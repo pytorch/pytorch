@@ -23,38 +23,16 @@ Some basics about this script:
 import argparse
 import copy
 import json
-import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Optional
-
-
-# Include function name, line number, and timestamp
-formatter = logging.Formatter(
-    "%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s"
-)
-
-# Create and configure handler
-handler = logging.StreamHandler()
-handler.setFormatter(formatter)
-
-# Configure logger
-logger = logging.getLogger(__name__)
-logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
+from typing import Dict, Optional, Tuple, List
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 
-
-def run_command(command: list[str], cwd: Optional[str] = None) -> str:
-    logger.debug("Running command: %s in %s", " ".join(command), cwd)
-    return subprocess.run(
-        command, check=True, cwd=cwd, capture_output=True, text=True
-    ).stdout.strip()
-
+STABLE_CUDA_VERSION = "12.6"
 
 class CpuArch:
     X86_64: str = "x86_64"
@@ -76,11 +54,82 @@ def _generate_docker_tag() -> str:
     If we're not in a git repo, we'll just use the default tag.
     """
     try:
-        return run_command(["git", "rev-parse", "HEAD:.ci/docker"], cwd=ROOT_DIR)
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD:.ci/docker"],
+            check=True,
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
     except subprocess.CalledProcessError:
         # If the git command fails, we're probably not in a git repo, so we'll just use the default tag
         return "main"
 
+# Dictionary of extra install requirements keyed by (accelerator_type, accelerator_version)
+EXTRA_INSTALL_REQUIREMENTS: Dict[Tuple[str, str, str], List[str]] = {
+    # CUDA 11.8
+    (CpuArch.X86_64, "cuda", "11.8"): [
+        "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
+        "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ],
+    # CUDA 12.6
+    (CpuArch.X86_64, "cuda", "12.6"): [
+        "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ],
+    # CUDA 12.8
+    (CpuArch.X86_64, "cuda", "12.8"): [
+        "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ],
+    # XPU
+    (CpuArch.X86_64, "xpu", ""): [
+        "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-sycl-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-sycl-rt==2025.0.5; platform_system == 'Windows' | "
+        "tcmlib==1.2.0 | "
+        "umf==0.9.1 | "
+        "intel-pti==0.10.1"
+    ],
+}
 
 @dataclass
 class BinaryBuild:
@@ -92,25 +141,23 @@ class BinaryBuild:
     image specifications.
 
     Attributes:
-        operating_systems (list[OperatingSystem]): List of supported operating systems for this build
+        operating_system (OperatingSystem): Operating system for this build
         cpu_arch (CpuArch): CPU architecture (x86_64, aarch64, or s390x)
         accelerator_version (str): Version of the accelerator (e.g., CUDA/ROCm version)
         accelerator_type (str): Type of accelerator (cpu, cuda, or rocm)
         builds_on (str): Github Actions runner for building
         tests_on (str): Github Actions runner for testing
         arch_list (list[str]): List of specific architectures to build for
-        extra_install_requirements (list[str]): Additional packages needed for the build
     """
 
-    operating_systems: list[OperatingSystem]
+    operating_system: OperatingSystem
     cpu_arch: CpuArch
     accelerator_version: str
     accelerator_type: str
     builds_on: str = field(default="linux.12xlarge.memory.ephemeral")
     tests_on: str = field(default="linux.4xlarge")
     arch_list: list[str] = field(default_factory=list)
-    extra_install_requirements: list[str] = field(default_factory=list)
-
+    
     def container_image(self) -> str:
         """
         Returns the container image for the build.
@@ -124,6 +171,24 @@ class BinaryBuild:
         """
         tag = _generate_docker_tag()
         return f"pytorch/wheel-build:{str(self.cpu_arch)}-{self.accelerator_type}{self.accelerator_version}-{tag}"
+    
+    def get_extra_install_requirements(self) -> List[str]:
+        """Returns the extra install requirements for this build configuration
+        
+        We need to keep the install requirements for packages 'mostly' consistent across most of our
+        packages for compat with package managers like uv + poetry. This is because they only read METADATA 
+        from the first wheel found on the index (which is typically the cuda-aarch64 wheels)
+
+        Since we publish our stable cuda wheels for x86_64 to PyPI, we can use that as the default.
+        See https://github.com/pytorch/pytorch/issues/146679 for more details.
+        """
+        key = (self.cpu_arch, self.accelerator_type, self.accelerator_version)
+        requirements = EXTRA_INSTALL_REQUIREMENTS.get(
+            key, EXTRA_INSTALL_REQUIREMENTS.get(
+                (CpuArch.X86_64, "cuda", STABLE_CUDA_VERSION), []
+            )
+        )
+        return requirements
 
 
 @dataclass
@@ -158,145 +223,134 @@ class XpuBuild(BinaryBuild):
     tests_on: str = "linux.s390x"
 
 
-MANYWHEEL_BUILDS: list[BinaryBuild] = [
-    # CPU x86_64
+MANYWHEEL_CPU_BUILDS: list[CpuBuild] = [
+    # CPU x86_64 - Linux
     CpuBuild(
-        operating_systems=[OperatingSystem.LINUX, OperatingSystem.WINDOWS],
+        operating_system=OperatingSystem.LINUX,
         cpu_arch=CpuArch.X86_64,
+        builds_on="linux.12xlarge.memory.ephemeral",
+        tests_on="linux.4xlarge",
     ),
-    # CPU ARM64
+    # CPU ARM64 - Linux
     CpuBuild(
+        operating_system=OperatingSystem.LINUX,
         cpu_arch=CpuArch.AARCH64,
-        operating_systems=[
-            OperatingSystem.LINUX,
-            OperatingSystem.WINDOWS,
-            OperatingSystem.MACOS,
-        ],
         builds_on="linux.arm64.m7g.4xlarge.ephemeral",
         tests_on="linux.arm64.2xlarge",
     ),
-    # CPU S390X
+    # CPU S390X - Linux
     CpuBuild(
         cpu_arch=CpuArch.S390X,
-        operating_systems=[OperatingSystem.LINUX],
+        operating_system=OperatingSystem.LINUX,
+        builds_on="linux.s390x",
+        tests_on="linux.s390x",
     ),
+    # CPU x86_64 - Windows
+    CpuBuild(
+        operating_system=OperatingSystem.WINDOWS,
+        cpu_arch=CpuArch.X86_64,
+        builds_on="windows.4xlarge",
+        tests_on="windows.4xlarge",
+    ),
+    # CPU ARM64 - Windows
+    CpuBuild(
+        cpu_arch=CpuArch.AARCH64,
+        operating_system=OperatingSystem.WINDOWS,
+        builds_on="windows-11-arm64",
+        tests_on="windows-11-arm64",
+    ),
+    # CPU ARM64 - macOS
+    CpuBuild(
+        cpu_arch=CpuArch.AARCH64,
+        operating_system=OperatingSystem.MACOS,
+        builds_on="macos-14-xlarge",
+        tests_on="macos-14-xlarge",
+    ),
+]
+
+MANYWHEEL_CUDA_BUILDS: list[CudaBuild] = [
     # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
-    # CUDA x86_64
+    # CUDA 11.8 x86_64 - Linux
     CudaBuild(
         accelerator_version="11.8",
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX, OperatingSystem.WINDOWS],
-        extra_install_requirements=[
-            "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-            "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
-        ],
+        operating_system=OperatingSystem.LINUX,
     ),
+    # CUDA 11.8 x86_64 - Windows
+    CudaBuild(
+        accelerator_version="11.8",
+        cpu_arch=CpuArch.X86_64,
+        operating_system=OperatingSystem.WINDOWS,
+        builds_on="windows.4xlarge",
+        tests_on="windows.g4dn.xlarge",
+    ),
+    # CUDA 12.6 x86_64 - Linux
     CudaBuild(
         accelerator_version="12.6",
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX, OperatingSystem.WINDOWS],
-        extra_install_requirements=[
-            "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
-        ],
+        operating_system=OperatingSystem.LINUX,
     ),
+    # CUDA 12.6 x86_64 - Windows
+    CudaBuild(
+        accelerator_version="12.6",
+        cpu_arch=CpuArch.X86_64,
+        operating_system=OperatingSystem.WINDOWS,
+        builds_on="windows.4xlarge",
+        tests_on="windows.g4dn.xlarge",
+    ),
+    # CUDA 12.8 x86_64 - Linux
     CudaBuild(
         accelerator_version="12.8",
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX, OperatingSystem.WINDOWS],
-        extra_install_requirements=[
-            "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
-        ],
+        operating_system=OperatingSystem.LINUX,
     ),
-    # CUDA ARM64
+    # CUDA 12.8 x86_64 - Windows
+    CudaBuild(
+        accelerator_version="12.8",
+        cpu_arch=CpuArch.X86_64,
+        operating_system=OperatingSystem.WINDOWS,
+        builds_on="windows.4xlarge",
+        tests_on="windows.g4dn.xlarge",
+    ),
+    # CUDA 12.8 AARCH64 - Linux
     CudaBuild(
         accelerator_version="12.8",
         cpu_arch=CpuArch.AARCH64,
-        operating_systems=[OperatingSystem.LINUX],
-        extra_install_requirements=[
-            "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-            "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
-        ],
+        operating_system=OperatingSystem.LINUX,
         builds_on="linux.arm64.m7g.4xlarge.ephemeral",
         # We skip tests for ARM64 builds
         tests_on="",
     ),
-    # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
-    # ROCm x86_64
+]
+
+MANYWHEEL_ROCM_BUILDS: list[RocmBuild] = [
+    # ROCm 6.2.4 x86_64
     RocmBuild(
         accelerator_version="6.2.4",
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX],
+        operating_system=OperatingSystem.LINUX,
     ),
+    # ROCm 6.3 x86_64
     RocmBuild(
         accelerator_version="6.3",
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX],
+        operating_system=OperatingSystem.LINUX,
     ),
+]
+
+MANYWHEEL_XPU_BUILDS: list[XpuBuild] = [
     # XPU x86_64
     XpuBuild(
         cpu_arch=CpuArch.X86_64,
-        operating_systems=[OperatingSystem.LINUX],
-        extra_install_requirements=[
-            "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
-            "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
-            "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
-            "intel-sycl-rt==2025.0.4; platform_system == 'Linux' | "
-            "intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | "
-            "intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | "
-            "intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | "
-            "intel-sycl-rt==2025.0.5; platform_system == 'Windows' | "
-            "tcmlib==1.2.0 | "
-            "umf==0.9.1 | "
-            "intel-pti==0.10.1"
-        ],
+        operating_system=OperatingSystem.LINUX,
     ),
+]
+
+MANYWHEEL_BUILDS: list[BinaryBuild] = [
+    *MANYWHEEL_CPU_BUILDS,
+    *MANYWHEEL_CUDA_BUILDS,
+    *MANYWHEEL_ROCM_BUILDS,
+    *MANYWHEEL_XPU_BUILDS,
 ]
 
 
@@ -316,12 +370,15 @@ def validate_nccl_dep_consistency() -> None:
     for build in MANYWHEEL_BUILDS:
         if isinstance(build, CudaBuild):
             nccl_release_tag = read_nccl_pin(build.accelerator_version)
-
+            key = (build.cpu_arch, build.accelerator_type, build.accelerator_version)
+            
             wheel_nccl_version = ""
-            for requirement in build.extra_install_requirements:
+            requirements = EXTRA_INSTALL_REQUIREMENTS.get(key, [])
+            for requirement in requirements:
                 if requirement.startswith("nvidia-nccl-cu"):
                     wheel_nccl_version = requirement.split("==")[1]
                     break
+                    
             if not nccl_release_tag.startswith(f"v{wheel_nccl_version}"):
                 raise RuntimeError(
                     f"{build.accelerator_version} NCCL release tag version "
@@ -347,6 +404,8 @@ def generate_wheels_matrix(
         if build.accelerator_type != accelerator_type:
             continue
         for python_version in python_versions:
+            if build.operating_system != os:
+                continue
             accelerator_info = f"{build.accelerator_type}{build.accelerator_version}"
             build_name = f"wheel-{build.cpu_arch}-py{python_version}-{accelerator_info}"
             matrix = {
@@ -355,14 +414,13 @@ def generate_wheels_matrix(
                 "accelerator_version": build.accelerator_version,
                 "container_image": build.container_image(),
                 "package_type": "wheel",
-                "pytorch_extra_install_requirements": build.extra_install_requirements,
+                "pytorch_extra_install_requirements": build.get_extra_install_requirements(),
                 "build_name": build_name,
                 "builds_on": build.builds_on,
                 "tests_on": build.tests_on,
             }
-            if os in build.operating_systems:
-                # We use deepcopy to avoid mutating the original matrix object for static builds down below
-                ret.append(copy.deepcopy(matrix))
+            # We use deepcopy to avoid mutating the original matrix object for static builds down below
+            ret.append(copy.deepcopy(matrix))
             # Special static build to use on Colab. x86_64 builds with Python 3.11 for 12.6 CUDA
             if all(
                 [
@@ -370,6 +428,8 @@ def generate_wheels_matrix(
                     build.accelerator_type == "cuda",
                     build.accelerator_version == "12.6",
                     python_version == "3.11",
+                    # Only add static build for Linux
+                    build.operating_system == OperatingSystem.LINUX, 
                 ]
             ):
                 matrix.update(
@@ -446,14 +506,11 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Invalid --package-type: {args.package_type}")
 
-    # Output the matrix for debugging
-    logger.debug(json.dumps(matrix, indent=2))
+    # Pretty printed JSON for human readability
+    print(json.dumps(matrix, indent=2))
 
     # Output the matrix
     if args.to_github_output:
         # Print the matrix in the format expected by GitHub Actions
         with open(os.environ["GITHUB_OUTPUT"], "w") as f:
             print(f"matrix={json.dumps(matrix)}", file=f)
-    else:
-        # Pretty printed JSON for human readability
-        print(json.dumps(matrix, indent=2))
