@@ -664,13 +664,13 @@ void
     }
   }
 
-  int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
+  int64_t thread_x = ((int64_t)blockIdx.x) * block_dim_x + threadIdx.x;
 
   // When partial_reduction is requested, we don't reduce within a block.
   // We also don't reduce if we are only a single block in the y dimension.
   if (partial_reduction || (blockDim.y == 1 && gridDim.y == 1)) {
     if (aligned_grid || thread_x < N) {
-      int64_t thread_y = blockIdx.y * blockDim.y + threadIdx.y;
+      int64_t thread_y = ((int64_t)blockIdx.y) * blockDim.y + threadIdx.y;
       if (dg) {
         dg[thread_y * N + thread_x] = dg_sum;
       }
@@ -715,7 +715,7 @@ void
         reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
       }
       // Reduce is done. Now write it out to global memory.
-      int64_t out_index = blockIdx.x * block_dim_x + i;
+      int64_t out_index = ((int64_t)blockIdx.x) * block_dim_x + i;
       if (threadIdx.x == 0 && (aligned_grid || out_index < N)) {
         if (dg) {
           dg[out_index] = reg_dg;
