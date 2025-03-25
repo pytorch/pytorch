@@ -27,7 +27,7 @@ popd
 popd
 
 # build
-pushd ${PACKAGE_DIR}/magma-${MAGMA_VERSION}
+pushd ${PACKAGE_DIR}/magma
 # The build.sh script expects to be executed from the sources root folder
 INSTALL_DIR=${PACKAGE_BUILD} ${PACKAGE_FILES}/build.sh
 popd
@@ -35,7 +35,7 @@ popd
 # Package recipe, license and tarball
 # Folder and package name are backward compatible for the build workflow
 cp ${PACKAGE_FILES}/build.sh ${PACKAGE_RECIPE}/build.sh
-cp ${PACKAGE_DIR}/magma-${MAGMA_VERSION}/COPYRIGHT ${PACKAGE_LICENSE}/COPYRIGHT
+cp ${PACKAGE_DIR}/magma/COPYRIGHT ${PACKAGE_LICENSE}/COPYRIGHT
 pushd ${PACKAGE_BUILD}
 tar cjf ${PACKAGE_OUTPUT}/linux-64/${PACKAGE_NAME}-${MAGMA_VERSION}-1.tar.bz2 include lib info
 echo Built in ${PACKAGE_OUTPUT}/linux-64/${PACKAGE_NAME}-${MAGMA_VERSION}-1.tar.bz2
