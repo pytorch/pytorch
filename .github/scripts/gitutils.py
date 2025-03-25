@@ -385,7 +385,7 @@ def patterns_to_regex(allowed_patterns: list[str]) -> Any:
             else:
                 rc += c
     rc += ")"
-    return re.compile(rc)
+    return re.compile(rc, re.IGNORECASE)
 
 
 def _shasum(value: str) -> str:
