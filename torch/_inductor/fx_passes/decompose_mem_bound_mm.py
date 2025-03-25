@@ -4,6 +4,7 @@ import logging
 import torch
 from torch import Tensor
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
@@ -71,9 +72,9 @@ def should_decompose_mm(mat1, mat2) -> bool:
         return False
     return (
         check_device(mat1, mat2, device="cuda")
-        and mat1.shape[0] >= min_first_dimension_decomposition
-        and mat2.shape[0] < max_other_dimention_decomposition
-        and mat2.shape[1] < max_other_dimention_decomposition
+        and statically_known_true(mat1.shape[0] >= min_first_dimension_decomposition)
+        and statically_known_true(mat2.shape[0] < max_other_dimention_decomposition)
+        and statically_known_true(mat2.shape[1] < max_other_dimention_decomposition)
     ) or (
         check_device(mat1, mat2, device="cpu")
         and mat1.shape[0] == 1
