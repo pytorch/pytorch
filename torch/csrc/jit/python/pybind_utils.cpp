@@ -641,8 +641,9 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
-#if defined(__clang__) && __clang_major__ > 12
-    return t
+#if (defined(__GNUC__) && __GNUC__ >= 13) || \
+    (defined(__clang__) && __clang_major__ > 12)
+    return t;
 #else
     return std::move(t);
 #endif
@@ -680,8 +681,9 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
-#if __cplusplus >= 202002L
-      return t
+#if (defined(__GNUC__) && __GNUC__ >= 13) || \
+    (defined(__clang__) && __clang_major__ > 12)
+      return t;
 #else
       return std::move(t);
 #endif
@@ -697,7 +699,8 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
-#if __cplusplus >= 202002L
+#if (defined(__GNUC__) && __GNUC__ >= 13) || \
+    (defined(__clang__) && __clang_major__ > 12)
     return py_dict;
 #else
     return std::move(py_dict);
