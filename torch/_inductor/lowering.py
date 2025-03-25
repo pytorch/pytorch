@@ -41,13 +41,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import (
-    CeilDiv,
-    FloorDiv,
-    Identity,
-    IntTrueDiv,
-    ModularIndexing,
-)
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -5007,23 +5001,21 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
         sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
-        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.trunc((i_expr + sample) * alpha_expr) - ops.trunc(
-            sample * alpha_expr
+        diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
+        out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
+        alpha = ops.truediv(
+            ops.to_dtype(diff, torch.float64), ops.to_dtype(out_sz_expr, torch.float64)
         )
+        alpha = ops.where(ops.eq(out_sz_expr, 0), 0, alpha)
+        seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
-
-        mask = ops.lt(
-            i_expr,
-            ops.index_expr(out_sz - 1, torch.int64),
-        )
-        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
+        mask = ops.lt(i_expr, out_sz_expr)
+        return ops.where(mask, seq_i, diff)
 
     return load
 
