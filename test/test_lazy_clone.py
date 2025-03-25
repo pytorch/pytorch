@@ -15,48 +15,61 @@ from torch.testing._internal.common_utils import (
 
 
 class TestLazyCloneDeviceType(TestCase):
-    def get_device_str(self, arg, device_type):
-        if isinstance(arg, str):
-            return arg
-        elif isinstance(arg, int):
-            if device_type == "cuda":
-                if arg >= torch.cuda.device_count():
-                    self.skipTest(f"CUDA index {arg} not found")
-            elif device_type == "mps":
-                if arg >= torch.mps.device_count():
-                    self.skipTest(f"MPS index {arg} not found")
-            else:
-                self.skipTest(f"Index not supported for device type {device_type}")
-
-            return f"{device_type}:{arg}"
-        elif arg is None:
-            return device_type
+    def skip_if_lt_two_devices(self, device_type):
+        if device_type == "cuda":
+            if torch.cuda.device_count() < 2:
+                self.skipTest("Only one CUDA device found")
+        elif device_type == "mps":
+            if torch.mps.device_count() < 2:
+                self.skipTest("Only one MPS device found")
         else:
-            raise AssertionError(f"Test parameter not recognized: {arg}")
+            self.skipTest(f"Index not supported for device type {device_type}")
+
+    def get_src_dest_devices(self, case, device):
+        device_type = torch.device(device).type
+
+        if device_type == "cpu" and case != "to_same_device":
+            self.skipTest("Only case='to_same_device' is run for CPU device")
+
+        if case == "to_cpu":
+            src_device = device_type
+            dest_device = "cpu"
+        elif case == "from_cpu":
+            src_device = "cpu"
+            dest_device = device_type
+        elif case == "to_same_device":
+            src_device = device_type
+            dest_device = device_type
+        elif case == "from_0_to_1":
+            self.skip_if_lt_two_devices(device_type)
+            src_device = f"{device_type}:0"
+            dest_device = f"{device_type}:1"
+        elif case == "from_1_to_0":
+            self.skip_if_lt_two_devices(device_type)
+            src_device = f"{device_type}:1"
+            dest_device = f"{device_type}:0"
+        else:
+            assert False
+
+        return src_device, dest_device
 
     # TODO: Add test compatible with dynamo/inductor
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
+    @parametrize("materialize_first", ("src", "dest"))
     @parametrize(
-        "src,dest",
+        "case",
         [
-            # NOTE: `None` indicates the device specified by the `device` arg of
-            # the test. A number indicates a device index of the same device
-            # type means use the device type as specified by the `device` arg.
-            ("cpu", None),
-            (None, None),
-            ("cpu", 0),
-            ("cpu", 1),
-            (1, 0),
-            (0, 1),
-            (None, "cpu"),
+            "to_cpu",
+            "from_cpu",
+            "to_same_device",
+            "from_0_to_1",
+            "from_1_to_0",
         ],
     )
-    @parametrize("materialize_first", ("src", "dest"))
-    def test_lazy_clone_to_device(self, device, src, dest, materialize_first):
-        device_type = torch.device(device).type
-        src_device = self.get_device_str(src, device_type)
-        dest_device = self.get_device_str(dest, device_type)
+    def test_lazy_clone_to_device(self, device, materialize_first, case):
+        src_device, dest_device = self.get_src_dest_devices(case, device)
+
         src_device_check = torch.empty(0, device=src_device).device
         dest_device_check = torch.empty(0, device=dest_device).device
         pin_memory = src_device_check.type == "cpu" and dest_device_check.type == "mps"
@@ -125,28 +138,22 @@ class TestLazyCloneDeviceType(TestCase):
 
     # Test that COW a tensor with a different target device can be used in read
     # operations.
-    @skipCUDAIf(True, "Does not work for CUDA yet")
+    @skipCUDAIf(True, "Does not work for CUDA")
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
     @parametrize(
-        "src,dest",
+        "case",
         [
-            # NOTE: `None` indicates the device specified by the `device` arg of
-            # the test. A number indicates a device index of the same device
-            # type means use the device type as specified by the `device` arg.
-            ("cpu", None),
-            (None, None),
-            ("cpu", 0),
-            ("cpu", 1),
-            (1, 0),
-            (0, 1),
-            (None, "cpu"),
+            "to_cpu",
+            "from_cpu",
+            "to_same_device",
+            "from_0_to_1",
+            "from_1_to_0",
         ],
     )
-    def test_lazy_clone_to_device_readable(self, device, src, dest):
-        device_type = torch.device(device).type
-        src_device = self.get_device_str(src, device_type)
-        dest_device = self.get_device_str(dest, device_type)
+    def test_lazy_clone_to_device_read(self, device, case):
+        src_device, dest_device = self.get_src_dest_devices(case, device)
+
         src_device_check = torch.empty(0, device=src_device).device
         dest_device_check = torch.empty(0, device=dest_device).device
         pin_memory = src_device_check.type == "cpu" and dest_device_check.type == "mps"
