@@ -28,7 +28,7 @@ void f8f8bf16_rowwise(
     f8f8bf16_rowwise_sm10x(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
     TORCH_CHECK(
-        false, "Rowwise scaling is not currently supported on your device");
+      false, "Rowwise scaling is not currently supported on your device");
   }
 }
 } // namespace at::cuda::detail
