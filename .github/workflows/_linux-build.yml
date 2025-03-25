@@ -69,13 +69,6 @@ on:
         required: false
         type: string
         default: ""
-      use_split_build:
-        description: |
-          [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel.
-        required: false
-        type: boolean
-        default: false
       max-jobs:
         description: |
           Overwrite the number of jobs to use for the build
@@ -132,7 +125,7 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -215,7 +208,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
           MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
           START_TIME=$(date +%s)
@@ -295,19 +287,9 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-          s3-bucket: ${{ inputs.s3-bucket }}
-
-      - name: Store PyTorch Build Artifacts on S3 for split build
-        uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        with:
-          name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
@@ -315,18 +297,9 @@ jobs:
 
       - name: Store PyTorch Build Artifacts for s390x
         uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
-      - name: Store PyTorch Build Artifacts for s390x for split build
-        uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
-        with:
-          name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip

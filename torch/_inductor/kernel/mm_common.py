@@ -8,7 +8,7 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -17,7 +17,6 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
-    ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
@@ -89,7 +88,7 @@ def filtered_configs(
         ),
         min_block_size_k,
     )
-    used = OrderedSet[tuple[int, int, int, int, int, int]]()
+    used = OrderedSet[tuple[int, ...]]()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
@@ -102,6 +101,7 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
+            kpack = 2
             for matrix_instr_nonkdim in [0, 16]:
                 if matrix_instr_nonkdim != 0 and (
                     block_m % matrix_instr_nonkdim != 0
@@ -109,6 +109,7 @@ def filtered_configs(
                 ):
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                     continue
+
                 if (
                     block_m,
                     block_n,
@@ -116,6 +117,7 @@ def filtered_configs(
                     num_stages,
                     num_warps,
                     matrix_instr_nonkdim,
+                    kpack,
                 ) not in used and (
                     max_mm_configs is None or len(used) < max_mm_configs
                 ):
@@ -127,6 +129,7 @@ def filtered_configs(
                             num_stages,
                             num_warps,
                             matrix_instr_nonkdim,
+                            kpack,
                         )
                     )
                     yield triton_config(
@@ -136,6 +139,7 @@ def filtered_configs(
                         num_stages=num_stages,
                         num_warps=num_warps,
                         matrix_instr_nonkdim=matrix_instr_nonkdim,
+                        kpack=kpack,
                     )
         else:
             if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used and (
@@ -175,6 +179,7 @@ mm_kernel_configs = (
         {"config": (128, 128, 32, 3, 4), "cond": True},
         {"config": (128, 128, 64, 3, 4), "cond": True},
         {"config": (128, 128, 64, 5, 8), "cond": True},
+        {"config": (128, 256, 64, 3, 8), "cond": True},
     ]
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
     else [
@@ -450,14 +455,16 @@ def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
     return False
 
 
-def mm_grid(m, n, meta):
+@SymbolicGridFn
+def mm_grid(m, n, meta, *, cdiv):
     """
     The CUDA grid size for matmul triton templates.
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):
+@SymbolicGridFn
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
