@@ -2845,15 +2845,9 @@ class PyCodeCache:
         return write(source_code, "py", extra=extra)
 
     @classmethod
-    def load(
-        cls,
-        source_code: str,
-        extra: str = "",
-        linemap: Optional[list[tuple[int, str]]] = None,
-        attrs: Optional[dict[str, Any]] = None,
-    ) -> ModuleType:
+    def load(cls, source_code: str, extra: str = "") -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path, linemap, attrs)
+        return cls.load_by_key_path(key, path)
 
     @classmethod
     def load_by_key_path(
