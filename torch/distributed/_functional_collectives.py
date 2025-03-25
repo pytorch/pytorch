@@ -866,14 +866,15 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
         )
 
 
-def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
-    def mk_out_tensor(shard):
-        out_size = list(shard.size())
-        out_size[0] *= group_size
-        out_tensor = shard.new_empty(out_size)
-        return out_tensor
+def _make_all_gather_out_tensor(input, group_size):
+    out_size = list(input.size())
+    out_size[0] *= group_size
+    out_tensor = input.new_empty(out_size)
+    return out_tensor
 
-    return [mk_out_tensor(t) for t in self]
+
+def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
+    return [_make_all_gather_out_tensor(t, group_size) for t in self]
 
 
 # We now register meta kernels to deal with tracing
@@ -890,9 +891,7 @@ def _wait_tensor_meta(self, *args):
 
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    return shard.new_empty(out_size)
+    return _make_all_gather_out_tensor(shard, group_size)
 
 
 def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
@@ -946,15 +945,11 @@ def _all_to_all_single_meta(
 
 
 def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
-    shape = list(input.size())
-    shape[0] *= group_size
-    return input.new_empty(shape)
+    return _make_all_gather_out_tensor(input, group_size)
 
 
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
-    shape = list(input.size())
-    shape[0] *= group_size
-    return input.new_empty(shape)
+    return _make_all_gather_out_tensor(input, group_size)
 
 
 def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name):
