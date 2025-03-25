@@ -736,7 +736,7 @@ class TestCutlassBackend(TestCase):
             model = MyModel()
             M, N, K = 128, 64, 64
             dynamic_shapes = {
-                "x": {0: Dim.DYNAMIC},  # type: ignore[attr-defined]
+                "x": {0: Dim.DYNAMIC},
                 "w": None,
             }
 

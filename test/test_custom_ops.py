@@ -3910,6 +3910,115 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x + y)
 
+    def test_any_requires_grad(self):
+        test_fn = torch._C._any_requires_grad
+
+        self.assertTrue(
+            test_fn(
+                torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)
+            )
+        )
+        self.assertFalse(test_fn(torch.ones(1), torch.zeros(1)))
+        self.assertTrue(
+            test_fn(
+                [torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)]
+            )
+        )
+        # _C_any_requires_grad supports only List[Tensor] in args, not List[List[Tensor]]
+        self.assertFalse(test_fn([[torch.zeros(1, requires_grad=True)]], torch.ones(1)))
+        self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)]))
+        self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
+        self.assertFalse(test_fn(torch.zeros(1), a=torch.ones(1)))
+        self.assertTrue(
+            test_fn([torch.zeros(1, requires_grad=True), torch.ones(1)], torch.zeros(1))
+        )
+        self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)], torch.zeros(1)))
+
+    def test_any_output_is_alias_to_input_or_output(self):
+        test_fn = torch._C._any_output_is_alias_to_input_or_output
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        self.assertTrue(
+            test_fn(
+                (x,),
+                {},
+                (x.t(),),
+            )
+        )
+        self.assertFalse(test_fn((x,), None, (2 * x,)))
+        self.assertTrue(
+            test_fn(
+                (),
+                {"a": x.view(-1)},
+                (x,),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                (),
+                {"a": x.view(-1)},
+                (x.t(),),
+            )
+        )
+        self.assertTrue(test_fn((y,), {}, (y[1:],)))
+        self.assertFalse(
+            test_fn(
+                (x,),
+                {"a": x},
+                (),
+            )
+        )
+        self.assertFalse(
+            test_fn(
+                (torch.tensor([]),),
+                {},
+                (torch.tensor([]),),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([x], x + 1),
+                {},
+                (x.t(),),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([x], x + 1),
+                {},
+                ([x.t()], x + 1),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([x], x),
+                {},
+                ([x.t()], x + 1),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([x, 1], x),
+                {},
+                ([x.t()], x + 1),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([[x]], x),
+                {},
+                ([x.t()], x + 1),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                ([[1, x], 2], 3),
+                {},
+                ([x.t()], x + 1),
+            )
+        )
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
