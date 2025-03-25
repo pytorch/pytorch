@@ -99,13 +99,12 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9)
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
     CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -119,7 +118,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -134,7 +132,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -149,7 +146,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -164,7 +160,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -178,7 +173,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -193,7 +187,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -208,7 +201,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -223,7 +215,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -235,7 +226,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     ONNX=yes
@@ -244,10 +234,7 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.162.1
-    SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -255,10 +242,7 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.162.1
-    SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -266,7 +250,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -275,7 +258,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
@@ -290,7 +272,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
@@ -305,7 +286,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
@@ -316,7 +296,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
@@ -327,7 +306,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -341,7 +319,6 @@ case "$image" in
     CUDNN_VERSION=9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     TRITON=yes
     ;;
@@ -349,7 +326,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -370,7 +346,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -403,20 +378,19 @@ case "$image" in
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
-    ANACONDA_PYTHON_VERSION=3.9
-    CONDA_CMAKE=yes
+    PYTHON_VERSION=3.9
+    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter)
-    ANACONDA_PYTHON_VERSION=3.9
+    PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
-    CONDA_CMAKE=yes
+    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -428,7 +402,6 @@ case "$image" in
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -439,7 +412,6 @@ case "$image" in
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
@@ -495,7 +467,6 @@ docker build \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
@@ -503,13 +474,12 @@ docker build \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
-       --build-arg "VULKAN_SDK_VERSION=${VULKAN_SDK_VERSION}" \
-       --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
@@ -519,6 +489,7 @@ docker build \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
+       --build-arg "PIP_CMAKE=${PIP_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
