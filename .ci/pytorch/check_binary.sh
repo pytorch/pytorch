@@ -78,47 +78,7 @@ fi
 
 echo "Checking that the gcc ABI is what we expect"
 if [[ "$(uname)" != 'Darwin' ]]; then
-  function is_expected() {
-    if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
-      echo 1
-    fi
-  }
-
-  # First we check that the env var in TorchConfig.cmake is correct
-
-  # We search for D_GLIBCXX_USE_CXX11_ABI=1 in torch/TorchConfig.cmake
-  torch_config="${install_root}/share/cmake/Torch/TorchConfig.cmake"
-  if [[ ! -f "$torch_config" ]]; then
-    echo "No TorchConfig.cmake found!"
-    ls -lah "$install_root/share/cmake/Torch"
-    exit 1
-  fi
-  echo "Checking the TorchConfig.cmake"
-  cat "$torch_config"
-
-  # The sed call below is
-  #   don't print lines by default (only print the line we want)
-  # -n
-  #   execute the following expression
-  # e
-  #   replace lines that match with the first capture group and print
-  # s/.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/\1/p
-  #   any characters, D_GLIBCXX_USE_CXX11_ABI=, exactly one any character, a
-  #   quote, any characters
-  #   Note the exactly one single character after the '='. In the case that the
-  #     variable is not set the '=' will be followed by a '"' immediately and the
-  #     line will fail the match and nothing will be printed; this is what we
-  #     want.  Otherwise it will capture the 0 or 1 after the '='.
-  # /.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/
-  #   replace the matched line with the capture group and print
-  # /\1/p
-  actual_gcc_abi="$(sed -ne 's/.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/\1/p' < "$torch_config")"
-  if [[ "$(is_expected "$actual_gcc_abi")" != 1 ]]; then
-    echo "gcc ABI $actual_gcc_abi not as expected."
-    exit 1
-  fi
-
-  # We also check that there are [not] cxx11 symbols in libtorch
+  # We also check that there are cxx11 symbols in libtorch
   #
   echo "Checking that symbols in libtorch.so have the right gcc abi"
   python3 "$(dirname ${BASH_SOURCE[0]})/smoke_test/check_binary_symbols.py"
@@ -196,33 +156,9 @@ setup_link_flags () {
 
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
 build_and_run_example_cpp () {
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    GLIBCXX_USE_CXX11_ABI=1
-  else
-    GLIBCXX_USE_CXX11_ABI=0
-  fi
   setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
+  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
-}
-
-build_example_cpp_with_incorrect_abi () {
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    GLIBCXX_USE_CXX11_ABI=0
-  else
-    GLIBCXX_USE_CXX11_ABI=1
-  fi
-  set +e
-  setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
-  ERRCODE=$?
-  set -e
-  if [ "$ERRCODE" -eq "0" ]; then
-    echo "Building example with incorrect ABI didn't throw error. Aborting."
-    exit 1
-  else
-    echo "Building example with incorrect ABI throws expected error. Proceeding."
-  fi
 }
 
 ###############################################################################
@@ -234,11 +170,6 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64
   fi
   build_and_run_example_cpp simple-torch-test
-  # `_GLIBCXX_USE_CXX11_ABI` is always ignored by gcc in devtoolset7, so we test
-  # the expected failure case for Ubuntu 16.04 + gcc 5.4 only.
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    build_example_cpp_with_incorrect_abi simple-torch-test
-  fi
 else
   pushd /tmp
   python -c 'import torch'
@@ -373,10 +304,13 @@ except RuntimeError as e:
 fi
 
 ###############################################################################
-# Check for C++ ABI compatibility between gcc7 and gcc9 compiled binaries
+# Check for C++ ABI compatibility to GCC-11
 ###############################################################################
 if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   pushd /tmp
-  python -c "import torch; exit(0 if torch.compiled_with_cxx11_abi() else (0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1011' else 1))"
+  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-11 is ABI16
+  # Though manylinux_2.28 should have been build with gcc-14, per
+  # https://github.com/pypa/manylinux?tab=readme-ov-file#manylinux_2_28-almalinux-8-based
+  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
   popd
 fi

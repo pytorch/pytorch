@@ -7,7 +7,6 @@ import dataclasses
 import functools
 import logging
 import math
-import operator
 import os
 import threading
 import traceback
@@ -1487,12 +1486,18 @@ class FakeTensorMode(TorchDispatchMode):
                     )
 
                 for node in subgraph_mod.graph.nodes:
-                    if (
-                        node.op == "call_function"
-                        and node.target is not operator.getitem
-                    ):
+                    if node.op == "call_function":
+                        op = node.target
+                        # Dynamo graphs can have operator.add type of operations. For these operations, it is safe to cache.
+                        if (
+                            callable(op)
+                            and getattr(op, "__module__", None)
+                            in {"_operator", "operator"}
+                            and not op.__name__.startswith("i")
+                        ):
+                            continue
                         try:
-                            self._validate_cache_key(node.target, [], {})
+                            self._validate_cache_key(op, [], {})
                         except _BypassDispatchCache as e:
                             raise _BypassDispatchCache(
                                 f"hop {func.name()} failed because of {str(e)}"
@@ -2196,6 +2201,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
             and not avoiding_device_init
+            and func is not aten._nested_tensor_from_tensor_list.default
         ):
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
