@@ -18,8 +18,27 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_deviceCount", []() {
     auto device_type = at::accelerator::getAccelerator(false);
-    torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::deviceCount();
+    if (!device_type.has_value()) {
+      return static_cast<c10::DeviceIndex>(0);
+    }
+
+    // Why not call at::accelerator::deviceCount() directly like other
+    // accelerator python binding functions?
+    // 1. Some accelerators, such as CUDA, have a Python implementation of
+    // `device_count` that is non-poisoning.
+    // 2. Features like DataLoader and Distributed Data Parallel (DDP) rely on
+    // this behavior.
+    // 3. To maintain consistency, we delegate the device count retrieval to the
+    // Python implementation.
+
+    // Ensure that the GIL is acquired before calling Python code
+    py::gil_scoped_acquire acquire;
+
+    // Call the Python `device_count` method from the device-specific module
+    return py::module::import("torch")
+        .attr(c10::DeviceTypeName(device_type.value(), true).c_str())
+        .attr("device_count")()
+        .cast<c10::DeviceIndex>();
   });
 
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
