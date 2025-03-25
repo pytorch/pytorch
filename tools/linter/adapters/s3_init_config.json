@@ -35,9 +35,13 @@
         }
     },
     "actionlint": {
-        "Darwin": {
+        "Darwin-i386": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Darwin_amd64/actionlint",
             "hash": "b354db83815384d3c3a07f68f44b30cb0a70899757a0d185d7322de9952e8813"
+        },
+        "Darwin-arm": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Darwin_arm64/actionlint",
+            "hash": "019f2a4a72cdadd7a67bec067399902e026a24e630cbf9ca46d5fb4dc20ef8b2"
         },
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
