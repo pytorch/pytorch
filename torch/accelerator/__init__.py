@@ -31,7 +31,11 @@ def device_count() -> int:
         int: the number of the current :ref:`accelerator<accelerators>` available.
             If there is no available accelerators, return 0.
 
-    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
+    .. note:: This API delegates to the device-specific version of `device_count`.
+        For example, if the current accelerator is CUDA, it will call
+        :func:`~torch.cuda.device_count`, which is non-poisoning.
+        Some features, such as multiprocessing-based components (e.g., DataLoader, DDP),
+        rely on this behavior. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     return torch._C._accelerator_deviceCount()
 
@@ -44,7 +48,12 @@ def is_available() -> bool:
     Returns:
         bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
 
-    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
+    .. note:: This API delegates to the device-specific version of `is_available`.
+        For example, if the current accelerator is CUDA, it will call
+        :func:`~torch.cuda.is_available`, which avoids poisoning when the environment
+        variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set.
+        Some features, such as multiprocessing-based components (e.g., DataLoader, DDP),
+        rely on this behavior. See :ref:`multiprocessing-poison-fork-note` for more details.
 
     Example::
 
