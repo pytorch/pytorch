@@ -33,20 +33,14 @@ void initModule(PyObject* module) {
     // 3. To maintain consistency, we delegate the device count retrieval to the
     // Python implementation.
 
-    std::string module_name =
-        "torch." + at::DeviceTypeName(device_type.value(), true);
-    auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
-    if (!module) {
-      throw python_error();
-    }
+    // Ensure that the GIL is acquired before calling Python code
+    py::gil_scoped_acquire acquire;
 
     // Call the Python `device_count` method from the device-specific module
-    auto res =
-        THPObjectPtr(PyObject_CallMethod(module.get(), "device_count", ""));
-    if (!res) {
-      throw python_error();
-    }
-    return static_cast<c10::DeviceIndex>(PyLong_AsLongLong(res.get()));
+    return py::module::import("torch")
+        .attr(c10::DeviceTypeName(device_type.value(), true).c_str())
+        .attr("device_count")()
+        .cast<c10::DeviceIndex>();
   });
 
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
