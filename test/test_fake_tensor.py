@@ -2217,7 +2217,7 @@ class FakeTensorDispatchCache(TestCase):
                         extract_tensor_metadata(a),
                         extract_tensor_metadata(b),
                     )
-            # self.assertTrue(count_invoke_subgraph_keys() > 0)
+            self.assertTrue(count_invoke_subgraph_keys() > 0)
 
         def count_invoke_subgraph_keys():
             invoke_subgraph_keys = 0
