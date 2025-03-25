@@ -6,15 +6,15 @@ add_loop_eager_dynamic,compile_time_instruction_count,5460000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,27820000000,0.015
+add_loop_inductor,compile_time_instruction_count,27660000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,40750000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,40640000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,24100000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,23970000000,0.015
 
 
 
@@ -73,4 +73,4 @@ aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3579000000,
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,9864000000,0.015
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,9830000000,0.015
