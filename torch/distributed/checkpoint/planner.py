@@ -20,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
 __all__ = [
     "WriteItemType",
     "LoadItemType",
+    "BytesIOWriteData",
     "TensorWriteData",
     "WriteItem",
     "ReadItem",
@@ -42,6 +43,11 @@ class LoadItemType(Enum):
 
 
 @dataclass(frozen=True)
+class BytesIOWriteData:
+    nbytes: int
+
+
+@dataclass(frozen=True)
 class TensorWriteData:
     chunk: ChunkStorageMetadata
     properties: TensorProperties
@@ -54,6 +60,9 @@ class WriteItem:
 
     index: MetadataIndex
     type: WriteItemType
+
+    # Size of bytesIO data to be written.
+    bytes_io_data: Optional[BytesIOWriteData] = None
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None

@@ -236,7 +236,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 
 // Return a + b_low * c_low + b_high * c_high
 vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en

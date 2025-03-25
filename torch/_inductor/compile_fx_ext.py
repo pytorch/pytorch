@@ -11,7 +11,7 @@ import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import override, Self, TypeGuard
+from typing_extensions import final, override, Self, TypeGuard
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -37,6 +37,7 @@ from .virtualized import V
 if TYPE_CHECKING:
     import types
     from collections.abc import Generator, Mapping, Sequence
+    from concurrent.futures import Future
 
     from torch._inductor.utils import InputType
     from torch.fx import GraphModule
@@ -191,7 +192,7 @@ class _WireProtocolInput:
     tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
     virtualized: _VirtualizedSerializer
-    deterministic_guard_for_testing: Optional[
+    deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard
     ]
     logger_state: _LoggerState
@@ -404,18 +405,46 @@ class _SerializedFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        def fallback() -> OutputCode:
+        # If this code changes it's likely _AsyncFxCompile.codegen_and_compile()
+        # will also need to match.
+
+        serialized = self.serialize_compile(
+            gm, example_inputs, inputs_to_check, graph_kwargs
+        )
+        if not serialized:
             return _InProcessFxCompile().codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
 
+        inputs, constants = serialized
+        output = self._send_to_child(inputs).deserialize(constants)
+
+        self._postprocess(output)
+        self._compile_stats[type(self)].codegen_and_compile += 1
+
+        # TODO: Do we need to figure out what changed in TracingContext in the
+        # child and plumb that back up to the parent?
+
+        return output.graph
+
+    def serialize_compile(
+        self,
+        gm: GraphModule,
+        example_inputs: Sequence[InputType],
+        inputs_to_check: Sequence[int],
+        graph_kwargs: _CompileFxKwargs,
+    ) -> Optional[tuple[_WireProtocolPickledInput, CompiledFxGraphConstantsWithGm]]:
+        """
+        Prepare a _WireProtocolInput to compile. If None is returned then it
+        wasn't possible to serialize and we should fallback to in-process.
+        """
         try:
             # _check_for_hop raises BypassFxGraphCache when it detects something
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
             log.debug("Skipping %s compile: %s", type(self), e)
-            return fallback()
+            return None
 
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
@@ -424,12 +453,12 @@ class _SerializedFxCompile(FxCompile):
 
         # If we're running tests then grab the DeterministicGuard (don't want to
         # import this if it isn't already imported because it has side-effects)
-        deterministic_guard_for_testing: Optional[
+        deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
             torch.testing._internal.common_utils.DeterministicGuard
         ] = None
         try:
             deterministic_guard_for_testing = (
-                torch.testing._internal.common_utils.DeterministicGuard._current_state()
+                torch.testing._internal.common_utils.DeterministicGuard._current_state()  # type: ignore[attr-defined]  # mypy bug
             )
         except AttributeError:
             pass
@@ -451,6 +480,7 @@ class _SerializedFxCompile(FxCompile):
                 lowering,
                 fake_tensor_mode,
             ).serialize()
+            return (input, constants)
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
@@ -458,17 +488,7 @@ class _SerializedFxCompile(FxCompile):
             # TODO: scuba record about not being able to do this?
             log.debug("Unable to pickle input graph or example inputs", exc_info=True)
 
-            return fallback()
-
-        output = self._send_to_child(input).deserialize(constants)
-
-        self._postprocess(output)
-        self._compile_stats[type(self)].codegen_and_compile += 1
-
-        # TODO: Do we need to figure out what changed in TracingContext in the
-        # child and plumb that back up to the parent?
-
-        return output.graph
+            return None
 
     @abstractmethod
     def _send_to_child(
@@ -532,6 +552,7 @@ class _SerializedFxCompile(FxCompile):
 
 # This is a debugging/testing implementation of FxCompile which serializes the
 # input and output but still runs the FxCompile in-process.
+@final
 class _DebugSerdeFxCompile(_SerializedFxCompile):
     @override
     def _send_to_child(
@@ -547,6 +568,29 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
     Represents an FxCompile which is run outside the current process (in
     either a subprocess or possibly even a separate machine).
     """
+
+    @override
+    @final
+    def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        f = self._send_to_child_async(pickled_input)
+
+        # For debugging: If we want to print status updates...
+        # last = time.time()
+        # while not f.done():
+        #     print("tick...")
+        #     time.sleep(0.125)
+        #     now = time.time()
+        #     if now - last > 1:
+        #         last = now
+
+        return f.result()
+
+    @abstractmethod
+    def _send_to_child_async(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> Future[_WireProtocolPickledOutput]: ...
 
     def _postprocess(self, output: _WireProtocolOutput) -> None:
         # Since our metrics were gathered in a subprocess make sure to add them
@@ -599,7 +643,8 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
 #     with open(f"/tmp/pytorch_compile_fx_tmp_output_{idx}.bin", "wb") as f:
 #         f.write(result.value)
 #
-class _DebugFileFxCompile(_OutOfProcessFxCompile):
+@final
+class _DebugFileFxCompile(_SerializedFxCompile):
     file_index = 0
 
     @override
