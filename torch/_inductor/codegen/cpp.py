@@ -43,6 +43,7 @@ from ..utils import (
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
+    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_product,
@@ -71,6 +72,7 @@ from .cpp_utils import (
     codegen_rand,
     CppCSEVariable,
     DTYPE_TO_CPP,
+    get_promote_dtype,
     INDEX_TYPE,
     LocalBufferContext,
     may_unify_binary_op_mask_type,
@@ -646,20 +648,31 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def decltype_promoted(*args):
+    assert not any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args), (
+        "Promotion of vector types is not supported"
+    )
+
+    if (dt := get_promote_dtype(args)) is not None:
+        return DTYPE_TO_CPP[dt]
+    else:
+        return f"decltype({args[0]})"
+
+
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
     def add(a, b):
-        return f"decltype({a})({a} + {b})"
+        return f"{decltype_promoted(a, b)}({a} + {b})"
 
     @staticmethod
     def sub(a, b):
-        return f"decltype({a})({a} - {b})"
+        return f"{decltype_promoted(a, b)}({a} - {b})"
 
     @staticmethod
     def mul(a, b):
-        return f"decltype({a})({a} * {b})"
+        return f"{decltype_promoted(a, b)}({a} * {b})"
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -2046,7 +2059,7 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr_index(index)}]"
-        csevar = self.cse.generate(self.loads, line)
+        csevar = self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
@@ -2659,7 +2672,7 @@ class CppVecKernel(CppKernel):
             buffer.splice(code)
             return None
         else:
-            csevar = self.cse.generate(buffer, code)
+            csevar = self.cse.generate(buffer, code, dtype=dtype)
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
@@ -2676,7 +2689,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -3422,7 +3435,7 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line)
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
@@ -5150,6 +5163,10 @@ class CppScheduling(BaseScheduling):
             else ""
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
+        # below add provenance tracing info for cpu CppKernel types
+        if config.trace.enabled:
+            set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
+
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
         src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)

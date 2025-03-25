@@ -50,6 +50,16 @@ import operator
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
 
+# Add bicubic2d_aa to test_consistency_op_db
+for op in op_db:
+    if op.name != "_upsample_bilinear2d_aa":
+        continue
+    op = copy.deepcopy(op)
+    op.name = "_upsample_bicubic2d_aa"
+    op.op = torch.ops.aten._upsample_bicubic2d_aa
+    test_consistency_op_db.append(op)
+    break
+
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
     filter(
@@ -82,6 +92,7 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
         '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
+        '_upsample_bicubic2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
@@ -602,7 +613,6 @@ def mps_ops_modifier(ops):
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
-        'nanmedian': None,
         'native_dropout_backward': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
@@ -645,19 +655,13 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_i1': None,
-        'special.modified_bessel_k0': None,
-        'special.modified_bessel_k1': None,
         'special.ndtri': None,
-        'special.scaled_modified_bessel_k0': None,
-        'special.scaled_modified_bessel_k1': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -667,6 +671,7 @@ def mps_ops_modifier(ops):
         'vdot': None,
         'segment_reduce_': None,
         '_upsample_bilinear2d_aa': [torch.uint8],  # uint8 is for CPU only
+        '_upsample_bicubic2d_aa': [torch.uint8],  # uint8 is for CPU only
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -707,6 +712,7 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.chebyshev_polynomial_t': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # entr does not support boolean types
         'special.entr': [torch.bool],
@@ -7838,13 +7844,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(tril_result, tril_result_cpu)
             self.assertEqual(x.grad, cpu_x.grad)
 
-        helper((2, 8, 4, 5))
-        helper((2, 8, 4, 5), diag=1)
-        helper((2, 8, 4, 5), diag=2)
-        helper((2, 8, 4, 5), diag=3)
-        helper((2, 8, 4, 5), diag=-1)
-        helper((2, 8, 4, 5), diag=-2)
-        helper((2, 8, 4, 5), diag=-3)
+        for diag in [0, 1, 2, 3, -1, -2, -3]:
+            helper((2, 8, 4, 5), diag=diag)
+
+        def helper_nans_infs(value, diag_vals=(0, 1, -2)):
+            """For nans and infs"""
+            mps_tensor = torch.full((2, 2, 5, 5), value, device="mps")
+            cpu_tensor = torch.full((2, 2, 5, 5), value, device="cpu")
+            for diag in diag_vals:
+                mps_result = torch.tril(mps_tensor, diagonal=diag)
+                cpu_result = torch.tril(cpu_tensor, diagonal=diag)
+                self.assertEqual(mps_result, cpu_result, f"Mismatch for diag={diag}")
+
+        helper_nans_infs(float("inf"))
+        helper_nans_infs(float("-inf"))
+        helper_nans_infs(float("nan"))
 
     # test eye
     def test_eye(self):
@@ -12600,11 +12614,10 @@ class TestConsistency(TestCaseMPS):
                 # in slight numerical differences
                 atol, rtol = 1, 0
 
-            if op.name == "_upsample_bilinear2d_aa" and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):

@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-arm64-binary-libtorch-debug
+name: windows-arm64-binary-libtorch
 
 on:
   push:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: windows-arm64-binary-libtorch-debug
+  BUILD_ENVIRONMENT: windows-arm64-binary-libtorch
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
