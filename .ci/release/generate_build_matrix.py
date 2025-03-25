@@ -9,6 +9,15 @@ architectures:
     * Latest CUDA
     * Latest ROCM
     * Latest XPU
+
+Some basics about this script:
+- It is designed to be run in a github action
+- You should be able to run it locally on ANY machine with python 3.10+
+- It SHOULD NOT depend on anything outside of the standard library
+- It is written in a way that should make it easy to understand what builds
+  are being generated
+- We should prefer to write this in a way that avoids extra business logic,
+  and instead relies on the inputs to drive the output
 """
 
 import argparse
@@ -87,8 +96,8 @@ class BinaryBuild:
         cpu_arch (CpuArch): CPU architecture (x86_64, aarch64, or s390x)
         accelerator_version (str): Version of the accelerator (e.g., CUDA/ROCm version)
         accelerator_type (str): Type of accelerator (cpu, cuda, or rocm)
-        builds_on (str): AWS EC2 instance type for building
-        tests_on (str): AWS EC2 instance type for testing
+        builds_on (str): Github Actions runner for building
+        tests_on (str): Github Actions runner for testing
         arch_list (list[str]): List of specific architectures to build for
         extra_install_requirements (list[str]): Additional packages needed for the build
     """
