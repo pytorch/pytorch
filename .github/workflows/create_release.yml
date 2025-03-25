@@ -69,7 +69,7 @@ jobs:
             echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: ${{env.PT_RELEASE_FILE}}
       - name: Upload source distribution to GHA artifacts for release tags
