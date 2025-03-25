@@ -157,11 +157,11 @@ class MicroPipelineTPTest(TestCase):
                 "placeholder",
             )
             self.assertEqual(
-                reduce_scatter.rs_node.target,
+                reduce_scatter.reduce_scatter_node.target,
                 torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             self.assertEqual(
-                reduce_scatter.res_node.target,
+                reduce_scatter.wait_tensor_node.target,
                 torch.ops._c10d_functional.wait_tensor.default,
             )
             self.assertEqual(reduce_scatter.group_name, group.group_name)

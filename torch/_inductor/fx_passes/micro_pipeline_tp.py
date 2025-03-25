@@ -205,14 +205,14 @@ class _ReduceScatterMatch:
     match: Match
     input_node: torch.fx.Node
     reduce_scatter_node: torch.fx.Node
-    res_node: torch.fx.Node
+    wait_tensor_node: torch.fx.Node
     reduce_op: str
     scatter_dim: int
     group_name: str
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
         # Replace all uses of the result node (wait_tensor) with the fused node.
-        self.res_node.replace_all_uses_with(new_node)
+        self.wait_tensor_node.replace_all_uses_with(new_node)
 
         # If the reduce-scatter result is saved for backward, save the fused node for backward instead.
         self._update_save_for_backward(new_node)
@@ -314,7 +314,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         match=match,
                         input_node=match.kwargs["input"],
                         reduce_scatter_node=match.nodes[-2],
-                        res_node=node,
+                        wait_tensor_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=match.kwargs["scatter_dim"],
                         group_name=match.kwargs["group_name"],
@@ -327,7 +327,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         match=match,
                         input_node=match.kwargs["input"],
                         reduce_scatter_node=match.nodes[0],
-                        res_node=node,
+                        wait_tensor_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=0,
                         group_name=match.kwargs["group_name"],
@@ -340,7 +340,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         match=match,
                         input_node=match.kwargs["input"],
                         reduce_scatter_node=match.nodes[-2],
-                        res_node=node,
+                        wait_tensor_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=match.kwargs["scatter_dim"],
                         group_name=match.kwargs["group_name"],
@@ -353,7 +353,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         match=match,
                         input_node=match.kwargs["input"],
                         reduce_scatter_node=match.nodes[0],
-                        res_node=node,
+                        wait_tensor_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=0,
                         group_name=match.kwargs["group_name"],
@@ -856,14 +856,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     (
         input_node,
         _reduce_scatter_node,
-        rs_res_node,
+        rs_wait_tensor_node,
         reduce_op,
         orig_scatter_dim,
         group_name,
     ) = (
         reduce_scatter.input_node,
         reduce_scatter.reduce_scatter_node,
-        reduce_scatter.res_node,
+        reduce_scatter.wait_tensor_node,
         reduce_scatter.reduce_op,
         reduce_scatter.scatter_dim,
         reduce_scatter.group_name,
@@ -890,7 +890,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         )
         return
 
-    if rs_res_node in matmul.arg_ancestor_nodes:
+    if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
         log.warning(
             "reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion"
         )
@@ -920,8 +920,8 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         B_shape = list(_get_tensor(matmul.B_node).shape)
         output_shape = [*A_orig_shape[:-1], B_shape[-1]]
 
-    graph = rs_res_node.graph
-    with graph.inserting_before(rs_res_node):
+    graph = rs_wait_tensor_node.graph
+    with graph.inserting_before(rs_wait_tensor_node):
         # Restride A tensor before fused op, for optimal perf in fused matmul reduce scatter
         if "val" in matmul.A_node.meta:
             restrided = restride_A_for_fused_matmul_reduce_scatter(
