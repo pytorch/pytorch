@@ -507,8 +507,9 @@ def speculate_subgraph(
     restore_side_effects=True,
     should_flatten_outputs=False,
     under_activation_checkpoint=False,
-    supports_input_mutation=False,
-    supports_aliasing=False,
+    # TODO - supports input_mutation and aliasing should be False by default for strictness
+    supports_input_mutation=True,
+    supports_aliasing=True,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -1820,8 +1821,8 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
-        self.supports_aliasing = False
+        self.supports_input_mutation = True
+        self.supports_aliasing = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2242,12 +2243,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Checkpoint HOP is desugared and does not see dispatcher
-        self.supports_input_mutation = True
-        self.supports_aliasing = True
-
     def call_function(
         self,
         tx: "InstructionTranslator",
