@@ -32,7 +32,9 @@ class FxirTestCase(InductorTestCase):
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
 
-    @config.patch(compile_threads=1)  # Disable async compile
+    @config.patch(
+        compile_threads=1, size_asserts=False, scalar_asserts=False, nan_asserts=False
+    )
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
 

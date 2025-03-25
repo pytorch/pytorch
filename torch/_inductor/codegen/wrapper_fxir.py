@@ -19,7 +19,7 @@ from torch._library.triton import wrap_triton
 
 aten = torch.ops.aten
 
-from torch._inductor.codecache import PyCodeCache, TritonFuture
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.virtualized import V
@@ -89,8 +89,6 @@ class ExternKernelLine(WrapperIRLine):
 class KernelCallLine(WrapperIRLine):
     kernel_name: str
     call_args: tuple[Any, ...]
-    grid: tuple[Any, ...]
-    grid_fn: str
     triton: bool
 
 
@@ -139,6 +137,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         return WrapperFxCodegen()
 
@@ -511,15 +510,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_triton_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)
 
-        if line.grid_fn not in ("grid", None):
-            raise NotImplementedError(f"Unsupported grid_fn: '{line.grid_fn}'")
-
         # Collect all kwargs, including autotuned block sizes.
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
-        call_kwargs = dict(zip(kernel.tuner.triton_meta["signature"], call_args))
-        tuned_kwargs = kernel.tuner.compile_results[0].config.kwargs
-        call_kwargs.update(tuned_kwargs)
+        tuner = kernel.tuner
+        config = tuner.compile_results[0].config
+        call_args, grid = tuner._interpret_args_grid(call_args, config)
+        call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
+        call_kwargs.update(config.kwargs)
 
         # Convert sympy expressions to symints.
         for name, val in call_kwargs.items():
@@ -537,7 +535,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
                 "constant_args_idx": constant_args_idx,
-                "grid": [line.grid],
+                "grid": [grid],
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
             },
@@ -549,6 +547,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         out: str,
         out_view: Optional[str],
         args: list[str],
+        device: str,
         node: ir.ExternKernelOut,
     ) -> None:
         # TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
@@ -591,16 +590,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self,
         kernel_name: str,
         call_args,
-        grid=None,
-        device_index=None,
-        gpu=True,
+        *,
+        device=None,
         triton=True,
         arg_types=None,
         raw_args=None,
-        grid_fn: str = "grid",
         triton_meta=None,
-        autotune_configs=None,
-        grid_extra_kwargs="",
     ) -> None:
         """
         Generates Wrapper IR for a kernel call.
@@ -610,8 +605,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 self,
                 kernel_name=kernel_name,
                 call_args=call_args,
-                grid=tuple(grid),
-                grid_fn=grid_fn,
                 triton=triton,
             )
         )
@@ -638,9 +631,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Assign the result to the given name.
         result = line.result
         if result:
-            assert (
-                "out" not in line.kwargs
-            ), f"Extern kernel '{line}' has both result and out kwarg. Expected only one."
+            assert "out" not in line.kwargs, (
+                f"Extern kernel '{line}' has both result and out kwarg. Expected only one."
+            )
             node.name = result
             self.buffer_to_node[result] = node
 
@@ -670,7 +663,5 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Import the module and store the JIT kernel.
         mod = self._import_kernel(kernel_code)
         kernel = getattr(mod, line.kernel_name)
-        if isinstance(kernel, TritonFuture):
-            kernel = kernel.kernel
         assert isinstance(kernel, CachingAutotuner)
         self.kernels[line.kernel_name] = TritonKernel(kernel)
