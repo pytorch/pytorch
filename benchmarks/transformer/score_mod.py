@@ -790,7 +790,7 @@ def get_backend_context(backend: str):
     Returns a context manager for the specified backend.
     Args:
         backend (str): The name of the backend to use.
-                       Valid options are 'fav2', 'cudnn', 'math', 'efficient', 'fav3', 'fakv', 'og-eager'.
+                       Valid options are 'fav2', 'cudnn', 'math', 'efficient', 'fav3', 'fakv', 'default'.
     Returns:
         A context manager for the specified backend.
     Raises:
@@ -803,7 +803,7 @@ def get_backend_context(backend: str):
         "efficient": sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
         "fav3": nullcontext(),
         "fakv": nullcontext(),
-        "og-eager": nullcontext(),
+        "default": nullcontext(),
     }
 
     if backend not in backends:
@@ -1194,8 +1194,8 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         "--backend",
         type=str,
         nargs="+",
-        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
-        default=["efficient"],
+        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "default"],
+        default=["default"],
         help="Backend to use for attention computation",
     )
     # Parse arguments
