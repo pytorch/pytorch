@@ -1530,24 +1530,26 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Union[list[str], str]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    config_patches: dict[str, Any] = (
-        {"cpp_wrapper": True}
-        if config_patches is None
-        else {**config_patches, "cpp_wrapper": True}
+    if config_patches is None:
+        config_patches = {}
+
+    config_patches.update(
+        cpp_wrapper=True,
+        freezing=config.freezing
+        if config.freezing is not None
+        else not config.aot_inductor.use_runtime_constant_folding,
     )
 
-    output_path = config_patches.get(
+    if output_path := config_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
-    )
-
-    if output_path:
+    ):
         assert not output_path.endswith(".pt2"), (
             "The output path for aot_compile should not have an extension with .pt2 "
             "this is for specifying the output path for the .so in AOTInductor. "
@@ -1555,10 +1557,7 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
-        config_patches = {
-            **config_patches,
-            "aot_inductor.output_path": code_hash(model_.code),
-        }
+        config_patches["aot_inductor.output_path"] = code_hash(model_.code)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
