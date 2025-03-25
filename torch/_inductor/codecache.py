@@ -2833,6 +2833,11 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: list[ModuleType] = []
+
+    # Modules laoded with out attributes attached to them, storted here, 
+    # Those do not need to be reloaded.
+    modules_no_attr: dict[str, ModuleType] = {}
+
     linemaps: dict[str, list[tuple[Any, ...]]] = {}
 
     @classmethod
@@ -2861,6 +2866,9 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
+        if attrs is None and path in cls.modules_no_attr:
+            return cls.modules_no_attr[path]
+
         in_toplevel = in_toplevel_process()
         mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
 
@@ -2873,7 +2881,10 @@ class PyCodeCache:
                 setattr(mod, k, v)
 
         if in_toplevel:
-            cls.modules.append(mod)
+            if attrs is None:
+                cls.modules_no_attr[path] = mod
+            else:
+                cls.modules.append(mod)
         return mod
 
     @classmethod
