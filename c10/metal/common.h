@@ -12,16 +12,16 @@ namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 
 enum class ScalarType {
-    Byte = 0,
-    Char = 1,
-    Short = 2,
-    Int = 3,
-    Long = 4,
-    Half = 5,
-    Float = 6,
-    Bool = 11,
+  Byte = 0,
+  Char = 1,
+  Short = 2,
+  Int = 3,
+  Long = 4,
+  Half = 5,
+  Float = 6,
+  Bool = 11,
 #if !defined(__METAL__) || __METAL_VERSION__ >= 310
-    BFloat16 = 15,
+  BFloat16 = 15,
 #endif
 };
 

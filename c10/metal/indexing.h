@@ -145,20 +145,45 @@ kernel void binary_dense(
   out[tid] = f(input[tid], other[tid]);
 }
 
+template <typename T, typename U>
+inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
+  return from;
+}
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
+  return T(float(from), 0.0);
+}
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
+cast_to(const U from) {
+  return static_cast<T>(from);
+}
+
 template <typename T>
 T cast_from(constant void* ptr, long offs, ScalarType type) {
   switch (type) {
-    case ScalarType::Bool: return ref_at_offs<bool>(ptr, offs);
-    case ScalarType::Byte: return ref_at_offs<uchar>(ptr, offs);
-    case ScalarType::Char: return ref_at_offs<char>(ptr, offs);
-    case ScalarType::Short: return ref_at_offs<short>(ptr, offs);
-    case ScalarType::Int: return ref_at_offs<int>(ptr, offs);
-    case ScalarType::Long: return ref_at_offs<long>(ptr, offs);
+    case ScalarType::Bool:
+      return ref_at_offs<bool>(ptr, offs);
+    case ScalarType::Byte:
+      return ref_at_offs<uchar>(ptr, offs);
+    case ScalarType::Char:
+      return ref_at_offs<char>(ptr, offs);
+    case ScalarType::Short:
+      return ref_at_offs<short>(ptr, offs);
+    case ScalarType::Int:
+      return ref_at_offs<int>(ptr, offs);
+    case ScalarType::Long:
+      return ref_at_offs<long>(ptr, offs);
     // Floats
-    case ScalarType::Float: return static_cast<T>(ref_at_offs<float>(ptr, offs));
-    case ScalarType::Half: return static_cast<T>(ref_at_offs<half>(ptr, offs));
+    case ScalarType::Float:
+      return static_cast<T>(ref_at_offs<float>(ptr, offs));
+    case ScalarType::Half:
+      return static_cast<T>(ref_at_offs<half>(ptr, offs));
 #if __METAL_VERSION__ >= 310
-//    case ScalarType::BFloat16: return static_cast<T>(ref_at_offs<bfloat>(ptr, offs));
+    case ScalarType::BFloat16:
+      return cast_to<T>(ref_at_offs<bfloat>(ptr, offs));
 #endif
   }
 }
@@ -167,11 +192,13 @@ kernel void binary_dense_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
     constant void* input [[buffer(1)]],
     constant void* other [[buffer(2)]],
-    constant uint4 &sizes_types [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  const auto a = cast_from<T>(input,tid*sizes_types.x, static_cast<ScalarType>(sizes_types.z));
-  const auto b = cast_from<T>(other,tid*sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  const auto a = cast_from<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b = cast_from<T>(
+      other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
   out[tid] = f(a, b);
 }
 
@@ -192,13 +219,13 @@ kernel void binary_dense_cast(
           device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
           constant DTYPE * input_,                                             \
           constant DTYPE * other_,                                             \
-          uint tid); \
-  template [[host_name(#NAME "_dense_cast_" #DTYPE)]] kernel void ::c10::metal::    \
-      binary_dense_cast<DTYPE, NAME##_functor>(                                     \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_cast_" #DTYPE)]] kernel void ::c10::      \
+      metal::binary_dense_cast<DTYPE, NAME##_functor>(                         \
           device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
-          constant void * input,                                             \
-          constant void * other,                                             \
-          constant uint4 &sizes_types, \
+          constant void* input,                                                \
+          constant void* other,                                                \
+          constant uint4& sizes_types,                                         \
           uint tid)
 } // namespace metal
 } // namespace c10
