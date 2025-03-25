@@ -97,7 +97,7 @@ jobs:
         with:
           name: ${{ needs.release.outputs.pt_release_name }}
       - name: Configure AWS credentials(PyTorch account)
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
           aws-region: us-east-1
