@@ -145,7 +145,7 @@ void Context::setAllowTF32OneDNN(bool b){
 #ifdef USE_XPU
   allow_tf32_onednn = b;
 #else
-  if(b){
+  if (b) {
     TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
   }
 #endif
