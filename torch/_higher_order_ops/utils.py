@@ -284,6 +284,16 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
         fake_mode = nullcontext()
         tracing_mode = "fake"
 
+    from torch._prims_common import clone_preserve_strides
+
+    # We need to clone so that when we retrace, we create new unbacked symbols
+    # and will re-insert deferred runtime asserts into the graph. It's important
+    # to re-insert the runtime asserts so that fake-prop later on will succeed.
+    inputs = [
+        clone_preserve_strides(inp) if isinstance(inp, FakeTensor) else inp
+        for inp in inputs
+    ]
+
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.

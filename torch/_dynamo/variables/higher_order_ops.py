@@ -228,9 +228,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     output_tensor_ids = {
         id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
     }
-    assert input_tensor_ids.isdisjoint(output_tensor_ids), (
-        "inputs to function body cannot alias outputs"
-    )
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
 
 
 def _check_all_tensorvariable(args):
@@ -685,9 +685,9 @@ def speculate_subgraph(
                     ][-len(lifted_freevars) :]
                     assert len(after_phs) == len(lifted_freevars)
                     for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
 
                     graph.lint()
 
@@ -835,9 +835,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1062,9 +1062,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -2792,9 +2792,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(x, torch.fx.Proxy):
                 return x.node
             else:
-                assert variables.ConstantVariable.is_literal(x), (
-                    f"Only constant is allowed. Got {x}"
-                )
+                assert variables.ConstantVariable.is_literal(
+                    x
+                ), f"Only constant is allowed. Got {x}"
                 return x
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
@@ -3088,18 +3088,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-        from torch._prims_common import clone_preserve_strides
-
-        def _maybe_clone_val(node):
-            example_value = node.meta["example_value"]
-            if isinstance(example_value, torch.Tensor):
-                # We need to clone so that when we retrace, we don't get the
-                # same unbacked symbols
-                return clone_preserve_strides(example_value)
-            return example_value
 
         fake_inputs = [
-            _maybe_clone_val(node)
+            node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
