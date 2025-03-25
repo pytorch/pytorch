@@ -62,9 +62,9 @@ from .utils import (
     is_collective,
     is_gpu,
     is_multi_outputs_template,
+    is_non_cudagraphable_custom_op,
     is_output_of_multi_outputs_template,
     is_wait,
-    should_partition_custom_op,
     sympy_product,
 )
 from .virtualized import V
@@ -3981,11 +3981,7 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if (
-            isinstance(node.node, ir.FallbackKernel)
-            and (python_kernel_name := getattr(node.node, "python_kernel_name", None))
-            and should_partition_custom_op(python_kernel_name)
-        ):
+        if is_non_cudagraphable_custom_op(node.node):
             return True
 
         return False

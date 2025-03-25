@@ -78,3 +78,7 @@
           relevant to CIA ops that decompose before functionalization/autograd. It is useful to
           know this information for export as we would want to decompose these ops as they are unsafe to be
           preserved.
+- tag: non_cudagraphable
+  desc: |
+          This tag indicates that the operator cannot be cudagraphed. Inductor graph partition will happen
+          on this operator and cudagraphify separately the graph before and after this operator.

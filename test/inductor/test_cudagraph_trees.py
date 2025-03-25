@@ -23,7 +23,6 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import register_custom_op_partition
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -2841,7 +2840,11 @@ if HAS_CUDA:
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_custom_op(self):
-            @torch.library.custom_op("mylib::movement", mutates_args=())
+            @torch.library.custom_op(
+                "mylib::movement",
+                mutates_args=(),
+                tags=(torch._C.Tag.non_cudagraphable,),
+            )
             def movement(pic: torch.Tensor) -> torch.Tensor:
                 img = pic.cpu()
                 cropped_img = (img + 1) * 2
@@ -2851,7 +2854,9 @@ if HAS_CUDA:
             def _(pic):
                 return torch.empty_like(pic)
 
-            @torch.library.custom_op("mylib::modify", mutates_args=())
+            @torch.library.custom_op(
+                "mylib::modify", mutates_args=(), tags=(torch._C.Tag.non_cudagraphable,)
+            )
             def modify(pic: torch.Tensor) -> torch.Tensor:
                 pic1 = pic + 1
                 pic1_cpu = (pic1.cpu() + 1) * 2
@@ -2868,9 +2873,6 @@ if HAS_CUDA:
             @transform.register_fake
             def _(pic):
                 return torch.empty_like(pic)
-
-            register_custom_op_partition(movement)
-            register_custom_op_partition(modify)
 
             img = torch.randn(3, 64, 64, device="cuda")
 
@@ -2908,6 +2910,7 @@ if HAS_CUDA:
                 "mylib::mysin",
                 mutates_args=["out_list"],
                 schema="(Tensor x, Tensor(a!)[]? out_list) -> Tensor",
+                tags=(torch._C.Tag.non_cudagraphable,),
             )
             def mysin(x, out_list) -> torch.Tensor:
                 r = x.sin()
@@ -2918,8 +2921,6 @@ if HAS_CUDA:
             @mysin.register_fake
             def _(x, out_list) -> torch.Tensor:
                 return torch.empty_like(x)
-
-            register_custom_op_partition(mysin)
 
             def fn(x):
                 x = x * 3
@@ -2941,7 +2942,11 @@ if HAS_CUDA:
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_custom_op_dynamoc_shapes(self):
-            @torch.library.custom_op("mylib::movement", mutates_args=())
+            @torch.library.custom_op(
+                "mylib::movement",
+                mutates_args=(),
+                tags=(torch._C.Tag.non_cudagraphable,),
+            )
             def movement(pic: torch.Tensor) -> torch.Tensor:
                 img = pic.cpu()
                 cropped_img = (img + 1) * 2
@@ -2950,8 +2955,6 @@ if HAS_CUDA:
             @movement.register_fake
             def _(pic):
                 return torch.empty_like(pic)
-
-            register_custom_op_partition(movement)
 
             def f(img):
                 x = (img + 10) * 2
