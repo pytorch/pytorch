@@ -655,7 +655,6 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
@@ -713,6 +712,7 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.chebyshev_polynomial_t': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # entr does not support boolean types
         'special.entr': [torch.bool],
@@ -7844,13 +7844,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(tril_result, tril_result_cpu)
             self.assertEqual(x.grad, cpu_x.grad)
 
-        helper((2, 8, 4, 5))
-        helper((2, 8, 4, 5), diag=1)
-        helper((2, 8, 4, 5), diag=2)
-        helper((2, 8, 4, 5), diag=3)
-        helper((2, 8, 4, 5), diag=-1)
-        helper((2, 8, 4, 5), diag=-2)
-        helper((2, 8, 4, 5), diag=-3)
+        for diag in [0, 1, 2, 3, -1, -2, -3]:
+            helper((2, 8, 4, 5), diag=diag)
+
+        def helper_nans_infs(value, diag_vals=(0, 1, -2)):
+            """For nans and infs"""
+            mps_tensor = torch.full((2, 2, 5, 5), value, device="mps")
+            cpu_tensor = torch.full((2, 2, 5, 5), value, device="cpu")
+            for diag in diag_vals:
+                mps_result = torch.tril(mps_tensor, diagonal=diag)
+                cpu_result = torch.tril(cpu_tensor, diagonal=diag)
+                self.assertEqual(mps_result, cpu_result, f"Mismatch for diag={diag}")
+
+        helper_nans_infs(float("inf"))
+        helper_nans_infs(float("-inf"))
+        helper_nans_infs(float("nan"))
 
     # test eye
     def test_eye(self):
