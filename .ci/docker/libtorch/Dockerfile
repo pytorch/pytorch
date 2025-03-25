@@ -72,6 +72,7 @@ RUN bash ./install_magma.sh 12.8
 RUN ln -sf /usr/local/cuda-12.8 /usr/local/cuda
 
 FROM cpu as rocm
+ARG ROCM_VERSION
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ENV MKLROOT /opt/intel
@@ -90,7 +91,7 @@ RUN apt-get update -y && \
     apt-get clean
 
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
-RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 
 FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
