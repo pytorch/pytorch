@@ -395,7 +395,7 @@ class TestFloat8Dtype(TestCase):
 class TestFloat4Dtype(TestCase):
     def test_float4_e2m1fn_x2(self, device):
         # can create a tensor of dtype float4
-        x1 = torch.empty(4, 4, device=device, dtype=torch.float4_e2m1fn_x2)
+        x1 = torch.empty(4096, 4096, device=device, dtype=torch.float4_e2m1fn_x2)
 
         # can create a string (so printing will work)
         str(x1)
