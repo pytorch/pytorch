@@ -2739,18 +2739,24 @@ class Scheduler:
         device = node_list_fused[0].get_device()
         assert device is not None
 
+        epilogue_fusion = node1.get_template_node() is not None
+
         def log_fusion(ms_fused: float, ms1: float, ms2: float) -> None:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
+                    if not epilogue_fusion:
+                        breakpoint()
                     fusion_log.debug(
-                        "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                        "can fuse %s (benchmark): fusing %s with %s cause %sx speedup",
+                        "epilogue" if epilogue_fusion else "prologue",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
                     )
                 else:
                     fusion_log.debug(
-                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                        "cannot fuse  %s benchmark): fusing %s with %s cause %sx slowdown",
+                        "epilogue" if epilogue_fusion else "prologue",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
@@ -3456,24 +3462,6 @@ class Scheduler:
         BYTES_THRESHOLD_MULTIPLIER = 1.1
         if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
             why("prologue fusion will not increase amount of bytes read in kernel")
-            return False
-
-        # we want to avoid attempting to fuse predictably unprofitable prologues
-        # such as increasing the unaligned reads or writes.
-        # TODO - would be nice to generalize this, however, we would need more explicit
-        # knowledge of memory access patterns in the TritonTemplate in order to know
-        # the stride order to check alignment.
-        origins = tuple(
-            e.target
-            for n in prologue_node.get_nodes()
-            if n.node is not None
-            for e in n.node.get_origins()
-            if e.op == "call_function"
-        )
-        if origins == (torch.ops.aten.constant_pad_nd.default,):
-            why(
-                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
-            )
             return False
 
         def low_prec_fp(dtype: torch.dtype) -> bool:

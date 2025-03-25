@@ -89,6 +89,7 @@ class RecordLowPrecisionOps(DefaultHandler):
             "to_dtype",
             "constant",
             "where",
+            "masked",
         )
 
     def load(self, name: str, index: sympy.Expr) -> DTypeContainer:
