@@ -348,11 +348,17 @@ def unique_graph_id(proxy_mode, prefix):
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
     # I was not sure how to do that. This kinda simulates it.
+    return unique_graph_name_with_root(proxy_mode.tracer.root, prefix)
+
+
+def unique_graph_name_with_root(
+    root: torch.fx.GraphModule, prefix: str
+) -> tuple[int, str]:
     next_name = None
     i = 0
     while not next_name:
         candidate = f"{prefix}_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
+        if hasattr(root, candidate):
             i += 1
         else:
             next_name = candidate
@@ -414,6 +420,26 @@ def prepare_fw_with_masks(fn):
             True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
             for ret in fw_out
         ]
+
+    return fw_with_masks
+
+
+def prepare_fw_with_masks_all_requires_grad(fn):
+    def fw_with_masks(*args):
+        fw_out = fn(*args)
+        # Note [force all outputs to be require grad]
+        # Instead of using the original fn, we set the output of original
+        # fn to all require grad. This is consistent with the behavior
+        # of autograd.Function, where if any one of the inputs requires grad
+        # all output will be require grad. This also makes the downstream
+        # require_gradness reasoning much easier.
+        if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
+            fw_out = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+            )
+        return fw_out, pytree.tree_map_only(
+            torch.Tensor, lambda x: x.requires_grad, fw_out
+        )
 
     return fw_with_masks
 
