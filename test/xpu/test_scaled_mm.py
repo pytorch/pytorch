@@ -1,32 +1,22 @@
-import copy
-import io
-import itertools
-import random
-import re
-import unittest
-import warnings
-from typing import List, Tuple
-
 import pytest
 
 import torch
-import torch.nn as nn
 from torchao.float8.float8_python_api import addmm_float8_unwrapped
 from torchao.float8.float8_tensor import (
-    Float8Tensor,
     GemmInputRole,
     hp_tensor_and_scale_to_float8,
     LinearMMConfig,
     ScaledMMConfig,
 )
 from torchao.float8.float8_utils import (
-    compute_error,
-    e4m3_dtype,
-    e5m2_dtype,
-    fp8_tensor_statistics,
-    FP8_TYPES,
     tensor_to_scale,
 )
+
+e4m3_dtype = torch.float8_e4m3fn
+e5m2_dtype = torch.float8_e5m2
+E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
 class TestScaledMM:
     @pytest.mark.parametrize(
         "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
