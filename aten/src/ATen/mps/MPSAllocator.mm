@@ -872,6 +872,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     std::cout << "in MPSAllocator::clone_from_cpu data: " << data << " (CPU " << getSharedBufferPtr(data).first << ")"
               << std::endl;
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
+    TORCH_INTERNAL_ASSERT(isSharedBuffer(data));
 
     DataPtr new_data = allocate(n);
     // void* dest = new_data.mutable_get();
@@ -887,6 +888,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     std::cout << "in MPSAllocator::clone_to_cpu data: " << data << " (CPU " << getSharedBufferPtr(data).first << ")"
               << std::endl;
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
+    TORCH_INTERNAL_ASSERT(isSharedBuffer(data));
 
     // DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
     DataPtr new_data = allocate(n);
