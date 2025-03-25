@@ -4678,9 +4678,7 @@ class TestLinalg(TestCase):
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
         import os
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             if dtype is torch.half:
                 os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
@@ -4727,9 +4725,7 @@ class TestLinalg(TestCase):
         # Tests only the main matmul GEMM API
         import os
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
             ordinal = torch.cuda.current_device()
@@ -4783,9 +4779,7 @@ class TestLinalg(TestCase):
         # This test is the offline version of test_scaled_gemm_tunableop
         import os
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             ordinal = torch.cuda.current_device()
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
@@ -4885,9 +4879,7 @@ class TestLinalg(TestCase):
         # on multiple GPUs
         import os
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # Use all available GPUs for this test
             total_gpus = torch.cuda.device_count()
 
@@ -4968,9 +4960,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float)
     def test_bmm_tunableop_rocm(self, device, dtype):
         # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(10)
             # the following 3 cases cover all previous failure cases and are here to catch regressions
             B = 16
@@ -5030,9 +5020,7 @@ class TestLinalg(TestCase):
         i2 = torch.randn((B, M, K), device=device, dtype=dtype)
         out = torch.bmm(i1, i2)
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # enable tunableop numeric check via env variable.
             os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
 
@@ -5058,9 +5046,7 @@ class TestLinalg(TestCase):
         # Validator,GCN_ARCH_NAME,<architecutre name>
         validator_num_lines = 5
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -5084,9 +5070,7 @@ class TestLinalg(TestCase):
         # Make sure that there is at least one tuning iteration occurs
         # when the max tuning duration and max tuning iteration are set
         # to zero.
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # Tune a single GEMM and verify that we get a new tuning result
             torch.cuda.tunable.set_max_tuning_duration(0)
             torch.cuda.tunable.set_max_tuning_iterations(0)
@@ -5110,9 +5094,7 @@ class TestLinalg(TestCase):
     def test_matmul_check_entries_tunableop(self, device, dtype):
         # Tune a couple of matrix multiplies
         # Verify we get the correct number of results
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -5147,9 +5129,7 @@ class TestLinalg(TestCase):
         # PYTORCH_TUNABLEOP_ENABLED=1
         # PYTORCH_TUNABLEOP_TUNING=0
         # is no longer tuning GEMMs.
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -5200,9 +5180,7 @@ class TestLinalg(TestCase):
         import os
         import multiprocessing as mp
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             ordinal = torch.cuda.current_device()
             filename = f"tunableop_results{ordinal}.csv"
 
@@ -5224,9 +5202,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.bfloat16)
     def test_gemm_bias_tunableop(self, device, dtype):
         # Test GEMM and bias tuning
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -5256,9 +5232,7 @@ class TestLinalg(TestCase):
         import os
         ordinal = torch.cuda.current_device()
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
             result_filename = f"tunableop_results{ordinal}.csv"
@@ -5326,9 +5300,7 @@ class TestLinalg(TestCase):
         #
         # Refer to test/test_matmul_cuda for support combinations that are
         # tested by PyTorch
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -5396,10 +5368,8 @@ class TestLinalg(TestCase):
         # and only for MI300+. Eventually this flag will go away.
         tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
 
-        tunableop_ctx = self._tunableop_ctx
-
         try:
-            with tunableop_ctx(), tf32_ctx():
+            with self._tunableop_ctx(), tf32_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
@@ -5467,10 +5437,8 @@ class TestLinalg(TestCase):
         # and only for MI300+. Eventually this flag will go away.
         tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
 
-        tunableop_ctx = self._tunableop_ctx
-
         try:
-            with tunableop_ctx(), tf32_ctx():
+            with self._tunableop_ctx(), tf32_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -5559,9 +5527,7 @@ class TestLinalg(TestCase):
         import os
         import multiprocessing as mp
 
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             os.putenv("PYTORCH_TUNABLEOP_BLAS_LOG", "1")
 
             ordinal = torch.cuda.current_device()
