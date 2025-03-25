@@ -942,7 +942,7 @@ void dispatch_fp8_rowwise_kernel_sm89(
         /*WarpShape=*/cutlass::gemm::GemmShape<64, 64, 64>,
         /*NumStages=*/5,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
-  }  
+  }
 }
 
 template <typename ArchTag, typename... Types>
@@ -959,7 +959,7 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<ArchTag, Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
-  
+
 template <typename ArchTag, typename... Types>
 void dispatch_fp8_rowwise_kernel_on_fast_accum(
     at::Tensor XQ,
