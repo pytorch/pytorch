@@ -415,7 +415,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   auto head_dim_limit = 128;
   if (cudnn_version >= 90501) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major >= 9 && !dprops->minor) {
+    if ((dprops->major == 9 || dprops->major == 10) && !dprops->minor) {
       head_dim_limit = 256;
     }
   }
