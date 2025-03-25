@@ -31,6 +31,7 @@ from torch._export.utils import (
 )
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.scan import scan
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -6819,6 +6820,22 @@ def forward(self, b_a_buffer, x):
             self.assertEqual(
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
+
+    def test_export_scan_pytree_output(self):
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+
+        def add(carry, accum):
+            return carry + carry, (accum[0]["moo"] + 1, accum[0]["moo2"] + 1)
+
+        class M(torch.nn.Module):
+            def forward(self, init, accum):
+                return scan(add, init, accum)
+
+        inp = torch.randn(3)
+        init, xs = torch.ones(3), ({"moo": torch.ones(3), "moo2": torch.ones(3)},)
+        ep = torch.export.export(M(), (init, xs))
+        self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
     # map_fn references module outside the module hierarchy
     @unittest.expectedFailure
