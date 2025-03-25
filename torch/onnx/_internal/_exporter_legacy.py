@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 __all__ = [
+    "DiagnosticOptions",
     "ExportOptions",
     "ONNXRuntimeOptions",
     "OnnxRegistry",
@@ -23,6 +24,7 @@ import torch
 import torch._ops
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import _constants
 from torch.onnx._internal.fx import (
     decomposition_table,
@@ -44,6 +46,9 @@ if TYPE_CHECKING:
     from torch._subclasses import fake_tensor
 
 log = logging.getLogger(__name__)
+
+
+DiagnosticOptions = infra.DiagnosticOptions
 
 
 @dataclasses.dataclass
@@ -227,6 +232,7 @@ class ExportOptions:
             When ``None``, the exporter determines the most compatible setting.
             When ``True``, all input shapes are considered dynamic.
             When ``False``, all input shapes are considered static.
+        diagnostic_options: The diagnostic options for the exporter.
         fake_context: The fake context used for symbolic tracing.
         onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
     """
@@ -237,10 +243,12 @@ class ExportOptions:
         dynamic_shapes: bool | None = True,
         fake_context: ONNXFakeContext | None = None,
         onnx_registry: OnnxRegistry | None = None,
+        diagnostic_options: DiagnosticOptions | None = None,
     ):
         self.dynamic_shapes = dynamic_shapes
         self.fake_context = fake_context
         self.onnx_registry = onnx_registry
+        self.diagnostic_options = diagnostic_options or DiagnosticOptions()
 
 
 @deprecated(
@@ -255,15 +263,22 @@ class ResolvedExportOptions(ExportOptions):
 
     def __init__(self):
         from torch.onnx._internal.fx import (
+            diagnostics,
             dynamo_graph_extractor,
             onnxfunction_dispatcher,
         )
 
         self.dynamic_shapes: bool = True
+        self.diagnostic_options: DiagnosticOptions = DiagnosticOptions()
         self.fx_tracer: dynamo_graph_extractor.DynamoExport = (
             dynamo_graph_extractor.DynamoExport()
         )
         self.fake_context = None
+        self.diagnostic_context = diagnostics.DiagnosticContext(
+            "torch.onnx.dynamo_export",
+            torch.__version__,
+            self.diagnostic_options,
+        )
         self.onnx_registry: OnnxRegistry = OnnxRegistry()
         self.decomposition_table = (
             decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
@@ -272,6 +287,7 @@ class ResolvedExportOptions(ExportOptions):
         )
         self.onnxfunction_dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
             self.onnx_registry,
+            self.diagnostic_context,
         )
 
 
@@ -440,10 +456,13 @@ def common_pre_export_passes(
     fx_module_args: Sequence[Any],
 ):
     # TODO: Import here to prevent circular dependency
-    from torch.onnx._internal.fx import passes
+    from torch.onnx._internal.fx import analysis, passes
+
+    diagnostic_context = options.diagnostic_context
 
     # Apply decomposition table to the input graph.
     module = passes.Decompose(
+        diagnostic_context,
         fx_module,
         options.decomposition_table,  # type: ignore[arg-type]
         enable_dynamic_axes=options.dynamic_shapes,
@@ -453,6 +472,7 @@ def common_pre_export_passes(
     # ONNX does not support views and mutations.
     # Functionalize to get a semantically equivalent graph without mutations.
     module = passes.Functionalize(
+        diagnostic_context,
         module,
         enable_dynamic_axes=options.dynamic_shapes,
         allow_fake_constant=options.fake_context is not None,
@@ -460,14 +480,24 @@ def common_pre_export_passes(
 
     # Input mutations are detected and distilled after `Functionalize` pass.
     # Remove them since ONNX inference does not need them.
-    module = passes.RemoveInputMutation(module).run(*fx_module_args)
+    module = passes.RemoveInputMutation(diagnostic_context, module).run(*fx_module_args)
 
     # ONNX does not support concept of (implicit) type promotion.
     # Insert type casts explicitly where needed.
-    module = passes.InsertTypePromotion(module).run()
+    module = passes.InsertTypePromotion(diagnostic_context, module).run()
+
+    analysis.UnsupportedFxNodesAnalysis(
+        diagnostic_context, module, options.onnxfunction_dispatcher
+    ).analyze(infra.levels.ERROR)
 
     if isinstance(original_model, torch.nn.Module):
-        module = passes.RestoreParameterAndBufferNames(module, original_model).run()
+        module = passes.RestoreParameterAndBufferNames(
+            diagnostic_context, module, original_model
+        ).run()
+
+    # This operation should be invoked as the last pre export pass.
+    # See [NOTE: Modularize pass ordering]
+    module = passes.Modularize(diagnostic_context, module).run()
 
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
