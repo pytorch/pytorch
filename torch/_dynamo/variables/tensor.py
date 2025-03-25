@@ -787,20 +787,9 @@ class TensorVariable(VariableTracker):
             from .torch_function import TensorWithTFOverrideVariable
 
             tx = InstructionTranslator.current_tx()
-
-            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
-            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
-            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
-            # It is up to the user whether this is correct behavior or not.
             py_cls = cls.as_python_constant()
-            torch_fn = VariableTracker.build(
-                tx,
-                py_cls.__torch_function__.__func__,
-                AttrSource(AttrSource(cls.source, "__torch_function__"), "__func__"),
-            )
-
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, self, py_cls, torch_fn
+                tx, self, py_cls, cls.source
             )
 
     def method_get_device(self):
@@ -1456,11 +1445,8 @@ class TensorSubclassVariable(VariableTracker):
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
 
-            source = AttrSource(self.source, "__torch_function__")
-            torch_fn = VariableTracker.build(tx, self.value.__torch_function__, source)
-
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, torch_fn
+                tx, args[0], self.value, self.source
             )
 
         return super().call_function(tx, args, kwargs)
