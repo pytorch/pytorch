@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import re
+import unittest
 from unittest.mock import patch
 
 import functorch
@@ -92,6 +93,7 @@ class TestCase(InductorTestCase):
     device = DEVICE
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class NumBytesMetricTests(TestCase):
     """
     Primarily used for sanity testing that the num_bytes_accessed metrics is correct.
@@ -337,6 +339,7 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class FusionTests(TestCase):
     """
     Tests that things can be fused into a single kernel
@@ -586,6 +589,7 @@ class FusionTests(TestCase):
         self.assertLess(numel * 5, S * S)
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class SchedulerFusionTests(TestCase):
     """
     Testing the fusion group creation heuristic (i.e. cases where we can't fuse
@@ -667,6 +671,7 @@ class SchedulerFusionTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """1342""")
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class TilingTests(TestCase):
     def test_tiling_simple(self):
         def f(a, b):
@@ -689,6 +694,7 @@ class TilingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class MinCutPartitioningTests(TestCase):
     def test_partitioning_full_remat(self):
         def f(x):
@@ -801,6 +807,7 @@ def unfusible(x):
     return aten._lazy_clone(x)
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class NoopTests(TestCase):
     def test_noop_clones(self):
         def f(a):
@@ -888,6 +895,7 @@ class NoopTests(TestCase):
         self.assertExpectedInline(count_numel(f2, inp), """20""")
 
 
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
         def f(a, b):
@@ -1249,6 +1257,7 @@ class InplacingTests(TestCase):
 
 
 # Test cases where we don't do the right thing yet.
+@unittest.skipIf(not HAS_CUDA, "No CUDA available")
 class WouldBeNiceIfItWorked:
     def test_horizontal(self):
         def f(a):

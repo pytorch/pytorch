@@ -86,6 +86,7 @@ class TestCase(InductorTestCase):
 class UnsupportedTests(TestCase):
     device = DEVICE
 
+    @skipIf(not HAS_GPU, "No GPU available")
     def test_no_op(self):
         def f(a):
             return a
@@ -101,6 +102,7 @@ class UnsupportedTests(TestCase):
         self.assertZero(calculate_runtime(f, *inp))
 
 
+@skipIf(not HAS_GPU, "No GPU available")
 class ComputeBoundedTests(TestCase):
     device = DEVICE
 
@@ -178,6 +180,7 @@ class ComputeBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(not HAS_GPU, "No GPU available")
 class MemoryBoundedTests(TestCase):
     device = DEVICE
 
@@ -221,6 +224,7 @@ class MemoryBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(not HAS_GPU, "No GPU available")
 @skipIf(not dist.is_available(), "requires distributed")
 class TestCommAnalysis(TestCase):
     device = DEVICE

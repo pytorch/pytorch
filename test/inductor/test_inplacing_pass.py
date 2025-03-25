@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
@@ -81,6 +83,7 @@ def boo(x: torch.Tensor) -> None:
     x.sin_()
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
