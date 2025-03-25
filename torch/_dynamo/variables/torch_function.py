@@ -597,7 +597,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
-        assert kwargs.pop("class_type") is torch.Tensor, (
+        assert kwargs.pop("class_type") in (torch.Tensor, torch.nn.Parameter), (
             "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         )
         torch_fn_var = build_torch_function_fn(tx, class_type, cls_source)
