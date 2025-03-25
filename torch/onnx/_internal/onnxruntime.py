@@ -12,6 +12,7 @@ import torch._C
 import torch._ops
 import torch._prims.executor
 import torch.fx
+import torch.onnx._internal._lazy_import
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -28,7 +29,6 @@ if TYPE_CHECKING:
     import torch.onnx
     import torch.onnx._internal
     import torch.onnx._internal._exporter_legacy
-    import torch.onnx._internal.diagnostics
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes  # noqa: TCH004
 
@@ -78,7 +78,6 @@ def is_onnxrt_backend_supported() -> bool:
             import torch.onnx  # noqa: F401
             import torch.onnx._internal  # noqa: F401
             import torch.onnx._internal._exporter_legacy  # noqa: F401
-            import torch.onnx._internal.diagnostics  # noqa: F401
             from torch.onnx._internal.fx import (  # noqa: F401
                 decomposition_table,
                 fx_onnx_interpreter,
@@ -726,9 +725,6 @@ class OrtBackendOptions:
     sub-graphs are compiled by ``OrtBackend``.
     """
 
-    export_options: Optional["torch.onnx.ExportOptions"] = None
-    """Options for the TorchDynamo-based ONNX exporter used by the ``OrtBackend``."""
-
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
@@ -773,11 +769,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
-                torch.onnx.ExportOptions()
-                if self._options.export_options is None
-                else self._options.export_options
-            )
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions()
         )
 
         #  Given DORT's computation flow:
@@ -901,7 +893,6 @@ class OrtBackend:
             # (type: onnxruntime.InferenceSession) for it.
 
             graph_module = passes.MovePlaceholderToFront(
-                self._resolved_onnx_exporter_options.diagnostic_context,
                 graph_module,
             ).run()
             # Generate reference outputs. They are used to indicate output
@@ -942,15 +933,11 @@ class OrtBackend:
 
             # Create the object to iterate through the nodes in graph one-by-one
             # and calls the corresponding ONNX exporter for each node.
-            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-                diagnostic_context=self._resolved_onnx_exporter_options.diagnostic_context
-            )
+            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter()
             # Cast FX variables if they will result schema-mismatch when searching
             # for ONNX operator. E.g., add(double_tensor, int_tensor) is fine in PyTorch,
             # but ONNX expects add(double_tensor, double_tensor).
-            graph_module = passes.InsertTypePromotion(
-                self._resolved_onnx_exporter_options.diagnostic_context, graph_module
-            ).run()
+            graph_module = passes.InsertTypePromotion(graph_module).run()
             # Start the per-node exporting process. It's conceptually a for loop
             # scanning through the nodes in the graph.
             exported = fx_interpreter.run(
@@ -1178,22 +1165,7 @@ class OrtBackend:
             if a.ort_session_options is not None or b.ort_session_options is not None:
                 return False
 
-            if a.export_options is b.export_options:
-                return True
-
-            # Similarly, some objects in ExportOptions are too stateful to use for
-            # caching. We should revisit this.
-            if a.export_options is not None and b.export_options is not None:
-                return (
-                    a.export_options.dynamic_shapes == b.export_options.dynamic_shapes
-                    and a.export_options.diagnostic_options
-                    == b.export_options.diagnostic_options
-                    and a.export_options.onnx_registry is b.export_options.onnx_registry
-                    and a.export_options.fake_context is b.export_options.fake_context
-                )
-
-            # We can't account for how the two option sets may differ, so it's not safe to reuse.
-            return False
+            return True
 
         if not isinstance(options, OrtBackendOptions):
             options = OrtBackendOptions(**(options or {}))
