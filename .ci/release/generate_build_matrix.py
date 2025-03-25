@@ -381,6 +381,12 @@ if __name__ == "__main__":
         description="Generate binary build matrix for PyTorch wheels"
     )
     parser.add_argument(
+        "--package-type",
+        choices=["wheel", "libtorch"],
+        required=True,
+        help="Type of binary package to build (wheel libtorch)",
+    )
+    parser.add_argument(
         "--os",
         choices=["linux", "windows", "macos"],
         required=True,
@@ -398,9 +404,15 @@ if __name__ == "__main__":
         help="Python versions to build for (e.g., 3.9 3.10 3.11). If not specified, all supported versions will be used.",
     )
     parser.add_argument(
-        "--output-json",
+        "--output",
+        choices=["json", "github_output"],
+        required=False,
+        help="Output format (json, github_output)",
+    )
+    parser.add_argument(
+        "--to-github-output",
         action="store_true",
-        help="Output the matrix as JSON (default is to print as indented JSON)",
+        help="Output the matrix to the GitHub Actions output file",
     )
 
     args = parser.parse_args()
@@ -412,17 +424,27 @@ if __name__ == "__main__":
         "macos": OperatingSystem.MACOS,
     }
 
-    # Generate the matrix
-    matrix = generate_wheels_matrix(
-        os=os_map[args.os],
-        accelerator_type=args.accelerator_type,
-        python_versions=args.python_versions,
-    )
+    if args.package_type == "wheel":
+        # Generate the matrix
+        matrix = generate_wheels_matrix(
+            os=os_map[args.os],
+            accelerator_type=args.accelerator_type,
+            python_versions=args.python_versions,
+        )
+    elif args.package_type == "libtorch":
+        # TODO: Implement libtorch matrix generation
+        pass
+    else:
+        raise ValueError(f"Invalid --package-type: {args.package_type}")
+
+    # Output the matrix for debugging
+    logger.debug(json.dumps(matrix, indent=2))
 
     # Output the matrix
-    if args.output_json:
-        # Simple JSON output format
-        print(json.dumps(matrix))
+    if args.to_github_output:
+        # Print the matrix in the format expected by GitHub Actions
+        with open(os.environ["GITHUB_OUTPUT"], "w") as f:
+            print(f"matrix={json.dumps(matrix)}", file=f)
     else:
         # Pretty printed JSON for human readability
         print(json.dumps(matrix, indent=2))
