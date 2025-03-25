@@ -73,7 +73,7 @@ jobs:
           path: llm-target-determinator
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read_write
           aws-region: us-east-1
