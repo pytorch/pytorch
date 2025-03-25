@@ -31,6 +31,7 @@ from torch.onnx._internal.exporter import (
     _constants,
     _dispatching,
     _errors,
+    _flags,
     _fx_passes,
     _ir_passes,
     _onnx_program,
@@ -1169,6 +1170,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
+@_flags.set_onnx_exporting_flag
 def export(
     model: torch.nn.Module
     | torch.export.ExportedProgram

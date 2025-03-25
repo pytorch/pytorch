@@ -31,7 +31,6 @@ if typing.TYPE_CHECKING:
 
 
 __all__ = [
-    "is_in_onnx_export",
     "select_model_mode_for_export",
     "disable_apex_o2_state_dict_hook",
     "setup_onnx_logging",
@@ -44,11 +43,6 @@ __all__ = [
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
 ]
-
-
-def is_in_onnx_export() -> bool:
-    """Returns whether it is in the middle of ONNX export."""
-    return GLOBALS.in_onnx_export
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
