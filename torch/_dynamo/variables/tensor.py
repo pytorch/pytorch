@@ -1447,7 +1447,6 @@ class TensorSubclassVariable(VariableTracker):
     ) -> VariableTracker:
         from .torch_function import TensorWithTFOverrideVariable
 
-        data = args[0]
         new_func = self.value.__new__
         if new_func is torch.Tensor.__new__:
             if (
@@ -1455,6 +1454,7 @@ class TensorSubclassVariable(VariableTracker):
                 and isinstance(args[0], TensorVariable)
                 and len(kwargs) == 0
             ):
+                data = args[0]
                 # Simulate `torch.Tensor.__new__` as shallow-copying the input
                 # tensor data with a new type. TODO polyfill?
                 var = TensorWithTFOverrideVariable.from_tensor_var(
