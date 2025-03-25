@@ -734,6 +734,18 @@ class AutogradCompilerInstance:
             self.bind_objects_to_proxies([inputs[i]], [proxy])
         return inputs
 
+    def cpp_tensor_pre_hook(self, inputs: list[torch.Tensor], hook_id: int, i: int):
+        proxy = self.fx_tracer.create_proxy(
+            "call_function",
+            torch._C._dynamo.compiled_autograd.call_cpp_tensor_pre_hooks,
+            (hook_id, self.to_proxy(inputs[i])),
+            {},
+        )
+        with disable_proxy_modes_tracing():
+            inputs[i] = maybe_clone(inputs[i])
+            self.bind_objects_to_proxies([inputs[i]], [proxy])
+        return inputs
+
     def pre_hook(self, inputs, hook_id):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]

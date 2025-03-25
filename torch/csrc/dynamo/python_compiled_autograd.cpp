@@ -58,6 +58,63 @@ int default_dyn_type_int = 0;
 PyObject* python_verbose_logger = nullptr;
 } // namespace
 
+// see https://github.com/pytorch/pytorch/pull/34845
+static void throw_python_error() {
+  python_error err;
+  err.persist();
+  throw std::move(err);
+}
+
+// RuntimeState contains arbitrary callables created during the forward pass.
+// e.g. .retains_grad(). It is created during the compiled_args stage, and is
+// used at runtime.  The lifetime of RuntimeState is a single backward pass.
+struct RuntimeState {
+  at::TensorBase call_cpp_tensor_pre_hooks(
+      size_t idx,
+      const at::TensorBase& grad) {
+    TORCH_INTERNAL_ASSERT(
+        cpp_tensor_pre_hooks.size() > static_cast<size_t>(idx));
+    return cpp_tensor_pre_hooks[idx](grad);
+  }
+
+  std::vector<std::function<at::TensorBase(const at::TensorBase&)>>
+      cpp_tensor_pre_hooks;
+  size_t next_id = 0;
+};
+
+static RuntimeState* active_rstate;
+struct RuntimeStateGuard {
+  RuntimeStateGuard() : _state(std::make_unique<RuntimeState>()) {
+    active_rstate = _state.get();
+  }
+  RuntimeStateGuard(const RuntimeStateGuard&) = delete;
+  RuntimeStateGuard& operator=(const RuntimeStateGuard&) = delete;
+  RuntimeStateGuard(RuntimeStateGuard&&) = delete;
+  RuntimeStateGuard& operator=(RuntimeStateGuard&&) = delete;
+
+  ~RuntimeStateGuard() {
+    active_rstate = nullptr;
+  }
+
+  std::unique_ptr<RuntimeState> _state;
+};
+
+static PyObject* call_cpp_tensor_pre_hooks(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  int idx = -1;
+  PyObject* grad = nullptr;
+  if (!PyArg_ParseTuple(args, "iO", &idx, &grad)) {
+    throw_python_error();
+  }
+  TORCH_INTERNAL_ASSERT(idx > -1);
+  TORCH_INTERNAL_ASSERT(grad != nullptr);
+  TORCH_INTERNAL_ASSERT(active_rstate != nullptr);
+  auto res = active_rstate->call_cpp_tensor_pre_hooks(
+      static_cast<size_t>(idx), THPVariable_Unpack(grad));
+  return THPVariable_Wrap(res);
+  END_HANDLE_TH_ERRORS;
+}
+
 // List[Optional[Tensor]] in Python can't be directly parsed into a
 // List[Tensor], so we need to do this conversion manually.
 static std::vector<at::Tensor> toTensorList(
@@ -251,13 +308,6 @@ static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
     PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
   }
   return pyinput;
-}
-
-// see https://github.com/pytorch/pytorch/pull/34845
-static void throw_python_error() {
-  python_error err;
-  err.persist();
-  throw std::move(err);
 }
 
 static PyObject* check(PyObject* pyresult) {
@@ -608,6 +658,10 @@ static PyMethodDef _methods[] = {
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
+    {"call_cpp_tensor_pre_hooks",
+     call_cpp_tensor_pre_hooks,
+     METH_VARARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -827,7 +881,8 @@ static CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks,
-    THPObjectPtr* graph_arg_packed_inputs) {
+    THPObjectPtr* graph_arg_packed_inputs,
+    RuntimeState* rstate) {
   const std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::unordered_map<Node*, int> visited_dependencies;
   visited_dependencies.reserve(dependencies.size());
@@ -963,6 +1018,20 @@ static CacheNode* _compiled_autograd_impl(
         }
         inputs = THPVariable_UnpackList(pyinputs);
       }
+      if (!call.cpp_tensor_pre_hooks.empty()) {
+        // proxy a call to runtimestate
+        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+        for (const auto& [hook_id, idx] : call.cpp_tensor_pre_hooks) {
+          pyinputs = check(PyObject_CallMethod(
+              py_compiler,
+              "cpp_tensor_pre_hook",
+              "Oii",
+              pyinputs.get(),
+              hook_id,
+              idx));
+        }
+        inputs = THPVariable_UnpackList(pyinputs);
+      }
       for (const auto& graph_output : call.graph_output) {
         int input_nr = graph_output.first;
         int output_index = graph_output.second;
@@ -1090,6 +1159,7 @@ static CacheNode* _compiled_autograd_impl(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
   *graph_arg_hooks = convert_pyobj_list(compiler_call.hooks);
   *graph_arg_packed_inputs = convert_pyobj_list(compiler_call.packed_inputs);
+  rstate->cpp_tensor_pre_hooks = std::move(compiler_call.cpp_tensor_pre_hooks);
   return cache;
 }
 
@@ -1125,6 +1195,7 @@ static variable_list compiled_autograd(
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
   at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+  RuntimeStateGuard rstate_guard;
 
   THPObjectPtr inputs;
   THPObjectPtr sizes;
@@ -1140,7 +1211,8 @@ static variable_list compiled_autograd(
       &sizes,
       &ivalue_args,
       &hooks,
-      &packed_inputs);
+      &packed_inputs,
+      active_rstate);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
