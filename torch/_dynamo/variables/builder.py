@@ -384,6 +384,12 @@ ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
 ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 
+# Capture fn pointer at import time
+# This is to guard against trying to mark the iterated tensors
+# as static in case user overrides fn ptr
+og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
+og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
 
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
@@ -1582,11 +1588,24 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
-                for p in value.parameters():
-                    self.mark_static_input(p, guard=freezing)
+                # Guard against the case where user may overwrite named parameters
+                # / named buffers
+                # NOTE: This is not likely to happen but worth guarding to avoid
+                # exception
+                if (
+                    callable(value.named_parameters)
+                    and value.named_parameters.__func__
+                    is og_module_named_parameters_fn_ptr
+                ):
+                    for _, p in value.named_parameters():
+                        self.mark_static_input(p, guard=freezing)
 
-                for b in value.buffers():
-                    self.mark_static_input(b, guard=freezing)
+                if (
+                    callable(value.named_buffers)
+                    and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
+                ):
+                    for _, b in value.named_buffers():
+                        self.mark_static_input(b, guard=freezing)
 
                 if freezing:
                     # we need to add the module to tracing context
