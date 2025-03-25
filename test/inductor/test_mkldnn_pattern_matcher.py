@@ -3835,7 +3835,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             include_ops = [
                 "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
                 if torch._inductor.config.cpp_wrapper
-                else "extern_kernels.int4mm_packed_weight_cpu"
+                else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
             ]
             self._test_code_common(
                 m,
@@ -4119,7 +4119,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
-@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+# When testing kernel counts, unspecializing float causes wobbling of our tests because
+# we end up reusing the same compiled region across tests. Thus we purposely specialize floats
+# here since we primarily care about number of kernels generated in the absence of compile
+# caching.
+@dynamo_config.patch(
+    {
+        "dynamic_shapes": True,
+        "assume_static_by_default": False,
+        "specialize_float": True,
+    }
+)
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
     _test_conv_unary_cpu_base = TestPatternMatcher._test_conv_unary_cpu_base
     test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
