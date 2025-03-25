@@ -14,6 +14,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
+from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
@@ -53,6 +54,15 @@ from .mm_common import (
     triton_config,
 )
 
+
+try:
+    import triton
+
+    triton_version = TorchVersion(triton.__version__)
+    has_triton = True
+except ImportError:
+    triton_version = TorchVersion("0.0.0")
+    has_triton = False
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -126,7 +136,7 @@ mm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
-        if torch.version.hip is None
+        if (torch.version.hip is None) or triton_version >= "3.3.0"
         # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
         # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
         # See more details in https://github.com/pytorch/pytorch/pull/146293
