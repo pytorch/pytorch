@@ -4300,7 +4300,7 @@ class CommonTemplate:
             )
             return vals, indices, offsets
 
-        self.common(fn, (torch.randn(1, 3, *[10]*dim),))
+        self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     @xfail_if_mps
     def test_to_dtype(self):
