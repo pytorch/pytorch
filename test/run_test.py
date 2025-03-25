@@ -199,10 +199,6 @@ S390X_BLOCKLIST = [
     "inductor/test_torchinductor_opinfo",
     # these tests fail when cuda is not available
     "inductor/test_best_config",
-    # these tests fail when mkldnn is not available
-    "inductor/test_custom_post_grad_passes",
-    "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",

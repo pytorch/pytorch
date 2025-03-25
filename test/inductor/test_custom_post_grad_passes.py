@@ -12,7 +12,7 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_file
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, xfailIfS390X
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -152,6 +152,8 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
+    # mkldnn is not supported on s390x
+    @xfailIfS390X
     def test_custom_pre_pass(self):
         with config.patch(
             # leave custom pass only in post_grad_passes()
@@ -177,6 +179,8 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                 match_nodes + other_match_nodes,
             )
 
+    # mkldnn is not supported on s390x
+    @xfailIfS390X
     def test_custom_post_pass(self):
         with config.patch(
             # leave custom pass only in post_grad_passes()
