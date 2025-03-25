@@ -878,7 +878,12 @@ main()
         activ = torch.ones(100) * 2
         inputs = [param, activ]
         _, proxies, _, _ = compiler.begin_capture(
-            inputs=inputs, sizes=[], scalars=[], origins=[[], [], []]
+            inputs=inputs,
+            sizes=[],
+            scalars=[],
+            origins=[[], [], []],
+            accumulate_grad=False,
+            check_nans=False,
         )
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
