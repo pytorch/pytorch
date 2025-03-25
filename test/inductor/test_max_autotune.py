@@ -31,6 +31,7 @@ from torch._inductor.select_algorithm import (
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_S390X,
     IS_WINDOWS,
     parametrize,
     TEST_WITH_ROCM,
@@ -75,6 +76,7 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
@@ -1130,6 +1132,7 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
     def setUp(self):
@@ -1207,6 +1210,7 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
         return "test"
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 class TestTuningProcess(TestCase):
     def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
         result = random.random()
@@ -1342,6 +1346,7 @@ class TestTuningProcessPool(TestCase):
         tuning_pool.shutdown()
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @instantiate_parametrized_tests
 class TestPrologueFusion(TestCase):
     @classmethod

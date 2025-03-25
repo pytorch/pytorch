@@ -8,7 +8,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, IS_S390X
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -32,6 +32,7 @@ class TestMoveConstructorsToCuda(TestCase):
         else:
             FileCheck().check_not("cpp_fused").run(code[0])
 
+    @unittest.skipIf(IS_S390X, "No CUDA on S390X")
     def test_simple(self):
         def foo(x):
             return x[torch.arange(x.shape[0])]
@@ -40,6 +41,7 @@ class TestMoveConstructorsToCuda(TestCase):
 
         self._check_fn(foo, False, inp)
 
+    @unittest.skipIf(IS_S390X, "No CUDA on S390X")
     def test_output_failure(self):
         def foo(x):
             tmp1 = torch.arange(x.shape[0])
@@ -49,6 +51,7 @@ class TestMoveConstructorsToCuda(TestCase):
 
         self._check_fn(foo, True, inp)
 
+    @unittest.skipIf(IS_S390X, "No CUDA on S390X")
     def test_non_convertable_op_failure(self):
         def foo(x):
             y = torch.arange(x.shape[0])
@@ -69,6 +72,7 @@ class TestMoveConstructorsToCuda(TestCase):
         inp = torch.rand([200, 200])
         self._check_fn(foo, True, inp)
 
+    @unittest.skipIf(IS_S390X, "No CUDA on S390X")
     def test_sets_equiv(self):
         @torch.compile()
         def foo(x):

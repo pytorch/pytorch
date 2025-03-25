@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -12,7 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_LINUX, IS_S390X, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -46,6 +47,7 @@ def patches(fn):
     return wrapped
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()
