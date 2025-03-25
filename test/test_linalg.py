@@ -6791,9 +6791,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @tf32_on_and_off(0.05)
     @bf32_on_and_off(0.05)
     def test_addmm_relu_tunableop_rocm(self, device, dtype):
-        tunableop_ctx = self._tunableop_ctx
-
-        with tunableop_ctx():
+        with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(10)
             self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
