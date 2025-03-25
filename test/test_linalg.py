@@ -77,6 +77,8 @@ def set_tunableop_defaults():
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
     torch.cuda.tunable.set_rotating_buffer_size(-1)
+    ordinal = torch.cuda.current_device()
+    torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
 def tunableop_matmul(device, dtype, offline=False):
     # Helper function to test TunableOp in a subprocess
