@@ -181,7 +181,6 @@ ROCM_BLOCKLIST = [
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
     "dynamo/test_misc",
-    "inductor/test_aot_inductor",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
     "inductor/test_aot_inductor_arrayref",
