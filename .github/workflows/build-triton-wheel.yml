@@ -264,7 +264,7 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials(PyTorch account) for main
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
