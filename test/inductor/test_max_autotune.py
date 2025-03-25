@@ -82,6 +82,7 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @unittest.mock.patch(
     "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
 )
@@ -1378,6 +1379,7 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("decompose_k").run(codegen)
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
         import threading
@@ -1498,6 +1500,7 @@ class TestMaxAutotunePrecompile(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 2)
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @instantiate_parametrized_tests
 class TestMaxAutotuneSubproc(TestCase):
     def _create_buffer(self, name, shape):
@@ -1690,6 +1693,7 @@ class TestMaxAutotuneSubproc(TestCase):
             torch.testing.assert_close(y1, y1_expected)
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
     def setUp(self):
@@ -1767,6 +1771,7 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
         return "test"
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestTuningProcess(TestCase):
     def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
         result = random.random()
@@ -1824,6 +1829,7 @@ class TestTuningProcess(TestCase):
             p.shutdown()
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
@@ -1902,6 +1908,7 @@ class TestTuningProcessPool(TestCase):
         tuning_pool.shutdown()
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @instantiate_parametrized_tests
 class TestPrologueFusion(TestCase):
     @classmethod

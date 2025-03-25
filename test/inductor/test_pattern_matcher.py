@@ -84,6 +84,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
@@ -179,6 +180,7 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_duplicate_search(self):
         from collections.abc import Iterable
         from typing import Callable
@@ -502,6 +504,7 @@ class TestPatternMatcher(TestCase):
         )
         self._test_mixed_impl(fn, args, False, False)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @parametrize(
         "case",
         [
@@ -528,6 +531,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 0)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @parametrize(
         "case",
         [
@@ -551,6 +555,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
@@ -599,6 +604,7 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_addmm_symbolic_scalar(self):
         def fn(m1, m2):
             bias = m1.size(0)
@@ -613,6 +619,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_addmm_broadcasting_bias(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -635,6 +642,7 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(
         {
             "max_autotune_gemm_backends": "ATEN",
@@ -673,6 +681,7 @@ class TestPatternMatcher(TestCase):
 
         FileCheck().check("extern_kernels.bmm(").run(code_multi)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -693,6 +702,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(out, fn(*args))
         FileCheck().check("call").check_not(".run").run(code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_cat_addmm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -713,6 +723,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(out, fn(*args))
         FileCheck().check("call").check_not(".run").run(code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
@@ -753,6 +764,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 3)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_pointless_view_pair(self):
         def f(x):
             x = aten.view.default(x, [3, 5, 7])
@@ -775,6 +787,7 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_pointless_permute_pair(self):
         def f(x):
             x = aten.permute.default(x, [1, 0])
@@ -797,6 +810,7 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_pointless_permute_pair_3d(self):
         def f(x):
             x = aten.permute.default(x, [1, 0, 2])
@@ -880,6 +894,7 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_splitwithsizes_cat(self):
         # Good case
         def fn(a):
@@ -932,6 +947,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_cat_splitwithsizes(self):
         # good case
         def fn(a, b, c):
@@ -1077,6 +1093,7 @@ class TestPatternMatcher(TestCase):
                 "target=torch.ops.aten.sym_size"
             ).run(str(saved_graph))
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_with_mutation(self):
         counter = 0
@@ -1160,6 +1177,7 @@ class TestPatternMatcher(TestCase):
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_unfuse_bias_addmm(self):
         args = [
             torch.randn(20, device=GPU_TYPE),
@@ -1191,6 +1209,7 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_serialized_patterns_up_to_date(self):
         import torch.utils._pytree as pytree
         from torch._inductor.fx_passes import joint_graph
@@ -1235,6 +1254,7 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @skipIfXpu
     @xfailIfSM89
     @inductor_config.patch(
@@ -1267,6 +1287,7 @@ class TestPatternMatcher(TestCase):
             "def triton_tem_fused_addmm"
         ).run(code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
@@ -1324,6 +1345,7 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     def test_replace_mul_zero(self):
         def test(x, y):
             return x + (y * 0)
@@ -1337,6 +1359,7 @@ class TestPatternMatcher(TestCase):
         FileCheck().check_not(".run").run(code[0])
         self.assertEqual(out, test(x, y))
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
         counter = 0
@@ -1383,6 +1406,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @unittest.skipIf(not HAS_GPU, "No GPU available")
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0

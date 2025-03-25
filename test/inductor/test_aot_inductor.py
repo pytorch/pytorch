@@ -6008,6 +6008,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(TestCase):
     device = GPU_TYPE

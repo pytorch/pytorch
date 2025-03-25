@@ -181,6 +181,7 @@ ROCM_BLOCKLIST = [
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
     "dynamo/test_misc",
+    "inductor/test_aot_inductor",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
     "inductor/test_aot_inductor_arrayref",
@@ -198,20 +199,7 @@ S390X_BLOCKLIST = [
     "test_quantization",
     "inductor/test_torchinductor_opinfo",
     # these tests fail when cuda is not available
-    "inductor/test_aot_inductor",
     "inductor/test_best_config",
-    "inductor/test_cudacodecache",
-    "inductor/test_inductor_utils",
-    "inductor/test_inplacing_pass",
-    "inductor/test_kernel_benchmark",
-    "inductor/test_max_autotune",
-    "inductor/test_move_constructors_to_cuda",
-    "inductor/test_multi_kernel",
-    "inductor/test_pattern_matcher",
-    "inductor/test_perf",
-    "inductor/test_select_algorithm",
-    "inductor/test_snode_runtime",
-    "inductor/test_triton_wrapper",
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
