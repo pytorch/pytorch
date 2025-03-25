@@ -2834,7 +2834,7 @@ class PyCodeCache:
     # constant values.
     modules: list[ModuleType] = []
 
-    # Modules laoded without extra attributes are stored here, those do not 
+    # Modules laoded without extra attributes are stored here, those do not
     # need to be re-loaded.
     modules_no_attr: dict[str, ModuleType] = {}
 
@@ -2882,7 +2882,7 @@ class PyCodeCache:
                 setattr(mod, k, v)
 
         if in_toplevel:
-             # we only cache whena ttrs is None
+            # we only cache whena ttrs is None
             if attrs is None:
                 cls.modules_no_attr[path] = mod
             else:
