@@ -197,10 +197,6 @@ S390X_BLOCKLIST = [
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor_opinfo",
-    # these tests fail when mkldnn is not available
-    "inductor/test_custom_post_grad_passes",
-    "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
