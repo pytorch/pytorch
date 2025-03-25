@@ -28,11 +28,12 @@ import subprocess
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 
 STABLE_CUDA_VERSION = "12.6"
+
 
 class CpuArch:
     X86_64: str = "x86_64"
@@ -65,8 +66,9 @@ def _generate_docker_tag() -> str:
         # If the git command fails, we're probably not in a git repo, so we'll just use the default tag
         return "main"
 
+
 # Dictionary of extra install requirements keyed by (accelerator_type, accelerator_version)
-EXTRA_INSTALL_REQUIREMENTS: Dict[Tuple[str, str, str], List[str]] = {
+EXTRA_INSTALL_REQUIREMENTS: dict[tuple[CpuArch, str, str], list[str]] = {
     # CUDA 11.8
     (CpuArch.X86_64, "cuda", "11.8"): [
         "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
@@ -131,6 +133,7 @@ EXTRA_INSTALL_REQUIREMENTS: Dict[Tuple[str, str, str], List[str]] = {
     ],
 }
 
+
 @dataclass
 class BinaryBuild:
     """
@@ -157,7 +160,7 @@ class BinaryBuild:
     builds_on: str = field(default="linux.12xlarge.memory.ephemeral")
     tests_on: str = field(default="linux.4xlarge")
     arch_list: list[str] = field(default_factory=list)
-    
+
     def container_image(self) -> str:
         """
         Returns the container image for the build.
@@ -171,12 +174,12 @@ class BinaryBuild:
         """
         tag = _generate_docker_tag()
         return f"pytorch/wheel-build:{str(self.cpu_arch)}-{self.accelerator_type}{self.accelerator_version}-{tag}"
-    
-    def get_extra_install_requirements(self) -> List[str]:
+
+    def get_extra_install_requirements(self) -> list[str]:
         """Returns the extra install requirements for this build configuration
-        
+
         We need to keep the install requirements for packages 'mostly' consistent across most of our
-        packages for compat with package managers like uv + poetry. This is because they only read METADATA 
+        packages for compat with package managers like uv + poetry. This is because they only read METADATA
         from the first wheel found on the index (which is typically the cuda-aarch64 wheels)
 
         Since we publish our stable cuda wheels for x86_64 to PyPI, we can use that as the default.
@@ -184,9 +187,10 @@ class BinaryBuild:
         """
         key = (self.cpu_arch, self.accelerator_type, self.accelerator_version)
         requirements = EXTRA_INSTALL_REQUIREMENTS.get(
-            key, EXTRA_INSTALL_REQUIREMENTS.get(
+            key,
+            EXTRA_INSTALL_REQUIREMENTS.get(
                 (CpuArch.X86_64, "cuda", STABLE_CUDA_VERSION), []
-            )
+            ),
         )
         return requirements
 
@@ -371,14 +375,14 @@ def validate_nccl_dep_consistency() -> None:
         if isinstance(build, CudaBuild):
             nccl_release_tag = read_nccl_pin(build.accelerator_version)
             key = (build.cpu_arch, build.accelerator_type, build.accelerator_version)
-            
+
             wheel_nccl_version = ""
             requirements = EXTRA_INSTALL_REQUIREMENTS.get(key, [])
             for requirement in requirements:
                 if requirement.startswith("nvidia-nccl-cu"):
                     wheel_nccl_version = requirement.split("==")[1]
                     break
-                    
+
             if not nccl_release_tag.startswith(f"v{wheel_nccl_version}"):
                 raise RuntimeError(
                     f"{build.accelerator_version} NCCL release tag version "
@@ -393,7 +397,7 @@ FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
 def generate_wheels_matrix(
     os: OperatingSystem,
     accelerator_type: str,
-    python_versions: Optional[list[str]] = None,
+    python_versions: list[str] | None = None,
 ) -> list[dict[str, str]]:
     if python_versions is None:
         python_versions = FULL_PYTHON_VERSIONS
@@ -429,7 +433,7 @@ def generate_wheels_matrix(
                     build.accelerator_version == "12.6",
                     python_version == "3.11",
                     # Only add static build for Linux
-                    build.operating_system == OperatingSystem.LINUX, 
+                    build.operating_system == OperatingSystem.LINUX,
                 ]
             ):
                 matrix.update(
