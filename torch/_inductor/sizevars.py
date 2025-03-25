@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -23,10 +23,6 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import V
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)

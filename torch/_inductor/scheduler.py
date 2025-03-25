@@ -997,8 +997,7 @@ class SchedulerNode(BaseSchedulerNode):
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
-        assert body is not None
-        self._body = body
+        self._body = body  # type: ignore[assignment]
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
