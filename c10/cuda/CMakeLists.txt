@@ -3,7 +3,7 @@
 # C10 CUDA is a minimal library, but it does depend on CUDA.
 
 include(../../cmake/public/utils.cmake)
-include(${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake)
+include(${PROJECT_BINARY_DIR}/../cmake/public/cuda.cmake)
 
 # ---[ Configure macro file.
 set(C10_CUDA_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
