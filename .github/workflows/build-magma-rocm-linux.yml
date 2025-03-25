@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build-linux-magma-rocm:
     if: github.repository_owner == 'pytorch'
-    runs-on: linux.2xlarge
+    runs-on: linux.12xlarge
     permissions:
       id-token: write
     strategy:
