@@ -315,8 +315,9 @@ Adam.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
+        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+            coefficients used for computing running averages of gradient and
+            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -375,7 +376,8 @@ def _single_tensor_adam(
         assert isinstance(beta2, float)
     else:
         lr = _to_scalar(lr)
-        # TODO: Support nonzero-dim Tensor betas, see #147921
+        beta1 = _to_scalar(beta1)
+        beta2 = _to_scalar(beta2)
 
     # We only shuffle around the beta when it is a Tensor, otherwise, we prefer
     # treating it as a scalar.
@@ -608,7 +610,8 @@ def _multi_tensor_adam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     lr = _to_scalar(lr)
-    # TODO: Support nonzero-dim Tensor betas, see #147921
+    beta1 = _to_scalar(beta1)
+    beta2 = _to_scalar(beta2)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
@@ -798,8 +801,8 @@ def _fused_adam(
     *,
     amsgrad: bool,
     has_complex: bool,  # Needed for consistency.
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
@@ -812,6 +815,9 @@ def _fused_adam(
         return
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
+
+    beta1 = _to_scalar(beta1)
+    beta2 = _to_scalar(beta2)
 
     grad_scale_dict: DeviceDict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else {}
@@ -902,8 +908,8 @@ def adam(
     decoupled_weight_decay: bool = False,
     *,
     amsgrad: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
