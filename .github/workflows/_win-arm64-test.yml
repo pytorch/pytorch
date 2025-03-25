@@ -65,6 +65,21 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
+      
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
 
       - name: Get workflow job id
         id: get-job-id
@@ -135,4 +150,4 @@ jobs:
           python3 -mpip install $(echo *.whl)
           popd
 
-          .ci/pytorch/win-test.sh
+          .ci/pytorch/win-arm64-test.sh
