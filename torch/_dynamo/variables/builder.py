@@ -609,8 +609,14 @@ class VariableBuilder:
             return id_dispatch(self, value)
 
         # Everything else (NB: order matters!)
-        if isinstance(value, torch.Tensor):
-            if type(value).__torch_dispatch__ == torch.Tensor.__torch_dispatch__:
+        if isinstance(value, torch.Tensor) and type(value) not in (
+            # These subclasses have overly restrictive `__torch_function__`
+            # which prevents Dynamo from reading their tensor attributes like
+            # shape.
+            torch.nn.parameter.UninitializedBuffer,
+            torch.nn.parameter.UninitializedParameter
+        ):
+            if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
                 # This case it's either tensor or subclass with default
                 # torch_dispatch (they might override torch_function or not),
                 # and we can always trace into them.
@@ -1189,9 +1195,13 @@ class VariableBuilder:
                 # `value` must be a strict subclass of `torch.Tensor`
                 issubclass(value, torch.Tensor)
                 and value is not torch.Tensor
+                # `TensorSubclassVariable` is not for subclass that overrides
+                # `torch_dispatch`.
+                and value.__torch_dispatch__ is torch.Tensor.__torch_dispatch__
                 # `TensorSubclassVariable` would lead to construction of
-                # `TensorWithTFOverrideVariable`, but we don't want that for wrapper
-                # subclasses or the builtin
+                # `TensorWithTFOverrideVariable`, but we don't want that for
+                # traceable wrapper subclasses (we wrap those subclass instances
+                # into `TensorVariable`).
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
