@@ -1023,8 +1023,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
+  const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
-  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(input));
+  const auto kernel_name = fmt::format("{}_{}{}_{}", name, suffix, cast_needed? "_cast": "", scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1049,6 +1050,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
                     iter.strides(1),
                     iter.strides(2),
                     iter.ndim());
+      }
+      if (cast_needed) {
+         std::array<int, 4> size_and_types = {4, 2, static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
+         mtl_setBytes(computeEncoder, size_and_types, 3);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
       getMPSProfiler().endProfileKernel(binaryPSO);
