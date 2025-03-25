@@ -145,7 +145,13 @@ Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor&
 // -----------------------------------
 namespace {
 
-constexpr int NLL_LOSS_THREADS = 32;
+int nll_loss_threads(int64_t nframe){
+#if defined(USE_ROCM)
+  return std::clamp(1 << static_cast<int64_t>(std::round(std::log2(nframe/16))), 32, 1024);
+#else
+  return 32;
+#endif
+}
 
 // NOTE(crcrpar): `Byte` support was added for https://github.com/pytorch/pytorch/issues/59765.
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
@@ -231,12 +237,13 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
-      acc_weight[NLL_LOSS_THREADS];
+  extern __shared__ unsigned char shmem[];
+  accscalar_t* sh_inputs = reinterpret_cast<accscalar_t*>(shmem);
+  accscalar_t* acc_weight = reinterpret_cast<accscalar_t*>(shmem + blockDim.x * sizeof(accscalar_t));
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
+  for (int i = threadIdx.x; i < nframe; i += blockDim.x) {
     index_t t = target[i];
     if (t != ignore_index) {
       CHECK_INDEX_IN_CLASS(t, n_classes);
@@ -252,7 +259,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   if (threadIdx.x == 0) {
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
-    for (int i = 0; i < NLL_LOSS_THREADS; ++i) {
+    for (int i = 0; i < blockDim.x; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
     }
@@ -374,10 +381,11 @@ void nll_loss_forward_out_cuda_template(
               "nll_loss_forward_reduce_cuda_kernel_2d_index",
               [&] {
                 using accscalar_t = at::acc_type<scalar_t, /*is_cuda*/true>;
+                int nthreads = nll_loss_threads(input.size(0));
                 nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, accscalar_t, index_t>
                     <<<1,
-                       NLL_LOSS_THREADS,
-                       0,
+                       nthreads,
+                       nthreads * sizeof(accscalar_t) * 2,
                        at::cuda::getCurrentCUDAStream()>>>(
                         output.mutable_data_ptr<scalar_t>(),
                         total_weight.mutable_data_ptr<scalar_t>(),
@@ -456,7 +464,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
 
-  for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
+  for (int i = threadIdx.x; i < nframe; i += blockDim.x) {
     const index_t t = target[i];
     if (t != ignore_index) {
       CHECK_INDEX_IN_CLASS(t, n_classes);
@@ -560,7 +568,7 @@ void nll_loss_backward_out_cuda_template(
               "nll_loss_backward_reduce_cuda_kernel_2d_index",
               [&] {
             nll_loss_backward_reduce_cuda_kernel_2d<scalar_t, index_t>
-                <<<1, NLL_LOSS_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+                <<<1, nll_loss_threads(input.size(0)), 0, at::cuda::getCurrentCUDAStream()>>>(
                     grad_input.mutable_data_ptr<scalar_t>(),
                     grad_output.const_data_ptr<scalar_t>(),
                     target.const_data_ptr<index_t>(),
