@@ -544,8 +544,6 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
 
 #ifdef USE_ROCM
 namespace {
-// Static functor type checker for binary functors with
-// float as the type of both parameters.
 template <
     typename TupleLike,
     typename FirstParamTy,
@@ -554,12 +552,11 @@ template <
     size_t arg_num = 0>
 struct check_binary_functor_types_for_specialization {
   constexpr static inline bool check() {
-    bool current = false;
     if constexpr (arity != 2)
       return false;
     if constexpr (arg_num == 0) {
       using SelectedType = std::tuple_element_t<arg_num, TupleLike>;
-      if constexpr (std::is_same_v<float, SelectedType>)
+      if constexpr (std::is_same_v<FirstParamTy, SelectedType>)
         return check_binary_functor_types_for_specialization<
             TupleLike,
             FirstParamTy,
@@ -568,7 +565,7 @@ struct check_binary_functor_types_for_specialization {
             arg_num + 1>::check();
     } else if constexpr (arg_num == 1) {
       using SelectedType2 = std::tuple_element_t<arg_num, TupleLike>;
-      if constexpr (std::is_same_v<float, SelectedType2>)
+      if constexpr (std::is_same_v<SecondParamTy, SelectedType2>)
         return check_binary_functor_types_for_specialization<
             TupleLike,
             FirstParamTy,
@@ -613,30 +610,91 @@ struct check_binary_functor_types_for_specialization<
 };
 
 // The following is a list of type specializations for vectorized_templated
-// elementwise kernel. It refers to the first and second runtime types of the
-// arguments of a binary functor.
-constexpr int number_of_binary_specializations = 4;
-const std::
-    array<std::array<c10::ScalarType, 2>, number_of_binary_specializations>
-        rt_binary_specializations = {
-            {{c10::CppTypeToScalarType<float>::value,
-              c10::CppTypeToScalarType<BFloat16>::value},
-             {c10::CppTypeToScalarType<BFloat16>::value,
-              c10::CppTypeToScalarType<float>::value},
-             {c10::CppTypeToScalarType<float>::value,
-              c10::CppTypeToScalarType<Half>::value},
-             {c10::CppTypeToScalarType<Half>::value,
-              c10::CppTypeToScalarType<float>::value}}};
+// elementwise kernel. The three types refer to runtime types of the output
+// tensor, first tensor argument, and the second tensor argument used for a
+// binary functor.
+constexpr std::array rt_binary_specializations = {
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<BFloat16>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<Half>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<Half>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<Half>::value,
+         c10::CppTypeToScalarType<Half>::value,
+         c10::CppTypeToScalarType<float>::value})};
 
 bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
   if (iter.ninputs() != 2)
     return false;
-  for (int i = 0; i < 4; i++)
-    if (iter.input_dtype(0) == rt_binary_specializations[i][0] &&
-        iter.input_dtype(1) == rt_binary_specializations[i][1])
+  for (auto spec : rt_binary_specializations)
+    if (iter.dtype(0) == spec[0] && iter.input_dtype(0) == spec[1] &&
+        iter.input_dtype(1) == spec[2])
       return true;
   return false;
 }
+
+template <int arg_index>
+struct type_specialized_kernel_launcher {
+  template <
+      typename func_t,
+      typename array_t,
+      typename inp_calc_t,
+      typename out_calc_t,
+      typename loader_t,
+      typename storer_t>
+  static void apply(
+      ScalarType ret_t,
+      ScalarType arg0_t,
+      ScalarType arg1_t,
+      int64_t numel,
+      func_t f,
+      array_t data,
+      inp_calc_t input_offset_calculator,
+      out_calc_t output_offset_calculator,
+      loader_t loader,
+      storer_t storer) {
+    if (ret_t == rt_binary_specializations[arg_index][0] &&
+        arg0_t == rt_binary_specializations[arg_index][1] &&
+        arg1_t == rt_binary_specializations[arg_index][2])
+      launch_vectorized_templated_kernel<
+          func_t,
+          array_t,
+          inp_calc_t,
+          out_calc_t,
+          loader_t,
+          storer_t,
+          decltype(c10::impl::ScalarTypeToCPPType<
+                   rt_binary_specializations[arg_index][0]>::t),
+          decltype(c10::impl::ScalarTypeToCPPType<
+                   rt_binary_specializations[arg_index][1]>::t),
+          decltype(c10::impl::ScalarTypeToCPPType<
+                   rt_binary_specializations[arg_index][2]>::t)>(
+          numel,
+          f,
+          data,
+          input_offset_calculator,
+          output_offset_calculator,
+          loader,
+          storer);
+  }
+};
+
 } // namespace
 #endif
 
@@ -666,10 +724,10 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 #ifdef USE_ROCM
     // Attempt to call specialized vectorized elementwise kernel
     // that enables interleaving.
-    if (false && check_binary_rt_types_for_specialization(iter) &&
+    if (check_binary_rt_types_for_specialization(iter) &&
         memory::can_vectorize_up_to<func_t>(data) > 1) {
-      // constexpr to reduce the amount of kernels (empty) generated for
-      // unrolled templated elementwise and limit which functors are actually
+      // constexpr to reduce the amount of kernels generated for
+      // vectorized templated elementwise and limit which functors are actually
       // applied to the load and store at compile time.
       using func_tuple = typename traits::ArgsTuple;
       if constexpr (
@@ -679,7 +737,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
               float,
               float,
               traits::arity,
-              /*current=*/0>::check()) {
+              /*arg_num=*/0>::check()) {
         // If we got here, we know we are in one of the specialized cases. We
         // need to translate the runtime type to a statically known type. This
         // is effectively hoisting to the host the switch over runtime type in
@@ -689,90 +747,24 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         auto output_offset_calculator = TrivialOffsetCalculator<1>();
         auto loader = memory::LoadWithCast<traits::arity>(iter);
         auto storer = memory::StoreWithCast<1>(iter);
-        if (iter.input_dtype(0) == c10::CppTypeToScalarType<float>::value &&
-            iter.input_dtype(1) == c10::CppTypeToScalarType<BFloat16>::value)
-          launch_vectorized_templated_kernel<
-              func_t,
-              at::detail::Array<char*, ntensors>,
-              decltype(input_offset_calculator),
-              decltype(output_offset_calculator),
-              decltype(loader),
-              decltype(storer),
-              float,
-              float,
-              BFloat16>(
-              numel,
-              f,
-              data,
-              input_offset_calculator,
-              output_offset_calculator,
-              loader,
-              storer);
-        else if (
-            iter.input_dtype(0) == c10::CppTypeToScalarType<BFloat16>::value &&
-            iter.input_dtype(1) == c10::CppTypeToScalarType<float>::value)
-          launch_vectorized_templated_kernel<
-              func_t,
-              at::detail::Array<char*, ntensors>,
-              decltype(input_offset_calculator),
-              decltype(output_offset_calculator),
-              decltype(loader),
-              decltype(storer),
-              float,
-              BFloat16,
-              float>(
-              numel,
-              f,
-              data,
-              input_offset_calculator,
-              output_offset_calculator,
-              loader,
-              storer);
-        else if (
-            iter.input_dtype(0) == c10::CppTypeToScalarType<float>::value &&
-            iter.input_dtype(1) == c10::CppTypeToScalarType<Half>::value)
-          launch_vectorized_templated_kernel<
-              func_t,
-              at::detail::Array<char*, ntensors>,
-              decltype(input_offset_calculator),
-              decltype(output_offset_calculator),
-              decltype(loader),
-              decltype(storer),
-              float,
-              float,
-              Half>(
-              numel,
-              f,
-              data,
-              input_offset_calculator,
-              output_offset_calculator,
-              loader,
-              storer);
-        else if (
-            iter.input_dtype(0) == c10::CppTypeToScalarType<Half>::value &&
-            iter.input_dtype(1) == c10::CppTypeToScalarType<float>::value)
-          launch_vectorized_templated_kernel<
-              func_t,
-              at::detail::Array<char*, ntensors>,
-              decltype(input_offset_calculator),
-              decltype(output_offset_calculator),
-              decltype(loader),
-              decltype(storer),
-              float,
-              Half,
-              float>(
-              numel,
-              f,
-              data,
-              input_offset_calculator,
-              output_offset_calculator,
-              loader,
-              storer);
-        else
-          TORCH_CHECK(false, "unreachable");
+        memory::detail::static_unroll<
+            type_specialized_kernel_launcher,
+            rt_binary_specializations.size()>::
+            with_args(
+                iter.dtype(0),
+                iter.input_dtype(0),
+                iter.input_dtype(1),
+                numel,
+                f,
+                data,
+                input_offset_calculator,
+                output_offset_calculator,
+                loader,
+                storer);
         return;
       }
     }
+
     at::detail::Array<ScalarType, ntensors> dtypes;
     auto inner_strides = iter.get_inner_strides();
     at::detail::Array<int, ntensors> strides;
