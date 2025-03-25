@@ -1788,8 +1788,8 @@ class OutputGraph:
             else:
                 base_name = node.name
 
-            node.name = f"{base_name}_{base_name_counter[base_name]}"
             base_name_counter[base_name] += 1
+            node.name = f"{base_name}_{base_name_counter[base_name]}"
 
     def add_output_instructions(self, prefix: list[Instruction]) -> None:
         """
