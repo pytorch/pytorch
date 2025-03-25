@@ -36,7 +36,9 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getCurrentAllocatedMemory() const = 0;
   virtual size_t getDriverAllocatedMemory() const = 0;
   virtual size_t getRecommendedMaxMemory() const = 0;
-  virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
+  virtual std::pair<void*, uint32_t> getSharedCPUPtrFromDevicePtr(
+      const void* ptr) const = 0;
+  virtual std::pair<void*, uint32_t> getSharedDevicePtrFromCPUPtr(
       const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
@@ -61,7 +63,11 @@ TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
-IMPSAllocator* getIMPSAllocator(bool sharedAllocator = true);
+IMPSAllocator* getIMPSAllocator(
+    bool sharedAllocator = true,
+    bool pinnedAllocator = false);
+
+at::Allocator* getPinnedMemoryAllocator();
 
 bool isMPSPinnedPtr(const void* data);
 

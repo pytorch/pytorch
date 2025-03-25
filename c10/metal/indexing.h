@@ -1,10 +1,10 @@
 #pragma once
+#include <c10/metal/common.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 namespace c10 {
 namespace metal {
-constant constexpr unsigned max_ndim = 16;
 
 // Given coordinates and strides, calculates offset from the start of the
 // tensors

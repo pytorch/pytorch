@@ -20,6 +20,14 @@ void Allocator::default_copy_data(
   std::memcpy(dest, src, count);
 }
 
+void* Allocator::get_cpu_ptr_from_device_ptr(void* device_ptr) {
+  return nullptr;
+}
+
+void* Allocator::get_device_ptr_from_cpu_ptr(void* cpu_ptr) {
+  return nullptr;
+}
+
 DataPtr Allocator::clone_from_cpu(const void* data, std::size_t n) {
   DataPtr new_data = allocate(n);
   copy_data(new_data.mutable_get(), data, n, true);

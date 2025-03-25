@@ -297,7 +297,10 @@ class MPSHeapAllocatorImpl {
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // returns a CPU-mapping of the input buffer and its retainCount,
   // if only it has Shared storage-mode and allocated on MPSAllocator
-  std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
+  std::pair<void*, uint32_t> getSharedCPUPtrFromDevicePtr(const void* ptr);
+  // returns the device-mapping of the input CPU pointer and its retainCount,
+  // if only it has Shared storage-mode and allocated on MPSAllocator
+  std::pair<void*, uint32_t> getSharedDevicePtrFromCPUPtr(const void* ptr);
   // records events for a list of MTLBuffers (list is used to lock the mutex once)
   // returns true if records any event (given if passed buffers exist and are shared-storage)
   bool recordEvents(c10::ArrayRef<const void*> buffers);
@@ -362,7 +365,9 @@ class MPSHeapAllocatorImpl {
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
-  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
+  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers_by_device_ptr;
+  // allocated buffers by cpu pointer
+  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers_by_cpu_ptr;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
   // total memory allocated by HeapAllocator (including blocks in pools)
@@ -399,7 +404,8 @@ class MPSHeapAllocatorImpl {
   void init_buffer_pools();
   HeapBlock* get_free_heap(AllocParams& params);
   bool get_free_buffer(AllocParams& params);
-  BufferBlock* get_allocated_buffer_block(const void* ptr);
+  BufferBlock* get_allocated_buffer_block_by_device_ptr(const void* ptr);
+  BufferBlock* get_allocated_buffer_block_by_cpu_ptr(const void* ptr);
   BufferBlock* alloc_buffer_block(size_t size, uint32_t usage);
   bool alloc_buffer(AllocParams& params);
   void free_buffer(BufferBlock* buffer_block);

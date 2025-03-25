@@ -152,8 +152,23 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
           c10::impl::cow::cow_deleter);
       device_type = dst_device.type();
       new_data_ptr.release_context();
-      new_data_ptr_opt = c10::DataPtr(
-          new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, dst_device);
+      // TODO: For CPU-to-MPS, `new_data_ptr.get()` is currently the CPU ptr,
+      // but it needs to be MPS ptr. Likewise, for MPS-to-CPU, its the MPS ptr,
+      // but needs to be CPU ptr.
+
+      void* ptr_value = new_data_ptr.get();
+
+      if (storage.device_type() == c10::kCPU &&
+          dst_device.type() == c10::kMPS) {
+        ptr_value = allocator->get_device_ptr_from_cpu_ptr(ptr_value);
+      } else if (
+          storage.device_type() == c10::kMPS &&
+          dst_device.type() == c10::kCPU) {
+        ptr_value = storage.allocator()->get_cpu_ptr_from_device_ptr(ptr_value);
+      }
+
+      new_data_ptr_opt =
+          c10::DataPtr(ptr_value, ctx, c10::impl::cow::cow_deleter, dst_device);
     }
   }
 
@@ -177,7 +192,10 @@ static c10::DataPtr clone_between_devices(
   DeviceType dst_type = dst_device.type();
   check_clone_between_devices(src_type, dst_type);
 
-  if (src_type == dst_type) {
+  if (src_type == dst_type ||
+      (src_type == c10::kMPS && dst_type == c10::kCPU) ||
+      (src_type == c10::kCPU && dst_type == c10::kMPS)) {
+    // NOTE: For CPU-to-MPS, the CPU allocator should be MPSPinnedAllocator
     return dst_allocator->clone(data, n, /*sync=*/true);
   } else if (src_type == c10::kCPU) {
     return dst_allocator->clone_from_cpu(data, n);

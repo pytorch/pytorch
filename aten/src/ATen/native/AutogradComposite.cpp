@@ -96,12 +96,19 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
   optional<c10::Allocator*> allocator_opt = nullopt;
   if (device_opt.has_value()) {
-    if (self.device().type() == c10::kCPU && device_opt.value() == c10::kMPS) {
+    if (self.device().type() == c10::kCPU && device_opt.value().type() == c10::kMPS) {
       TORCH_CHECK(self.is_pinned(),
         "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
         "is pinned.");
     }
-    allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
+    if (self.device().type() == c10::kMPS && device_opt.value().type() == c10::kCPU) {
+      // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
+      // the regular CPU allocator.
+      allocator_opt = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
+
+    } else {
+      allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
+    }
   }
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage =
