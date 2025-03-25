@@ -35,7 +35,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 devices = ["cpu", "cuda", "hpu", "xpu"]
+
 
 def new_subgroups(group_size: int, pg_tag=None):
     world_size = dist.get_world_size()
@@ -455,6 +457,7 @@ def with_comms(func=None):
             return func(self, *args, **kwargs)
         finally:
             torch.distributed.destroy_process_group()
+
     return wrapper
 
 
@@ -581,7 +584,9 @@ class TestDistributedBackendCollectivesWithWorldSize4(DistributedTestBase):
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
-            torch.device(device).type, (2, self.world_size // 2), mesh_dim_names=mesh_dim_names
+            torch.device(device).type,
+            (2, self.world_size // 2),
+            mesh_dim_names=mesh_dim_names,
         )
 
         for mesh_name in mesh_dim_names:
@@ -757,6 +762,7 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
+
 accelerator_only = ("cuda", "hpu", "xpu")
 
 
@@ -764,7 +770,9 @@ instantiate_device_type_tests(
     TestCollectivesWithDistributedBackend, globals(), only_for=accelerator_only
 )
 instantiate_device_type_tests(
-    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=accelerator_only
+    TestDistributedBackendCollectivesWithWorldSize4,
+    globals(),
+    only_for=accelerator_only,
 )
 instantiate_device_type_tests(
     TestFunctionalAutogradWithDistributedBackend, globals(), only_for=accelerator_only
