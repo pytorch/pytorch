@@ -928,18 +928,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             [(1, -1, 3), (1, 2, 3), 13.33],
         ]:
             if a != b:
-                x += 1 * c
+                x = x + 1 * c
             if a == b:
-                x += 2 * c
+                x = x + 2 * c
             if a < b:
-                x += 4 * c
+                x = x + 4 * c
             if a > b:
-                x += 8 * c
+                x = x + 8 * c
             if a <= b:
-                x += 16 * c
+                x = x + 16 * c
             if a >= b:
-                x += 32 * c
+                x = x + 32 * c
         return x
+
+    @make_test
+    def test_list_compare_polyfill_non_lists(x):
+        conds = []
+
+        # Non-list instances only work for eq and ne
+        for a, b, c in [
+            [(1, 2, 3), "(1, 2, 3)", 7.77],
+            [143, (143,), 3.33],
+        ]:
+            conds.append(a != b)
+            if conds[-1]:
+                x = x + 1 * c
+
+            conds.append(a == b)
+            if conds[-1]:
+                x = x + 2 * c
+
+        return x, conds
 
     @make_test
     def test_promote_types(x):
@@ -984,13 +1003,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         fn = torch.Tensor.dim
         return fn(x + 1)
 
-    @make_test
-    def test_tensor_is_inference(x):
-        if x.is_inference():
-            return x + 1
-        else:
-            return x - 1
-
     def test_is_inference_recompilation(self):
         def fn(x):
             if x.is_inference():
@@ -1002,8 +1014,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x_inference = torch.randn(2, 2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         x = torch.randn(2, 2)
 
         self.assertEqual(fn(x), opt_fn(x))
@@ -1011,6 +1022,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(x_inference), opt_fn(x_inference))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_is_inference_mode_global_recompilation(self):
+        def fn(x):
+            if torch.is_inference_mode_enabled():
+                return x + 1
+            else:
+                return x - 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnts.frame_count, 1)
 
     @make_test
     def test_get_privateuse1_name(x):

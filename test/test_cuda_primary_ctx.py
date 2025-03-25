@@ -5,12 +5,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_utils import (
-    NoTest,
-    run_tests,
-    skipIfRocmVersionLessThan,
-    TestCase,
-)
+from torch.testing._internal.common_utils import NoTest, run_tests, TestCase
 
 
 # NOTE: this needs to be run in a brand new process
@@ -28,7 +23,6 @@ class TestCudaPrimaryCtx(TestCase):
         "--subprocess to run each test in a different subprocess."
     )
 
-    @skipIfRocmVersionLessThan((4, 4, 21504))
     def setUp(self):
         for device in range(torch.cuda.device_count()):
             # Ensure context has not been created beforehand
