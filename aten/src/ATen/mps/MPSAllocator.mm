@@ -869,7 +869,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr clone_from_cpu(const void* data, std::size_t n) override {
-    std::cout << "in MPSAllocator::clone_from_cpu: " << data << " (CPU " << getSharedBufferPtr(data) << ")"
+    std::cout << "in MPSAllocator::clone_from_cpu data: " << data << " (CPU " << getSharedBufferPtr(data) << ")"
               << std::endl;
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
 
@@ -877,17 +877,23 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     // void* dest = new_data.mutable_get();
     // copy_data_from_cpu_to_mps(dest, data, n);
     copy_data(new_data.mutable_get(), data, n, /*sync=*/true);
+    std::cout << "in MPSAllocator::clone_from_cpu new_data: " << new_data.mutable_get() << " (CPU "
+              << getSharedBufferPtr(new_data.mutable_get()) << ")" << std::endl;
 
     return new_data;
   }
 
   DataPtr clone_to_cpu(const void* data, std::size_t n) override {
-    std::cout << "in MPSAllocator::clone_to_cpu: " << data << " (CPU " << getSharedBufferPtr(data) << ")" << std::endl;
+    std::cout << "in MPSAllocator::clone_to_cpu data: " << data << " (CPU " << getSharedBufferPtr(data) << ")"
+              << std::endl;
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
 
     // DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
     DataPtr new_data = allocate(n);
     copy_data(new_data.mutable_get(), data, n, /*sync=*/true);
+
+    std::cout << "in MPSAllocator::clone_to_cpu new_data: " << new_data.mutable_get() << " (CPU "
+              << getSharedBufferPtr(new_data.mutable_get()) << ")" << std::endl;
 
     return new_data;
   }
