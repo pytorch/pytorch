@@ -1183,7 +1183,13 @@ def compute_unbacked_bindings(
 
 
 # The following two functions are common utilities used while defining unbacked semantics
-# of varies framework code.
+# of various framework code. Those would be used in situations you prefer to guard and know
+# the result of the expression over not guarding, but in case you hit a data dependent error
+# you are ok with just returning true or false.
+# Some reasons you might be ok with returning true/false instead could be:
+#  (1) It's an optimization/additional check I do not want to fail for not performing it.
+#  (2) I am willing to deviate from the normal semantics when I have unbacked for the
+#      benefit of not failing (See the doc above for more details).
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to gaurd a, if data dependent error encountered just return false.
