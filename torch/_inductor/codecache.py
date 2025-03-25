@@ -3152,6 +3152,7 @@ class CUDACodeCache:
     class CacheEntry:
         input_path: str
         output_path: str
+        error_json: Optional[str] = None
 
     cache: dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
@@ -3188,6 +3189,14 @@ class CUDACodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
+                if os.path.exists(output_path + ".error"):
+                    with open(output_path + ".error", encoding="utf-8") as fh:
+                        error_json = fh.read()
+                    cmd_parts, error_output = json.loads(error_json)
+                    cls.cache[key] = CUDACodeCache.CacheEntry(
+                        input_path, output_path, error_json
+                    )
+                    raise exc.CUDACompileError(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
@@ -3203,6 +3212,14 @@ class CUDACodeCache:
                             cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
                     except subprocess.CalledProcessError as error:
+                        error_json = json.dumps(
+                            [cmd_parts, error.output.decode("utf-8")]
+                        )
+                        cls.cache[key] = CUDACodeCache.CacheEntry(
+                            input_path, output_path, error_json
+                        )
+                        with open(output_path + ".error", "w", encoding="utf-8") as fh:
+                            fh.write(error_json)
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
                     log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
@@ -3212,8 +3229,12 @@ class CUDACodeCache:
                         "CUDA Compilation skipped: %s since output already exists",
                         input_path,
                     )
-                cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
-
+                cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
+        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
+        if cache_entry.error_json is not None:
+            # Restore cached Exception and raise it as if we had compiled
+            cmd_parts, error_output = json.loads(cache_entry.error_json)
+            raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
