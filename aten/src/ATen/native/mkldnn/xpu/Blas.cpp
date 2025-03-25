@@ -463,7 +463,7 @@ Tensor _weight_int4pack_mm_xpu(
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize, onednn::Attr());
+  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
 
   return C;
 }

@@ -8,15 +8,13 @@
 
 namespace at::native::onednn {
 
-sycl::event woq_matmul_int4(
+void woq_matmul_int4(
     Tensor& result, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
     const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16
     const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
-    int64_t group_size,
-    Attr attr,
-    const std::vector<sycl::event>& deps) {
+    int64_t group_size) {
   size_t dims = result.dim();
   TORCH_CHECK(
       dims == 2, "INT4 matmul at XPU only works with 2D input, got ", dims);
@@ -26,8 +24,8 @@ sycl::event woq_matmul_int4(
   TORCH_CHECK(
       cur_device == mat1_.device(),
       "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   Tensor m1 = mat1_;
   Tensor m2 = mat2_;
@@ -115,7 +113,6 @@ sycl::event woq_matmul_int4(
   dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
 
   std::unordered_map<int, dnnl::memory> args;
-  dnnl::post_ops po = attr.extract_post_ops(dst);
 
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
@@ -177,9 +174,6 @@ sycl::event woq_matmul_int4(
   args.insert({DNNL_ARG_DST, dst_m});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, scale_m});
   args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_usr_m});
-
-  sycl::event matmul_event =
-      dnnl::sycl_interop::execute(matmul_p, stream, args, deps);
-  return matmul_event;
+  dnnl::sycl_interop::execute(matmul_p, stream, args);
 }
 } // namespace at::native::onednn

@@ -3609,7 +3609,7 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    torch._check(w.dim() == 2 or w.dim() == 4, lambda: "w must be a 4D tensor")
+    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
         lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
@@ -3618,9 +3618,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    return x.new_empty(
-        x.size(0), w.size(0) * 8 if w.dim() == 4 else w.size(0), dtype=x.dtype
-    )
+    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int4pack_mm_for_cpu])
@@ -3648,7 +3646,7 @@ def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros
     )
     torch._check(
         w.dtype is torch.int32,
-        lambda: f"expected w to be uint8, got {w.dtype}",
+        lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
@@ -5277,6 +5275,50 @@ def zeros_like(
     return res
 
 
+@register_meta([aten.ones.default, aten.ones.out])
+@out_wrapper()
+def meta_ones(
+    size,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    if device is None:
+        device = torch.get_default_device()
+    if layout is None:
+        layout = torch.strided
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta([aten.zeros.default, aten.zeros.out])
+@out_wrapper()
+def meta_zeros(
+    size,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    if device is None:
+        device = torch.get_default_device()
+    if layout is None:
+        layout = torch.strided
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -5600,7 +5642,20 @@ def meta__scaled_dot_product_cudnn_attention(
     S_KV = key.size(2)
     D_V = value.size(-1)
 
-    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
+    res_shape = (B, H, S_Q, D_V)
+    if tuple(query.shape) == res_shape:
+        query_t = query.transpose(1, 2)
+        res = torch.empty_like(query_t).transpose(1, 2)
+    else:
+        dim_order = sorted(
+            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
+        )
+        permuted_shape = [res_shape[idx] for idx in dim_order]
+        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
+        res = torch.empty(
+            permuted_shape, dtype=query.dtype, device=query.device
+        ).permute(final_permute)
+
     logsum_exp = torch.empty(
         (B, H, S_Q),
         dtype=torch.float,
