@@ -1785,6 +1785,9 @@ class OutputGraph:
             name_parts = node.name.rsplit("_", 1)
             if len(name_parts) > 1 and name_parts[1].isdigit():
                 base_name = name_parts[0]
+                base_name_counter[base_name] = max(
+                    base_name_counter[base_name], int(name_parts[1])
+                )
             else:
                 base_name = node.name
 
