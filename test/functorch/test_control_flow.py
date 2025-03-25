@@ -6209,11 +6209,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-<<<<<<< HEAD
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int, sym_size_int_1));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int = sym_size_int_1 = None
-=======
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1, sym_size_int_1, sym_size_int]);  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = None
->>>>>>> 0659fef8fbc (Use hashing to generate consistent symbolic ids)
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int_1, sym_size_int));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
             )
@@ -6569,11 +6565,7 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
     tensor = torch.tensor([True])
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-<<<<<<< HEAD
-    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, (l_a_, l_b_, l_self_num, s0));  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
-=======
-    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, [l_a_, l_b_, l_self_num, s97]);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s97 = None
->>>>>>> 0659fef8fbc (Use hashing to generate consistent symbolic ids)
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, (l_a_, l_b_, l_self_num, s97));  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s97 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -7354,13 +7346,8 @@ class GraphModule(torch.nn.Module):
 
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
-<<<<<<< HEAD
         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, sym_size_int_4, sym_size_int_3, z));  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
-        getitem: "f32[s0, 3]" = cond[0];  cond = None
-=======
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
         getitem: "f32[s35, 3]" = cond[0];  cond = None
->>>>>>> 0659fef8fbc (Use hashing to generate consistent symbolic ids)
         return pytree.tree_unflatten((getitem,), self._out_spec)
 
     class true_graph_0(torch.nn.Module):
@@ -7545,11 +7532,7 @@ class GraphModule(torch.nn.Module):
 
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
-<<<<<<< HEAD
-        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s1, s0, s0, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s1 = s0 = l_z_ = None
-=======
-        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, s94, s17, s17, l_z_]);  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
->>>>>>> 0659fef8fbc (Use hashing to generate consistent symbolic ids)
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s94, s17, s17, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
 
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
