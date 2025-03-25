@@ -934,19 +934,6 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            isinstance(value, torch._C._TensorMeta)
-            and value
-            not in (
-                torch.Tensor,
-                torch.nn.Parameter,
-            )
-            # `TensorSubclassVariable` would lead to construction of
-            # `TensorWithTFOverrideVariable`, but we don't want that for wrapper
-            # subclasses.
-            and not is_traceable_wrapper_subclass_type(value)
-        ):
-            return TensorSubclassVariable(value, source=self.source)
-        elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
         ):
@@ -1198,6 +1185,16 @@ class VariableBuilder:
             if value is torch.autograd._unsafe_preserve_version_counter:
                 self.install_guards(GuardBuilder.FUNCTION_MATCH)
                 return PreserveVersionContextVariable.constructor(self.tx)
+            if (
+                # `value` must be a strict subclass of `torch.Tensor`
+                issubclass(value, torch.Tensor)
+                and value is not torch.Tensor
+                # `TensorSubclassVariable` would lead to construction of
+                # `TensorWithTFOverrideVariable`, but we don't want that for wrapper
+                # subclasses or the builtin
+                and not is_traceable_wrapper_subclass_type(value)
+            ):
+                return TensorSubclassVariable(value, source=self.source)
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)

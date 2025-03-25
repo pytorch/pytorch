@@ -70,6 +70,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+from .user_defined import UserDefinedClassVariable
 
 
 try:
@@ -410,8 +411,6 @@ class TensorVariable(VariableTracker):
         return ConstantVariable(ret_val)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from . import UserDefinedClassVariable
-
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
@@ -613,7 +612,7 @@ class TensorVariable(VariableTracker):
         """
 
         # This is seen in inspect signature where we check if the value is a default value
-        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+        if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
 
         try:
@@ -1434,11 +1433,7 @@ class FakeItemVariable(TensorVariable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
 
 
-class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs) -> None:
-        self.value = value
-        super().__init__(*args, **kwargs)
-
+class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",

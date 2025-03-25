@@ -517,8 +517,6 @@ def call_torch_function(
 def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
     from types import FunctionType
 
-    if cls_or_obj.__torch_function__ is torch._C._disabled_torch_function_impl:
-        unimplemented("torch._C._disabled_torch_function_impl as torch function")
     # If we reach here, the target `__torch_function__` should have been
     # annotated with `@classmethod`, so accessing it always yield a bound
     # method, and the actual `__torch_function__` impl is inside the bound
@@ -596,7 +594,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
-        assert kwargs.pop("class_type") is torch.Tensor, (
+        assert kwargs.pop("class_type") in (torch.Tensor, torch.nn.Parameter), (
             "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         )
         torch_fn_var = build_torch_function_fn(tx, class_type, cls_source)
