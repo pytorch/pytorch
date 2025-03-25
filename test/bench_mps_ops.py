@@ -3,6 +3,7 @@
 # Useful as reference tool when migrating ops from MPS to Metal
 import itertools
 import timeit
+from typing import Optional
 
 import torch
 from torch.utils.benchmark import Compare, Measurement, Timer
@@ -50,12 +51,15 @@ def bench_unary(
 
 
 def bench_binary(
-    binary_func, device: str = "mps", dtype: torch.dtype = torch.float32
+    binary_func,
+    device: str = "mps",
+    dt_a: torch.dtype = torch.float32,
+    dt_b: Optional[torch.dtype] = None,
 ) -> list[Measurement]:
-    x, y = torch.testing.make_tensor(2, 1024, 1024, device=device, dtype=dtype).unbind(
-        0
-    )
-    s = torch.testing.make_tensor((), device=device, dtype=dtype)
+    dt_b = dt_b if dt_b is not None else dt_a
+    x = torch.testing.make_tensor(1024, 1024, device=device, dtype=dt_a)
+    y = torch.testing.make_tensor(1024, 1024, device=device, dtype=dt_b)
+    s = torch.testing.make_tensor((), device=device, dtype=dt_b)
     rc = []
     rc.append(bench_binary_op(binary_func, x, y, "dense-dense"))
     rc.append(bench_binary_op(binary_func, x.t(), y.t(), "transp-transp"))
@@ -66,20 +70,20 @@ def bench_binary(
 
 
 def main() -> None:
+    dtypes = [torch.float16, torch.float32]
     # Profile unary ops
     rc = []
-    for op, dtype in itertools.product(
-        [torch.sqrt, torch.sin], [torch.float32, torch.float16]
-    ):
+    for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):
         rc.extend(bench_unary(op, dtype=dtype))
     Compare(rc).print()
 
     # Profile binary ops
     rc = []
-    for op, dtype in itertools.product(
-        [torch.fmax, torch.add], [torch.float32, torch.float16]
-    ):
-        rc.extend(bench_binary(op, dtype=dtype))
+    ops = [torch.fmax, torch.add]
+    for op, dtype in itertools.product(ops, dtypes):
+        rc.extend(bench_binary(op, dt_a=dtype))
+    for op in ops:
+        rc.extend(bench_binary(op, dt_b=torch.float16))
     Compare(rc).print()
 
 
