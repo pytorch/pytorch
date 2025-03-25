@@ -788,7 +788,7 @@ class BaseSchedulerNode:
                 from torch.utils.flop_counter import FlopCounterMode
 
                 if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
+                    len(free_unbacked_symbols(n.get_numel())) > 0  # type: ignore[union-attr]
                     for n in self.node.inputs
                 ):
                     # Tensor has unbacked symints, we don't know how to estimate
@@ -804,7 +804,7 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input, guard_shape=False)
+                        ir_node_to_tensor(input, guard_shape=False)  # type: ignore[arg-type]
                         for input in self.node.inputs
                     ]
                     cls = self.node.__class__
@@ -2659,7 +2659,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -3546,7 +3546,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
+                OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - allowed_prologue_inps
             )
 

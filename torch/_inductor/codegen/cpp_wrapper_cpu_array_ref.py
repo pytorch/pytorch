@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 import sympy
 
@@ -784,7 +784,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 outputs,
             )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
         # so disable stack allocation here

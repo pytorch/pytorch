@@ -2020,7 +2020,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 

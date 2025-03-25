@@ -3615,7 +3615,7 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)  # type: ignore[arg-type]
     return self
 
 
@@ -6897,7 +6897,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, operands)
-    return list(map(TensorBox.create, result))
+    return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
