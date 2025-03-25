@@ -28,7 +28,7 @@ class MemoryDelta(ContextDecorator):
             torch.get_device_module(self.device).memory_stats()[
                 "active_bytes.all.current"
             ]
-            if self.device.type == torch.get_device_module(self.device)
+            if self.device.type == device_type.type
             else 0
         )
         return self
@@ -38,7 +38,7 @@ class MemoryDelta(ContextDecorator):
             torch.get_device_module(self.device).memory_stats()[
                 "active_bytes.all.current"
             ]
-            if self.device.type == torch.get_device_module(self.device)
+            if self.device.type == device_type.type
             else 0
         )
 
@@ -133,7 +133,7 @@ class TestCheckpoint(TestCase):
             loss2 = net2(x2).sum()
         loss2.backward()
 
-        if x.device.type == device_type:
+        if x.device.type == device_type.type:
             self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
