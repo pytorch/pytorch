@@ -101,7 +101,7 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
-            ${GPU_FLAG:-} \
+            "${GPU_FLAG:-}" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
