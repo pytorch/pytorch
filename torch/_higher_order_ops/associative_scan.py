@@ -668,20 +668,25 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
         op_grad_y, op_grad_x = grads[:num_xs], grads[num_xs:]
 
+        def expand_masks(mask):
+            for _ in range(ndim - 1):
+                mask = mask.unsqueeze(-1)
+            return mask
+
         def compute_grad_y_mat(x: torch.Tensor) -> torch.Tensor:
             # Prepare a ones and a zero mask in order to easily compute the y_mat
             ones_mask = torch.tril(
                 torch.ones(scan_length, scan_length, device=x.device, dtype=torch.bool),
                 diagonal=0,
             )
-            ones_mask = ones_mask[..., *(None for _ in range(ndim - 1))]
+            ones_mask = expand_masks(ones_mask)
             ones_mask = ones_mask.expand(-1, -1, *x.shape[1:])
 
             zeros_mask = torch.tril(
                 torch.ones(scan_length, scan_length, device=x.device, dtype=torch.bool),
                 diagonal=-1,
             )
-            zeros_mask = zeros_mask[..., *(None for _ in range(ndim - 1))]
+            zeros_mask = expand_masks(zeros_mask)
             zeros_mask = zeros_mask.expand(-1, -1, *x.shape[1:])
 
             y_mat = x.unsqueeze(dim).repeat_interleave(scan_length, dim)
