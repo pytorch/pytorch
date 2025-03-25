@@ -188,19 +188,6 @@ class VecSVE256(VecISA):
 
 
 @dataclasses.dataclass
-class VecSVE256_BF16(VecSVE256):
-    _macro = [
-        "CPU_CAPABILITY_SVE",
-        "CPU_CAPABILITY_SVE256",
-        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-        "__ARM_FEATURE_BF16",
-    ]
-    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = ["CPU_CAPABILITY_AVX512"]
@@ -345,14 +332,7 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [
-    VecAMX(),
-    VecAVX512(),
-    VecAVX2(),
-    VecNEON(),
-    VecSVE256(),
-    VecSVE256_BF16(),
-]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256()]
 
 
 def get_isa_from_cpu_capability(
@@ -413,13 +393,10 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.backends.cpu.get_cpu_capability() == "SVE256_BF16":
-            isa_list.append(VecSVE256_BF16())
-        elif torch.backends.cpu.get_cpu_capability() == "SVE256":
+        if torch.backends.cpu.get_cpu_capability() == "SVE256":
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
-
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
