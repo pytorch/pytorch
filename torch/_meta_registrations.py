@@ -3618,7 +3618,9 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+    return x.new_empty(
+        x.size(0), w.size(0) * 8 if w.dim() == 4 else w.size(0), dtype=x.dtype
+    )
 
 
 @register_meta([aten._weight_int4pack_mm_for_cpu])
