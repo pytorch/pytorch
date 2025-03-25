@@ -61,6 +61,13 @@ def register_fake_operators():
         b = foo.add_tensor(a)
         return (a, b)
 
+    @torch.library.register_fake("_TorchScriptTesting::takes_foo_tensor_return")
+    def meta_takes_foo_tensor_return(foo, x):
+        # This implementation deliberately creates unbacked symint for testing
+        ctx = torch.library.get_ctx()
+        fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
+        return torch.empty(fake_shape, dtype=torch.int, device="cpu")
+
     torch.ops._TorchScriptTesting.takes_foo_list_return.default.py_impl(
         torch._C.DispatchKey.Meta
     )(meta_takes_foo_list_return)
