@@ -189,7 +189,7 @@ class TestLinalg(TestCase):
                 try:
                     del os.environ[env]
                 except KeyError:
-                   pass
+                    pass
 
     exact_dtype = True
 
