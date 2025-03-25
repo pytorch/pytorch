@@ -475,6 +475,9 @@ class TestCuda(TestCase):
         finally:
             torch.cuda.set_per_process_memory_fraction(orig, 0)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @serialTest()
     def test_get_per_process_memory_fraction(self):
         # get the initial memory fraction
@@ -4145,6 +4148,9 @@ class TestCudaMallocAsync(TestCase):
             cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
             self.assertEqual(cuda_alloc_size, raw_alloc_size)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @parametrize("max_split_size_mb_setting", [False, True])
     def test_raises_oom(self, max_split_size_mb_setting):
         if max_split_size_mb_setting:
