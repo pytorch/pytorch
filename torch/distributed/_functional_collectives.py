@@ -868,7 +868,10 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
 
 def _make_all_gather_out_tensor(input, group_size):
     out_size = list(input.size())
-    out_size[0] *= group_size
+    if len(out_size) == 0:
+        out_size.append(group_size)
+    else:
+        out_size[0] *= group_size
     out_tensor = input.new_empty(out_size)
     return out_tensor
 
@@ -1150,7 +1153,7 @@ def all_gather_inplace(
     assert not async_op, (
         "Can't remap async version of inplace op to functional collective"
     )
-    assert all(t.size(0) == tensor.size(0) for t in tensor_list), (
+    assert tensor.dim() == 0 or all(t.size(0) == tensor.size(0) for t in tensor_list), (
         "Remapping variable size all_gather is not yet supported"
     )
 
@@ -1164,8 +1167,11 @@ def all_gather_inplace(
     output_splits = []
     offset = 0
     for t in tensor_list:
-        output_splits.append(output[offset : offset + t.size(0)])
-        offset += t.size(0)
+        is_scalar = t.dim() == 0
+        t_offset = 1 if is_scalar else t.size(0)
+        out = output[offset] if is_scalar else output[offset : offset + t_offset]
+        output_splits.append(out)
+        offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
