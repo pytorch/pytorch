@@ -256,10 +256,7 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
     def flat_fn(*args_and_grad_outs):
         primals = args_and_grad_outs[:n_primals]
         tangents = args_and_grad_outs[n_primals:]
-        try:
-            grad_args = bw_fn(primals, tangents)[1]
-        except:
-            print('failed!')
+        grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
         return [
             (
