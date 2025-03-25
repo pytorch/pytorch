@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     import torch.onnx
     import torch.onnx._internal
     import torch.onnx._internal._exporter_legacy
+    import torch.onnx._internal.diagnostics
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes  # noqa: TCH004
 
@@ -78,6 +79,7 @@ def is_onnxrt_backend_supported() -> bool:
             import torch.onnx  # noqa: F401
             import torch.onnx._internal  # noqa: F401
             import torch.onnx._internal._exporter_legacy  # noqa: F401
+            import torch.onnx._internal.diagnostics  # noqa: F401
             from torch.onnx._internal.fx import (  # noqa: F401
                 decomposition_table,
                 fx_onnx_interpreter,
@@ -893,6 +895,7 @@ class OrtBackend:
             # (type: onnxruntime.InferenceSession) for it.
 
             graph_module = passes.MovePlaceholderToFront(
+                self._resolved_onnx_exporter_options.diagnostic_context,
                 graph_module,
             ).run()
             # Generate reference outputs. They are used to indicate output
@@ -933,11 +936,15 @@ class OrtBackend:
 
             # Create the object to iterate through the nodes in graph one-by-one
             # and calls the corresponding ONNX exporter for each node.
-            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter()
+            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
+                diagnostic_context=self._resolved_onnx_exporter_options.diagnostic_context
+            )
             # Cast FX variables if they will result schema-mismatch when searching
             # for ONNX operator. E.g., add(double_tensor, int_tensor) is fine in PyTorch,
             # but ONNX expects add(double_tensor, double_tensor).
-            graph_module = passes.InsertTypePromotion(graph_module).run()
+            graph_module = passes.InsertTypePromotion(
+                self._resolved_onnx_exporter_options.diagnostic_context, graph_module
+            ).run()
             # Start the per-node exporting process. It's conceptually a for loop
             # scanning through the nodes in the graph.
             exported = fx_interpreter.run(

@@ -9,7 +9,7 @@ from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch.onnx._internal.fx import _pass
+from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
 
 
@@ -793,6 +793,7 @@ class Modularize(_pass.Transform):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> import torch
         >>> from torch.onnx._internal.fx import passes
+        >>> from torch.onnx._internal.diagnostics import infra
         >>>
         >>> class CustomModule(torch.nn.Module):
         >>>     def __init__(self) -> None:
@@ -822,6 +823,7 @@ class Modularize(_pass.Transform):
         >>> gm.print_readable()
 
         >>> gm = passes.Modularize(
+        ...     infra.DiagnosticContext("test_context", "1.0"),
         ...     gm,
         ... ).run()
         >>> gm.print_readable()
@@ -830,10 +832,11 @@ class Modularize(_pass.Transform):
 
     def __init__(
         self,
+        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         is_exported_program: bool = False,
     ):
-        super().__init__(module)
+        super().__init__(diagnostic_context, module)
         self.module = module
         self.is_exported_program = is_exported_program
 
