@@ -160,6 +160,14 @@ jobs:
         run: |
           cat test/**/*_toprint.log || true
 
+      - name: Run OP benchmark
+        run: |
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+          ${CONDA_RUN} python3 test/bench_mps_op.py
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
