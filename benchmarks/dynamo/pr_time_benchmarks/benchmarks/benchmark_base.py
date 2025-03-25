@@ -3,7 +3,8 @@ import gc
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Optional, Self
+from typing import Optional
+from typing_extensions import Self
 
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
