@@ -37,7 +37,7 @@ std::string stringSlice(
       slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
   int64_t i = start_val;
-  std::string result = "";
+  std::string result;
   for ([[maybe_unused]] const auto j : c10::irange(num_vals)) {
     result += string[i];
     i += step;

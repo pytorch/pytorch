@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
-"""Dispatcher for AtenLib functions from onnx-script."""
+"""Dispatcher for AtenLib functions from onnx-script.
+
+This is a deprecated module to be removed.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
         graph_building as onnxscript_graph_building,
     )
 
-    from torch.onnx import OnnxRegistry
+    from torch.onnx._internal._exporter_legacy import OnnxRegistry
 
 
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
@@ -42,7 +45,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     for symbolic_func in default_and_custom_functions:
         overload_func = symbolic_func.onnx_function
         all_function_overload_names += f"ONNX Node: {overload_func.name}[opset={overload_func.opset};is_custom={symbolic_func.is_custom}]. \n"  # noqa: B950
-    return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
+    return f"FX Node: {node.target}. \n{all_function_overload_names}"
 
 
 def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(

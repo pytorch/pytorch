@@ -16,10 +16,9 @@
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
 TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_expanded_stacks_mangled);
 
 namespace torch::jit {
-
-std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 namespace interpreter {
 
@@ -62,10 +61,10 @@ struct WithCurrentNode {
 };
 
 struct NodeSourceInfo {
-  const char* func_name_;
-  const char* file_name_;
-  size_t line_;
-  NodeSourceInfo() : func_name_(nullptr), file_name_(nullptr), line_(0) {}
+  const char* func_name_{nullptr};
+  const char* file_name_{nullptr};
+  size_t line_{0};
+  NodeSourceInfo() {}
 };
 
 struct CodeImpl {
@@ -229,7 +228,7 @@ struct CodeImpl {
   NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
     NodeSourceInfo nodeSource;
     SourceRange r = range;
-    if (range.source()) {
+    if (!FLAGS_torch_jit_expanded_stacks_mangled && range.source()) {
       if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
         r = *orig;
       }

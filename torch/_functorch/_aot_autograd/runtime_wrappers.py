@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -45,6 +46,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputType,
     PlainTensorMeta,
@@ -201,6 +203,7 @@ class IsInputHandler:
 
 class AliasOfIntermediateHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
+        self._unwrap_aliased_base_tensor = _identity
         if info.output_type in (
             OutputType.alias_of_intermediate,
             OutputType.alias_of_intermediate_save_as_output,
@@ -209,6 +212,8 @@ class AliasOfIntermediateHandler:
             self.base_idx = info.base_idx + num_user_outputs
         else:
             self.base_idx = info.base_idx
+            if self.base_idx in runtime_metadata.aliased_out_indices:
+                self._unwrap_aliased_base_tensor = _unwrap_tensoralias
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
@@ -218,7 +223,7 @@ class AliasOfIntermediateHandler:
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
-            aliased_base_tensor,
+            self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
             self.functional_tensor,
@@ -1455,6 +1460,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -1681,6 +1693,45 @@ def _backward_prologue_functional(
     return all_args
 
 
+def initialize_rng_states(
+    num_rng: int,
+    graphsafe_idx: int,
+    fwd_rng_states: list[torch.Generator],
+    bwd_rng_states: list[torch.Generator],
+):
+    """
+    Initialize the cudagraph safe rng states.
+
+    Initialization of rng states should have a few properties:
+    - the initialization for each rng state should be independent
+    - the initialization should be deterministic
+    - the initialization should be based off current rng state, so that independent graphs do not
+    have equal rng behavior
+
+    We defer initialization of rng states until runtime because compilation is wrapped
+    with preserve_rng_states. Seed initialization should advance the rng states so consecutive compilations
+    do not give equal randomness.
+    """
+    with torch.utils._python_dispatch._disable_current_modes():
+        seeds = torch.randint(0, torch.iinfo(torch.int64).max, (num_rng,), device="cpu")
+        fwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+        bwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+
+
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_epilogue_functional(
     metadata, maybe_subclass_metadata, out, *, make_subclass_override=None
@@ -1710,6 +1761,39 @@ def _backward_epilogue_functional(
     return out
 
 
+def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    if memory_format.memory_format is not None:
+        # Coerce to torch.memory_format
+        if not x.is_contiguous(memory_format=memory_format.memory_format):
+            x = x.contiguous(memory_format=memory_format.memory_format)
+        return x
+
+    expected_size = memory_format.size
+    assert expected_size is not None
+    expected_stride = memory_format.stride
+    assert expected_stride is not None
+    # Expected size and stride are static ints
+    # ok to use == to compare runtime tensor strides and shapes
+
+    if x.shape == expected_size and x.stride() == expected_stride:
+        # Runtime tangent size and stride are the same as expected, no need to coerce
+        return x
+
+    # Empty_strided creates a raw Tensor.
+    # We are guranteed that only raw Tensors has expected size and stride.
+    # Subclasses have only expected memory_format.
+    restrided = torch.empty_strided(
+        size=expected_size,
+        stride=expected_stride,
+        dtype=x.dtype,
+        device=x.device,
+        layout=x.layout,
+        requires_grad=x.requires_grad,
+    )
+    restrided.copy_(x)
+    return restrided
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -1719,8 +1803,8 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            if not x.is_contiguous(memory_format=meta.memory_format):
-                x = x.contiguous(memory_format=meta.memory_format)
+            assert meta.memory_format
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1778,8 +1862,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+        assert meta.memory_format
+        x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
@@ -1816,13 +1900,40 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+        # For additional context see Note [CUDA Graph Safe RNG Functionalization]
+        # Each pair forward, backward rng states must be equal prior to its invocation on any
+        # iteration of forward, backward. Because they are initialized equal, and are computing the same rng op,
+        # running forward then backward advances them the same amount and keeps them equal.
+        # However, a user may invoke multiple forwards, then backwards, such that they are not in sync.
+        # Initially we have:
+        # fwd_state0 == bwd_state0.
+        # Lets say we run:
+        # fwd0: fwd_state0 -> fwd_state1
+        # fwd1: fwd_state1 -> fwd_state2
+        # fwd2: fwd_state2 -> fwd_state3
+        # If we now invoke bwd2,
+        # we need to update bwd_state equal to the rng that was observed in fwd2.
+        # we save the rng_state fwd_state2 in forward because we detect that it is not the
+        # current backward state and therefore would not be accessible if we do not save it.
+        # Similarly, if we are going to update the backward state to a new value, and there is a pending
+        # forwards which needs its current state, we will save it.
+        # Within the autograd context, we keep track of the curr iteration so that on backward
+        # we know what the generator state must be before the backward is run.
+        num_rng = fw_metadata.num_graphsafe_rng_states
+        graphsafe_idx = fw_metadata.graphsafe_rng_state_index
+        fwd_rng_states: list[torch.Generator] = []
+        bwd_rng_states: list[torch.Generator] = []
+        curr_fwd_iter = itertools.count(0)
+        backward_state_position = 0
+        pending_forwards: set[int] = set()
+        saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -1837,6 +1948,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
+
+                if num_rng:
+                    if len(fwd_rng_states) == 0:
+                        assert graphsafe_idx is not None
+                        initialize_rng_states(
+                            num_rng, graphsafe_idx, fwd_rng_states, bwd_rng_states
+                        )
+
+                    _curr_iter = next(curr_fwd_iter)
+                    ctx._curr_iter = _curr_iter
+
+                    # if this state is not contained in the backward,
+                    # we need to save it for when its backward pass happens
+                    if _curr_iter != backward_state_position:
+                        saved_backward_tensor_states[_curr_iter] = [
+                            rng_state.get_state() for rng_state in fwd_rng_states
+                        ]
+
+                    pending_forwards.add(_curr_iter)
+                    args = (*args, *fwd_rng_states)
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
@@ -1965,6 +2096,45 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *flat_args,
                 )
 
+                if num_rng:
+                    nonlocal backward_state_position, bwd_rng_states
+                    curr_backward_iter = ctx._curr_iter
+                    retain_graph = (
+                        torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
+
+                    # Save current state if we have a pending forward that needs this state
+                    # or this state may be needed again because of retain graph
+                    if (
+                        backward_state_position in pending_forwards
+                        and backward_state_position not in saved_backward_tensor_states
+                        and (
+                            backward_state_position != curr_backward_iter
+                            or retain_graph
+                        )
+                    ):
+                        saved_backward_tensor_states[backward_state_position] = [
+                            rng_state.get_state() for rng_state in bwd_rng_states
+                        ]
+
+                    # Restore saved states if needed
+                    if curr_backward_iter in saved_backward_tensor_states:
+                        if backward_state_position != curr_backward_iter:
+                            for bwd_state, saved_state in zip(
+                                bwd_rng_states,
+                                saved_backward_tensor_states[curr_backward_iter],
+                            ):
+                                bwd_state.set_state(saved_state)
+                        if not retain_graph:
+                            del saved_backward_tensor_states[curr_backward_iter]
+                    else:
+                        assert backward_state_position == curr_backward_iter
+
+                    backward_state_position = curr_backward_iter + 1
+                    if not retain_graph:
+                        pending_forwards.remove(curr_backward_iter)
+                    all_args.extend(bwd_rng_states)
+
                 def impl_fn(double_ctx=None):
                     out = CompiledFunction._backward_impl(ctx, all_args)
                     return _backward_epilogue_functional(
@@ -1989,7 +2159,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
@@ -2010,10 +2179,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                assert (
-                    not ctx._is_compiled_autograd_tracing()
-                ), "compiled autograd reimplements this function at proxy_call_aot_backward"
-
+                # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert (
                     not backward_state_indices
                 ), "BackwardState requires CompiledAutograd"
@@ -2059,8 +2225,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:

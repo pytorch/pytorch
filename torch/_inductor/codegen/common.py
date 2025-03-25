@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -10,49 +9,70 @@ import logging
 import math
 import operator
 import re
+import typing
 from enum import auto, Enum
 from itertools import chain
-from typing import Any, Callable, ClassVar, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    ClassVar,
+    Generic,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
+from typing_extensions import TypeVar
 
 import sympy
 
 import torch
 import torch.fx
-from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
+from ..dtype_propagation import DtypePropagationOpsHandler
+from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
     generate_assert,
+    get_current_backend,
     IndentedBuffer,
     ir_dataclass,
+    ScopedDict,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
+    triton_type,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from typing import Never, TypeVar
+    from collections.abc import Iterator, MutableMapping, Sequence
 
-    from ..ir import FixedLayout
+    from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
-    from ..scheduler import BaseScheduling, Scheduler
+    from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
     SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
+
+    # OpVarT should really be Union[CSEVariable, str], however this
+    # causes typing errors in subclasses (defined in other files).
+    OpVarT = str
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
@@ -104,7 +124,7 @@ class WorkspaceArg:
     dtype: torch.dtype = torch.uint8
 
     @staticmethod
-    def unique_name(prefix="workspace_") -> str:
+    def unique_name(prefix: str = "workspace_") -> str:
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
@@ -214,61 +234,62 @@ class DeviceCodegen:
     cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
-    def import_get_raw_stream_as(self, name: str):
+    def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
     def set_device(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         raise NotImplementedError
 
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def cpp_device_guard(self):
+    def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         raise NotImplementedError
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         raise NotImplementedError
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
         raise NotImplementedError
 
-    def abi_compatible_header(self):
+    def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_type(self):
+    def aoti_get_stream(self) -> str:
         raise NotImplementedError
 
-    def aoti_get_stream(self):
+    def cpp_kernel_type(self) -> str:
         raise NotImplementedError
 
-    def cpp_kernel_type(self):
+    def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
-    def cpp_device_ptr(self):
+    def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def tma_descriptor_helpers(self):
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
 
@@ -320,9 +341,11 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str, None]):
+def get_backend_features(
+    device: Union[torch.device, str, None],
+) -> OrderedSet[BackendFeature]:
     if device is None:
-        return {}
+        return OrderedSet()
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -440,7 +463,9 @@ def init_backend_registration() -> None:
 
 
 def index_prevent_reordering(
-    index: list[sympy.Expr], index_vars, sizes
+    index: Sequence[sympy.Expr],
+    index_vars: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
 ) -> list[sympy.Expr]:
     from ..ir import FlexibleLayout
 
@@ -516,8 +541,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",
@@ -528,6 +552,31 @@ def deduce_output_dtype_by_name(
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
+
+
+def check_dtype(
+    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
+) -> None:
+    backend = get_current_backend()
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
+    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
+        from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
+
+        assert isinstance(var, CppCSEVariable)
+        if dtype == torch.bool:
+            if var.is_vec:
+                is_same_dt = f"IsVecMaskType<decltype({var})>::value"
+            else:
+                # operator&(bool, bool) returns int and it can be used as boolean in C++
+                is_same_dt = f"std::is_same_v<decltype({var}), bool> || std::is_same_v<decltype({var}), int>"
+        else:
+            c_var_type = f"decltype({var})"
+            if var.is_vec:
+                c_var_type = f"typename {c_var_type}::value_type"
+            is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
+
+        buffer.writeline(f"static_assert({is_same_dt});")
 
 
 class DataTypePropagation:
@@ -615,11 +664,11 @@ class DataTypePropagation:
         return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body) -> Optional[torch.dtype]:
+    def propagate_loopbody(cls, body: LoopBody) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node) -> Optional[torch.dtype]:
+    def propagate_scheduler_node(cls, node: SchedulerNode) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
@@ -644,74 +693,74 @@ class OpDecompositions:
     """
 
     @staticmethod
-    def identity(value: _T) -> _T:
+    def identity(value: OpVarT) -> OpVarT:
         # used to trigger cse
         return value
 
     @staticmethod
-    def reciprocal(x):
+    def reciprocal(x: OpVarT) -> OpVarT:
         return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
-    def square(x):
+    def square(x: OpVarT) -> OpVarT:
         return ops.mul(x, x)
 
     @staticmethod
-    def erfc(x):
+    def erfc(x: OpVarT) -> OpVarT:
         return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
 
     @staticmethod
-    def erfcx(x):
+    def erfcx(x: OpVarT) -> OpVarT:
         return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
-    def expm1(x):
+    def expm1(x: OpVarT) -> OpVarT:
         return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
 
     @staticmethod
-    def log10(x):
+    def log10(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
 
     @staticmethod
-    def log2(x):
+    def log2(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
 
     @staticmethod
-    def exp2(x):
+    def exp2(x: OpVarT) -> OpVarT:
         return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
 
     @staticmethod
-    def log1p(x):
+    def log1p(x: OpVarT) -> OpVarT:
         return ops.log(ops.add(x, ops.constant(1, torch.int32)))
 
     @staticmethod
-    def sigmoid(x):
+    def sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
-    def relu(x):
+    def relu(x: OpVarT) -> OpVarT:
         return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
-    def fma(x, y, z):
+    def fma(x: OpVarT, y: OpVarT, z: OpVarT) -> OpVarT:
         # for backends that don't override this (halide)
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
-    def floor_to_int(a, dtype):
+    def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
     @staticmethod
-    def ceil_to_int(a, dtype):
+    def ceil_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.ceil(a), dtype)
 
     @staticmethod
-    def trunc_to_int(a, dtype):
+    def trunc_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.trunc(a), dtype)
 
     @staticmethod
-    def remainder(a, b):
+    def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
         r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),
@@ -720,127 +769,254 @@ class OpDecompositions:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
-    def round_to_int(a, dtype):
+    def round_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.round(a), dtype)
 
 
-class OpOverrides(OpDecompositions):
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
+_RE_PAREN_NOT_NEEDED = re.compile(r"[a-z0-9_.]+|\([^)]*\)|", flags=re.IGNORECASE)
 
+
+def _all_in_parens(string: str) -> bool:
+    if string[0] != "(" or len(string) < 2:
+        return False
+    count = 1
+    for i, char in enumerate(string[1:]):
+        if char == "(":
+            count += 1
+        elif char == ")":
+            count -= 1
+        if count == 0 and i != len(string) - 2:
+            return False
+    assert count == 0
+    return True
+
+
+class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
+    def paren(string: OpVarT) -> OpVarT:
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
+            or _RE_PAREN_NOT_NEEDED.fullmatch(string)
+            or _all_in_parens(string)
         ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
+            # don't put extra parens for strings that are already wrapped in parens
             return string
         return f"({string})"
 
-    def __getattr__(self, item):
-        return getattr(self._parent, item)
-
     @staticmethod
-    def constant(value, dtype):
+    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod
-    def libdevice_sigmoid(x):
+    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
 
     @staticmethod
-    def libdevice_abs(x):
+    def libdevice_abs(x: OpVarT) -> OpVarT:
         return ops.abs(x)
 
     @staticmethod
-    def libdevice_sqrt(x):
+    def libdevice_sqrt(x: OpVarT) -> OpVarT:
         return ops.sqrt(x)
 
     @staticmethod
-    def libdevice_cos(x):
+    def libdevice_cos(x: OpVarT) -> OpVarT:
         return ops.cos(x)
 
     @staticmethod
-    def libdevice_sin(x):
+    def libdevice_sin(x: OpVarT) -> OpVarT:
         return ops.sin(x)
 
     @staticmethod
-    def libdevice_log(x):
+    def libdevice_log(x: OpVarT) -> OpVarT:
         return ops.log(x)
 
     @staticmethod
-    def libdevice_exp(x):
+    def libdevice_exp(x: OpVarT) -> OpVarT:
         return ops.exp(x)
 
     @staticmethod
-    def bitwise_not(x):
+    def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
-    def logical_not(a):
+    def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
-    def bitwise_and(x, y):
+    def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_or(x, y):
+    def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_xor(x, y):
+    def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_left_shift(x, y):
+    def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_right_shift(x, y):
+    def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
-    def int_truediv(a, b):
+    def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
         # <= 2**53, which is when this equation is correct
         return ops.truediv(a, b)
 
     @staticmethod
-    def load_seed(name, offset):
+    def load_seed(name: str, offset: OpVarT) -> OpVarT:
         return ops.load(name, sympy.Integer(offset))
 
+    def indirect_indexing(
+        self,
+        var: OpVarT,
+        size: Union[sympy.Expr, int],
+        check: bool = True,
+        wrap_neg: bool = True,
+    ) -> sympy.Symbol:
+        return sympy_index_symbol(str(var))
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
+        )
+
+    def load(self, name: str, index: sympy.Expr) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: load should be handled by CSEProxy"
+        )
+
+    def store(
+        self, name: str, index: sympy.Expr, value: OpVarT, mode: StoreMode = None
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
+        )
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[OpVarT, tuple[OpVarT, ...]],
+    ) -> Union[OpVarT, tuple[OpVarT, ...]]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: reduction should be handled by CSEProxy"
+        )
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [tuple[OpVarT, ...], tuple[OpVarT, ...]],
+            tuple[OpVarT, ...],
+        ],
+        values: tuple[OpVarT, ...],
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: scan should be handled by CSEProxy"
+        )
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[OpVarT, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: sort should be handled by CSEProxy"
+        )
+
+    def bucketize(
+        self,
+        values: OpVarT,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: OpVarT,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[OpVarT] = None,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: bucketize should be handled by CSEProxy"
+        )
+
+    def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def inline_asm_elementwise(
+        self,
+        *inputs: OpVarT,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
+        )
+
+    def output(self, *args: OpVarT) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear at codegen time"
+        )
+
+    def placeholder(self, index: int) -> OpVarT:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear at codegen time"
+        )
+
+    @staticmethod
+    def _unimplemented(name: str) -> Callable[..., OpVarT]:
+        def unimplemented(self: OpOverrides, *args: Any, **kwargs: Any) -> OpVarT:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not implement ops.{name}"
+            )
+
+        unimplemented.__name__ = name
+        unimplemented.is_unimplemented = True  # type: ignore[attr-defined]
+        return unimplemented
+
     @classmethod
-    def _initialize_pointwise_overrides(cls, target):
-        assert target in ("triton", "cpp", "cppvec"), target
+    def _is_unimplemented(cls, name: str) -> bool:
+        fn = getattr(cls, name, None)
+        default_fn = getattr(OpsHandler, name, None)
+        return not fn or fn == default_fn or getattr(fn, "is_unimplemented", False)
+
+    @classmethod
+    def _initialize_pointwise_overrides(cls, target: str) -> None:
+        assert target in ("triton", "cpp", "cppvec", "halide", "mps"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
             if impl is None:
-                continue
-            setattr(cls, funcname, staticmethod(impl))
+                if cls._is_unimplemented(funcname):
+                    setattr(cls, funcname, cls._unimplemented(funcname))
+            else:
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
+                impl.__name__ = funcname
+                setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
@@ -854,6 +1030,8 @@ class OverridesData:
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
+    halide: Optional[Callable[..., str]] = None
+    mps: Optional[Callable[..., str]] = None
 
 
 # NB: if you add a new special function, don't forget to update
@@ -1084,40 +1262,39 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[str]:
-    return h
+def is_buffer_removed(name: str) -> bool:
+    return any(
+        name in x
+        for x in (
+            V.graph.removed_buffers,
+            V.kernel.removed_buffers,
+            V.graph.inplaced_to_remove,
+            V.kernel.inplaced_to_remove,
+        )
+    )
 
 
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
-    def __init__(self, name, line):
+    def __init__(self, name: str, line: str):
         super().__init__(line)
         self.name = name
         assert not isinstance(line, DeferredLineBase)
 
-    def __call__(self):
-        if all(
-            self.name not in x
-            for x in (
-                V.graph.removed_buffers,
-                V.kernel.removed_buffers,
-                V.graph.inplaced_to_remove,
-                V.kernel.inplaced_to_remove,
-            )
-        ):
+    def __call__(self) -> Optional[str]:
+        if not is_buffer_removed(self.name):
             return self.line
         return None
 
-    def _new_line(self, line):
+    def _new_line(self, line: str) -> DeferredLine:
         return DeferredLine(self.name, line)
 
 
 class BracesBuffer(IndentedBuffer):
-    def indent(self, offset=1) -> contextlib.AbstractContextManager[None]:
+    def indent(self, offset: int = 1) -> contextlib.AbstractContextManager[None]:
         @contextlib.contextmanager
-        def ctx():
+        def ctx() -> Iterator[None]:
             for _ in range(offset):
                 self.writeline("{")
                 self._indent += 1
@@ -1140,20 +1317,43 @@ class InplacedBuffer(NamedTuple):
     other_names: list[str]
 
 
+@dataclasses.dataclass
+class ArgName:
+    name: str
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
+
+    def full_name(self) -> str:
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
+
+
+class RemovedArg:
+    def __str__(self) -> str:
+        return "REMOVED"
+
+
+REMOVED = RemovedArg()
+
+
 class KernelArgs:
     @staticmethod
-    def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
-        assert isinstance(name, (str, sympy.Symbol))
-        if name not in odict:
-            odict[name] = f"{prefix}{len(odict)}"
-        return odict[name]
+    def _lookup(
+        prefix: str,
+        odict: Union[dict[_T, Union[str, RemovedArg]], dict[_T, str]],
+        name: _T,
+    ) -> str:
+        result: Union[str, RemovedArg] = odict.get(name, REMOVED)
+        if isinstance(result, RemovedArg):
+            odict[name] = new_result = f"{prefix}{len(odict)}"
+            return new_result
+        return result
 
-    def __init__(self, sizevars=None):
-        self.input_buffers = {}
-        self.output_buffers = {}
-        self.inplace_buffers = {}
-        self.sizevars = sizevars or {}
-        self.workspace_args = []
+    def __init__(self) -> None:
+        self.input_buffers: dict[str, str] = {}
+        self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
+        self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
+        self.sizevars: dict[sympy.Expr, str] = {}
+        self.workspace_args: list[WorkspaceArg] = []
 
     def __repr__(self) -> str:
         return "KernelArgs({})".format(
@@ -1170,38 +1370,52 @@ class KernelArgs:
             )
         )
 
-    def _buffer_is_marked_removed(self, name):
-        return isinstance(name, str) and name.startswith("REMOVED")
+    @staticmethod
+    def _buffer_is_marked_removed(name: Any) -> bool:
+        # this function is needed by MTIA
+        return isinstance(name, RemovedArg)
 
-    def input(self, name):
+    def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
-            return self.output_buffers[name]
+            return cast(str, self.output_buffers[name])
         if name in self.inplace_buffers:
-            return self.inplace_buffers[name].inner_name
+            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         if name.startswith("seed"):
             return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
 
-    def output(self, name):
+    def output(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
-            return self.inplace_buffers[name].inner_name
+            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
 
-    def make_inplace(self, input_name, output_name):
+    def make_inplace(self, input_name: str, output_name: str) -> None:
         assert output_name not in self.inplace_buffers
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
+            assert not isinstance(buf, RemovedArg)
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
+            alive_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if not isinstance(val, RemovedArg)
+            ]
+            removed_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if isinstance(val, RemovedArg)
+            ]
+            inplace_buffer_idx = len(unique(alive_buffers)) + len(removed_buffers)
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                f"in_out_ptr{inplace_buffer_idx}",
                 [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
@@ -1276,7 +1490,10 @@ class KernelArgs:
         self.workspace_args.append(arg)
         return arg.inner_name
 
-    def seed_offset(self, name, value):
+    def seed_offset(self, name: str, value: int) -> str:
+        assert isinstance(value, int), (type(value), value)
+        # here we are lifting a constant integer into an arg to the kernel to try to get additional cache hits
+        value = sympy.Integer(value)
         if value in self.sizevars:
             return self.sizevars[value]
         if name in self.sizevars.values():
@@ -1286,31 +1503,44 @@ class KernelArgs:
         self.sizevars[value] = name
         return name
 
-    def size(self, name):
-        if str(name) == "seed":
-            self.sizevars["seed"] = "seed"
+    def size(self, name: sympy.Symbol) -> str:
+        assert isinstance(name, sympy.Symbol), (type(name), name)
+        if name.name == "seed":
+            self.sizevars[name] = "seed"  # dont' mange the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
-    def call_names(self):
+    def call_names(self) -> Iterator[str]:
         return chain(
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def wrap_ptr_arg(self, buf, dtype):
+    def arg_name(self, name: str) -> Optional[str]:
+        """
+        Returns inner name of a given outer name.
+        """
+        inplaced = self.inplace_buffers.get(name, None)
+        if inplaced is not None and not isinstance(inplaced, RemovedArg):
+            return inplaced.inner_name
+        output_name = self.output_buffers.get(name, None)
+        if output_name is not None and not isinstance(output_name, RemovedArg):
+            return output_name
+        return self.input_buffers.get(name, None)
+
+    def wrap_ptr_arg(self, buf: str, dtype: torch.dtype) -> str:
         return buf
 
-    def wrap_size_arg(self, size):
+    def wrap_size_arg(self, size: SymbolLike) -> str:
         return str(size)
 
-    def cpp_argdefs(self):
+    def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
         from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
@@ -1327,12 +1557,12 @@ class KernelArgs:
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
-        for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+        for outer, maybe_inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or isinstance(maybe_inner, RemovedArg):
                 continue
             dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* {inner}")
+            arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
@@ -1344,15 +1574,17 @@ class KernelArgs:
         assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
-    def python_argdefs(self):
-        arg_defs: list[str] = []
+    def python_argdefs(
+        self,
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
+        arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
-        precompile_args: list[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+        precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
-            arg_defs.append(inplaced.inner_name)
+            arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
             arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
@@ -1365,9 +1597,9 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+            if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
@@ -1378,22 +1610,22 @@ class KernelArgs:
                 )
             )
         for outer, inner in self.sizevars.items():
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         for arg in self.workspace_args:
-            arg_defs.append(arg.inner_name)
+            arg_defs.append(ArgName(arg.inner_name))
             call_args.append(arg.outer_name)
             precompile_args.append(arg)
             arg_types.append(arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
-    def aliases(self):
+    def aliases(self) -> Iterator[tuple[str, str]]:
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             for other in inplaced.other_names:
                 if (
@@ -1404,27 +1636,24 @@ class KernelArgs:
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
-                    yield self.output_buffers[other], inplaced.inner_name
+                    yield cast(str, self.output_buffers[other]), inplaced.inner_name
 
-    def is_removed(self, name):
-        def _is_removed(name, buffers):
-            return name not in buffers or self._buffer_is_marked_removed(buffers[name])
-
-        return _is_removed(name, self.output_buffers) and _is_removed(
-            name, self.inplace_buffers
-        )
+    def is_removed(self, name: str) -> bool:
+        return isinstance(
+            self.output_buffers.get(name, REMOVED), RemovedArg
+        ) and isinstance(self.inplace_buffers.get(name, REMOVED), RemovedArg)
 
     # Includes inplace buffers, excludes removed buffers.  Essentially,
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
-    def live_output_buffers(self):
+    def live_output_buffers(self) -> OrderedSet[str]:
         live_outs = OrderedSet()  # type: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+            if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
             live_outs.add(outer)
         return live_outs
@@ -1439,69 +1668,82 @@ class CSEVariable:
 
     def __init__(
         self,
-        name,
+        name: str,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
     ):
+        super().__init__()
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     def __hash__(self) -> int:
         return hash(self.name)
 
-    def __eq__(self, other) -> bool:
-        return type(other) == type(self) and other.name == self.name
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, CSEVariable) and other.name == self.name
 
-    def update_on_args(self, name, args, kwargs):
+    def update_on_args(self, name: str, args: Any, kwargs: Any) -> None:
         pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name!r})"
 
 
-class CppWrapperKernelArgs(KernelArgs):
-    def wrap_size_arg(self, size):
-        return f"{size}"
+AugmentedKeyT = TypeVar("AugmentedKeyT", default=str)
+CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
+
+if TYPE_CHECKING:
+    ReductionCacheKey = tuple[
+        torch.dtype,
+        ReductionType,
+        Union[CSEVariable, tuple[CSEVariable, ...]],
+    ]
 
 
-class CSE:
+class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     """Common subexpression elimination"""
 
     def __init__(
         self,
-        prefix="",
-        suffix="",
-        name_prefix="tmp",
-        iter_buffers=None,
-        store_cache=None,
-        reduction_cache=None,
-        varname_map=None,
+        prefix: str = "",
+        suffix: str = "",
+        name_prefix: str = "tmp",
+        iter_buffers: Optional[itertools.count[int]] = None,
+        store_cache: Optional[MutableMapping[str, CSEVariableType]] = None,
+        reduction_cache: Optional[
+            MutableMapping[ReductionCacheKey, CSEVariableType]
+        ] = None,
+        varname_map: Optional[dict[str, CSEVariableType]] = None,
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self._cache = {}
+        self._cache: MutableMapping[AugmentedKeyT, CSEVariableType] = {}
         self.name_prefix = name_prefix
-        self.store_cache = store_cache or {}
-        self.reduction_cache = reduction_cache or {}
-        self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = OrderedSet[str]()
-        self.varname_map = varname_map or {}
+        self.store_cache: MutableMapping[str, CSEVariableType] = store_cache or {}
+        self.reduction_cache: MutableMapping[ReductionCacheKey, CSEVariableType] = (
+            reduction_cache or {}
+        )
+        self.iter_buffer_ids: itertools.count[int] = iter_buffers or itertools.count()
+        self.invalidated_stores: OrderedSet[str] = OrderedSet()
+        self.varname_map: dict[str, CSEVariableType] = varname_map or {}
 
-    def invalidate(self, keep_vars: Union[OrderedSet[str], OrderedSet[Never]]):
-        for name, tmp in list(self.store_cache.items()):
+    def invalidate(self, keep_vars: OrderedSet[CSEVariable]) -> None:
+        for name, tmp in [*self.store_cache.items()]:
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
+        if keep_vars:
+            self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
+        else:
+            self._cache = {}
 
-    def clone(self):
-        # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
+    def clone(self) -> typing.Self:
         return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
@@ -1509,22 +1751,31 @@ class CSE:
             iter_buffers=self.iter_buffer_ids,
             store_cache=self.store_cache,
             varname_map=self.varname_map,
+            reduction_cache=self.reduction_cache,
         )
 
-    def augment_key(self, cache_key: object) -> object:
-        "Override this method to augment cache key with backend specifics"
-        return cache_key
+    def scoped_copy(self) -> typing.Self:
+        """Return a copy of using ScopedDict so changes to *_cache aren't visible in self"""
+        new_cse = self.clone()
+        new_cse._cache = ScopedDict(self._cache)
+        new_cse.reduction_cache = ScopedDict(self.reduction_cache)
+        new_cse.store_cache = ScopedDict(self.store_cache)
+        return new_cse
 
-    def put(self, cache_key: object, val: CSEVariable) -> None:
+    def augment_key(self, cache_key: str) -> AugmentedKeyT:
+        "Override this method to augment cache key with backend specifics"
+        return cast(AugmentedKeyT, cache_key)
+
+    def put(self, cache_key: str, val: CSEVariableType) -> None:
         self._cache[self.augment_key(cache_key)] = val
 
-    def contains(self, cache_key) -> bool:
+    def contains(self, cache_key: str) -> bool:
         return self.augment_key(cache_key) in self._cache
 
-    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+    def try_get(self, cache_key: str) -> Optional[CSEVariableType]:
         return self._cache.get(self.augment_key(cache_key), None)
 
-    def get(self, cache_key: object) -> CSEVariable:
+    def get(self, cache_key: str) -> CSEVariableType:
         return self._cache[self.augment_key(cache_key)]
 
     def generate(
@@ -1533,10 +1784,10 @@ class CSE:
         expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        write=True,
-        assignment=True,
+        write: bool = True,
+        assignment: bool = True,
         dtype: Optional[torch.dtype] = None,
-    ) -> CSEVariable:
+    ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
@@ -1547,7 +1798,7 @@ class CSE:
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
-            return expr
+            return cast(CSEVariableType, expr)
         elif isinstance(expr, IndentedBuffer):
             cache_key = expr.getvalue()
         elif isinstance(expr, DeferredLineBase):
@@ -1580,6 +1831,19 @@ class CSE:
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
+
+                    # cpp backend cannot determin is_vec at this point
+                    if (
+                        assignment
+                        and (
+                            config.test_configs.runtime_triton_dtype_assert
+                            or config.test_configs.static_cpp_dtype_assert
+                        )
+                        and dtype is not None
+                        and get_current_backend() != "cpp"
+                    ):
+                        check_dtype(buffer, var, dtype)
+
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
@@ -1590,7 +1854,7 @@ class CSE:
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
-    ) -> CSEVariable:
+    ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
@@ -1601,7 +1865,7 @@ class CSE:
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
-    ) -> CSEVariable:
+    ) -> CSEVariableType:
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
@@ -1615,45 +1879,22 @@ class CodeGen:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
-    def __enter__(self):
+    def __enter__(self) -> typing.Self:
         self.exit_stack.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
-class ScopedDict:
-    def __init__(self, original_dict):
-        self.original_dict = original_dict
-        self.new_items = {}
+class Kernel(CodeGen, Generic[CSEVariableType]):
+    newvar_prefix: str = ""
+    suffix: str = ""
+    overrides: Optional[Callable[[], OpsHandler[Any]]] = None
 
-    def __getitem__(self, key):
-        if key in self.new_items:
-            return self.new_items[key]
-        return self.original_dict[key]
-
-    def __setitem__(self, key, value):
-        self.new_items[key] = value
-
-    def __contains__(self, key):
-        return key in self.new_items or key in self.original_dict
-
-    def get(self, key, default=None):
-        if key in self.new_items:
-            return self.new_items[key]
-        return self.original_dict.get(key, default)
-
-
-class Kernel(CodeGen):
-    newvar_prefix = ""
-    suffix = ""
-    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
-    # TODO: these look dead, but with all the getattr it's hard to tell...
-    load_format: None = None
-    store_format: None = None
-
-    def __init__(self, args=None, increase_kernel_count=True):
+    def __init__(
+        self, args: Optional[KernelArgs] = None, increase_kernel_count: bool = True
+    ) -> None:
         super().__init__()
         if increase_kernel_count:
             metrics.generated_kernel_count += 1
@@ -1665,13 +1906,13 @@ class Kernel(CodeGen):
         self.num_load = 0
         self.num_reduction = 0
 
-        self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
+        self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = OrderedSet[str]()
         self.store_buffer_names = OrderedSet[str]()
-        self._load_mask = None
-        self._load_other = None
+        self._load_mask: Optional[str] = None
+        self._load_other: Union[None, int, float] = None
         # OrderedSet in set_current_node
-        self.current_node = None
+        self.current_node: Optional[SchedulerNode] = None
         self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
         self.removed_buffers = OrderedSet[str]()
@@ -1680,13 +1921,13 @@ class Kernel(CodeGen):
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = {}
+        self.inplace_update_buffers: dict[str, str] = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
-        self.kernel_name = None
+        self.kernel_name: Optional[str] = None
 
     @contextlib.contextmanager
-    def set_current_node(self, node):
+    def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
         prior = self.current_node
         self.current_node = node
         self.node_to_bounds = node._body.bounds().get_bounds()
@@ -1696,16 +1937,16 @@ class Kernel(CodeGen):
             self.current_node = prior
 
     @contextlib.contextmanager
-    def swap_buffers(self, lb, cb=None, sb=None):
-        def scope_cse(cse):
-            new_cse = cse.clone()
-            new_cse._cache = ScopedDict(cse._cache)
-            new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
-            new_cse.store_cache = ScopedDict(cse.store_cache)
-            return new_cse
-
+    def swap_buffers(
+        self,
+        lb: IndentedBuffer,
+        cb: Optional[IndentedBuffer] = None,
+        sb: Optional[IndentedBuffer] = None,
+    ) -> Iterator[None]:
         if cb is None:
             cb = lb
+        if disallow_stores := sb is None:
+            sb = IndentedBuffer()
         loads = self.loads
         compute = self.compute
         stores = self.stores
@@ -1713,7 +1954,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = scope_cse(cse)
+        self.cse = cse.scoped_copy()
         try:
             yield
         finally:
@@ -1721,11 +1962,13 @@ class Kernel(CodeGen):
             self.compute = compute
             self.stores = stores
             self.cse = cse
+            if disallow_stores:
+                assert not sb, "unexpected store inside swap_buffers"
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
-    def indirect_load(self, name: str, index: sympy.Expr):
+    def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
@@ -1735,7 +1978,7 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         raise NotImplementedError
 
     def store(
@@ -1771,7 +2014,7 @@ class Kernel(CodeGen):
     ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
-    def var_ranges(self):
+    def var_ranges(self) -> dict[sympy.Symbol, sympy.Expr]:
         raise NotImplementedError
 
     def bucketize(
@@ -1825,352 +2068,22 @@ class Kernel(CodeGen):
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
-    ):
+    ) -> None:
         raise NotImplementedError
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
 
-    def __enter__(self):
-        # TODO: hoist this to top level
-        class CSEProxy:
-            self.name = "CSEProxy"
-            vr_analysis = ValueRangeAnalysis()
-
-            @staticmethod
-            def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
-                def inner(*args, **kwargs):
-                    bounds = CSEProxy._bound_variable(name, *args, **kwargs)
-
-                    value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-                    dtype_handler = DtypePropagationOpsHandler()
-
-                    output_idx = 0
-
-                    def do_cse(v):
-                        # cpp backend doesnt set current device - TODO: fix
-                        if V.graph.current_device is not None:
-                            device_str = V.graph.get_current_device_or_throw().type
-                            triton_backend = (
-                                config.cpu_backend == "triton"
-                                if device_str == "cpu"
-                                else config.cuda_backend == "triton"
-                                if device_str != "mps"
-                                else False
-                            )
-                        else:
-                            triton_backend = False
-
-                        # only triton backend tracks dtype currently
-                        if triton_backend:
-                            if name == "masked":
-                                output_dtype = value.dtype
-                            else:
-                                output_dtype = getattr(
-                                    dtype_handler,
-                                    name,
-                                )(*args, **kwargs)
-                        else:
-                            # cpp backend doesnt track dtype yet
-                            output_dtype = None
-
-                        csevar = V.kernel.cse.generate(
-                            V.kernel.compute,
-                            v,
-                            bounds=bounds,
-                            dtype=output_dtype,
-                        )
-
-                        nonlocal output_idx
-                        if (
-                            config.test_configs.runtime_triton_dtype_assert
-                            and triton_backend
-                        ):
-                            from torch._inductor.codegen.triton import triton_type
-
-                            # we tree_map over the output, so we need to fetch corresponding dtype
-                            if isinstance(output_dtype, (list, tuple)):
-                                output_dtype = output_dtype[output_idx]
-
-                            V.kernel.compute.writeline(
-                                f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
-                            )
-                        output_idx += 1
-
-                        csevar.update_on_args(name, args, kwargs)
-
-                        return csevar
-
-                    return pytree.tree_map(do_cse, value)
-
-                return inner
-
-            @staticmethod
-            def _bound_variable(name, *args, **kwargs):
-                """
-                If the variable comes from an FX node, we forward the bound we have already computed
-                Else, if the variable when codegen'ing another op, we try to compute its bounds
-                """
-                from ..select_algorithm import TritonTemplateKernel
-
-                if isinstance(V.kernel, TritonTemplateKernel):
-                    return ValueRanges.unknown()
-
-                fx_node = V.interpreter.current_node
-                if fx_node.target == name and self.node_to_bounds is not None:
-                    assert isinstance(self.node_to_bounds, dict)
-                    return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
-                elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
-                    # These create lots of inner strings. We would need to compute the bounds at the ops
-                    # We will also likely not get much from computing VRs on these nodes
-                    if any(
-                        s in fx_node.target
-                        for s in ("set_indirect", "reduction", "scan")
-                    ):
-                        return ValueRanges.unknown()
-
-                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
-                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
-
-                    # If there is no FX bound but we know how to compute one we do so
-                    assert not kwargs
-
-                    def arg_to_bound(x):
-                        if isinstance(x, CSEVariable):
-                            return x.bounds
-                        elif isinstance(x, sympy.Expr):
-                            return bound_sympy(x)
-                        else:
-                            return x
-
-                    arg_bounds = list(map(arg_to_bound, args))
-                    return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                return ValueRanges.unknown()
-
-            @staticmethod
-            def indirect_indexing(
-                var: CSEVariable,
-                size: Union[sympy.Expr, int],
-                check: bool = True,
-                wrap_neg=True,
-            ):
-                if isinstance(size, int):
-                    size = sympy.Integer(size)
-                assert isinstance(size, sympy.Expr), size
-                # Skip CSE since this doesn't return an expression
-
-                if var.bounds.lower < 0:  # type: ignore[operator]
-                    if wrap_neg:
-                        stm = ops.add(var, ops.index_expr(size, torch.long))
-                        # Mixed negative and non-negative
-                        if var.bounds.upper >= 0:  # type: ignore[operator]
-                            lt = ops.lt(var, 0)
-                            stm = ops.where(lt, stm, var)
-                    else:
-                        stm = var
-
-                    # Propagate bounds as we know how to compute them properly
-                    new_bounds = ValueRanges.unknown()
-                    if var.bounds != ValueRanges.unknown() and isinstance(
-                        size, sympy.Number
-                    ):
-                        # Take the negative part of the bound and add size to it
-                        # Then take union of that and the positive part
-                        # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
-                        new_bounds = ValueRanges(
-                            neg_bounds.lower + size, neg_bounds.upper + size
-                        )
-                        # We don't have a good way of representing the empty range
-                        if var.bounds.upper >= 0:  # type: ignore[operator]
-                            pos = var.bounds & ValueRanges(0, int_oo)
-                            new_bounds = new_bounds | pos
-
-                    var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-                sympy_var = parent_handler.indirect_indexing(var, size, check)
-                if generate_assert(check):
-                    assert_lower = not (var.bounds.lower >= 0)
-                    # value ranges cannot x < s when x and s are symbols
-                    assert_upper = not isinstance(size, sympy.Number) or not (
-                        var.bounds.upper < size
-                    )
-                    self.check_bounds(sympy_var, size, assert_lower, assert_upper)
-                return sympy_var
-
-            @staticmethod
-            def check_bounds(
-                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
-            ):
-                return self.check_bounds(expr, size, lower, upper)
-
-            @staticmethod
-            def load(name: str, index: sympy.Expr) -> CSEVariable:
-                if name in self.cse.invalidated_stores:
-                    # A load from an invalidated store requires us to
-                    # keep the actual buffer around
-                    V.kernel.must_keep_buffers.add(name)
-                if free_symbol_is_type(index, SymT.TMP):
-                    return self.indirect_load(name, index)
-                store_cache = self.cse.store_cache
-                if name in store_cache:
-                    return store_cache[name]
-                out = self.load(name, index)
-                # count load that is not in the store_cache, and also not in the
-                # cse cache.
-                if out.use_count == 1:
-                    self.num_load += 1
-                return out
-
-            @staticmethod
-            def _update_store_cache(name: str, value: CSEVariable):
-                self.cse.store_cache[name] = value
-                if self.current_node and name in V.graph.name_to_buffer:
-                    buf = self.current_node.get_output(name)
-                    for other_name in buf.get_mutations():
-                        self.cse.store_cache[other_name] = value
-
-            @staticmethod
-            def store(
-                name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
-            ) -> None:
-                self.store_buffer_names.add(name)
-                if mode is None:
-                    CSEProxy._update_store_cache(name, value)
-                if name not in V.graph.removed_buffers:
-                    return self.store(name, index, value, mode=mode)
-                return None  # type: ignore[return-value]
-
-            @staticmethod
-            def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
-                self.store_buffer_names.add(name)
-                CSEProxy._update_store_cache(name, value)
-
-                if name not in V.graph.removed_buffers:
-                    return self.store_reduction(name, index, value)
-
-            @staticmethod
-            def reduction(
-                dtype: torch.dtype,
-                src_dtype: torch.dtype,
-                reduction_type: ReductionType,
-                value: Union[CSEVariable, tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-                self.num_reduction += 1
-                return self.reduction(dtype, src_dtype, reduction_type, value)
-
-            @staticmethod
-            def scan(
-                dtypes: tuple[torch.dtype, ...],
-                combine_fn: Callable[
-                    [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
-                    tuple[CSEVariable, ...],
-                ],
-                values: tuple[CSEVariable, ...],
-            ) -> tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values)
-
-            @staticmethod
-            def sort(
-                dtypes: tuple[torch.dtype, ...],
-                values: tuple[CSEVariable, ...],
-                stable: bool,
-                descending: bool,
-            ) -> tuple[CSEVariable, ...]:
-                return self.sort(dtypes, values, stable, descending)
-
-            @staticmethod
-            def bucketize(
-                values: CSEVariable,
-                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
-                boundary_indices: CSEVariable,
-                indexing_dtype: torch.dtype,
-                right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
-                sorter_indices: Optional[CSEVariable] = None,
-            ) -> CSEVariable:
-                """
-                [Note: Inductor bucketize op]
-
-                Inputs:
-                -------
-                values: the values to be bucketized.
-                boundaries: a tuple containing
-                  (a) the name of the boundaries tensor (which must be sorted, unless
-                  the sorting tensor is present),
-                  (b) the length of the tensor in the last dimension (i.e. the length of
-                  one set of boundaries),
-                  (c) the number of elements in the underlying storage (i.e. the length
-                  of the flattened tensor, ignoring striding), and
-                  (d) the stride of the tensor in the last dimension.
-                boundary_indices: indices into a flattened version of the boundaries
-                tensor, of the same size and shape as "values".  Each index points to
-                the first element in the set of boundaries to be used for the
-                corresponding value.
-                indexing_dtype: the dtype to use when indexing into the boundaries
-                tensor.  This must be int64 or int32.  This additionally specifies the
-                dtype of the return value.
-                right: see "Details" below.
-                sorter: an optional tuple containing
-                  (a) the name of an optional sorting tensor, used to access unsorted
-                  boundaries without reordering the boundaries tensor, and
-                  (b) the stride of the tensor in the last dimension.
-                The values in the sorting tensor are used as indices into the *last*
-                dimension of the boundaries tensor, with all other indices matching.
-                The size of the sorting and boundaries tensors must be equivalent.
-                sorter_indices: must be present if the sorting array is present; see
-                "boundary_indices" for the equivalent definition for the boundaries
-                tensor.
-
-                Output:
-                -------
-                The buckets each value belongs in, within a given set of boundaries.  0
-                indicates a position before the first boundary, and len(boundaries_set)
-                represents a position after the last boundary.
-
-                Details:
-                --------
-                Given a value and a set of boundaries, calculate the bucket that each
-                value belongs to.  This works differently in 1-D and N-D cases.
-
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [0, 4, 4, 8], right=True
-                return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
-
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [[0, 4], [4, 8]], right=True
-                return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
-
-                Note that in the N-D boundaries case, the shape of "values" and
-                "boundaries" must match in every dimension _except_ the last.
-
-                When right == False, bucket i refers to range (boundaries[i], boundaries[i+1]].
-                When right == True,  bucket i refers to range [boundaries[i], boundaries[i+1]).
-
-                Boundaries must be non-decreasing, or a sorter must be provided which
-                would re-index offsets in a non-decreasing order (e.g. the second output
-                of torch.sort(offsets)).  Otherwise, the result is undefined.
-                """
-                return self.bucketize(
-                    values,
-                    boundaries,
-                    boundary_indices,
-                    indexing_dtype,
-                    right,
-                    sorter,
-                    sorter_indices,
-                )
-
-        # Use mypy to check protocol implemented correctly
-        def _typecheck_CSEProxy(h: CSEProxy) -> OpsHandler[CSEVariable]:
-            return h
-
+    def __enter__(self) -> typing.Self:
         super().__enter__()
         assert self.overrides
-        parent_handler = self.overrides(V.get_ops_handler())
-        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
+        self.exit_stack.enter_context(
+            V.set_ops_handler(CSEProxy(self, self.overrides()))
+        )
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
@@ -2186,7 +2099,7 @@ class Kernel(CodeGen):
         if not scheduler:
             return
         fused_node_names = OrderedSet(
-            scheduler.name_to_buf[buf].defining_op.get_name()
+            scheduler.name_to_buf[buf].defining_op_name()
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
@@ -2204,7 +2117,7 @@ class Kernel(CodeGen):
         for name in names_to_remove:
             if name in self.args.inplace_buffers:
                 buf = self.args.inplace_buffers[name]
-                if isinstance(buf, str) and buf.startswith("REMOVED"):
+                if isinstance(buf, RemovedArg):
                     continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
@@ -2218,16 +2131,17 @@ class Kernel(CodeGen):
         # because we still rely on output_buffers's length to
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
-        self.args.output_buffers[name] = "REMOVED"
+        self.args.output_buffers[name] = REMOVED
         self.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name: str) -> None:
         log.debug("removing_inplace_buffer(%r)", name)
-        inner_name = self.args.inplace_buffers[name].inner_name
-        self.args.inplace_buffers[name] = inner_name.replace("in_out_ptr", "REMOVED")
+        self.args.inplace_buffers[name] = REMOVED
         self.removed_buffers.add(name)
 
-    def rename_indexing(self, index) -> sympy.Expr:
+    def rename_indexing(
+        self, index: Union[list[sympy.Expr], tuple[sympy.Expr, ...], sympy.Expr]
+    ) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
@@ -2248,8 +2162,16 @@ class Kernel(CodeGen):
         }
         return sympy_subs(index, replacements)
 
-    def create_cse_var(self, *args, **kwargs):
+    def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         return CSEVariable(*args, **kwargs)
+
+    def arg_name(self, node: IRNode) -> Optional[str]:
+        """
+        Returns arg name of a given input or output node.
+        """
+        if node is None:
+            return None
+        return self.args.arg_name(node.get_name())
 
 
 @dataclasses.dataclass
@@ -2261,7 +2183,7 @@ class OptimizationContext:
 
 
 @functools.lru_cache(None)
-def jinja2_env():
+def jinja2_env() -> Any:
     try:
         import jinja2
 
@@ -2280,7 +2202,9 @@ class KernelTemplate:
     """
 
     @staticmethod
-    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+    def indent_except_first(
+        source: str, num_indents: int, indents_spacing: int = 4
+    ) -> str:
         lines = source.splitlines(True)
         if len(lines) > 1:
             lines[1:] = [
@@ -2289,64 +2213,74 @@ class KernelTemplate:
         return "".join(lines)
 
     @staticmethod
-    def _template_from_string(source):
+    def _template_from_string(source: str) -> Any:
         env = jinja2_env()
         if env is None:
             return None
         env.filters["indent_except_first"] = KernelTemplate.indent_except_first
         from jinja2 import TemplateSyntaxError
 
-        class DetailedTemplateSyntaxError(TemplateSyntaxError):
-            def __init__(self, original_error):
-                super().__init__(
-                    original_error.message,
-                    original_error.lineno,
-                    original_error.name,
-                    original_error.filename,
-                )
-                self.original_error = original_error
-
-            def __str__(self):
-                error_info = f"Error in template at line {self.lineno}\n"
-                error_info += f"Error message: {self.message}\n"
-                if hasattr(self.original_error, "source"):
-                    lines = self.original_error.source.split("\n")
-                    error_info += "Context:\n"
-                    start = max(0, self.lineno - 2)
-                    end = min(len(lines), self.lineno + 2)
-                    for i in range(start, end):
-                        if i == self.lineno - 1:
-                            error_info += f"{i + 1}: --> {lines[i]}\n"
-                            if hasattr(self.original_error, "column"):
-                                error_info += (
-                                    "     "
-                                    + " " * (self.original_error.column - 1)
-                                    + "^\n"
-                                )
-                        else:
-                            error_info += f"{i + 1}:     {lines[i]}\n"
-                return error_info
-
         try:
             return env.from_string(source)
         except TemplateSyntaxError as e:
+
+            class DetailedTemplateSyntaxError(TemplateSyntaxError):
+                def __init__(self, original_error: TemplateSyntaxError) -> None:
+                    super().__init__(
+                        original_error.message,
+                        original_error.lineno,
+                        original_error.name,
+                        original_error.filename,
+                    )
+                    self.original_error = original_error
+
+                def __str__(self) -> str:
+                    error_info = f"Error in template at line {self.lineno}\n"
+                    error_info += f"Error message: {self.message}\n"
+                    if hasattr(self.original_error, "source"):
+                        lines = self.original_error.source.split("\n")
+                        error_info += "Context:\n"
+                        start = max(0, self.lineno - 2)
+                        end = min(len(lines), self.lineno + 2)
+                        for i in range(start, end):
+                            if i == self.lineno - 1:
+                                error_info += f"{i + 1}: --> {lines[i]}\n"
+                                if hasattr(self.original_error, "column"):
+                                    error_info += (
+                                        "     "
+                                        + " " * (self.original_error.column - 1)
+                                        + "^\n"
+                                    )
+                            else:
+                                error_info += f"{i + 1}:     {lines[i]}\n"
+                    return error_info
+
             raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
-    def _fake_get_dtype(fake_out):
+    def _fake_get_dtype(
+        fake_outs: Union[list[Buffer], Buffer],
+    ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
+        if isinstance(fake_outs, (list, tuple)):
+            lookup = {buf.get_name(): buf.get_dtype() for buf in fake_outs}
+        else:
+            lookup = {fake_outs.get_name(): fake_outs.get_dtype()}
 
-        def get_dtype(name):
-            if name == fake_out.get_name():
-                return fake_out.get_dtype()
+        def get_dtype(name: str) -> torch.dtype:
+            result = lookup.get(name)
+            if result is not None:
+                return result
             return _get_dtype_real(name)
 
         return get_dtype
 
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
 
-    def maybe_append_choice(self, choices, **kwargs):
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -2359,11 +2293,330 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
 
-    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
+    def generate(self, **kwargs: Any) -> ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """
 
         raise NotImplementedError
+
+
+class CSEProxy(DefaultHandler):
+    name = "CSEProxy"
+
+    def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
+        super().__init__()
+        from ..bounds import ValueRangeAnalysis
+
+        self.vr_analysis = ValueRangeAnalysis()
+        self.kernel = kernel
+        self.parent_handler = parent_handler
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        bounds = self._bound_variable(name, *args, **kwargs)
+
+        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        dtype_handler = DtypePropagationOpsHandler()
+
+        backend = get_current_backend()
+
+        output_dtype = None
+        if name == "masked" and backend == "triton":
+            output_dtype = value.dtype
+        elif name == "masked" and backend == "cpp":
+            output_dtype = V.interpreter.current_node.meta.get(
+                OptimizationContext.key, None
+            ).dtype
+        elif backend in ("triton", "cpp"):
+            dtype_op = getattr(dtype_handler, name)
+            output_dtype = dtype_op(*args, **kwargs)
+
+        if backend in ("triton", "cpp"):
+            # maybe there are some exceptions on mps?
+            assert output_dtype is not None
+
+        output_idx = 0
+
+        def do_cse(v: str) -> CSEVariable:
+            # we tree_map over the output, so we need to fetch corresponding dtype
+            nonlocal output_idx
+            var_dtype: torch.dtype = (
+                output_dtype[output_idx]  # type: ignore[assignment]
+                if isinstance(output_dtype, (list, tuple))
+                else output_dtype
+            )
+            output_idx += 1
+
+            # some cpp op implementations don't set the dtype
+            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
+                v.dtype = var_dtype
+
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute,
+                v,
+                bounds=bounds,
+                dtype=output_dtype,
+            )
+
+            csevar.update_on_args(name, args, kwargs)
+
+            if (
+                config.test_configs.runtime_triton_dtype_assert
+                or config.test_configs.static_cpp_dtype_assert
+            ):
+                check_dtype(V.kernel.compute, csevar, var_dtype)
+            return csevar
+
+        return pytree.tree_map(do_cse, value)
+
+    def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
+        """
+        If the variable comes from an FX node, we forward the bound we have already computed
+        Else, if the variable when codegen'ing another op, we try to compute its bounds
+        """
+        from ..bounds import ValueRangeAnalysis
+        from ..select_algorithm import TritonTemplateKernel
+
+        if isinstance(V.kernel, TritonTemplateKernel):
+            return ValueRanges.unknown()
+
+        fx_node = V.interpreter.current_node
+        if fx_node.target == name and self.kernel.node_to_bounds is not None:
+            assert isinstance(self.kernel.node_to_bounds, dict)
+            return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
+        elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
+            # These create lots of inner strings. We would need to compute the bounds at the ops
+            # We will also likely not get much from computing VRs on these nodes
+            if any(s in fx_node.target for s in ("set_indirect", "reduction", "scan")):
+                return ValueRanges.unknown()
+
+            # We assume that the inputs come from `ops.` and are not strings. If you want to generate
+            # intermediary strings, wrap them in CSE variables with properly initialised bounds.
+
+            # If there is no FX bound but we know how to compute one we do so
+            assert not kwargs
+
+            def arg_to_bound(x: Any) -> Any:
+                if isinstance(x, CSEVariable):
+                    return x.bounds
+                elif isinstance(x, sympy.Expr):
+                    return bound_sympy(x)
+                else:
+                    return x
+
+            arg_bounds = list(map(arg_to_bound, args))
+            return getattr(self.vr_analysis, name)(*arg_bounds)
+        return ValueRanges.unknown()
+
+    def indirect_indexing(
+        self,
+        var: CSEVariable,
+        size: Union[sympy.Expr, int],
+        check: bool = True,
+        wrap_neg: bool = True,
+    ) -> sympy.Symbol:
+        if isinstance(size, int):
+            size = sympy.Integer(size)
+        assert isinstance(size, sympy.Expr), size
+        # Skip CSE since this doesn't return an expression
+
+        if var.bounds.lower < 0:  # type: ignore[operator]
+            if wrap_neg:
+                stm = ops.add(var, ops.index_expr(size, torch.long))
+                # Mixed negative and non-negative
+                if var.bounds.upper >= 0:  # type: ignore[operator]
+                    lt = ops.lt(var, 0)
+                    stm = ops.where(lt, stm, var)
+            else:
+                stm = var
+
+            # Propagate bounds as we know how to compute them properly
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
+                new_bounds = ValueRanges(
+                    neg_bounds.lower + size, neg_bounds.upper + size
+                )
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:  # type: ignore[operator]
+                    pos = var.bounds & ValueRanges(0, int_oo)
+                    new_bounds = new_bounds | pos
+
+            var = self.kernel.cse.generate(self.kernel.compute, stm, bounds=new_bounds)
+
+        sympy_var = self.parent_handler.indirect_indexing(var, size, check)
+        if generate_assert(check):
+            assert_lower = not (var.bounds.lower >= 0)
+            # value ranges cannot x < s when x and s are symbols
+            assert_upper = not isinstance(size, sympy.Number) or not (
+                var.bounds.upper < size
+            )
+            self.kernel.check_bounds(sympy_var, size, assert_lower, assert_upper)
+        return sympy_var
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        return self.kernel.check_bounds(expr, size, lower, upper)
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        if name in self.kernel.cse.invalidated_stores:
+            # A load from an invalidated store requires us to
+            # keep the actual buffer around
+            V.kernel.must_keep_buffers.add(name)
+        if free_symbol_is_type(index, SymT.TMP):
+            return self.kernel.indirect_load(name, index)
+        store_cache = self.kernel.cse.store_cache
+        if name in store_cache:
+            return store_cache[name]
+        out = self.kernel.load(name, index)
+        # count load that is not in the store_cache, and also not in the
+        # cse cache.
+        if out.use_count == 1:
+            self.kernel.num_load += 1
+        return out
+
+    def _update_store_cache(self, name: str, value: CSEVariable) -> None:
+        self.kernel.cse.store_cache[name] = value
+        if self.kernel.current_node and name in V.graph.name_to_buffer:
+            buf = self.kernel.current_node.get_output(name)
+            for other_name in buf.get_mutations():
+                self.kernel.cse.store_cache[other_name] = value
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        self.kernel.store_buffer_names.add(name)
+        if mode is None:
+            self._update_store_cache(name, value)
+        if name not in V.graph.removed_buffers:
+            return self.kernel.store(name, index, value, mode=mode)
+        return None  # type: ignore[return-value]
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        self.kernel.store_buffer_names.add(name)
+        self._update_store_cache(name, value)
+
+        if name not in V.graph.removed_buffers:
+            return self.kernel.store_reduction(name, index, value)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        self.kernel.num_reduction += 1
+        return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
+            tuple[CSEVariable, ...],
+        ],
+        values: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
+        return self.kernel.scan(dtypes, combine_fn, values)
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[CSEVariable, ...]:
+        return self.kernel.sort(dtypes, values, stable, descending)
+
+    def bucketize(
+        self,
+        values: CSEVariable,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: CSEVariable,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
+    ) -> CSEVariable:
+        """
+        [Note: Inductor bucketize op]
+
+        Inputs:
+        -------
+        values: the values to be bucketized.
+        boundaries: a tuple containing
+          (a) the name of the boundaries tensor (which must be sorted, unless
+          the sorting tensor is present),
+          (b) the length of the tensor in the last dimension (i.e. the length of
+          one set of boundaries),
+          (c) the number of elements in the underlying storage (i.e. the length
+          of the flattened tensor, ignoring striding), and
+          (d) the stride of the tensor in the last dimension.
+        boundary_indices: indices into a flattened version of the boundaries
+        tensor, of the same size and shape as "values".  Each index points to
+        the first element in the set of boundaries to be used for the
+        corresponding value.
+        indexing_dtype: the dtype to use when indexing into the boundaries
+        tensor.  This must be int64 or int32.  This additionally specifies the
+        dtype of the return value.
+        right: see "Details" below.
+        sorter: an optional tuple containing
+          (a) the name of an optional sorting tensor, used to access unsorted
+          boundaries without reordering the boundaries tensor, and
+          (b) the stride of the tensor in the last dimension.
+        The values in the sorting tensor are used as indices into the *last*
+        dimension of the boundaries tensor, with all other indices matching.
+        The size of the sorting and boundaries tensors must be equivalent.
+        sorter_indices: must be present if the sorting array is present; see
+        "boundary_indices" for the equivalent definition for the boundaries
+        tensor.
+
+        Output:
+        -------
+        The buckets each value belongs in, within a given set of boundaries.  0
+        indicates a position before the first boundary, and len(boundaries_set)
+        represents a position after the last boundary.
+
+        Details:
+        --------
+        Given a value and a set of boundaries, calculate the bucket that each
+        value belongs to.  This works differently in 1-D and N-D cases.
+
+        for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [0, 4, 4, 8], right=True
+        return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
+
+        for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [[0, 4], [4, 8]], right=True
+        return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
+
+        Note that in the N-D boundaries case, the shape of "values" and
+        "boundaries" must match in every dimension _except_ the last.
+
+        When right == False, bucket i refers to range (boundaries[i], boundaries[i+1]].
+        When right == True,  bucket i refers to range [boundaries[i], boundaries[i+1]).
+
+        Boundaries must be non-decreasing, or a sorter must be provided which
+        would re-index offsets in a non-decreasing order (e.g. the second output
+        of torch.sort(offsets)).  Otherwise, the result is undefined.
+        """
+        return self.kernel.bucketize(
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
+        )

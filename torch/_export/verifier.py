@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import inspect
 import math
 import operator
@@ -134,18 +133,23 @@ class Verifier(metaclass=_VerifierMeta):
             operator.pow,
             operator.neg,
             operator.abs,
+            operator.lshift,
+            operator.rshift,
             math.ceil,
             math.floor,
             math.trunc,
             round,
-            builtins.getattr,
         ]
 
     def allowed_op_types(self) -> tuple[type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> tuple[type[Any], ...]:
-        return (torch.fx.GraphModule,)
+        return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
+
+    def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
+        # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
 
     def check_valid_op(self, op):
         pass
@@ -163,8 +167,11 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
-        def _allowed_getattr_types() -> tuple[type[Any], ...]:
-            ret = self.allowed_getattr_types()
+        def _allowed_getattr_types(is_toplevel_gm) -> tuple[type[Any], ...]:
+            if is_toplevel_gm:
+                ret = self.allowed_getattr_types()
+            else:
+                ret = self.allowed_getattr_types_for_subgm()
             assert not any(t is object for t in ret)
             return ret
 
@@ -216,6 +223,8 @@ class Verifier(metaclass=_VerifierMeta):
             self.check_valid_op(op)
 
         for mod in gm.modules():
+            is_toplevel_gm = mod is gm
+
             if not isinstance(mod, torch.fx.GraphModule):
                 continue
 
@@ -259,11 +268,14 @@ class Verifier(metaclass=_VerifierMeta):
                                     f"processed_bytes(bytes) : {type(processed_bytes)}, "
                                     f"compile_specs(list) : {type(compile_specs)}"
                                 )
+                        elif type(attr).__name__ == "AOTInductorEPModule":
+                            continue
 
-                    if not isinstance(attr, _allowed_getattr_types()):
+
+                    if not isinstance(attr, _allowed_getattr_types(is_toplevel_gm)):
                         raise SpecViolationError(
                             f"Invalid get_attr type {type(attr)}. \n"
-                            f"Valid get_attr types: {_allowed_getattr_types()}"
+                            f"Valid get_attr types: {_allowed_getattr_types(is_toplevel_gm)}"
                         )
 
 

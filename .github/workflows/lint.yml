@@ -1,4 +1,5 @@
 name: Lint
+# Workflow that runs lint checks and also unittests for tools, and scripts.
 
 on:
   pull_request:
@@ -25,7 +26,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   lintrunner-clang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -42,7 +43,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -58,7 +59,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   quick-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -67,10 +68,6 @@ jobs:
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Ensure no non-breaking spaces
         # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
         # does not support the '\u000a' syntax (which is relevant for local linters)
@@ -115,7 +112,7 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -125,10 +122,6 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
 
@@ -153,7 +146,7 @@ jobs:
         exit $RC
 
   toc:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -162,10 +155,6 @@ jobs:
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Regenerate ToCs and check that they didn't change
         set -eu
 
@@ -193,7 +182,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -202,18 +191,15 @@ jobs:
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Test tools
+        PYTHONPATH=$(pwd) pytest tools/stats
         PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
         PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -239,10 +225,18 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        test_type: [with_torch, without_torch, older_python_version]
+        include:
+          - test_type: with_torch
+            runner: linux.24_04.4x
+          - test_type: without_torch
+            runner: linux.24_04.4x
+          # NOTE: The oldest supported version of python for 24.04 is 3.8
+          #       so this cannot be updated if we want to keep this test at 3.6
+          - test_type: older_python_version
+            runner: linux.20_04.4x
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
@@ -251,21 +245,28 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.6
+      - name: Get min python version
+        id: get-min-python-version
+        if: matrix.test_type == 'older_python_version'
+        run: |
+          set -eou pipefail
+          # Generate PyTorch version to use
+          echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
+      - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.6'
+          python-version: 3.6
           architecture: x64
           check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.9
+      - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
           check-latest: false
           cache: pip

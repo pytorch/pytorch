@@ -3,6 +3,8 @@ import logging
 from collections.abc import Sequence
 from typing import cast
 
+from torch.utils._ordered_set import OrderedSet
+
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
@@ -10,7 +12,7 @@ from ...ir import CUDATemplateBuffer
 from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer
+from ..common import BackendFeature, IndentedBuffer
 
 
 log = logging.getLogger(__name__)
@@ -26,8 +28,8 @@ class CUDACPPScheduling(BaseScheduling):
     """
 
     @classmethod
-    def get_backend_features(cls, device):
-        return {}
+    def get_backend_features(cls, device) -> OrderedSet[BackendFeature]:
+        return OrderedSet()
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -85,9 +87,9 @@ class CUDACPPScheduling(BaseScheduling):
         Codegen a CUDA template, possibly with fused epilogues
         """
         counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cuda_cpp_template(
-            template_node
-        ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+        assert self.is_cuda_cpp_template(template_node), (
+            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+        )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1

@@ -400,7 +400,13 @@ Tensor& set_storage_meta__symint(
     c10::SymInt storage_offset,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride) {
-  checkSetStorage(result, storage, storage_offset, size, stride);
+  checkSetStorage(
+      result,
+      storage,
+      storage_offset,
+      size,
+      stride,
+      /*check_offset_in_bounds=*/false);
 
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
@@ -1234,8 +1240,7 @@ Tensor diagonal(
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t diag_size;
+  int64_t diag_size = 0;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
   // for positive values of offset (above the main diagonal)
@@ -1616,9 +1621,7 @@ Tensor& narrow_copy_dense_cpu_out(
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
   const auto itemsize = self_contig->dtype().itemsize();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t src_nbytes = itemsize * self_contig->numel();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];
@@ -3607,11 +3610,11 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  std::swap(strides[dim0], strides[dim1]);
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  self.as_strided_(sizes, strides);
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
+  std::swap(strides[dim0], strides[dim1]);
+  auto result = self.as_strided__symint(std::move(sizes), std::move(strides));
   return self;
 }
 

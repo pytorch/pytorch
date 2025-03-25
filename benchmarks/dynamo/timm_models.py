@@ -10,9 +10,9 @@ import warnings
 
 
 try:
-    from .common import BenchmarkRunner, download_retry_decorator, main
+    from .common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 except ImportError:
-    from common import BenchmarkRunner, download_retry_decorator, main
+    from common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 
 import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
@@ -127,6 +127,7 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
     "cspdarknet53",
+    "gluon_inception_v3",
 }
 
 
@@ -217,6 +218,18 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def _config(self):
+        return load_yaml_file("timm_models.yaml")
+
+    @property
+    def _skip(self):
+        return self._config["skip"]
+
+    @property
+    def skip_models(self):
+        return self._skip["all"]
 
     @property
     def force_amp_for_fp16_bf16_models(self):
