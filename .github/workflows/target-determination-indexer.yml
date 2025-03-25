@@ -26,7 +26,7 @@ jobs:
     environment: target-determinator-env
     steps:
       - name: Clone PyTorch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: pytorch
 
@@ -59,14 +59,14 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
 
       - name: Clone CodeLlama
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: osalpekar/codellama
           ref: 1ec50e0cfc0fadc3b6ceb146617e2119ab26eb34
           path: codellama
 
       - name: Clone Target Determination Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.2
