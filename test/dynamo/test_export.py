@@ -1897,18 +1897,18 @@ def forward(self, x, y):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    sym_size_int = torch.ops.aten.sym_size.int(l_x_, 0)
-    le = sym_size_int <= 2;  sym_size_int = None
-    cond_true_0 = self.cond_true_0
-    cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
-    getitem_3 = cond[0]
-    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
-    ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
-    getitem_4 = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem_4], self._out_spec)""",  # noqa: B950
+    sym_size_int_1 = torch.ops.aten.sym_size.int(l_x_, 0)
+    le_1 = sym_size_int_1 <= 2;  sym_size_int_1 = None
+    cond_true_1 = self.cond_true_0
+    cond_false_1 = self.cond_false_0
+    cond_1 = torch.ops.higher_order.cond(le_1, cond_true_1, cond_false_1, [l_x_]);  le_1 = cond_true_1 = cond_false_1 = l_x_ = None
+    getitem_1 = cond_1[0]
+    sym_size_int_2 = torch.ops.aten.sym_size.int(getitem_1, 0);  getitem_1 = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_1 = None
+    ge_1 = sym_size_int_2 >= 2;  sym_size_int_2 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge_1 = _assert_scalar_default_1 = None
+    getitem_2 = cond_1[0];  cond_1 = None
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",  # noqa: B950
             )
             self.assertExpectedInline(
                 out_graph.cond_true_0.code.strip(),
@@ -3842,15 +3842,15 @@ def forward(self, pred, x):
     arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
     l_pred_ = arg0
     l_x_ = arg1
-    a = torch.ones(6, 4)
-    b = torch.ones(6, 4)
-    c = torch.ones(6, 4)
-    d = torch.ones(6, 4)
-    cond_true_0 = self.cond_true_0
-    cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
-    getitem = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
+    a_1 = torch.ones(6, 4)
+    b_1 = torch.ones(6, 4)
+    c_1 = torch.ones(6, 4)
+    d_1 = torch.ones(6, 4)
+    cond_true_1 = self.cond_true_0
+    cond_false_1 = self.cond_false_0
+    cond_1 = torch.ops.higher_order.cond(l_pred_, cond_true_1, cond_false_1, [a_1, b_1, l_x_, d_1, c_1]);  l_pred_ = cond_true_1 = cond_false_1 = a_1 = b_1 = l_x_ = d_1 = c_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
+    return pytree.tree_unflatten([getitem_1], self._out_spec)""",  # noqa: B950,E122
         )
 
         self.assertExpectedInline(
@@ -4264,10 +4264,10 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    x = torch.cos(l_x_);  l_x_ = None
-    x_1 = torch.sin(x);  x = None
-    x_2 = torch.relu(x_1);  x_1 = None
-    return pytree.tree_unflatten([x_2], self._out_spec)""",
+    x_1 = torch.cos(l_x_);  l_x_ = None
+    x_2 = torch.sin(x_1);  x_1 = None
+    x_3 = torch.relu(x_2);  x_2 = None
+    return pytree.tree_unflatten([x_3], self._out_spec)""",
         )
 
         def _constais_op(gm, target):
@@ -4286,10 +4286,10 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    x = torch.cos(l_x_);  l_x_ = None
-    x_1 = torch.sin(x);  x = None
-    x_2 = torch.abs(x_1);  x_1 = None
-    return pytree.tree_unflatten([x_2], self._out_spec)""",
+    x_1 = torch.cos(l_x_);  l_x_ = None
+    x_2 = torch.sin(x_1);  x_1 = None
+    x_3 = torch.abs(x_2);  x_2 = None
+    return pytree.tree_unflatten([x_3], self._out_spec)""",
         )
 
         # check for other metadata
@@ -4321,8 +4321,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    sin = torch.sin(l_x_);  l_x_ = None
-    return pytree.tree_unflatten([sin], self._out_spec)""",
+    sin_1 = torch.sin(l_x_);  l_x_ = None
+    return pytree.tree_unflatten([sin_1], self._out_spec)""",
         )
         self.assertExpectedInline(
             gm2.code.strip(),
@@ -4330,8 +4330,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    sin = torch.sin(l_x_);  l_x_ = None
-    return pytree.tree_unflatten([sin], self._out_spec)""",
+    sin_1 = torch.sin(l_x_);  l_x_ = None
+    return pytree.tree_unflatten([sin_1], self._out_spec)""",
         )
 
     def test_preserve_fx_node_metadata_inline(self):
@@ -4352,9 +4352,9 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    x = torch.cos(l_x_);  l_x_ = None
-    sin = torch.sin(x);  x = None
-    return pytree.tree_unflatten([sin], self._out_spec)""",
+    x_1 = torch.cos(l_x_);  l_x_ = None
+    sin_1 = torch.sin(x_1);  x_1 = None
+    return pytree.tree_unflatten([sin_1], self._out_spec)""",
         )
 
     def test_preserve_fx_node_metadata_graph_break(self):
@@ -4412,10 +4412,10 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_args_0_ = arg0
-    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
-    add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _enter_inference_mode_1 = torch.autograd.grad_mode._enter_inference_mode(True)
+    add_1 = l_args_0_ + 1;  l_args_0_ = None
+    _exit_inference_mode_1 = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode_1);  _enter_inference_mode_1 = _exit_inference_mode_1 = None
+    return pytree.tree_unflatten([add_1], self._out_spec)""",  # NOQA: B950
         )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
@@ -4435,10 +4435,10 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_args_0_ = arg0
-    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
-    add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _enter_inference_mode_1 = torch.autograd.grad_mode._enter_inference_mode(False)
+    add_1 = l_args_0_ + 1;  l_args_0_ = None
+    _exit_inference_mode_1 = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode_1);  _enter_inference_mode_1 = _exit_inference_mode_1 = None
+    return pytree.tree_unflatten([add_1], self._out_spec)""",  # NOQA: B950
         )
 
         inp = torch.randn(2, 2)
@@ -4457,10 +4457,10 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
-    add = l_x_ + 1;  l_x_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _enter_inference_mode_1 = torch.autograd.grad_mode._enter_inference_mode(True)
+    add_1 = l_x_ + 1;  l_x_ = None
+    _exit_inference_mode_1 = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode_1);  _enter_inference_mode_1 = _exit_inference_mode_1 = None
+    return pytree.tree_unflatten([add_1], self._out_spec)""",  # NOQA: B950
         )
         inp = torch.randn(2, 2, requires_grad=True)
         out = gm(inp)
@@ -4493,11 +4493,11 @@ def forward(self, x, b, y):
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
-    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
-    x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-    return pytree.tree_unflatten([x], self._out_spec)""",
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
+    x_1 = l_x_.clone();  l_x_ = None
+    x_1[l_b_] = l_y_;  setitem_1 = x_1;  l_b_ = l_y_ = setitem_1 = None
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(True);  _set_grad_enabled_2 = None
+    return pytree.tree_unflatten([x_1], self._out_spec)""",
         )
 
         gm, _ = torch._dynamo.export(fn_inference_mode)(x, b, y)
@@ -4509,11 +4509,11 @@ def forward(self, x, b, y):
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
-    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
-    x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
+    _enter_inference_mode_1 = torch.autograd.grad_mode._enter_inference_mode(True)
+    x_1 = l_x_.clone();  l_x_ = None
+    x_1[l_b_] = l_y_;  setitem_1 = x_1;  l_b_ = l_y_ = setitem_1 = None
+    _exit_inference_mode_1 = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode_1);  _enter_inference_mode_1 = _exit_inference_mode_1 = None
+    return pytree.tree_unflatten([x_1], self._out_spec)""",  # NOQA: B950
         )
 
         gm, _ = torch._dynamo.export(fn)(x, b, y)
