@@ -166,7 +166,7 @@ jobs:
             # Use binaries under conda environment
             export PATH="$CONDA_ENV/bin":$PATH
           fi
-          ${CONDA_RUN} python3 test/bench_mps_op.py
+          ${CONDA_RUN} python3 test/bench_mps_ops.py
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
