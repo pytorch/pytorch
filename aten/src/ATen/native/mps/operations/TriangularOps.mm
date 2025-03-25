@@ -107,7 +107,12 @@ TORCH_IMPL_FUNC(tril_mps_out)
                                                          numLowerTensor:negDiagMinusOneTensor
                                                          numUpperTensor:minusOneTensor
                                                                    name:nil];
-        outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:complementTensor name:nil];
+        MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:getMPSDataType(self)];
+        MPSGraphTensor* mask = [mpsGraph equalWithPrimaryTensor:complementTensor secondaryTensor:zeroTensor name:nil];
+        outputTensor = [mpsGraph selectWithPredicateTensor:mask
+                                       truePredicateTensor:inputTensor
+                                      falsePredicateTensor:zeroTensor
+                                                      name:nil];
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
