@@ -8313,6 +8313,15 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
     ),
+    # Not supported yet (but should be): cat() on non-contig transposed NJTs.
+    # It's not currently easy to convert a dense tensor -> NJT with ragged_idx != 1.
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="currently only supports nested tensor with ragged_idx == 1",
+        op_match_fn=lambda device, op: (op.name == "cat"),
+        sample_match_fn=lambda device, sample: "noncontig_transposed" in sample.name,
+        name="cat_noncontig_transposed_not_supported",
+    ),
 ]
 
 BACKWARD_SKIPS_AND_XFAILS = [
@@ -8320,6 +8329,12 @@ BACKWARD_SKIPS_AND_XFAILS = [
     SkipRule(
         op_match_fn=lambda device, op: op.full_name == "split_with_sizes",
         name="split_with_sizes_backward_segfault",
+    ),
+    # needs work; default cat backward uses narrow() on the ragged dim
+    # I think we'll need an NJT-specific cat formula
+    SkipRule(
+        op_match_fn=lambda device, op: op.full_name == "cat",
+        name="cat_backwards_broken",
     ),
     *FORWARD_SKIPS_AND_XFAILS,
     # Backwards is generally broken for non-contiguous NJTs with holes. Rather than
@@ -8538,6 +8553,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # Needs work to avoid data-dependent errors when operating on the ragged dim
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="Could not guard on data-dependent expression",
+        op_match_fn=lambda device, op: (op.name == "cat"),
+        sample_match_fn=lambda device, sample: ("ragged" in sample.name),
+        name="cat_ragged_dim_data_dependency",
+    ),
     # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
     # e.g. Expected 5 == 4
     XFailRule(

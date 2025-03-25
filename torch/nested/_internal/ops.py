@@ -1119,7 +1119,7 @@ def unsqueeze_default(func, *args, **kwargs):
     return NestedTensor(func(values, **new_kwargs), **output_kwargs)
 
 
-@register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
+@register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any?")
 def cat_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1131,13 +1131,46 @@ def cat_default(func, *args, **kwargs):
     nested = [t for t in tensors if t.is_nested]
     assert len(nested) > 0
     first = nested[0]
-    tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
+    if first._ragged_idx != 1:
+        raise RuntimeError(
+            "cat(): currently only supports nested tensor with ragged_idx == 1"
+        )
+
+    tensors = [
+        t if t.is_nested else torch.nested.as_nested_tensor(t, layout=torch.jagged)
+        for t in tensors
+    ]
+
+    if not all(t.dim() == first.dim() for t in tensors):
+        raise RuntimeError(
+            "cat(): expected all input nested tensors to have the same number of dims"
+        )
+
+    if not all(t._ragged_idx == first._ragged_idx for t in tensors):
+        raise RuntimeError(
+            "cat(): expected all input nested tensors to be ragged in the same dimension"
+        )
 
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
     new_kwargs["dim"] = _wrap_jagged_dim(
-        len(first.shape), dim, first._ragged_idx, "cat"
+        len(first.shape), dim, first._ragged_idx, "cat", allow_ragged_dim=True
     )
+
+    if dim == first._ragged_idx:
+        unbound = [t.unbind() for t in tensors]
+        batch_size = first.shape[0]
+        if not all(t.shape[0] == batch_size for t in tensors):
+            raise RuntimeError(
+                "cat(): when operating on the ragged dim, all input nested tensors must have "
+                "the same batch dim"
+            )
+
+        output_components = [
+            func([u[i] for u in unbound], dim=new_kwargs["dim"])
+            for i in range(batch_size)
+        ]
+        return torch.nested.as_nested_tensor(output_components, layout=torch.jagged)
 
     return NestedTensor(
         func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
@@ -1283,14 +1316,23 @@ def expand_default(func, *args, **kwargs):
     size = new_kwargs["size"]
 
     assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
-    if not raggedness_matches(inp, size):
-        raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
+    mismatch_error_msg = f"expand(): cannot expand shape {inp._size} -> {size}"
+    if len(inp.shape) != len(size):
+        raise RuntimeError(mismatch_error_msg)
+
+    # replace -1s in size with existing input size
+    size = [ns if s == -1 else s for ns, s in zip(inp.shape, size)]
+    try:
+        # broadcast any 1s
+        size = torch.broadcast_shapes(inp.shape, size)
+    except RuntimeError:
+        raise RuntimeError(mismatch_error_msg) from None
 
     expand_arg = [-1 if d == inp._ragged_idx else size[d] for d in range(1, inp.dim())]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
+@register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt_all")
 def expand_as_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
