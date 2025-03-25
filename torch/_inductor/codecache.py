@@ -2834,8 +2834,8 @@ class PyCodeCache:
     # constant values.
     modules: list[ModuleType] = []
 
-    # Modules laoded with out attributes attached to them, storted here, 
-    # Those do not need to be reloaded.
+    # Modules laoded without extra attributes are stored here, those do not 
+    # need to be re-loaded.
     modules_no_attr: dict[str, ModuleType] = {}
 
     linemaps: dict[str, list[tuple[Any, ...]]] = {}
@@ -2866,6 +2866,7 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
+        # we only cache whena ttrs is None
         if attrs is None and path in cls.modules_no_attr:
             return cls.modules_no_attr[path]
 
@@ -2881,6 +2882,7 @@ class PyCodeCache:
                 setattr(mod, k, v)
 
         if in_toplevel:
+             # we only cache whena ttrs is None
             if attrs is None:
                 cls.modules_no_attr[path] = mod
             else:
@@ -2900,7 +2902,14 @@ class PyCodeCache:
                     os.remove(mod.__file__)
                 except FileNotFoundError:
                     pass
+            for mod in cls.modules_no_attr.values():
+                try:
+                    assert mod.__file__
+                    os.remove(mod.__file__)
+                except FileNotFoundError:
+                    pass
         cls.modules.clear()
+        cls.modules_no_attr.clear()
 
     @classmethod
     @functools.lru_cache(None)
