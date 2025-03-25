@@ -613,7 +613,6 @@ def mps_ops_modifier(ops):
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
-        'nanmedian': None,
         'native_dropout_backward': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
@@ -656,17 +655,13 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_k1': None,
         'special.ndtri': None,
-        'special.scaled_modified_bessel_k0': None,
-        'special.scaled_modified_bessel_k1': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -717,6 +712,7 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.chebyshev_polynomial_t': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # entr does not support boolean types
         'special.entr': [torch.bool],
@@ -5493,39 +5489,6 @@ class TestMPS(TestCaseMPS):
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
 
-    @parametrize("dtype", [torch.float32, torch.float16])
-    def test_nanmedian(self, dtype):
-        def helper(n1, n2, n3, dtype, add_nans=False):
-            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=dtype)
-
-            if add_nans and dtype in [torch.float32, torch.float16]:
-                nan_mask = torch.rand(n1, n2, n3) < 0.2
-                cpu_x = cpu_x.clone()
-                cpu_x[nan_mask] = float('nan')
-
-            mps_x = cpu_x.clone().to('mps')
-
-            y_cpu = torch.nanmedian(cpu_x)
-            y_mps = torch.nanmedian(mps_x)
-            self.assertEqual(y_cpu, y_mps)
-
-        # test with no nans(to test the caching of the graph and behaviour when there are no nans)
-        helper(10, 10, 10, dtype)
-        helper(3, 3, 3, dtype)
-        helper(1, 1, 1, dtype)
-        helper(1, 2, 3, dtype)
-        # test with some random nans added
-        helper(10, 10, 10, dtype, add_nans=True)
-        helper(3, 3, 3, dtype, add_nans=True)
-        helper(2, 2, 3, dtype, add_nans=True)
-
-        # mix of NaNs and regular values where a median would output 3.0 while nanmedian outputs 2.0
-        cpu_x = torch.tensor([float('nan'), 1.0, 2.0, float('nan'), 3.0], device='cpu', dtype=dtype)
-        mps_x = cpu_x.detach().clone().to('mps')
-        y_cpu = torch.nanmedian(cpu_x)
-        y_mps = torch.nanmedian(mps_x)
-        self.assertEqual(y_cpu, y_mps)
-
     def test_any(self):
         def helper(shape):
             input_xs = []
@@ -7881,13 +7844,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(tril_result, tril_result_cpu)
             self.assertEqual(x.grad, cpu_x.grad)
 
-        helper((2, 8, 4, 5))
-        helper((2, 8, 4, 5), diag=1)
-        helper((2, 8, 4, 5), diag=2)
-        helper((2, 8, 4, 5), diag=3)
-        helper((2, 8, 4, 5), diag=-1)
-        helper((2, 8, 4, 5), diag=-2)
-        helper((2, 8, 4, 5), diag=-3)
+        for diag in [0, 1, 2, 3, -1, -2, -3]:
+            helper((2, 8, 4, 5), diag=diag)
+
+        def helper_nans_infs(value, diag_vals=(0, 1, -2)):
+            """For nans and infs"""
+            mps_tensor = torch.full((2, 2, 5, 5), value, device="mps")
+            cpu_tensor = torch.full((2, 2, 5, 5), value, device="cpu")
+            for diag in diag_vals:
+                mps_result = torch.tril(mps_tensor, diagonal=diag)
+                cpu_result = torch.tril(cpu_tensor, diagonal=diag)
+                self.assertEqual(mps_result, cpu_result, f"Mismatch for diag={diag}")
+
+        helper_nans_infs(float("inf"))
+        helper_nans_infs(float("-inf"))
+        helper_nans_infs(float("nan"))
 
     # test eye
     def test_eye(self):
