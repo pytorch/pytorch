@@ -43,6 +43,10 @@ class C10_API AllocatorConfig {
     return garbage_collection_threshold_;
   }
 
+  bool used_async_allocator() {
+    return used_async_allocator_;
+  }
+
   bool expandable_segments() {
     return expandable_segments_;
   }
@@ -73,8 +77,6 @@ class C10_API AllocatorConfig {
   /* Internal functions */
   virtual void parseArgs(const char* env);
 
-  virtual void checkMallocAsyncSupport();
-
   void lexArgs(const char* env, std::vector<std::string>& config);
 
   void consumeToken(
@@ -98,8 +100,7 @@ class C10_API AllocatorConfig {
 
   size_t parseAllocatorBackendConfig(
       const std::vector<std::string>& config,
-      size_t i,
-      bool& used_MallocAsync);
+      size_t i);
 
   size_t parsePinnedUseHostRegister(
       const std::vector<std::string>& config,
@@ -113,34 +114,34 @@ class C10_API AllocatorConfig {
       const std::vector<std::string>& config,
       size_t i);
 
-  // The maximum block size that is allowed to be split. Default is
-  // std::numeric_limits<size_t>::max()
-  std::atomic<size_t> max_split_size_;
+  // The maximum block size that is allowed to be split.
+  std::atomic<size_t> max_split_size_{std::numeric_limits<size_t>::max()};
   // The maximum allowable extra size of a memory block without requiring
-  // splitting when searching for a free block. Default is kLargeBuffer
-  std::atomic<size_t> max_non_split_rounding_size_;
+  // splitting when searching for a free block.
+  std::atomic<size_t> max_non_split_rounding_size_{kLargeBuffer};
   // Used to store how memory allocations of different sizes should be rounded
   // up to the nearest power of 2 divisions.
   std::vector<size_t> roundup_power2_divisions_;
   // The threshold that triggers garbage collection when the ratio of used
-  // memory to maximum allowed memory exceeds this value. Default is 0.0
-  std::atomic<double> garbage_collection_threshold_;
-  // A flag to enable expandable segments feature. The default value is false.
-  std::atomic<bool> expandable_segments_;
-  // A flag to release the lock on device malloc. The default value is false.
-  std::atomic<bool> release_lock_on_device_malloc_;
+  // memory to maximum allowed memory exceeds this value.
+  std::atomic<double> garbage_collection_threshold_{0};
+  // A flag to enable MallocAsync feature.
+  std::atomic<bool> used_async_allocator_{false};
+  // A flag to enable expandable segments feature.
+  std::atomic<bool> expandable_segments_{false};
+  // A flag to release the lock on device malloc.
+  std::atomic<bool> release_lock_on_device_malloc_{false};
   // Record the last allocator config environment setting.
   std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
   // A flag that determines whether to register a CPU allocation for use by
-  // device. The default value is false.
-  std::atomic<bool> pinned_use_host_register_;
+  // device.
+  std::atomic<bool> pinned_use_host_register_{false};
   // The number of threads to parallelize to register a CPU allocation to reduce
-  // the overall time. Default is 1.
-  std::atomic<size_t> pinned_num_register_threads_;
-  // A flag to enable background thread for processing events. The default value
-  // is false.
-  std::atomic<bool> pinned_use_background_threads_;
+  // the overall time.
+  std::atomic<size_t> pinned_num_register_threads_{1};
+  // A flag to enable background thread for processing events.
+  std::atomic<bool> pinned_use_background_threads_{false};
 
   c10::DeviceType device_type_;
 };
