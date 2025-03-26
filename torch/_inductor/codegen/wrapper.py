@@ -477,25 +477,22 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
+    args: list[str]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        node = self.node
-        node.codegen_comment(self.wrapper)
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
-        V.graph.wrapper_code._generate_extern_kernel_alloc_helper(self, args)
-        if isinstance(node.layout, ir.Layout):
-            node.codegen_size_asserts(self.wrapper)
+        V.graph.wrapper_code._generate_extern_kernel_alloc_helper(
+            code, self.node, self.args
+        )
 
 
 @dataclasses.dataclass
 class ExternKernelOutLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelOut
+    args: list[str]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.codegen_comment(self.wrapper)
         node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs(skip_out=True)]
         kernel_name = node.get_kernel_name()
         if (
             V.graph.cpp_wrapper
@@ -507,10 +504,11 @@ class ExternKernelOutLine(WrapperLine):
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
         self.wrapper._generate_extern_kernel_out_helper(
+            code,
             kernel_name,
             node.codegen_reference(),
             node.output_view.codegen_reference() if node.output_view else None,
-            args,
+            self.args,
             device,
         )
 
@@ -523,7 +521,7 @@ class FallbackKernelLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
         args = [*node.codegen_args(), *node.codegen_kwargs()]
-        self.wrapper._generate_fallback_kernel_line(node, args)
+        self.wrapper._generate_extern_kernel_alloc_helper(code, node, args)
 
 
 @dataclasses.dataclass
@@ -627,7 +625,9 @@ class ReinterpretLine(MemoryPlanningLine):
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper.codegen_deferred_allocation(self.node.get_name(), self.layout.view)
+        self.wrapper.codegen_deferred_allocation(
+            code, self.node.get_name(), self.layout.view
+        )
 
 
 @dataclasses.dataclass
@@ -1216,13 +1216,16 @@ class PythonWrapperCodegen(CodeGen):
     def generate_fallback_kernel(self, node: ir.FallbackKernel):
         self.writeline(FallbackKernelLine(self, node))
 
-    def _generate_fallback_kernel_line(self, fallback_kernel, args):
-        self._generate_extern_kernel_alloc_helper(fallback_kernel, args)
-
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
-        self.writeline(ExternKernelAllocLine(self, node))
+        node.codegen_comment(self)
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        self.writeline(ExternKernelAllocLine(self, node, args))
+        if isinstance(node.layout, ir.Layout):
+            node.codegen_size_asserts(self)
 
-    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(
+        self, code: IndentedBuffer, extern_kernel, args
+    ):
         # If it's a NoneLayout then the extern_kernel should essentially be
         # treated as if it doesn't return anything
         no_return = isinstance(extern_kernel.layout, ir.NoneLayout)
@@ -1236,9 +1239,9 @@ class PythonWrapperCodegen(CodeGen):
             ending = f".clone(){ending}"
 
         if no_return:
-            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+            code.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
         else:
-            self.writeline(
+            code.writeline(
                 f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
             )
             if (
@@ -1247,7 +1250,7 @@ class PythonWrapperCodegen(CodeGen):
                 and origin_node is not None
             ):
                 counters["inductor"]["intermediate_hooks"] += 1
-                self.writeline(
+                code.writeline(
                     f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
                 )
 
@@ -1255,10 +1258,13 @@ class PythonWrapperCodegen(CodeGen):
         self,
         node: ir.ExternKernelOut,
     ) -> None:
-        self.writeline(ExternKernelOutLine(self, node))
+        node.codegen_comment(self)
+        args = [*node.codegen_args(), *node.codegen_kwargs(skip_out=True)]
+        self.writeline(ExternKernelOutLine(self, node, args))
 
     def _generate_extern_kernel_out_helper(
         self,
+        code: IndentedBuffer,
         kernel: str,
         out: str,
         out_view: Optional[str],
@@ -1270,7 +1276,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
         with debug_printer_manager:
-            self.writeline(f"{kernel}({', '.join(args)})")
+            code.writeline(f"{kernel}({', '.join(args)})")
 
     def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
         dims = desc.dims
@@ -2494,8 +2500,10 @@ class PythonWrapperCodegen(CodeGen):
         )
         return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
-    def codegen_deferred_allocation(self, name: str, view: ir.ReinterpretView) -> None:
-        self.writeline(
+    def codegen_deferred_allocation(
+        self, code: IndentedBuffer, name: str, view: ir.ReinterpretView
+    ) -> None:
+        code.writeline(
             DeferredLine(
                 name,
                 f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
