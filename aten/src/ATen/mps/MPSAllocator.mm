@@ -787,7 +787,7 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
 } // namespace
 
 // MPS allocator struct to be registered with Pytorch
-struct TORCH_API MPSAllocator override : public IMPSAllocator {
+struct TORCH_API MPSAllocator : public IMPSAllocator {
  public:
   explicit MPSAllocator(uint32_t Usage)
       : m_has_unified_memory(_getAllocImpl().Device().hasUnifiedMemory), m_usage(Usage) {
@@ -950,7 +950,7 @@ struct TORCH_API MPSAllocator override : public IMPSAllocator {
   }
 };
 
-struct TORCH_API MPSPinnedAllocator override : public MPSAllocator {
+struct TORCH_API MPSPinnedAllocator : public MPSAllocator {
  public:
   DataPtr allocate(const size_t nbytes) override {
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
@@ -963,7 +963,7 @@ struct TORCH_API MPSPinnedAllocator override : public MPSAllocator {
     void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf);
     return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU, 0)};
   }
-}
+};
 
 namespace {
   MPSAllocator& _getSharedAllocator() {
