@@ -2488,10 +2488,16 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_data_address",
-      [](const at::Tensor& tensor, bool resolve_unified_cpu_to_device = false) {
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
+      },
+      "Gets the memory address of the Tensor's data pointer.");
+
+  py_module.def(
+      "_data_address_resolve_unified",
+      [](const at::Tensor& tensor) {
         const void* data_ptr = tensor.storage().data();
-        if (resolve_unified_cpu_to_device &&
-            tensor.device().type() == c10::kCPU) {
+        if (tensor.device().type() == c10::kCPU) {
           c10::Allocator* allocator = tensor.storage().allocator();
           if (allocator->has_unified_memory()) {
             return reinterpret_cast<std::intptr_t>(
@@ -2500,7 +2506,9 @@ Call this whenever a new thread is created in order to propagate values from
         }
         return reinterpret_cast<std::intptr_t>(data_ptr);
       },
-      "Gets the memory address of the Tensor's data pointer.");
+      ("Gets the memory address of the Tensor's data pointer. If the device "
+       "is CPU and the allocator has unified memory, then the CPU data "
+       "address is resolved to the device address."));
 
   py_module.def(
       "_is_cow_tensor",
