@@ -932,7 +932,15 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     return getSharedCPUPtrFromDevicePtr(device_ptr).first;
   }
 
+  const void* get_cpu_ptr_from_device_ptr(const void* device_ptr) const override {
+    return getSharedCPUPtrFromDevicePtr(device_ptr).first;
+  }
+
   void* get_device_ptr_from_cpu_ptr(void* cpu_ptr) const override {
+    return getSharedDevicePtrFromCPUPtr(cpu_ptr).first;
+  }
+
+  const void* get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const override {
     return getSharedDevicePtrFromCPUPtr(cpu_ptr).first;
   }
 

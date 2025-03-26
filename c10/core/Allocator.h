@@ -189,7 +189,9 @@ struct C10_API Allocator {
   // The following two functions are used to map between CPU and device
   // memory address spaces. By default, they return nullptr.
   virtual void* get_cpu_ptr_from_device_ptr(void* device_ptr) const;
+  virtual const void* get_cpu_ptr_from_device_ptr(const void* device_ptr) const;
   virtual void* get_device_ptr_from_cpu_ptr(void* cpu_ptr) const;
+  virtual const void* get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const;
   virtual bool has_unified_memory() const;
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the

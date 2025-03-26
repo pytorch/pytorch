@@ -2492,10 +2492,10 @@ Call this whenever a new thread is created in order to propagate values from
         const void* data_ptr = tensor.storage().data();
         if (resolve_unified_cpu_to_device &&
             tensor.device().type() == c10::kCPU) {
-          Allocator* allocator = tensor.storage().allocator();
-          if (allocator.has_unified_memory()) {
+          c10::Allocator* allocator = tensor.storage().allocator();
+          if (allocator->has_unified_memory()) {
             return reinterpret_cast<std::intptr_t>(
-                allocator.get_device_ptr_from_cpu_ptr(data_ptr));
+                allocator->get_device_ptr_from_cpu_ptr(data_ptr));
           }
         }
         return reinterpret_cast<std::intptr_t>(data_ptr);

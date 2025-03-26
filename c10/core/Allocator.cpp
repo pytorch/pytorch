@@ -24,7 +24,16 @@ void* Allocator::get_cpu_ptr_from_device_ptr(void* device_ptr) const {
   return nullptr;
 }
 
+const void* Allocator::get_cpu_ptr_from_device_ptr(
+    const void* device_ptr) const {
+  return nullptr;
+}
+
 void* Allocator::get_device_ptr_from_cpu_ptr(void* cpu_ptr) const {
+  return nullptr;
+}
+
+const void* Allocator::get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const {
   return nullptr;
 }
 
