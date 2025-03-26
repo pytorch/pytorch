@@ -71,9 +71,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"      
+          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
+          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
+          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -118,7 +118,6 @@ jobs:
       - name: Bootstrap folders
         shell: cmd
         run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Populate binary env
         shell: bash
@@ -179,9 +178,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
+          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
+          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
