@@ -95,8 +95,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.

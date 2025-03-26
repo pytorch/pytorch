@@ -6002,10 +6002,12 @@ class UserDefinedTritonKernel(ExternKernel):
 
         args: list[Any] = []
         arg_types: list[Any] = []
+        raw_keys_filtered: list[Any] = []
         raw_args_filtered: list[Any] = []
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
                 args.append(arg.codegen_reference())
@@ -6032,6 +6034,7 @@ class UserDefinedTritonKernel(ExternKernel):
                     args.append(-1)
                     arg_types.append(int)
                 else:
+                    raw_keys_filtered.pop()
                     raw_args_filtered.pop()
             else:
                 raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
@@ -6042,9 +6045,11 @@ class UserDefinedTritonKernel(ExternKernel):
             args,
             arg_types=arg_types,
             raw_args=raw_args_filtered,
+            raw_keys=raw_keys_filtered,
             triton_meta=triton_meta,
             triton=True,
             device=self.get_device(),
+            original_fxnode_name=self.fx_node.name,
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
