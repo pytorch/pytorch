@@ -8,6 +8,7 @@ import io
 import queue
 import sys
 import tempfile
+import time
 import threading
 import unittest
 from itertools import chain, repeat
@@ -1015,14 +1016,16 @@ class TestCudaMultiGPU(TestCase):
             # Prevent PyTorch from reusing the allocated memory
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+            time.sleep(0.1)
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
-            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
+            # increasing to 512 MB to force acquiring a new block and overcome blocksize differences across platforms
+            t = torch.randn(1024 * 1024 * 512, device=device)  # noqa: F841
 
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
                 torch.cuda.synchronize()
+                time.sleep(0.1)
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
 
             self.assertLess(after_free_bytes, before_free_bytes)
