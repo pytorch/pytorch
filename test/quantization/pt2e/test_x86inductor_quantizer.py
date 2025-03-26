@@ -554,8 +554,6 @@ class TestHelperModules:
 
     class MiniResNet(nn.Module):
         class BasicBlock(nn.Module):
-            expansion = 1
-
             def __init__(self, in_channels, out_channels, stride=1, downsample=None):
                 super().__init__()
                 self.conv1 = nn.Conv2d(
