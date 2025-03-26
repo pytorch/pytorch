@@ -241,6 +241,7 @@ class TritonBundler:
         This function also finalizes the current bundle.
         """
         from torch._inductor import config
+
         if not TritonBundler.is_enabled():
             cls.end_compile()
             set_feature_use("triton_bundling", False)
@@ -298,7 +299,9 @@ class TritonBundler:
                             )
                         )
                 if config.use_static_cuda_launcher:
-                    static_autotuners, static_kernel_names = cls.collect_static_autotuners()
+                    static_autotuners, static_kernel_names = (
+                        cls.collect_static_autotuners()
+                    )
                 cls.end_compile()
                 return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
                     kernel_names, static_kernel_names
@@ -320,6 +323,7 @@ class TritonBundler:
         or reading from the target directory.
         """
         from torch._inductor import config
+
         if not TritonBundler.is_enabled():
             return None
 
