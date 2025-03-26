@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
-    IS_WINDOWS,
     retry_shell,
     set_cwd,
     shell,
