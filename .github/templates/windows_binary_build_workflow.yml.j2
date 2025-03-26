@@ -151,7 +151,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+{%- if os != "windows-arm64" %}   
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+{% endif %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
