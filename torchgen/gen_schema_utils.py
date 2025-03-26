@@ -172,7 +172,7 @@ class CArgumentGen:
             None,
             arg_info.default_value,
             False,
-            torch._C._create_alias_info(arg_info.name, arg_info.is_mutated),
+            torch._C._create_alias_info(arg_info.is_mutated),
         )
 
 
