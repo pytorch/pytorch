@@ -483,11 +483,10 @@ ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
   if (it == shapeSymbolToVar_.end()) {
     VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
-#if (defined(__GNUC__) && __GNUC__ >= 13) || \
-    (defined(__clang__) && __clang_major__ > 12)
-    return var;
-#else
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
 #endif
   }
   return it->second;
@@ -1025,11 +1024,10 @@ ExprHandle TensorExprKernel::getStrideArg(
         kLong);
     strideArgToVar_[std::pair<size_t, size_t>(
         tensor_input_index, stride_index)] = var;
-#if (defined(__GNUC__) && __GNUC__ >= 13) || \
-    (defined(__clang__) && __clang_major__ > 12)
-    return var;
-#else
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
 #endif
   }
   return it->second;

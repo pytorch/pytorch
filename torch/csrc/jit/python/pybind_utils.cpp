@@ -641,11 +641,10 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
-#if (defined(__GNUC__) && __GNUC__ >= 13) || \
-    (defined(__clang__) && __clang_major__ > 12)
-    return t;
-#else
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(t);
+#else
+    return t;
 #endif
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
@@ -681,11 +680,10 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
-#if (defined(__GNUC__) && __GNUC__ >= 13) || \
-    (defined(__clang__) && __clang_major__ > 12)
-      return t;
-#else
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
       return std::move(t);
+#else
+      return t;
 #endif
     }
   } else if (ivalue.isDevice()) {
@@ -699,11 +697,10 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
-#if (defined(__GNUC__) && __GNUC__ >= 13) || \
-    (defined(__clang__) && __clang_major__ > 12)
-    return py_dict;
-#else
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(py_dict);
+#else
+    return py_dict;
 #endif
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
