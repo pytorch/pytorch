@@ -132,10 +132,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 {%- else %}      
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}

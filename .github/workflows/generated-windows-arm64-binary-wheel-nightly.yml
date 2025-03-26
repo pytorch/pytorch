@@ -112,10 +112,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Populate binary env
         shell: bash
         run: |
