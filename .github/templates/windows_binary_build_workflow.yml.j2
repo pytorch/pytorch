@@ -131,31 +131,24 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-{%- else %}      
-      !{{ common.setup_ec2_windows() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-{%- endif %}
-      !{{ set_runner_specific_vars() }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-{%- if os == "windows-arm64" %}
       - name: Bootstrap folders
         shell: cmd
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "pytorch/.circleci/scripts/binary_windows_arm64_build.sh"
-{%- else %}
+{%- else %}      
+      !{{ common.setup_ec2_windows() }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+{%- endif %}
       - name: Build PyTorch binary
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-{%- endif %}
+      !{{ set_runner_specific_vars() }}
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
@@ -194,35 +187,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: "pytorch"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-          submodules: recursive
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
 {%- else %}
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}

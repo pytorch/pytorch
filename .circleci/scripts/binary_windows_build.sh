@@ -21,7 +21,16 @@ df -h
 
 pushd "$PYTORCH_ROOT/.ci/pytorch/"
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
-./windows/internal/build_wheels.bat
+
+if [[ os == 'windows' ]]; then
+    ./windows/internal/build_wheels.bat
+elif [[ os == 'windows-arm64' ]]; then{
+    if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+        ./windows/arm64/build_libtorch.bat
+    elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
+        ./windows/arm64/build_pytorch.bat
+    fi
+fi
 
 echo "Free space on filesystem after build:"
 df -h
