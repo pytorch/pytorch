@@ -4271,14 +4271,14 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
-    def test_low_memory_max_pool(self):
+    @parametrize("dilation", (1, 2))
+    def test_low_memory_max_pool(self, dilation: int):
         prims = torch.ops.prims
 
         def fn(x):
             kernel_size = [3, 3]
             stride = [2, 2]
             padding = [1, 1]
-            dilation = [1, 1]
             ceil_mode = False
 
             vals, offsets = prims._low_memory_max_pool2d_with_offsets(
@@ -4286,7 +4286,7 @@ class CommonTemplate:
                 kernel_size,
                 stride,
                 padding,
-                dilation,
+                [dilation] * 2,
                 ceil_mode,
             )
             indices = prims._low_memory_max_pool2d_offsets_to_indices(
@@ -4295,6 +4295,7 @@ class CommonTemplate:
                 x.size(-1),
                 stride,
                 padding,
+                dilation=[dilation] * 2,
             )
             return vals, indices, offsets
 
@@ -5044,10 +5045,13 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
-    def test_max_pool2d6(self):
+    @parametrize("dilation", (1, 2))
+    def test_max_pool2d6(self, dilation: int):
         # Big kernel size
         def fn(x):
-            return aten.max_pool2d_with_indices(x, [13, 13], [])
+            return aten.max_pool2d_with_indices(
+                x, [13, 13], [], dilation=[dilation] * 2
+            )
 
         self.common(
             fn,
@@ -5069,16 +5073,14 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d8(self):
-        # dialtion is not 1, use fallback
+        # dilation is not 1
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -10090,9 +10092,6 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
-    @skip_if_cpp_wrapper(
-        "cannot currently handle fallback ops with return types containing list[Tensor]"
-    )
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")

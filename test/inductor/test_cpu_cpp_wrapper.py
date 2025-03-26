@@ -246,7 +246,8 @@ if RUN_CPU:
             for func in dir(test_cpu_repro.CPUReproTests())
             if func.startswith("test_lstm_packed_change_input_sizes")
         ],
-        BaseTest("test_max_pool2d6"),
+        BaseTest("test_max_pool2d6_dilation_1"),
+        BaseTest("test_max_pool2d6_dilation_2"),
         BaseTest(
             "test_mkl_linear", "", test_cpu_repro.CPUReproTests(), condition=TEST_MKL
         ),

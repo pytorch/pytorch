@@ -1983,7 +1983,6 @@ class BuiltinVariable(VariableTracker):
                     # enables reading `val` from the other.
                     tx.output.side_effects.store_attr(obj, "grad", val)
                     tx.output.side_effects.store_attr(obj, "_grad", val)
-                    return val
                 elif is_tensor_getset_descriptor(name):
                     # Attribute like `torch.Tensor.real` has special setters we
                     # don't yet support; it's not as simple adding an entry to

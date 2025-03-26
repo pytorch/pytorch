@@ -460,6 +460,26 @@ class TestFakeTensorExport(common_utils.TestCase):
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
 
+    def test_is_in_onnx_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                def f(x):
+                    return x.sin() if torch.onnx.is_in_onnx_export() else x.cos()
+
+                return f(x)
+
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+        onnx_program = torch.onnx.export(
+            Mod(),
+            (torch.randn(3, 4),),
+            dynamo=True,
+            fallback=False,
+        )
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+
+        node_names = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sin", node_names)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
