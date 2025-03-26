@@ -4061,9 +4061,9 @@ class Scheduler:
                     | free_symbols(layout.stride)
                     | free_symbols(layout.offset)
                 )
-            elif isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                # symint may be used as index in layout.target
-                free_symbol_uses.update(get_layout_symints(layout.target))
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    # symint may be used as index in layout.target
+                    free_symbol_uses.update(get_layout_symints(layout.target))
             else:
                 assert layout is None, (
                     f"Expect layout to be None but found layout={layout}"
@@ -4094,12 +4094,13 @@ class Scheduler:
             Gets symbols used in input node shapes, strides, and offsets.
             """
             if isinstance(node, ir.TorchBindObject):
+                # TorchBindObject does not involve dynamic shapes yet
                 return OrderedSet()
             elif isinstance(node, ir.IRNode):
                 return get_layout_symints(node)
-            elif isinstance(node, sympy.Expr):
-                return OrderedSet(node)
             else:
+                # node cannot be sympy.Expr since node comes from read_writes and
+                # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
         def filter_symbols(
