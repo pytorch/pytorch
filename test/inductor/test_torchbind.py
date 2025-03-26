@@ -314,7 +314,7 @@ class TestTorchbind(TestCase):
     @requires_gpu()
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     @torch._inductor.config.patch("graph_partition", True)
-    def test_torchbind_compile_symint_graph_partition(self):
+    def test_torchbind_compile_gpu_op_symint_graph_partition(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()

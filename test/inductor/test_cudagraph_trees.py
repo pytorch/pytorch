@@ -2790,6 +2790,38 @@ if HAS_CUDA:
             # 4 cudagraphs, due to (2 dynamic shapes) x (2 graph partitions)
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_tensor_symints(self):
+            def f(x, y):
+                return x + 1, y + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape_x, shape_y):
+                x = torch.randn(shape_x, device="cuda")
+                y = torch.randn(shape_y, device="cpu")
+                for _ in range(3):
+                    compiled_f(x, y)
+
+            # static shape. record a NEW cudagraph
+            run(shape_x=(2, 3), shape_y=(4, 4))
+
+            # shape_y becomes dynamic shape leading to a new dynamo graph.
+            # This new dynamo graph forces a NEW cudagraph although tensor y is on cpu
+            run(shape_x=(2, 3), shape_y=(5, 6))
+
+            # tensor y is on cpu so NO new cudagraph is recorded
+            run(shape_x=(2, 3), shape_y=(7, 8))
+
+            # shape_x becomes dynamic shape, leading to a new dynamo graph
+            # this new dynamo graph forces a NEW cudagraph
+            run(shape_x=(3, 4), shape_y=(4, 4))
+
+            # tensor y is on cpu so NO new cudagraph is recorded
+            run(shape_x=(3, 4), shape_y=(10, 11))
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
