@@ -4,8 +4,9 @@
 
 #include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Tensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/Utils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
@@ -36,9 +37,6 @@
 @end
 
 // Fwd declarations
-namespace at {
-struct TensorIteratorBase;
-}
 using namespace at::mps;
 
 namespace at::native::mps {
@@ -82,6 +80,9 @@ static inline std::string getMPSTypeString(const TensorBase& t, bool short_name 
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 static inline std::string scalarToMetalTypeString(const TensorBase& t) {
   return scalarToMetalTypeString(t.scalar_type());
+}
+static inline std::string scalarToMetalTypeString(const TensorIteratorBase& i) {
+  return scalarToMetalTypeString(i.common_dtype());
 }
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);

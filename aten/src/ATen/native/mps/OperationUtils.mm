@@ -1026,7 +1026,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto kernel_name =
-      fmt::format("{}_{}{}_{}", name, suffix, cast_needed ? "_cast" : "", scalarToMetalTypeString(input));
+      fmt::format("{}_{}{}_{}", name, suffix, cast_needed ? "_cast" : "", scalarToMetalTypeString(iter));
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
