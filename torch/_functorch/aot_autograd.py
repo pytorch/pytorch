@@ -23,6 +23,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import OutputCode
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -1071,6 +1072,7 @@ def aot_module_simplified(
     keep_inference_input_mutations=False,
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
+    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1166,6 +1168,7 @@ def aot_module_simplified(
                 fake_flat_args,
                 aot_config,
                 cudagraphs,
+                boxed_forward_device_index,
                 local,
                 remote,
             )

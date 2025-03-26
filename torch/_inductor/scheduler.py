@@ -2773,9 +2773,6 @@ class Scheduler:
 
             return (fut, mod)
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
@@ -2786,10 +2783,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
-            choice_timings = multi_node.choice_timings
-            _, ms1 = multi_node.get_min_choice()
 
             # Eagerly compile and benchmark non-template nodes
+            choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -3063,7 +3059,7 @@ class Scheduler:
         fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
-        log.debug("ComboKernels: Generating with num_ck_nodes = %d...", num_ck_nodes)
+        log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
         ):

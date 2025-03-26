@@ -1445,6 +1445,7 @@ class TensorSubclassVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Handle `Subclass(existing_tensor, ...)` calls.
         from .torch_function import TensorWithTFOverrideVariable
 
         new_func = self.value.__new__
@@ -1483,9 +1484,12 @@ class TensorSubclassVariable(VariableTracker):
         # which is `object.__init__`, so that we can remove this check.
         if init_func is not torch.Tensor.__init__:
             VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
-        return var
 
-        return super().call_function(tx, args, kwargs)
+        # See NOTE [Side effect tracking for newly constructed tensor]
+        tx.output.side_effects._track_obj(
+            object(), var, mutation_type_cls=variables.base.AttributeMutationNew
+        )
+        return var
 
     def as_python_constant(self):
         return self.value
