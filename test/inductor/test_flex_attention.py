@@ -468,7 +468,7 @@ class TestFlexAttention(InductorTestCase):
                 noop_mask, Q_B, Q_H, Q_S, KV_S, device=self.device
             )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -489,7 +489,7 @@ class TestFlexAttention(InductorTestCase):
                 (Q_B, Q_H, Q_S, V_D), dtype=dtype, device=self.device
             )
 
-            golden_out.backward(backward_grad.to(self.gold_dtype))
+            golden_out.backward(backward_grad.to(torch.float64))
             ref_out.backward(backward_grad)
             compiled_out.backward(backward_grad)
 
