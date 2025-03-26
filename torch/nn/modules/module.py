@@ -1983,6 +1983,10 @@ class Module:
                     self._buffers,
                     self._non_persistent_buffers_set,
                 )
+                if hasattr(type(self), name):
+                    raise KeyError(
+                        "Cannot assign a module instead of an existing class attribute."
+                    )
                 for hook in _global_module_registration_hooks.values():
                     output = hook(self, name, value)
                     if output is not None:
