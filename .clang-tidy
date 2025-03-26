@@ -68,7 +68,7 @@ readability-string-compare,
 -readability-redundant-access-specifiers,
 -readability-redundant-control-flow,
 '
-HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
+HeaderFilterRegex: '^(aten/|caffe2/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
