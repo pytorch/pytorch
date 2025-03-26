@@ -141,6 +141,18 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(torch.complex64.to_real(), torch.float32)
         self.assertEqual(torch.complex32.to_real(), torch.float16)
 
+    def test_assert_close(self):
+        for dtype in [
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ]:
+            x = torch.tensor([3.14, 3.14], dtype=dtype)
+            y = torch.tensor([3.14, 3.14], dtype=dtype)
+            torch.testing.assert_close(x, y)
+
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
