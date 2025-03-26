@@ -322,7 +322,8 @@ class AOTInductorModelContainer {
         tensor = it->second;
       }
 
-      constants_map_to_update->insert_or_assign(constant_name, tensor);
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor));
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -410,7 +411,8 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->insert_or_assign(constant_name, tensor_handle);
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
     // Update the inactive constant array.
     update_array_from_map(
