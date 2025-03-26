@@ -37,7 +37,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
 )
 from torch.testing._internal.common_quantized import override_qengines
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, IS_S390X
 
 class SubModule(torch.nn.Module):
     def __init__(self) -> None:
@@ -577,12 +577,14 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @unittest.skipIf(IS_ARM64, "Not working on arm right now")
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     def test_mobilenet_v2(self):
         from torchvision.models.quantization import mobilenet_v2
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
 
     @skip_if_no_torchvision
     @unittest.skipIf(IS_ARM64, "Not working on arm right now")
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
         self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))
