@@ -13,7 +13,7 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from inspect import currentframe
 from itertools import count
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -1663,7 +1663,11 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs += tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with (
+        mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+        if fake_mode
+        else nullcontext()
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,

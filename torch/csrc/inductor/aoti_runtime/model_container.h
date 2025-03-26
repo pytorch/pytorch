@@ -448,9 +448,9 @@ class AOTInductorModelContainer {
   }
 
   void free_inactive_constant_buffer() {
-    if (use_secondary_ && constant_blob_) {
+    if (use_secondary_) {
       constant_blob_.reset();
-    } else if (constant_blob_secondary_) {
+    } else {
       constant_blob_secondary_.reset();
     }
   }
