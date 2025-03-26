@@ -76,55 +76,51 @@ if(INTERN_BUILD_ATEN_OPS)
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
+  # Handle files that may need sm89/sm90a/sm100a flags (stable/nightly
+  # builds are not built for these archs).
   if(USE_CUDA)
-    set(ROWWISE_SCALED_MM_SM89_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMMSM89.cu")
-    set(ROWWISE_SCALED_MM_SM9X_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMMSM9x.cu")
-    set(ROWWISE_SCALED_MM_SM10X_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMMSM10x.cu")
+    # The stable/nightly builds do not enable some SM architectures,
+    # like 89/90a/100a.  Still, some files need to be built for these
+    # architecturs specifically.  This function makes it possible to
+    # enable building given file for a specific such architecture, in
+    # case if PyTorch is built for corresponding other architecture;
+    # for example, it will enable building for SM 90a in case PyTorch
+    # built for SM 90, etc.  For examples of how to use the function,
+    # see below the function itself.
+    function(_BUILD_FOR_ADDITIONAL_ARCHS file archs)
+      torch_cuda_get_nvcc_gencode_flag(_existing_arch_flags)
 
-    # Get existing arch flags
-    torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
-
-    # Check NVCC version and existing arch flags
-    set(ROWWISE_SCALED_MM_SM89_FILE_COMPILE_FLAGS "")
-    set(ROWWISE_SCALED_MM_SM9X_FILE_COMPILE_FLAGS "")
-    set(ROWWISE_SCALED_MM_SM10X_FILE_COMPILE_FLAGS "")
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
-      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
-        list(APPEND ROWWISE_SCALED_MM_SM89_FILE_COMPILE_FLAGS "-gencode;arch=compute_89,code=sm_89")
+      set(_file_compile_flags "")
+      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+        foreach(_arch ${archs})
+          if ("${_arch}" STREQUAL "89")
+            if(_existing_arch_flags MATCHES ".*compute_86.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_89,code=sm_89")
+            endif()
+          endif()
+          if ("${_arch}" STREQUAL "90a")
+            if(_existing_arch_flags MATCHES ".*compute_90.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_90a,code=sm_90a")
+            endif()
+          endif()
+          if ("${_arch}" STREQUAL "100a")
+            if(_existing_arch_flags MATCHES ".*compute_100.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
+            endif()
+          endif()
+        endforeach()
       endif()
-      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-        list(APPEND ROWWISE_SCALED_MM_SM9X_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
-      endif()
-      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_100.*")
-        list(APPEND ROWWISE_SCALED_MM_SM10X_FILE_COMPILE_FLAGS "-gencode;arch=compute_100a,code=sm_100a")
-      endif()
-    endif()
-    list(JOIN ROWWISE_SCALED_MM_SM89_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_SM89_FILE_COMPILE_FLAGS)
-    list(JOIN ROWWISE_SCALED_MM_SM9X_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_SM9X_FILE_COMPILE_FLAGS)
-    list(JOIN ROWWISE_SCALED_MM_SM10X_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_SM10X_FILE_COMPILE_FLAGS)
-    set_source_files_properties(${ROWWISE_SCALED_MM_SM89_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_SM89_FILE_COMPILE_FLAGS}")
-    set_source_files_properties(${ROWWISE_SCALED_MM_SM9X_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_SM9X_FILE_COMPILE_FLAGS}")
-    set_source_files_properties(${ROWWISE_SCALED_MM_SM10X_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_SM10X_FILE_COMPILE_FLAGS}")
+      list(JOIN _file_compile_flags " " _file_compile_flags)
 
-    set(SCALED_GROUP_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu")
+      set_source_files_properties(${file} PROPERTIES COMPILE_FLAGS "${_file_compile_flags}")
+    endfunction()
 
-    # Get existing arch flags
-    torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
-
-    # Check NVCC version and existing arch flags
-    set(SCALED_GROUP_MM_FILE_COMPILE_FLAGS "")
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
-      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
-        list(APPEND SCALED_GROUP_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_89,code=sm_89")
-      endif()
-      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-        list(APPEND SCALED_GROUP_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
-      endif()
-    endif()
-    list(JOIN SCALED_GROUP_MM_FILE_COMPILE_FLAGS " " SCALED_GROUP_MM_FILE_COMPILE_FLAGS)
-    set_source_files_properties(${SCALED_GROUP_MM_FILE} PROPERTIES COMPILE_FLAGS "${SCALED_GROUP_MM_FILE_COMPILE_FLAGS}")
-
-
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
+      "89;90a;100a")
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
+      "89;90a")
   endif()
 
   set(GEN_ROCM_FLAG)

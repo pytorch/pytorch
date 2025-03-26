@@ -1,6 +1,5 @@
 #pragma once
-
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBase.h>
 #include <optional>
 
 namespace at::cuda::detail {
