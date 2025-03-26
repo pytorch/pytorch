@@ -114,8 +114,8 @@ inline Tensor mse_loss(
   }
   std::vector<torch::Tensor> broadcast_tensors =
       torch::broadcast_tensors({input, target});
-  auto expanded_input = broadcast_tensors[0];
-  auto expanded_target = broadcast_tensors[1];
+  const auto& expanded_input = broadcast_tensors[0];
+  const auto& expanded_target = broadcast_tensors[1];
   return torch::mse_loss(
       expanded_input, expanded_target, enumtype::reduction_get_enum(reduction));
 }
