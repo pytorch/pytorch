@@ -127,6 +127,11 @@ jobs:
         shell: bash
         run: python pytorch/.github/scripts/parse_ref.py
 
+      - name: cd pytorch
+        shell: cmd
+        run: |
+          cd pytorch
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./pytorch/.github/actions/get-workflow-job-id
@@ -134,6 +139,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: popd
+        shell: cmd
+        run: |
+          popd
+        
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
