@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <c10/metal/common.h>
 #include <functional>
 #include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -1023,8 +1024,14 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
+  const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
-  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(input));
+  // TODO: Implicitly pass both input and output types to non-cast kernels
+  const auto kernel_name = fmt::format("{}_{}{}_{}",
+                                       name,
+                                       suffix,
+                                       cast_needed ? "_cast" : "",
+                                       cast_needed ? scalarToMetalTypeString(out) : scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1036,10 +1043,19 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
         mtl_setArgs(computeEncoder, out, input, other);
+        if (cast_needed) {
+          std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                               static_cast<int>(c10::elementSize(other.scalar_type())),
+                                               static_cast<int>(input.scalar_type()),
+                                               static_cast<int>(other.scalar_type())};
+          mtl_setBytes(computeEncoder, size_and_types, 3);
+        }
       } else {
         // Please note that shapes and strides of the iterator might be
         // different than that of its operands, for example binary op
         // between 4x4 tensor and scalar will result in 1D 16 element iterator
+        std::array<int, 3> ndim_and_types = {
+            iter.ndim(), static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
         mtl_setArgs(computeEncoder,
                     out,
                     input,
@@ -1048,7 +1064,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
                     iter.strides(0),
                     iter.strides(1),
                     iter.strides(2),
-                    iter.ndim());
+                    ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
       getMPSProfiler().endProfileKernel(binaryPSO);
@@ -1132,3 +1148,8 @@ uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
 }
 
 } // namespace at::native::mps
+
+// Check that c10::metal::ScalarType is strict subset (with matching values) of c10::ScalarType
+#define DTYPE_CHECKER(_n, _v) \
+  static_assert(static_cast<int>(::c10::ScalarType::_n) == static_cast<int>(::c10::metal::ScalarType::_n));
+C10_METAL_ALL_TYPES_FUNCTOR(DTYPE_CHECKER)

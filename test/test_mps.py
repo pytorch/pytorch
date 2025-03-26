@@ -12704,6 +12704,22 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
+    def test_fmax_mixed_dtypes(self, device):
+        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # fmax and fmin are implemented as binary metal shaders and they were implemented
+        # with the assumption that both args have the same dtype
+        x = torch.rand((3, 3), device=device, dtype=torch.float32)
+        x_int = torch.randint(-10, 10, (3, 3), device=device, dtype=torch.int8)
+        y = torch.rand((3, 3), device=device, dtype=torch.float16)
+        for op in [torch.fmax, torch.fmin]:
+            self.assertEqual(op(x, y), op(x.to("mps"), y.to("mps")).cpu())
+            self.assertEqual(op(x_int, y), op(x_int.to("mps"), y.to("mps")).cpu())
+            # Stride
+            self.assertEqual(op(x.t(), y), op(x.to("mps").t(), y.to("mps")).cpu())
+            # Broadcast
+            self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
+
+
 
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
