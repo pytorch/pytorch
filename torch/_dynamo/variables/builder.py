@@ -68,6 +68,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
@@ -622,7 +623,7 @@ class VariableBuilder:
             # `_is_view`.
             torch.nn.parameter.UninitializedBuffer,
             torch.nn.parameter.UninitializedParameter,
-            torch.nn.utils._expanded_weights.ExpandedWeight,
+            ExpandedWeight,
         ):
             if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
                 # This case it's either tensor or subclass with default
