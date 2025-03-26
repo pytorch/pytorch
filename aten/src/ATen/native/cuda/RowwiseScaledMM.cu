@@ -3,7 +3,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/native/cuda/cutlass_common.cuh>
 #include <c10/macros/Macros.h>
 
 // Two warninngs in Cutlass included header files
@@ -41,6 +40,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
+
+#include <ATen/native/cuda/cutlass_common.cuh>
 
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
