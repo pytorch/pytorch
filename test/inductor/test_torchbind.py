@@ -79,6 +79,22 @@ class TestTorchbind(TestCase):
         new_res = compiled(*inputs)
         self.assertTrue(torch.allclose(orig_res, new_res))
 
+    def test_torchbind_compile_symint(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
+                return a
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+        new_res = torch.compile(m, backend="inductor")(*inputs)
+        self.assertTrue(torch.allclose(orig_res, new_res))
+
     def test_torchbind_compile(self):
         _, inputs, orig_res, mod = self.get_exported_model()
         new_res = torch.compile(mod, backend="inductor")(*inputs)
