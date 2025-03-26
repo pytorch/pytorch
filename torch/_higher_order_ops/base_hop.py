@@ -137,33 +137,44 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         assert isinstance(
             subgraph, torch.fx.GraphModule
         ), f"NYI non GraphModule subgraph got {subgraph}"
+
         fake_args = [
             ph.meta["example_value"]
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
-        mutated_inp_idx, _, _, _, output = check_input_alias_and_mutation_return_ouputs(
-            subgraph, fake_args
-        )
-        args = []
-        for idx, arg in enumerate((subgraph, *operands, *kwargs.items())):
+        (
+            mutated_inp_idx,
+            inp_inp_alias,
+            inp_out_alias,
+            out_out_alias,
+            output,
+        ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
+
+        assert (
+            len(inp_inp_alias) == 0
+            and len(inp_out_alias) == 0
+            and len(out_out_alias) == 0
+        ), "Aliasing is not suppported for HOP subgraph."
+        args = [
+            HopArgumentInfoGen.from_example(
+                subgraph, name="subgraph", default_value=None, is_mutated=False
+            )
+        ]
+        for idx, arg in enumerate(*operands, *kwargs.items()):
             if isinstance(arg, tuple):
+                # kwargs value are treated as default argument
                 arg_name, example_value = arg
                 default = example_value
             else:
                 arg_name = f"arg{idx}"
                 example_value = arg
                 default = None
-            if isinstance(default, str):
-                default = '"' + default + '"'
-            is_mutated = False
-            if idx - 1 in mutated_inp_idx:
-                is_mutated = True
             args.append(
                 HopArgumentInfoGen.from_example(
                     example_value=example_value,
                     name=arg_name,
                     default_value=default,
-                    is_mutated=is_mutated,
+                    is_mutated=idx in mutated_inp_idx,
                 )
             )
 
