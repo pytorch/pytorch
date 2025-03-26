@@ -206,6 +206,7 @@ class CppWrapperGpu(CppWrapperCpu):
         super().__init__()
         self.grid_id = count()
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
+        self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
 
     @staticmethod
     def create(
@@ -243,6 +244,9 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def get_autotuning_input_name(self, idx):
+        return f"{self.autotune_input_prefix}_{idx}"
 
     def codegen_inputs(self):
         # See Note: [Input Alignment handling in Inductor]
@@ -326,6 +330,8 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args=[self.val_to_arg_str(desc.tensor)],
             arg_types=[desc.tensor.get_dtype()],
             arg_signatures=[None],
+            # these args are passed to initNDTMADescriptor, which is NOT a triton kernel
+            is_triton_kernel=False,
         )
 
         desc_name = desc.name
@@ -344,8 +350,27 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline(f"{fn}({args});")
 
     def generate_args_decl(
-        self, code: Union[IndentedBuffer, Self], call_args, arg_types, arg_signatures
+        self,
+        code: Union[IndentedBuffer, Self],
+        call_args,
+        arg_types,
+        arg_signatures,
+        is_triton_kernel=True,
     ):
+        """
+        Generates any declarations of args to pass into a kernel call, and then returns the arg names.
+
+        In more detail:
+        * declarations: e.g. this function has a side effect of generating lines like `auto var_0 = ...;`
+        * returns: a string with the list of args, e.g. "var_0, var_1"
+
+        call_args: list of call arguments
+        arg_types: list of argument types
+        arg_signatures: list with signatures of all the args
+        is_triton_kernel: whether these are passed into a triton kernel or not. In particular,
+                          calls to triton kernels will have an additional global scratch space
+                          arg injected at the front of the arg list.
+        """
         new_args: list[str] = []
 
         # Add more cases for other types as needed
@@ -398,10 +423,14 @@ class CppWrapperGpu(CppWrapperCpu):
             process_args(arg, arg_type, arg_signature)
 
         if (
-            global_scratch := self.device_codegen.cpp_global_scratch(
-                next(self.arg_var_id)
+            is_triton_kernel
+            and (
+                global_scratch := self.device_codegen.cpp_global_scratch(
+                    next(self.arg_var_id)
+                )
             )
-        ) is not None:
+            is not None
+        ):
             global_scratch_def, global_scratch_var = global_scratch
             code.writeline(global_scratch_def)
             new_args.append(f"&{global_scratch_var}")
@@ -416,8 +445,10 @@ class CppWrapperGpu(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -434,6 +465,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
             )
@@ -451,8 +483,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                original_fxnode_name=original_fxnode_name,
             )
 
         stream = (
