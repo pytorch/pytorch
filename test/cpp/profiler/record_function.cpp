@@ -144,7 +144,9 @@ TEST(RecordFunctionTest, CallOrder) {
 #undef REGISTER_CALLBACK
 
   RECORD_FUNCTION("Outer", {});
-  { RECORD_FUNCTION("Inner", {}); }
+  {
+    RECORD_FUNCTION("Inner", {});
+  }
 
   at::clearCallbacks();
   ASSERT_FALSE(at::hasCallbacks());
