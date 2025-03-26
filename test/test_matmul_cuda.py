@@ -425,10 +425,6 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return 20 * torch.log10(Ps / Pn)
 
 
-def ceil_div(a, b):
-  return (a + b - 1) // b
-
-
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
 # max value of `torch.float8_e4m3fn` (448)
@@ -484,7 +480,7 @@ def pack_uint4(uint8_data) -> torch.Tensor:
     shape = uint8_data.shape
     assert shape[-1] % 2 == 0
     uint8_data = uint8_data.contiguous().view(-1)
-    return (uint8_data[::2] << 4 | uint8_data[1::2]).view(down_size(shape))
+    return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
 
 
 def _bfloat16_to_float4_e2m1fn_x2(x):
@@ -934,6 +930,20 @@ class TestFP8MatmulCuda(TestCase):
             self.assertEqual(no_carveout, no_carveout_again)
             self.assertNotEqual(no_carveout, carveout_66)
             self.assertNotEqual(carveout_66, carveout_0)
+
+    def test_pack_uint4(self):
+        """
+        Verify that given a tensor with high precision values [val0, val1],
+        the x2 packed representation is val1:val0 (from MSB to LSB), and
+        not val0:val1.
+
+        Note that the packing function is private to this file, but it's still
+        good to test that we are packing in the expected way.
+        """
+        hp_data = torch.tensor([0b00000010, 0b00001011], dtype=torch.uint8)
+        lp_data_actual = pack_uint4(hp_data)
+        lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
+        torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
