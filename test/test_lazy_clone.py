@@ -49,7 +49,7 @@ class TestLazyCloneDeviceType(TestCase):
             src_device = f"{device_type}:1"
             dest_device = f"{device_type}:0"
         else:
-            assert False
+            raise AssertionError(f"case='{case}' not recognized")
 
         return src_device, dest_device
 

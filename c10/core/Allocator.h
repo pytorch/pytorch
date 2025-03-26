@@ -190,6 +190,7 @@ struct C10_API Allocator {
   // memory address spaces. By default, they return nullptr.
   virtual void* get_cpu_ptr_from_device_ptr(void* device_ptr) const;
   virtual void* get_device_ptr_from_cpu_ptr(void* cpu_ptr) const;
+  virtual bool has_unified_memory() const;
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.

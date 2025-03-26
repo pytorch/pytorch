@@ -936,6 +936,10 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     return getSharedDevicePtrFromCPUPtr(cpu_ptr).first;
   }
 
+  bool has_unified_memory() const override {
+    return m_has_unified_memory;
+  }
+
  protected:
   bool m_has_unified_memory;
   uint32_t m_usage;

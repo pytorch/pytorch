@@ -2488,8 +2488,17 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_data_address",
-      [](const at::Tensor& tensor) {
-        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
+      [](const at::Tensor& tensor, bool resolve_unified_cpu_to_device = false) {
+        const void* data_ptr = tensor.storage().data();
+        if (resolve_unified_cpu_to_device &&
+            tensor.device().type() == c10::kCPU) {
+          Allocator* allocator = tensor.storage().allocator();
+          if (allocator.has_unified_memory()) {
+            return reinterpret_cast<std::intptr_t>(
+                allocator.get_device_ptr_from_cpu_ptr(data_ptr));
+          }
+        }
+        return reinterpret_cast<std::intptr_t>(data_ptr);
       },
       "Gets the memory address of the Tensor's data pointer.");
 
