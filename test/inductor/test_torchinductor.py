@@ -4786,6 +4786,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
 
+    def test_fractional_max_pool2d5(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (3, 3), (1, 1), samples)
+
+        self.common(
+            fn, (torch.randn(2, 4, 6, 6), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
@@ -10092,6 +10100,9 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    @skip_if_cpp_wrapper(
+        "cannot currently handle fallback ops with return types containing list[Tensor]"
+    )
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
