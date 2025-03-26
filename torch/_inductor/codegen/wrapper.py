@@ -525,6 +525,16 @@ class FallbackKernelLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class FreeLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: Union[BufferLike, ir.TorchBindObject]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        assert self.node.get_name() not in V.graph.removed_buffers
+        code.writeline(self.wrapper.make_buffer_free(self.node))
+
+
+@dataclasses.dataclass
 class MemoryPlanningLine(WrapperLine):
     wrapper: PythonWrapperCodegen
 
@@ -581,18 +591,6 @@ class AllocateLine(MemoryPlanningLine):
 
 
 @dataclasses.dataclass
-class FreeLine(MemoryPlanningLine):
-    node: Union[BufferLike, ir.TorchBindObject]
-
-    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        return self
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
-        code.writeline(self.wrapper.make_buffer_free(self.node))
-
-
-@dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
     node: BufferLike
     is_reused: bool = False
@@ -627,7 +625,7 @@ class ReinterpretLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert isinstance(self.layout, ir.NonOwningLayout)
         self.wrapper.codegen_deferred_allocation(
-            code, self.node.get_name(), self.layout.view
+            code, self.reused_as.get_name(), self.layout.view
         )
 
 
