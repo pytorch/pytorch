@@ -493,6 +493,11 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 1e-2,
     },
+    ("fft_irfft2", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-2,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
