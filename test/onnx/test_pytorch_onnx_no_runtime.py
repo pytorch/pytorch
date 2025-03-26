@@ -341,22 +341,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         f = io.BytesIO()
         torch.onnx.export(foo, (torch.zeros(1, 2, 3)), f)
 
-    def test_listconstruct_erasure(self):
-        class FooMod(torch.nn.Module):
-            def forward(self, x):
-                mask = x < 0.0
-                return x[mask]
-
-        f = io.BytesIO()
-        torch.onnx.export(
-            FooMod(),
-            (torch.rand(3, 4),),
-            f,
-            add_node_names=False,
-            do_constant_folding=False,
-            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        )
-
     def test_export_dynamic_slice(self):
         class DynamicSliceExportMod(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -383,7 +367,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         f = io.BytesIO()
         torch.onnx.export(mod, (x_in,), f)
 
-        with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
+        with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported"):
             f = io.BytesIO()
             torch.onnx.export(torch.jit.script(mod), (x_in,), f)
 

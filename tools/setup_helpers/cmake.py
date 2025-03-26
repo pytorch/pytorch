@@ -189,7 +189,6 @@ class CMake:
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
-            "_GLIBCXX_USE_CXX11_ABI": "GLIBCXX_USE_CXX11_ABI",
             "CUDNN_LIB_DIR": "CUDNN_LIBRARY",
             "USE_CUDA_STATIC_LINK": "CAFFE2_STATIC_LINK_CUDA",
         }
@@ -377,15 +376,6 @@ class CMake:
             # os.sched_getaffinity(0) on platforms that support it.
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
 
-            # This ``if-else'' clause would be unnecessary when cmake
-            # 3.12 becomes minimum, which provides a '-j' option:
-            # build_args += ['-j', max_jobs] would be sufficient by
-            # then. Until then, we use "--" to pass parameters to the
-            # underlying build system.
-            build_args += ["--"]
-            if IS_WINDOWS and not USE_NINJA:
-                # We are likely using msbuild here
-                build_args += [f"/p:CL_MPCount={max_jobs}"]
-            else:
-                build_args += ["-j", max_jobs]
+            # CMake 3.12 provides a '-j' option.
+            build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

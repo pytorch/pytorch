@@ -24,13 +24,7 @@ from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
-from .common import (
-    CSEVariable,
-    deduce_output_dtype_by_name,
-    Kernel,
-    KernelArgs,
-    OptimizationContext,
-)
+from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 
 
 DTYPE_TO_CPP = {
@@ -47,7 +41,9 @@ DTYPE_TO_CPP = {
     torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex32: "c10::complex<half>",
     torch.complex64: "c10::complex<float>",
+    torch.complex128: "c10::complex<double>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
     torch.float8_e4m3fnuz: "float8_e4m3fnuz",
@@ -80,6 +76,7 @@ DTYPE_TO_ATEN = {
 }
 
 DEVICE_TO_ATEN = {
+    "meta": "at::kMeta",
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
@@ -138,45 +135,6 @@ def promote_args(new_args):
     return new_args
 
 
-def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
-    return node.meta.get(OptimizationContext.key, None)
-
-
-def get_current_node_opt_ctx() -> OptimizationContext:
-    assert V.interpreter.current_node
-    return get_opt_ctx(V.interpreter.current_node)
-
-
-def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
-    if (
-        output_dtype := deduce_output_dtype_by_name(
-            name,
-            *args,
-            **kwargs,
-        )
-    ) is not None:
-        return output_dtype
-    elif name == "masked":
-        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
-        # inputs' CppCseVariable like other. Let's check it if any
-        # unexpected failures.
-        assert (
-            hasattr(V.interpreter, "current_node")
-            and V.interpreter.current_node.target.startswith("masked_subblock")
-            and get_current_node_opt_ctx() is not None
-        )
-        return get_current_node_opt_ctx().dtype
-    else:
-        # deduce output dtype by inputs' dtype
-        assert all(
-            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
-        )
-        return functools.reduce(
-            torch.promote_types,  # type: ignore[arg-type]
-            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
-        )
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -211,13 +169,6 @@ class CppCSEVariable(CSEVariable):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        if self.dtype is None:
-            # Take frexp for example: 2 output with different data type.
-            # The output dtype can't be deduced, since we don't know the idx
-            # of return tensor everywhere invoking update_on_args
-            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
-        assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """

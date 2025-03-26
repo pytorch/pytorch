@@ -46,6 +46,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
+
     arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, transforms, validate_args=None):

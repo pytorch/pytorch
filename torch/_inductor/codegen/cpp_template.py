@@ -34,8 +34,9 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
+        self.index = next(self.index_counter)
         self.output_node: Union[ir.Buffer, list[ir.Buffer]] = ir.Buffer(
-            name="buf_out", layout=layout
+            name=f"buf_out{self.index}", layout=layout
         )
         self.layout = layout
         self.num_threads = num_threads
@@ -43,11 +44,14 @@ class CppTemplate(KernelTemplate):
 
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
-            kernel_name=kernel_name, num_threads=self.num_threads
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
+            patch.object(ir.FlexibleLayout, "allow_indexing", True),
+            V.graph.set_current_device(self.layout.device),
+            CppTemplateKernel(
+                kernel_name=kernel_name, num_threads=self.num_threads
+            ) as kernel,
+        ):
             code = kernel.render(self, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
@@ -75,7 +79,7 @@ class CppTemplate(KernelTemplate):
         # since in cpp kernel, we bind it to C long
         extra_args = tuple(ctypes.c_ulonglong(x) for x in extra_args)
 
-        kernel_hash_name = f"cpp_{self.name}_{next(self.index_counter)}"
+        kernel_hash_name = f"cpp_{self.name}_{self.index}"
 
         # Create the BenchmarkRequest for CPP
         bmreq = CppBenchmarkRequest(

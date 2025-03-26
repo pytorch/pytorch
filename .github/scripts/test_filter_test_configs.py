@@ -102,30 +102,6 @@ MOCKED_DISABLED_UNSTABLE_JOBS = {
         "manywheel-py3_8-cuda11_8-build",
         "",
     ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor)": [
-        "pytorchbot",
-        "107079",
-        "https://github.com/pytorch/pytorch/issues/107079",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface)": [
-        "pytorchbot",
-        "109153",
-        "https://github.com/pytorch/pytorch/issues/109153",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface_dynamic)": [
-        "pytorchbot",
-        "109154",
-        "https://github.com/pytorch/pytorch/issues/109154",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface_dynamic)",
-    ],
 }
 
 MOCKED_PR_INFO = {
@@ -636,37 +612,6 @@ class TestConfigFilter(TestCase):
                 "test_matrix": '{include: [{config: "default"}]}',
                 "expected": '{"include": [{"config": "default", "unstable": "unstable"}]}',
                 "description": "Both binary build and test jobs are unstable",
-            },
-            {
-                "workflow": "inductor",
-                "job_name": "cuda12.1-py3.10-gcc9-sm86 / build",
-                "test_matrix": """
-                    { include: [
-                        { config: "inductor" },
-                        { config: "inductor_huggingface", shard: 1 },
-                        { config: "inductor_huggingface", shard: 2 },
-                        { config: "inductor_timm", shard: 1 },
-                        { config: "inductor_timm", shard: 2 },
-                        { config: "inductor_torchbench" },
-                        { config: "inductor_huggingface_dynamic" },
-                        { config: "inductor_torchbench_dynamic" },
-                        { config: "inductor_distributed" },
-                    ]}
-                """,
-                "expected": """
-                    { "include": [
-                        { "config": "inductor", "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 1, "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 2, "unstable": "unstable" },
-                        { "config": "inductor_timm", "shard": 1 },
-                        { "config": "inductor_timm", "shard": 2 },
-                        { "config": "inductor_torchbench" },
-                        { "config": "inductor_huggingface_dynamic", "unstable": "unstable" },
-                        { "config": "inductor_torchbench_dynamic" },
-                        { "config": "inductor_distributed" }
-                    ]}
-                """,
-                "description": "Marking multiple unstable configurations",
             },
         ]
 

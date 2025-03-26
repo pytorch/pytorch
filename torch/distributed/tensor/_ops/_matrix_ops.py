@@ -2,6 +2,8 @@
 # implement matrix related ops for distributed tensor
 
 
+from typing import Optional
+
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -29,7 +31,7 @@ aten = torch.ops.aten
 
 
 @register_op_strategy(aten.t.default)
-def transpose_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
     self_strategy = op_schema.args_schema[0]
     assert isinstance(self_strategy, OpStrategy)
 
@@ -43,7 +45,7 @@ def transpose_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         ]
         transpose_strategy = PlacementStrategy(
             output_specs=DTensorSpec(
-                mesh=input_strategy.output_spec.mesh,
+                mesh=input_strategy.mesh,
                 placements=tuple(output_placements),
             ),
             input_specs=(input_strategy.output_spec,),
@@ -155,9 +157,9 @@ def _scaled_mm_like_strategy(
     assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
     assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
-    assert (
-        scale_result_strategy is None
-    ), "_scaled_mm on DTensors doesn't support scale_result"
+    assert scale_result_strategy is None, (
+        "_scaled_mm on DTensors doesn't support scale_result"
+    )
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
@@ -202,39 +204,45 @@ def _scaled_mm_like_strategy(
 
 
 @register_op_strategy(aten.mm.default)
-def mm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def mm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_op_strategy(aten.addmm.default)
-def addmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_op_strategy(aten.bmm.default)
-def bmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_op_strategy(aten.baddbmm.default)
-def baddmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def baddmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_op_strategy(aten._scaled_mm.default)
-def scaled_mm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _scaled_mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_op_strategy(
     aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
 )
-def scaled_dot_product_flash_attention_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
-) -> OpStrategy:
+def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrategy:
     # NOTE: currently we only support some simple strategies to support tensor parallelism
     # TODO: sdpa might be a good candidate for us to explore decomposed sharding propagation
     # as it involves: matmul, pointwise, reduction ops together.
+
+    mesh = op_schema.get_mesh_from_args()
+
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
@@ -252,8 +260,8 @@ def scaled_dot_product_flash_attention_strategy(
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         Replicate(),
         Replicate(),
         Replicate(),
@@ -279,14 +287,32 @@ def scaled_dot_product_flash_attention_strategy(
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         debug_attn_mask_sharding,
         qkv_sharding,
         qkv_sharding,
         qkv_sharding,
     ]
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Shard on the batch dimension
+    single_mesh_dim_strategies.append(
+        [
+            Shard(0),  # output
+            Shard(0),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            Shard(0),  # debugattn
+            Shard(0),  # q
+            Shard(0),  # k
+            Shard(0),  # v
+        ]
+    )
 
     # Context Parallelism: shards on the sequence dim
     single_mesh_dim_strategies.append(
@@ -297,8 +323,8 @@ def scaled_dot_product_flash_attention_strategy(
             None,  # cum_seq_k
             None,  # max_q
             None,  # max_k
-            None,  # philox_seed
-            None,  # philox_offset
+            Replicate(),  # rng_state
+            None,  # unused
             Shard(2),  # debugattn
             Shard(2),  # q
             Shard(2),  # k
@@ -312,8 +338,11 @@ def scaled_dot_product_flash_attention_strategy(
 
 @register_op_strategy(aten._scaled_dot_product_flash_attention_backward.default)
 def scaled_dot_product_flash_attention_backward_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
+    op_schema: OpSchema,
 ) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
@@ -359,6 +388,24 @@ def scaled_dot_product_flash_attention_backward_strategy(
     num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # Batch sharding
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    batch_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
         Shard(2),  # grad_q
@@ -383,7 +430,9 @@ def scaled_dot_product_flash_attention_backward_strategy(
 
 
 @register_op_strategy(aten.constant_pad_nd.default)
-def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
     # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
     return OpStrategy(
         [
@@ -403,10 +452,9 @@ def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrateg
     aten._scaled_dot_product_efficient_attention.default,
     schema_info=RuntimeSchemaInfo(4),
 )
-def scaled_dot_product_efficient_attention_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
-) -> OpStrategy:
+def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpStrategy:
     # NOTE: currently we only support some simple strategies to support tensor parallelism
+    mesh = op_schema.get_mesh_from_args()
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
@@ -469,6 +517,26 @@ def scaled_dot_product_efficient_attention_strategy(
         num_heads_dim_sharding.append(Shard(1))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # batch sharding
+    if compute_log_sumexp:
+        logsumexp_sharding_dp: Placement = Shard(0)
+    else:
+        # empty logsumexp, replicated
+        logsumexp_sharding_dp = Replicate()
+    batch_sharding = [
+        Shard(0),  # output
+        logsumexp_sharding_dp,  # logsumexp
+        None,  # philox_seed
+        None,  # philox_offset
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    if has_attn_bias:
+        batch_sharding.append(Shard(0))
+
+    single_mesh_dim_strategies.append(batch_sharding)
+
     return expand_to_full_mesh_op_strategy(
         mesh,
         op_schema,
@@ -479,8 +547,11 @@ def scaled_dot_product_efficient_attention_strategy(
 
 @register_op_strategy(aten._scaled_dot_product_efficient_attention_backward.default)
 def scaled_dot_product_efficient_attention_backward_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
+    op_schema: OpSchema,
 ) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
@@ -530,6 +601,27 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     num_heads_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # Shards on batch dim
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0) if has_attn_bias else None,  # grad_bias
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    if has_attn_bias:
+        batch_dim_sharding.insert(8, Shard(0))
+    batch_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
         Shard(2),  # grad_q
@@ -556,4 +648,242 @@ def scaled_dot_product_efficient_attention_backward_strategy(
         op_schema,
         single_mesh_dim_strategies,
         input_index=4,
+    )
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_cudnn_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+
+    (
+        query_strategy,  # query
+        _,  # key
+        _,  # value
+        attn_bias_strategy,
+        compute_log_sumexp,  # compute_log_sumexp
+        *rest_args,  # optional args: dropout_p, is_causal, return_debug_mask, scale
+    ) = op_schema.args_schema
+    return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
+    has_attn_bias = attn_bias_strategy is not None
+    debug_attn_mask_sharding: Optional[Placement] = (
+        Replicate() if return_debug_mask else None
+    )
+
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [outputs, inputs]
+    # in the spda case, we have 2 valid tensor outputs and 3 tensor inputs
+    # first we can always accept full replication for both inputs and outputs
+    all_replicate: PlacementList = [
+        Replicate(),  # output
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        # NOTE: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
+        debug_attn_mask_sharding,  # debug_attn_mask
+        Replicate(),  # q
+        Replicate(),  # k
+        Replicate(),  # v
+    ]
+    if has_attn_bias:
+        all_replicate.append(Replicate())  # attn bias
+
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # second we can accept the sharding pattern of tensor parallelism, which
+    # shard on the num of head dim
+    tp_sharding = Shard(1)  # num head dim
+    qkv_sharding = tp_sharding
+    output_sharding = tp_sharding
+    logsumexp_sharding = tp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = tp_sharding if return_debug_mask else None
+
+    num_heads_dim_sharding: PlacementList = [
+        output_sharding,
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_sharding,
+        qkv_sharding,
+        qkv_sharding,
+        qkv_sharding,
+    ]
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # batch parallelism
+    logsumexp_sharding = Shard(0) if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = Shard(0) if return_debug_mask else None
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # output
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_sharding,
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    cp_sharding = Shard(2)  # seq dim
+    logsumexp_sharding = cp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
+
+    single_mesh_dim_strategies.append(
+        [
+            cp_sharding,  # output
+            logsumexp_sharding,  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            None,  # philox_seed
+            None,  # philox_offset
+            debug_attn_mask_sharding,  # debug_attn_mask
+            cp_sharding,  # q
+            cp_sharding,  # k
+            cp_sharding,  # v
+        ]
+    )
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    )
+
+
+@register_op_strategy(aten._scaled_dot_product_cudnn_attention_backward.default)
+def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    assert len(op_schema.args_schema) >= 15
+    has_attn_bias = op_schema.args_schema[8] is not None
+    has_scale = len(op_schema.args_schema) >= 16 and False
+
+    query_strategy = op_schema.args_schema[1]
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [outputs, inputs]
+    # cudnn outputs: (Tensor dq, Tensor dk, Tensor dv)
+    # cudnn inputs: (
+    #   Tensor grad_out,
+    #   Tensor query,
+    #   Tensor key,
+    #   Tensor value,
+    #   Tensor out,
+    #   Tensor logsumexp,
+    #   Tensor philox_seed,
+    #   Tensor philox_offset,
+    #   Tensor attn_bias,
+    #   Tensor cum_seq_q,
+    #   Tensor cum_seq_k,
+    #   SymInt max_q,
+    #   SymInt max_k,
+    #   float dropout_p,
+    #   bool is_causal,
+    #   int? scale,
+    # )
+
+    # case 1: we can always accept full replication for both inputs and outputs
+    all_replicate_out: PlacementList = [
+        Replicate(),  # dq
+        Replicate(),  # dk
+        Replicate(),  # dv
+    ]
+    all_replicate_inp: PlacementList = [Replicate()] * 6
+    all_replicate_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    all_replicate_inp += [Replicate() if has_attn_bias else None]
+    all_replicate_inp += [None] * 6
+    if has_scale:
+        all_replicate_inp.append(None)
+
+    all_replicate: PlacementList = all_replicate_out + all_replicate_inp
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # case 2: we can accept the sharding pattern of tensor parallelism, which
+    #   shards on the num of head dim
+    qkv_sharding = Shard(1)  # num head dim
+    output_sharding = Shard(1)  # num head dim
+    logsumexp_sharding = Shard(1)  # num head dim
+
+    num_heads_dim_sharding_out: PlacementList = [qkv_sharding] * 3
+    num_heads_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
+    num_heads_dim_sharding_inp += [output_sharding]
+    num_heads_dim_sharding_inp += [logsumexp_sharding]
+    num_heads_dim_sharding_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    num_heads_dim_sharding_inp += [Shard(1) if has_attn_bias else None]
+    num_heads_dim_sharding_inp += [None] * 6
+    if has_scale:
+        num_heads_dim_sharding_inp.append(None)
+
+    num_heads_dim_sharding = num_heads_dim_sharding_out + num_heads_dim_sharding_inp
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # case 3: Context Parallelism which shards on the sequence dim
+    context_parallel_sharding_out: PlacementList = [Shard(2)] * 3
+    context_parallel_sharding_inp: PlacementList = [Shard(2)] * 6
+    context_parallel_sharding_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    context_parallel_sharding_inp += [Shard(2) if has_attn_bias else None]
+    context_parallel_sharding_inp += [None] * 6
+    if has_scale:
+        context_parallel_sharding_inp.append(None)
+
+    context_parallel_sharding = (
+        context_parallel_sharding_out + context_parallel_sharding_inp
+    )
+    single_mesh_dim_strategies.append(context_parallel_sharding)
+
+    # case 4: we can accept the sharding pattern of batch parallelism, which
+    #   shards on the batch dimension
+    qkv_sharding = Shard(0)
+    output_sharding = Shard(0)
+    logsumexp_sharding = Shard(0)
+
+    batch_dim_sharding_out: PlacementList = [qkv_sharding] * 3
+    batch_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
+    batch_dim_sharding_inp += [output_sharding]
+    batch_dim_sharding_inp += [logsumexp_sharding]
+    batch_dim_sharding_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    batch_dim_sharding_inp += [Shard(0) if has_attn_bias else None]
+    batch_dim_sharding_inp += [None] * 6
+    if has_scale:
+        batch_dim_sharding_inp.append(None)
+
+    batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )
