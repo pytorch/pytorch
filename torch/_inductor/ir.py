@@ -3543,18 +3543,10 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):  # type: ignore[no-untyped-def]
-            # assert len(index) == len(self.stride)
-            # assert len(index) == len(self.size)
-
-            # Calculate how many dimensions to pad
-            dim_diff = len(index) - len(self.size)
-            
-            # Create padded size and stride
-            padded_size = [1] * dim_diff + list(self.size)
-            padded_stride = [0] * dim_diff + list(self.stride)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
-
-            for idx, stride, sz in zip(index, padded_stride, padded_size):
+            for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
                     result = result + idx * stride
 

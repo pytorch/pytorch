@@ -58,6 +58,9 @@ from .mm_common import (
     triton_config,
 )
 
+from ..lowering import (
+    lowerings as L,
+)
 
 try:
     import triton
@@ -555,6 +558,27 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
         return torch.addmm(inp[0], mat1, mat2, out=out, alpha=alpha, beta=beta)
     return torch.addmm(inp, mat1, mat2, out=out, alpha=alpha, beta=beta)
 
+def check_supported_striding(mat_a, mat_b) -> None:
+    def is_row_major(stride) -> bool:
+        return stride[1] == 1
+
+    def is_col_major(stride) -> bool:
+        return stride[0] == 1
+
+    def has_zero_dim(size) -> bool:
+        return bool(size[0] == 0 or size[1] == 0)
+
+    # Check mat_a (self) stride requirements
+    torch._check(
+        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+    )
+
+    # Check mat_b stride requirements
+    torch._check(
+        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+    )
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
@@ -949,6 +973,7 @@ def tuned_scaled_mm(
     layout=None,
 ):
     from torch._inductor.select_algorithm import realize_inputs
+
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -964,7 +989,7 @@ def tuned_scaled_mm(
         layout,
     )
 
-    # check_supported_striding(mat_a, mat_b)
+    check_supported_striding(mat_a, mat_b)
     
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
@@ -976,8 +1001,8 @@ def tuned_scaled_mm(
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
         suffix_args = 2
     else:
-        bias = realize_inputs(bias)
-        input_nodes = (mat_a, mat_b, scale_a, scale_b, bias)
+        bias_arg = realize_inputs(bias)
+        input_nodes = (mat_a, mat_b, scale_a, scale_b, bias_arg)
         suffix_args = 3
 
     aten_choice = aten__fp8_mm.bind(
@@ -991,15 +1016,20 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
+        if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
+            # Need to unsqueeze bias from [N] -> [1, N]
+            triton_input_nodes = (mat_a, mat_b, scale_a, scale_b, L[aten.unsqueeze](bias, 0))
+        else:
+            triton_input_nodes = input_nodes
+
         if use_triton_tma_template(mat_a, mat_b) and bias is None:
             for config in scaled_persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum, device_tma=True
                 )
-                input_nodes = (mat_a, mat_b, scale_a, scale_b)
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
-                    input_nodes=input_nodes,
+                    input_nodes=triton_input_nodes,
                     layout=layout,
                     workspace_arg=get_tma_workspace_arg(
                         num_tma_descriptors=2,
@@ -1016,14 +1046,14 @@ def tuned_scaled_mm(
                 # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
                 if using_b200() and k < 32:
                     continue
-
+                
                 kwargs = scaled_mm_options(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
                 # possibly appends a TritonTemplateCaller to choices
                 mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=input_nodes,
+                    input_nodes=triton_input_nodes,
                     layout=layout,
                     **kwargs,
                     suffix_args=suffix_args,
