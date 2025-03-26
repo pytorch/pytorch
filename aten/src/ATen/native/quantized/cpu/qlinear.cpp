@@ -1,17 +1,18 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
-#include <ATen/native/quantized/cpu/XnnpackUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/ACLUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/cpu/XnnpackUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/native/quantized/library.h>
-#include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -25,6 +26,7 @@
 #include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
 #include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_weight_int4pack_mm_for_cpu.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -1106,6 +1108,96 @@ static at::Tensor linear_int8_with_onednn_weight(
   primitive.execute(ideep::stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
+
+#if AT_MKLDNN_ACL_ENABLED()
+
+template <bool ReluFused>
+at::Tensor PackedLinearWeightsACL::apply_impl(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  const int64_t dim = input.dim();
+  TORCH_CHECK(
+      dim != 0, "qlinear (ACL): input dim should be at least 1, but got 0");
+  TORCH_CHECK(
+      input.scalar_type() == c10::ScalarType::QUInt8 ||
+          input.scalar_type() == c10::ScalarType::QInt8,
+      "qlinear (ACL): data type of input should be QUInt8 or QInt8.");
+
+  auto input_contig = input.expect_contiguous();
+
+  int64_t m = input.numel() / k_;
+  double input_scale = input.q_scale();
+  int64_t input_zero_point = input.q_zero_point();
+  auto is_input_qint8 = input.scalar_type() == c10::ScalarType::QInt8;
+  auto key = std::make_tuple(
+      m,
+      ReluFused,
+      static_cast<int64_t>(at::get_num_threads()),
+      input_scale,
+      input_zero_point,
+      output_scale,
+      output_zero_point,
+      is_input_qint8);
+
+  auto acl_gemm =
+      get_acl_quant_matmul<at::native::acl_utils::StaticQuantMatmul>(key);
+  if (acl_gemm) {
+    acl_gemm->src_q_tensor.allocator()->import_memory(input_contig->data_ptr());
+
+    auto dst_dims = {m, n_};
+    at::Tensor output = at::_empty_affine_quantized(
+        dst_dims,
+        at::device(c10::kCPU).dtype(
+            is_input_qint8 ? c10::kQInt8 : c10::kQUInt8),
+        output_scale,
+        output_zero_point);
+
+    if (output.numel() == 0) {
+      return output;
+    }
+
+    acl_gemm->dst_q_tensor.allocator()->import_memory(output.data_ptr());
+
+    acl_gemm->gemm.run();
+
+    acl_gemm->src_q_tensor.allocator()->free();
+    acl_gemm->dst_q_tensor.allocator()->free();
+
+    auto out_sizes = input.sizes().vec();
+    out_sizes.back() = n_;
+
+    if (output.sizes().vec() == out_sizes)
+      return output;
+    return output.reshape(out_sizes);
+  }
+  // fallback to oneDNN in the unlikely scinario that ACL's validation fails
+  if (ReluFused) {
+    return PackedLinearWeightsOnednn::apply_relu(
+        input, output_scale, output_zero_point);
+  } else {
+    return PackedLinearWeightsOnednn::apply(
+        input, output_scale, output_zero_point);
+  }
+}
+
+at::Tensor PackedLinearWeightsACL::apply(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl</*ReluFused=*/false>(
+      std::move(input), output_scale, output_zero_point);
+}
+
+at::Tensor PackedLinearWeightsACL::apply_relu(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl</*ReluFused=*/true>(
+      std::move(input), output_scale, output_zero_point);
+}
+
+#endif // AT_MKLDNN_ACL_ENABLED()
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
@@ -1177,6 +1269,17 @@ namespace at::native {
     );
 #endif
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+  }
+
+  Tensor _weight_int4pack_mm_cpu_tensor(
+      const Tensor& A,
+      const Tensor& B,
+      const Tensor& qGroupSize,
+      const Tensor& qScaleAndZeros) {
+    TORCH_CHECK(qGroupSize.numel() == 1, __func__, ": group size must be a scalar.");
+    TORCH_CHECK(qGroupSize.scalar_type() == c10::kLong, __func__, ": group size must be int64.");
+    int group_size = qGroupSize.item<int64_t>();
+    return at::_weight_int4pack_mm_for_cpu(A, B, group_size, qScaleAndZeros);
   }
 
 
@@ -1346,6 +1449,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_relu_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::int4mm_packed_weight_cpu"), TORCH_FN(at::native::_weight_int4pack_mm_cpu_tensor));
 }
 
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {

@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -11,7 +10,9 @@ import math
 import tempfile
 import unittest
 import zipfile
+from collections import namedtuple
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -20,16 +21,18 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _to_json_bytes,
     canonicalize,
     deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleSerializer,
     serialize,
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import Dim, export_for_training, load, save
+from torch.export import Dim, export_for_training, load, save, unflatten
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -230,6 +233,47 @@ def forward(self, x):
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
 
+    def test_nested_layer_split(self):
+        class Bar(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                )
+
+            def forward(self, x):
+                out_start, out_rest = self.layers[0], self.layers[1:]
+                h = out_start(x)
+                h = out_rest(h) + 2
+                return h
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_module("a[(1)]", Bar())
+                self.register_module("b[(2)]", Bar())
+                self.register_buffer("c:[22]", torch.randn(1))
+
+            def forward(self, x):
+                out_a, out_b = getattr(self, "a[(1)]"), getattr(self, "b[(2)]")
+                out_c = getattr(self, "c:[22]")
+                h = out_a(x)
+                h = out_b(h)
+                return h + out_c
+
+        inp = (torch.ones(10),)
+        ep = export_for_training(Foo(), inp, strict=True)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+
+        # Check that both modules run to confirm load was successful.
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -377,6 +421,17 @@ def forward(self, x):
         for v in serialized.exported_program.range_constraints.values():
             self.assertEqual(v.max_val, None)
 
+    def test_symint_list(self):
+        # This reflects the behavior from inductor's ExternFallbackNode
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        res = serializer.serialize_inputs(
+            torch.ops.aten.ones.default, ([1, symint, 3],), {}
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].arg._type, "as_sym_ints")
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -413,6 +468,26 @@ def forward(self, x):
             name = output.name
             self.assertNotIn(name, seen)
             seen.add(name)
+
+    def test_infinity_inputs(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Scalar(x, math.inf)
+
+        fn = Module()
+        ep = torch.export.export(
+            fn,
+            (torch.randn(3, 2),),
+        )
+        json_bytes = _to_json_bytes(
+            ExportedProgramSerializer().serialize(ep).exported_program
+        )
+        import json
+
+        def parse_constant(x):
+            raise RuntimeError(f"Invalid JSON float: {x}")
+
+        json.loads(json_bytes, parse_constant=parse_constant)
 
     def test_multi_return_some_unused(self) -> None:
         """
@@ -711,6 +786,46 @@ class TestDeserialize(TestCase):
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
+    def test_unbacked_bindings_serialize(self):
+        from torch._export.utils import _get_shape_env_from_gm
+        from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                n = x.item()
+                n = n * 2 + y.item()
+                return n + 2
+
+        inps = (
+            torch.tensor(4),
+            torch.tensor(5),
+        )
+        for _strict in [True, False]:
+            ep = torch.export.export(M(), inps, strict=_strict).run_decompositions()
+
+            # check bindings after deserialization
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            bound = set()
+            for old_node, new_node in zip(ep.graph.nodes, loaded_ep.graph.nodes):
+                self.assertEqual(
+                    "unbacked_bindings" in old_node.meta,
+                    "unbacked_bindings" in new_node.meta,
+                )
+                bound.update(new_node.meta.get("unbacked_bindings", {}))
+
+            # check ShapeEnv counters
+            shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
+            next_index = next(shape_env.unbacked_symint_counter)
+            for symbol in bound:
+                self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
+                self.assertTrue(
+                    int(str(symbol)[len(prefix_str[SymT.UNBACKED_INT]) :]) < next_index
+                )
+
     def test_sym_bool_dynamic_shapes(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -856,7 +971,6 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
-    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -933,6 +1047,55 @@ class TestDeserialize(TestCase):
         inputs = (torch.randn(3, 3, device="meta"),)
         self.check_graph(mod, inputs)
 
+    def test_pytree_namedtuple(self):
+        N1 = namedtuple("N1", ["a", "b"])
+
+        class N2(NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return N2(x.a + y.a, x.b * y.b)
+
+        pytree._register_namedtuple(
+            N1,
+            serialized_type_name="test.export.test_serialize.test_pytree_namedtuple.N1",
+        )
+        pytree._register_namedtuple(
+            N2,
+            serialized_type_name="test.export.test_serialize.test_pytree_namedtuple.N2",
+        )
+
+        inp = (N1(torch.randn(3), torch.randn(3)), N1(torch.randn(3), torch.randn(3)))
+        ep = torch.export.export(M(), inp)
+        ep.example_inputs = None  # Can't pickle the input since the namedtuple class is not at a global namespace
+        serialized = ExportedProgramSerializer().serialize(ep)
+        self.assertEqual(
+            len(serialized.exported_program.graph_module.treespec_namedtuple_fields), 2
+        )
+        deserialized = ExportedProgramDeserializer().deserialize(
+            serialized.exported_program,
+            serialized.state_dict,
+            serialized.constants,
+        )
+        self.assertTrue("treespec_namedtuple_fields" in deserialized.graph_module.meta)
+        self.assertEqual(
+            deserialized.graph_module.meta["treespec_namedtuple_fields"],
+            {
+                "test.export.test_serialize.test_pytree_namedtuple.N1": ["a", "b"],
+                "test.export.test_serialize.test_pytree_namedtuple.N2": ["a", "b"],
+            },
+        )
+
+        unlifted = deserialized.module()
+        self.assertTrue("treespec_namedtuple_fields" in unlifted.meta)
+        self.assertEqual(len(unlifted.meta["treespec_namedtuple_fields"]), 2)
+
+        unflattened = unflatten(deserialized)
+        self.assertTrue("treespec_namedtuple_fields" in unflattened.meta)
+        self.assertEqual(len(unflattened.meta["treespec_namedtuple_fields"]), 2)
+
     def test_cond(self):
         from functorch.experimental.control_flow import cond
 
@@ -949,6 +1112,14 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_sym_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.item()
+                return b * 0.1
+
+        self.check_graph(M(), (torch.tensor(1.0),))
 
     def test_arg_from(self):
         class M(torch.nn.Module):
@@ -1340,17 +1511,17 @@ class TestSaveLoad(TestCase):
 
         ep = export_for_training(f, (torch.randn(1, 3),))
 
-        with tempfile.NamedTemporaryFile() as f:
-            save(ep, f)
-            f.seek(0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"Serialized version .* does not match our current"
+        ):
+            with tempfile.NamedTemporaryFile() as f:
+                save(ep, f)
+                f.seek(0)
 
-            # Modify the version
-            with zipfile.ZipFile(f, "a") as zipf:
-                zipf.writestr("version", "-1.1")
+                # Modify the version
+                with zipfile.ZipFile(f, "a") as zipf:
+                    zipf.writestr("version", "-1.1")
 
-            with self.assertRaisesRegex(
-                RuntimeError, r"Serialized version .* does not match our current"
-            ):
                 f.seek(0)
                 load(f)
 
@@ -1449,6 +1620,46 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+
+    def test_custom_class_input_to_function(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export_for_training(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, obj_attr, x):
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return (add,)""",
+        )
+        self.assertTrue(isinstance(ep.constants["attr"], torch.ScriptObject))
+        gm = ep.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    attr = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+        self.assertTrue(isinstance(gm.attr, torch.ScriptObject))
 
     def test_custom_tag_metadata_serialization(self):
         class Foo(torch.nn.Module):

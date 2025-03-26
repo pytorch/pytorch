@@ -1245,8 +1245,10 @@ class CrossEntropyLoss(_WeightedLoss):
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
-          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
+          target data type is required to be long when using class indices. If containing class probabilities, the
+          target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
+          data type is required to be float when using class probabilities.
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 

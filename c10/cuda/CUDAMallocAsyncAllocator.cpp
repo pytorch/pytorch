@@ -11,9 +11,10 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
+using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-#if CUDA_VERSION >= 11040
+#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 
@@ -503,9 +504,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
         cudaMemPool_t mempool = nullptr;
-        cudaDeviceGetDefaultMemPool(&mempool, dev);
-        cudaDeviceSynchronize();
-        cudaMemPoolTrimTo(mempool, 0);
+        C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev));
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+        C10_CUDA_CHECK(cudaMemPoolTrimTo(mempool, 0));
       }
     }
   }
@@ -581,7 +582,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       }
 
       if (err == cudaSuccess) {
-        cudaFreeAsync(dummy, stream);
+        C10_CUDA_CHECK(cudaFreeAsync(dummy, stream));
         *maxWorkspaceGuess = guess;
         return;
       } else if (err == cudaErrorMemoryAllocation) {
@@ -647,7 +648,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      RecordContext when) override {
+      RecordContext when,
+      bool clearHistory) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
@@ -919,11 +921,13 @@ static CudaMallocAsyncAllocator device_allocator;
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
 }
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
   return &device_allocator;
 }
 
 #else
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
   TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;

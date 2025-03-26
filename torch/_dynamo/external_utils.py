@@ -1,5 +1,27 @@
 # This module contains functions that *will be allowed* by dynamo
 
+"""
+This module contains utility functions that are explicitly allowed to be called during
+TorchDynamo compilation. These functions are carefully vetted to ensure they work
+correctly within the TorchDynamo tracing and compilation process.
+
+Key functionality groups:
+
+- Compilation State:
+  Functions for checking compilation state (is_compiling)
+
+- Function Wrapping:
+  Utilities for wrapping functions (wrap_inline, wrap_numpy) to work with
+  TorchDynamo compilation
+
+- Autograd Hooks:
+  Functions and classes for handling autograd hooks and backward passes
+  (call_hook, FakeBackwardCFunction, etc.)
+
+- Tensor Operations:
+  Utility functions for tensor operations and transformations
+"""
+
 import functools
 import warnings
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -165,3 +187,14 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used for torch._dynamo.disable(recursive=False)
+def get_nonrecursive_disable_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+    # wrap function to get the right error message
+    # this function is in external_utils so that convert_frame doesn't skip it.
+    @functools.wraps(fn)
+    def nonrecursive_disable_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return fn(*args, **kwargs)
+
+    return nonrecursive_disable_wrapper

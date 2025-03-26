@@ -158,6 +158,11 @@ class FSDPParamGroup:
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
+        # Optional stream to run the user-defined all-reduce hook in
+        # Saved here and not in the comm. context because we allow the user to
+        # specify it, possibly at construction time before lazy init
+        self._all_reduce_hook_stream: Optional[torch.cuda.Stream] = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
@@ -414,6 +419,18 @@ class FSDPParamGroup:
                     self.comm_ctx.reduce_scatter_state.event
                 )
                 self.comm_ctx.reduce_scatter_state = None
+            all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
+            all_reduce_stream: torch.cuda.Stream
+            if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
+                # this means the native HSDP is not enabled,
+                # but user may want to have a custom HSDP setup
+                assert self._all_reduce_hook is not None, (
+                    "all reduce hook stream is specified but hook itself is missing."
+                )
+                all_reduce_stream = self._all_reduce_hook_stream
+            else:
+                all_reduce_stream = self.comm_ctx.all_reduce_stream
+
             self._wait_for_post_backward()
             (
                 reduce_scatter_input,
@@ -432,9 +449,10 @@ class FSDPParamGroup:
                 self.device,
                 self.reduce_scatter_reduce_op,
                 self._all_reduce_process_group if self._is_hsdp else None,
-                self.comm_ctx.all_reduce_stream,
+                all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
+                self._all_reduce_hook,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
@@ -495,9 +513,10 @@ class FSDPParamGroup:
         else:
             raise ValueError(f"Unknown pass type: {pass_type}")
         target_fqn = target_fsdp_param_group._module_fqn
-        with record_function(
-            f"FSDP::{pass_type}_prefetch for {target_fqn}"
-        ), target_fsdp_param_group.use_training_state(training_state):
+        with (
+            record_function(f"FSDP::{pass_type}_prefetch for {target_fqn}"),
+            target_fsdp_param_group.use_training_state(training_state),
+        ):
             async_op = target_fsdp_param_group.unshard_async_op
             target_fsdp_param_group.unshard(async_op)
 
@@ -574,9 +593,9 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert (
-            num_pre_save_hooks == num_pre_load_hooks
-        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        assert num_pre_save_hooks == num_pre_load_hooks, (
+            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        )
         if num_pre_save_hooks > 0:
             return  # already registered
         modules_with_fsdp_params: set[nn.Module] = {
@@ -587,12 +606,12 @@ class FSDPParamGroup:
             self._to_sharded()
 
         for module in modules_with_fsdp_params:
-            self._module_to_pre_save_state_dict_hook_handle[
-                module
-            ] = module.register_state_dict_pre_hook(to_sharded_hook)
-            self._module_to_pre_load_state_dict_hook_handle[
-                module
-            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
+            self._module_to_pre_save_state_dict_hook_handle[module] = (
+                module.register_state_dict_pre_hook(to_sharded_hook)
+            )
+            self._module_to_pre_load_state_dict_hook_handle[module] = (
+                module._register_load_state_dict_pre_hook(to_sharded_hook)
+            )
 
     # Properties #
     @property
