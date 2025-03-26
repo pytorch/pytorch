@@ -55,7 +55,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -100,15 +100,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -121,6 +112,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -210,6 +210,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -224,18 +236,6 @@ jobs:
         with:
           name: wheel-py3_9-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -291,7 +291,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -336,15 +336,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -357,6 +348,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -447,6 +447,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -461,18 +473,6 @@ jobs:
         with:
           name: wheel-py3_9-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -529,7 +529,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -574,15 +574,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -595,6 +586,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -685,6 +685,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -699,18 +711,6 @@ jobs:
         with:
           name: wheel-py3_9-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -767,7 +767,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -812,15 +812,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -833,6 +824,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -923,6 +923,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -937,18 +949,6 @@ jobs:
         with:
           name: wheel-py3_9-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -1004,7 +1004,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1049,15 +1049,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -1070,6 +1061,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -1159,6 +1159,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1173,18 +1185,6 @@ jobs:
         with:
           name: wheel-py3_9-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -1239,7 +1239,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1284,15 +1284,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -1305,6 +1296,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -1394,6 +1394,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1408,18 +1420,6 @@ jobs:
         with:
           name: wheel-py3_10-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -1475,7 +1475,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1520,15 +1520,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -1541,6 +1532,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -1631,6 +1631,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1645,18 +1657,6 @@ jobs:
         with:
           name: wheel-py3_10-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -1713,7 +1713,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1758,15 +1758,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -1779,6 +1770,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -1869,6 +1869,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1883,18 +1895,6 @@ jobs:
         with:
           name: wheel-py3_10-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -1951,7 +1951,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1996,15 +1996,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -2017,6 +2008,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -2107,6 +2107,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2121,18 +2133,6 @@ jobs:
         with:
           name: wheel-py3_10-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -2188,7 +2188,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2233,15 +2233,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -2254,6 +2245,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -2343,6 +2343,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2357,18 +2369,6 @@ jobs:
         with:
           name: wheel-py3_10-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -2423,7 +2423,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2468,15 +2468,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -2489,6 +2480,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -2578,6 +2578,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2592,18 +2604,6 @@ jobs:
         with:
           name: wheel-py3_11-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -2659,7 +2659,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2704,15 +2704,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -2725,6 +2716,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -2815,6 +2815,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2829,18 +2841,6 @@ jobs:
         with:
           name: wheel-py3_11-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -2897,7 +2897,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2942,15 +2942,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -2963,6 +2954,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -3053,6 +3053,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3067,18 +3079,6 @@ jobs:
         with:
           name: wheel-py3_11-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -3135,7 +3135,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3180,15 +3180,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -3201,6 +3192,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -3291,6 +3291,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3305,18 +3317,6 @@ jobs:
         with:
           name: wheel-py3_11-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -3372,7 +3372,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3417,15 +3417,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -3438,6 +3429,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -3527,6 +3527,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3541,18 +3553,6 @@ jobs:
         with:
           name: wheel-py3_11-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -3607,7 +3607,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3652,15 +3652,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -3673,6 +3664,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -3762,6 +3762,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3776,18 +3788,6 @@ jobs:
         with:
           name: wheel-py3_12-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -3843,7 +3843,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3888,15 +3888,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -3909,6 +3900,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -3999,6 +3999,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -4013,18 +4025,6 @@ jobs:
         with:
           name: wheel-py3_12-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -4081,7 +4081,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4126,15 +4126,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -4147,6 +4138,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -4237,6 +4237,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -4251,18 +4263,6 @@ jobs:
         with:
           name: wheel-py3_12-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -4319,7 +4319,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4364,15 +4364,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -4385,6 +4376,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -4475,6 +4475,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -4489,18 +4501,6 @@ jobs:
         with:
           name: wheel-py3_12-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -4556,7 +4556,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4601,15 +4601,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -4622,6 +4613,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -4711,6 +4711,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -4725,18 +4737,6 @@ jobs:
         with:
           name: wheel-py3_12-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -4791,7 +4791,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4836,15 +4836,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -4857,6 +4848,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -4946,6 +4946,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -4960,18 +4972,6 @@ jobs:
         with:
           name: wheel-py3_13-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -5027,7 +5027,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5072,15 +5072,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -5093,6 +5084,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -5183,6 +5183,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -5197,18 +5209,6 @@ jobs:
         with:
           name: wheel-py3_13-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -5265,7 +5265,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5310,15 +5310,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -5331,6 +5322,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -5421,6 +5421,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -5435,18 +5447,6 @@ jobs:
         with:
           name: wheel-py3_13-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -5503,7 +5503,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5548,15 +5548,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -5569,6 +5560,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -5659,6 +5659,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -5673,18 +5685,6 @@ jobs:
         with:
           name: wheel-py3_13-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -5740,7 +5740,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5785,15 +5785,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -5806,6 +5797,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -5895,6 +5895,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -5909,18 +5921,6 @@ jobs:
         with:
           name: wheel-py3_13-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -5975,7 +5975,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6020,15 +6020,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -6041,6 +6032,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -6130,6 +6130,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -6144,18 +6156,6 @@ jobs:
         with:
           name: wheel-py3_13t-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -6211,7 +6211,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6256,15 +6256,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -6277,6 +6268,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -6367,6 +6367,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -6381,18 +6393,6 @@ jobs:
         with:
           name: wheel-py3_13t-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -6449,7 +6449,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6494,15 +6494,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -6515,6 +6506,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -6605,6 +6605,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -6619,18 +6631,6 @@ jobs:
         with:
           name: wheel-py3_13t-cuda12_6
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -6687,7 +6687,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6732,15 +6732,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -6753,6 +6744,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -6843,6 +6843,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -6857,18 +6869,6 @@ jobs:
         with:
           name: wheel-py3_13t-cuda12_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -6924,7 +6924,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
-    steps:
+    steps:      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6969,15 +6969,6 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -6990,6 +6981,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Populate binary env
         shell: bash
         run: |
@@ -7079,6 +7079,18 @@ jobs:
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -7093,18 +7105,6 @@ jobs:
         with:
           name: wheel-py3_13t-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
