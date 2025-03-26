@@ -616,9 +616,12 @@ class VariableBuilder:
 
         # Everything else (NB: order matters!)
         if isinstance(value, torch.Tensor) and type(value) not in (
-            # These subclasses have overly restrictive `__torch_function__`
-            # which prevents Dynamo from reading their tensor attributes like
-            # shape.
+            # These torch-native subclasses
+            # 1. have overly restrictive `__torch_function__` which prevents
+            # Dynamo from reading their tensor attributes like `is_nested` or
+            # calling methods like `_is_view`.
+            # 2. doesn't make much practical sense to be traced and compiled;
+            # instead one should initialize the lazy parts first then compile.
             torch.nn.parameter.UninitializedBuffer,
             torch.nn.parameter.UninitializedParameter,
         ):
