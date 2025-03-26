@@ -1658,8 +1658,7 @@
 
 - func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: complex_out
-    MPS: complex_out_mps
+    CPU, CUDA, MPS: complex_out
 
 - func: polar(Tensor abs, Tensor angle) -> Tensor
   variants: function
@@ -1668,8 +1667,7 @@
 
 - func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: polar_out
-    MPS: polar_out_mps
+    CPU, CUDA, MPS: polar_out
 
 - func: constant_pad_nd(Tensor self, SymInt[] pad, Scalar value=0) -> Tensor
   variants: function
@@ -4013,6 +4011,7 @@
   dispatch:
     CPU: nanmedian_out_cpu
     CUDA: nanmedian_out_cuda
+    MPS: nanmedian_out_mps
 
 - func: nanmedian.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -15067,7 +15066,7 @@
 - func: special_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_chebyshev_polynomial_t_out
+    CPU, CUDA, MPS: special_chebyshev_polynomial_t_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15516,7 +15515,7 @@
 
 - func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_scaled_modified_bessel_k1_out
+    CPU, CUDA, MPS: special_scaled_modified_bessel_k1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
