@@ -283,6 +283,8 @@ class MPSHeapAllocatorImpl {
   void freeInactiveBuffers();
   // returns true if buffer was allocated from the shared pool
   bool isSharedBuffer(const void* ptr);
+  // returns true if buffer was allocated from the shared pool
+  bool isSharedBufferCPUPtr(const void* ptr);
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(const void* ptr);
 

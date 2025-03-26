@@ -23,6 +23,7 @@ class IMPSAllocator : public c10::Allocator {
   virtual void setBufferShape(const void* ptr, const IntArrayRef& shape)
       const = 0;
   virtual bool isSharedBuffer(const void* ptr) const = 0;
+  virtual bool isSharedBufferCPUPtr(const void* ptr) const = 0;
   virtual bool isSharedStorageSupported() const = 0;
   virtual c10::DataPtr allocScalarBufferWithValue(void* value, size_t size)
       const = 0;
