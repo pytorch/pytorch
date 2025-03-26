@@ -204,6 +204,7 @@ NON_STRICT_SUFFIX = "_nonstrict"
 STRICT_SUFFIX = "_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability_strict"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_nonstrict"
+SERDES_SUFFIX = "serdes"
 SERDES_STRICT_SUFFIX = "_serdes_strict"
 SERDES_NON_STRICT_SUFFIX = "_serdes_nonstrict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
@@ -235,6 +236,10 @@ def is_serdes_test(test_name):
     return test_name.endswith(SERDES_STRICT_SUFFIX) or test_name.endswith(
         SERDES_NON_STRICT_SUFFIX
     )
+
+
+def need_serdes_test(test_name):
+    return SERDES_SUFFIX in test_name
 
 
 def is_training_ir_test(test_name):
@@ -6673,9 +6678,11 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            """\
+        # serdes deserailizes tuple as list
+        if need_serdes_test(self._testMethodName):
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
@@ -6684,7 +6691,21 @@ def forward(self, b_a_buffer, x):
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
-        )
+            )
+
+        else:
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
+def forward(self, b_a_buffer, x):
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
+            )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
@@ -7827,6 +7848,16 @@ graph():
             },
         )
         self.assertEqual(ep.module()(*inputs), m3(*inputs))
+
+    def test_operator_aten_tensor_mode_variant(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.div.Tensor_mode(x, 2, rounding_mode="floor")
+
+        m = Module()
+        args = (torch.randn(4, 3),)
+        ep = export(m, args)
+        self.assertEqual(ep.module()(*args), m(*args))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
@@ -10073,7 +10104,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (p_bar_linear_bias, p_bar_linear_weight, x));  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
@@ -10233,7 +10264,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 def forward(self, b_pred, b_t, x, y):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
+    cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, (b_t, x, y));  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
         )  # noqa: B950
@@ -10816,6 +10847,16 @@ def forward(self, x):
             torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
         )
         self.assertEqual(ep.graph_signature.user_inputs, ("a", "c", "b", "d"))
+
+    def test_isnonzero(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.is_nonzero(x)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Boolean value of Tensor with more than"
+        ):
+            export(Foo(), (torch.randn(4, 4),), strict=False)
 
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
@@ -11649,6 +11690,16 @@ graph():
         FileCheck().check_count(
             "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
         ).run(gm_torch_ir.code)
+
+    def test_sym_float_operators(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return -(x.max().item() / 2) + x
+
+        m = Module()
+        args = (torch.ones(4),)
+        ep = export(m, args)
+        self.assertEqual(ep.module()(*args), m(*args))
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
@@ -13414,7 +13465,6 @@ class TestExportCustomClass(TorchTestCase):
         )
 
         decomp_table = default_decompositions()
-        del decomp_table[torch.ops.aten.elu.default]
 
         ep = ep.run_decompositions(
             decomp_table=decomp_table,
