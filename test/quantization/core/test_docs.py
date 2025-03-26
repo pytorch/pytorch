@@ -11,10 +11,11 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_ARM64, IS_FBCODE
+from torch.testing._internal.common_utils import IS_ARM64, IS_FBCODE, IS_S390X
 import unittest
 
 
+@unittest.skipIf(IS_S390X, "No quantization support on s390x")
 @unittest.skipIf(IS_FBCODE, "some path issues in fbcode")
 class TestQuantizationDocs(QuantizationTestCase):
     r"""
