@@ -2577,9 +2577,11 @@ class PythonWrapperCodegen(CodeGen):
         input_deallocation = partition_signatures.input_deallocation
         output_nodes = partition_signatures.output_nodes
 
-        inputs = ", ".join(input_deallocation.keys()) + (
-            "," if len(input_deallocation) == 1 else ""
-        )
+        input_names = list(input_deallocation.keys()) + [
+            symbol_input.name for symbol_input in partition_signatures.symbol_inputs
+        ]
+
+        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
 
         output_names = [node.get_name() for node in output_nodes]
         outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
@@ -2834,7 +2836,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_input_names(self) -> list[str]:
         if signature := self.partition_signatures:
-            names = list(signature.input_nodes.keys())
+            names = list(signature.input_nodes.keys()) + [
+                symbol_input.name for symbol_input in signature.symbol_inputs
+            ]
         else:
             names = V.graph.graph_input_names
         return names
