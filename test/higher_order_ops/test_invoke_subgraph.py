@@ -695,6 +695,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_pending_unbacked(self):
         @mark_compile_region
         def gn(x):
@@ -707,7 +708,6 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8)
         torch._dynamo.mark_dynamic(x, 0)
         ref = fn(x)
-        torch._dynamo.config.capture_scalar_outputs = True
         opt_fn = torch.compile(
             fn, backend="eager", fullgraph=True
         )  # Inductor fails with cpp compilation error
