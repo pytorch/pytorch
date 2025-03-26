@@ -13,16 +13,7 @@ constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024 * kMB; // 64GB
 constexpr size_t kPinnedMaxRegisterThreads = 128;
 } // anonymous namespace
 
-AllocatorConfig::AllocatorConfig(c10::DeviceType t)
-    : max_split_size_(std::numeric_limits<size_t>::max()),
-      max_non_split_rounding_size_(kLargeBuffer),
-      garbage_collection_threshold_(0),
-      expandable_segments_(false),
-      release_lock_on_device_malloc_(false),
-      pinned_use_host_register_(false),
-      pinned_num_register_threads_(1),
-      pinned_use_background_threads_(false),
-      device_type_(t) {
+AllocatorConfig::AllocatorConfig(c10::DeviceType t) : device_type_(t) {
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -86,7 +77,7 @@ size_t AllocatorConfig::parseMaxSplitSize(
   if (++i < config.size()) {
     size_t val_env = stoi(config[i]);
     TORCH_CHECK(
-        val_env >= min_allowed_split_size_mb,
+        val_env > min_allowed_split_size_mb,
         "CachingAllocator option max_split_size_mb too small, must be >= ",
         min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
@@ -215,8 +206,7 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
 
 size_t AllocatorConfig::parseAllocatorBackendConfig(
     const std::vector<std::string>& config,
-    size_t i,
-    bool& used_MallocAsync) {
+    size_t i) {
   std::string backend_name =
       c10::DeviceTypeName(device_type_, true) + "MallocAsync";
   consumeToken(config, ++i, ':');
@@ -224,17 +214,9 @@ size_t AllocatorConfig::parseAllocatorBackendConfig(
   if (++i < config.size()) {
     TORCH_CHECK(
         ((config[i] == "native") || (config[i] == backend_name)),
-        "Unknown allocator backend, "
-        "options are native and ",
+        "Unknown allocator backend, options are native and ",
         backend_name);
-    used_MallocAsync = (config[i] == backend_name);
-    if (used_MallocAsync) {
-      checkMallocAsyncSupport();
-    }
-    // TORCH_INTERNAL_ASSERT(
-    //     config[i] == get()->name(),
-    //     "Allocator backend parsed at runtime != "
-    //     "allocator backend parsed at load time");
+    used_async_allocator_ = (config[i] == backend_name);
   } else {
     TORCH_CHECK(false, "Error parsing allocator backend value");
   }
@@ -302,7 +284,6 @@ void AllocatorConfig::parseArgs(const char* env) {
   max_split_size_ = std::numeric_limits<size_t>::max();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
   garbage_collection_threshold_ = 0;
-  bool used_MallocAsync = false;
   bool used_native_specific_option = false;
 
   if (env == nullptr) {
@@ -331,7 +312,7 @@ void AllocatorConfig::parseArgs(const char* env) {
       i = parseRoundUpPower2Divisions(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "backend") {
-      i = parseAllocatorBackendConfig(config, i, used_MallocAsync);
+      i = parseAllocatorBackendConfig(config, i);
     } else if (config_item_view == "expandable_segments") {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
@@ -381,7 +362,7 @@ void AllocatorConfig::parseArgs(const char* env) {
     }
   }
 
-  if (used_MallocAsync && used_native_specific_option) {
+  if (used_async_allocator_ && used_native_specific_option) {
     TORCH_WARN(
         "backend:",
         device_type_,
