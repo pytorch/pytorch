@@ -1084,7 +1084,6 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.
