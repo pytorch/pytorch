@@ -6413,7 +6413,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         V.graph.register_operation(self)
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
-        assert isinstance(variable, (BaseView, StorageBox)), type(variable)
+        assert isinstance(variable, (BaseView, StorageBox, TensorBox)), type(variable)
         V.graph.never_reuse_buffers.add(variable.data.get_name())
 
 
