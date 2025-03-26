@@ -1070,6 +1070,51 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ref = opt_f(x)
         self.assertEqual(res, ref)
 
+    def test_newly_constructed_tensor_subclass_attr_mutation(self):
+        # Make sure the attribute mutation is handled both during Dynamo tracing
+        # and codegen-ed to be visible outside `torch.compile`.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def f():
+            x = MySubclass(torch.ones(2))
+            x.bar = 42
+            return x
+
+        opt_f = compile_full_eager(f)
+
+        with traceable_subclass(MySubclass):
+            res = f()
+            ref = opt_f()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res.bar, ref.bar)
+
+    def test_tensor_subclass_attr_codegen_tos(self):
+        # This repros a very subtle interaction between
+        # `TensorWithTFOverrideVariable` attribute mutation codegen and
+        # `PyCodegen.top_of_stack`. It was uncovered from
+        # `test_tensor_subclass_deepcopy`.
+        class MySubclass(torch.Tensor):
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_subclass(cls, torch.ones(0))
+                r.elem = elem
+                return r
+
+        def f(t):
+            return MySubclass(t.elem.clone())
+
+        opt_f = compile_full_eager(f)
+
+        t = MySubclass(torch.ones(2))
+        with traceable_subclass(MySubclass):
+            res = f(t)
+            ref = opt_f(t)
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res.elem, ref.elem)
+        self.assertEqual(type(res), type(ref))
+
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
 
