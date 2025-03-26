@@ -16,7 +16,7 @@ import os
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -110,7 +110,7 @@ assume_static_by_default = True
 automatic_dynamic_shapes = True
 
 # Valid options: "dynamic", "unbacked"
-automatic_dynamic_shapes_mark_as = "dynamic"
+automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
@@ -188,7 +188,7 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1
 rewrite_assert_with_torch_assert = True
 
 # Disable dynamo
-disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
+disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
@@ -310,7 +310,15 @@ allow_unspec_int_on_nn_module = False
 # Note that to avoid breaking the existing usage, mode 1 and mode 4 can be
 # specified with a boolean value. True is using ddp_optimizer and False is
 # no optimization.
-optimize_ddp: Union[bool, str] = True
+optimize_ddp: Union[
+    bool,
+    Literal[
+        "ddp_optimizer",
+        "python_reducer",
+        "python_reducer_without_compiled_forward",
+        "no_optimization",
+    ],
+] = True
 
 # By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
 # In some cases those asserts could be performance costly
@@ -526,8 +534,19 @@ fake_tensor_cache_crosscheck_enabled = (
     os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
 )
 
-# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
-# Note: AOT Autograd will still trace joint graphs.
+# Disables inference mode for fake tensor prop during compilation. At runtime,
+# the inference_mode is still respected.
+fake_tensor_disable_inference_mode = True
+
+# Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
+# Note: AOTAutograd will still trace and partition an AOT backward graph local to that
+# compiled region. But AOTAutograd traces without knowledge of backward hooks which are
+# coordinated by the Autograd engine, and under the hood, it uses the torch.autograd.grad
+# API, so it cannot capture gradient accumulation operations (AccumulateGrad).
+#
+# Compiled Autograd will trace all autograd operations as seen by the Autograd engine.
+# This flag will also lift certain restrictions during the forward trace such as
+# registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
@@ -587,6 +606,10 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
+
+# Takes the function/module decorated with torch.compile and passes it through a
+# wrapper. This ensures that nn.module hooks are also compiled in the same frame.
+wrap_top_frame = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None

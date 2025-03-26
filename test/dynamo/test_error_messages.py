@@ -637,7 +637,13 @@ from user code:
 
         self.assertExpectedInline(
             munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=0),
-            """None""",
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+""",
         )
 
     def test_unsupported_bytecode(self):
@@ -865,7 +871,7 @@ Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
   File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None) from None
+    raise e.with_traceback(None) from e.__cause__
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
@@ -1010,8 +1016,15 @@ User code traceback:
         self.assertIn("Foo().attr = x  # 0", records[-1].getMessage())
         self.assertIn("Foo().attr = x  # 1", records[-1].getMessage())
 
+        def post_munge(s):
+            return re.sub(
+                r"torch_dynamo_resume_in_f(\d)_at_(\d+)",
+                r"torch_dynamo_resume_in_f\1_at_N",
+                s,
+            )
+
         self.assertExpectedInline(
-            munge_exc(records[-1].getMessage(), skip=0),
+            post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: STORE_ATTR-caused graph break
@@ -1020,12 +1033,12 @@ User code traceback:
     f3(torch.randn(3))
   File "test_error_messages.py", line N, in f3
     Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_N
     Foo().attr = x  # 1
 
 ========== most recent `torch.compile` tracing attempt started here ==========
 
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_N
     Foo().attr = x
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
