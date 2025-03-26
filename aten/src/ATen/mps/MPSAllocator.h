@@ -287,8 +287,6 @@ class MPSHeapAllocatorImpl {
   bool isSharedBufferCPUPtr(const void* ptr);
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(const void* ptr);
-
-  bool hasBuffer(const void* ptr);
   // set the shape of a base tensor from a view tensor
   void setBufferShape(const void* ptr, const IntArrayRef& shape);
   // retrieve the shape of a base tensor from a view tensor
