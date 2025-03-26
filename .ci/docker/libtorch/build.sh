@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Script used only in CD pipeline
+# Script used only in CD pipeline.
 
 set -eou pipefail
 
