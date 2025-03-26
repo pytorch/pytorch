@@ -26,7 +26,8 @@ from torch.nn.attention.flex_attention import (
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
-torch._dynamo.config.recompile_limit = 1000
+torch._dynamo.config.recompile_limit = 10000
+torch._dynamo.config.accumulated_recompile_limit = 10000
 
 
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -378,7 +379,7 @@ def run_single_experiment(
 
     if max_autotune:
         compiled_sdpa = torch.compile(
-            flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
+            flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs", fullgraph=True
         )
     else:
         compiled_sdpa = torch.compile(flex_attention, dynamic=dynamic)
@@ -790,7 +791,7 @@ def get_backend_context(backend: str):
     Returns a context manager for the specified backend.
     Args:
         backend (str): The name of the backend to use.
-                       Valid options are 'fav2', 'cudnn', 'math', 'efficient', 'fav3', 'fakv', 'og-eager'.
+                       Valid options are 'fav2', 'cudnn', 'math', 'efficient', 'fav3', 'fakv', 'default'.
     Returns:
         A context manager for the specified backend.
     Raises:
@@ -803,7 +804,7 @@ def get_backend_context(backend: str):
         "efficient": sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
         "fav3": nullcontext(),
         "fakv": nullcontext(),
-        "og-eager": nullcontext(),
+        "default": nullcontext(),
     }
 
     if backend not in backends:
@@ -1187,14 +1188,14 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
     parser.add_argument(
         "--save-path",
         type=str,
-        help="Path to save the results JSON file (optional)",
+        help="Path to save the results CSV file (optional)",
         default=None,
     )
     parser.add_argument(
         "--backend",
         type=str,
         nargs="+",
-        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
+        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "default"],
         default=["efficient"],
         help="Backend to use for attention computation",
     )
