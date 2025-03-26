@@ -53,6 +53,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
@@ -68,10 +69,7 @@ from torch._inductor.cpp_builder import (
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
-from torch._inductor.runtime.compile_tasks import (
-    _reload_python_module,
-    _reload_python_module_in_subproc,
-)
+from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
@@ -91,6 +89,7 @@ from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
+from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -1363,7 +1362,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: dict[str, dict[str, str]] = {}
+    cache: dict[str, dict[str, Any]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1381,7 +1380,7 @@ class CudaKernelParamCache:
         cls.cache[key] = params
 
     @classmethod
-    def get(cls, key: str) -> Optional[dict[str, str]]:
+    def get(cls, key: str) -> Optional[dict[str, Any]]:
         return cls.cache.get(key, None)
 
     @classmethod
@@ -1680,7 +1679,7 @@ class AotCodeCompiler:
                 "aot_mode": graph.aot_mode,
                 "device_type": device_type,
                 "use_mmap_weights": use_mmap_weights,
-                "use_relative_path": config.is_fbcode(),
+                "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
             # If we're packaging via CMake, we build the whole code at max optimization.
@@ -1693,6 +1692,18 @@ class AotCodeCompiler:
                 compile_only=True,
                 **compile_command,
             )
+
+            # potentially, precompile the AOT header for this device
+            if config.aot_inductor.precompile_headers and not _IS_WINDOWS:
+                header_file = _get_cpp_wrapper_header(
+                    device_type, aot_mode=graph.aot_mode
+                )
+                wrapper_build_options.precompiled_header = _precompile_header(
+                    header_file,
+                    cpp_command,
+                    min_optimize=not config.aot_inductor.package_cpp_only,
+                    **compile_command,
+                )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
@@ -1740,6 +1751,42 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
+            custom_obj_idx = 0
+            # Note that custom_objs_config.json file is different from the model_constants_config.json file produced
+            # in package_sigmoid(). The keys in custom_objs_config.json directly correspond to the arg name in extern
+            # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
+            # user model code.
+
+            qual_name_to_id = {}  # Map from constant name to its name in constants folder
+            for custom_obj_idx, (name, constant) in enumerate(
+                graph.torchbind_constants.items()
+            ):
+                if isinstance(
+                    constant, torch._library.fake_class_registry.FakeScriptObject
+                ):
+                    constant = constant.real_obj
+                assert isinstance(constant, torch._C.ScriptObject)
+                custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+
+                log.debug("saving script object %s as %s", name, custom_obj_name)
+
+                qual_name_to_id[name] = custom_obj_name
+                custom_obj_bytes = torch._C._pickle_save(constant)
+                custom_obj_path = os.path.join(
+                    wrapper_path_operator.parent, custom_obj_name
+                )
+
+                write_atomic(custom_obj_path, custom_obj_bytes, True)
+                generated_files.append(custom_obj_path)
+
+            if qual_name_to_id:
+                constants_config_json = os.path.join(
+                    wrapper_path_operator.parent, "custom_objs_config.json"
+                )
+                with open(constants_config_json, "w") as f:
+                    f.write(json.dumps(qual_name_to_id))
+                generated_files.append(constants_config_json)
+
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
@@ -1925,6 +1972,88 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
+# Precompiled headers are persistent past program runtime, but associated with one
+# specific compiler version and set of flags.  We explicitly use default_cache_dir here
+# because these headers need to be global, rather than ignored by fresh_inductor_cache.
+_HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
+_HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
+
+
+@functools.lru_cache(None)
+def _precompile_header(
+    header: str,
+    hashable_cmd_line: str,
+    **compile_command: Any,
+) -> str:
+    assert not _IS_WINDOWS, (
+        "CppBuilder does not currently support precompiling on Windows!"
+    )
+
+    # Get the preprocessed output from the header file to be precompiled.  This allows
+    # us to properly invalidate the file cache when any header dependency changes.
+    #
+    # N.B. we can't use NamedTemporaryFile here because Windows errors out on attempts
+    # to read from a file with an open write handle.
+    with tempfile.TemporaryDirectory() as preprocessing_dir:
+        preprocessing_header = Path(preprocessing_dir) / "header.h"
+        preprocessing_header.write_text(f"#include <{header}>\n")
+        preprocessor = CppBuilder(
+            name=str(preprocessing_header),
+            sources=str(preprocessing_header),
+            BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
+        )
+        preprocessor.build()
+
+        def _get_file_checksum(filename: str) -> str:
+            """Reading the whole preprocessed header in for hashing is very expensive,
+            but calling a fast hashing utility in a subprocess is cheap."""
+            # If Windows support needs to be added here, use certutil -hashfile.
+            cmd_output = subprocess.run(
+                ("openssl", "sha512", filename), capture_output=True, text=True
+            )
+            return cmd_output.stdout.split()[-1]
+
+        preprocessor_hash = _get_file_checksum(preprocessor.get_target_file_path())
+
+    header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
+    header_hash, header_full_path = write(
+        content=f"#include <{header}>\n",
+        extension="h",
+        extra=(
+            hashable_cmd_line
+            + preprocessor_hash
+            + get_compiler_version_info(header_build_option.get_compiler())
+        ),
+        specified_dir=_HEADER_DIR,
+    )
+    cpp_builder = CppBuilder(
+        name=header_full_path,
+        sources=header_full_path,
+        BuildOption=header_build_option,
+    )
+    # _worker_compile_cpp will automatically ignore any compilation whose result already
+    # exists, so this is always safe.
+    os.makedirs(_HEADER_LOCK_DIR, exist_ok=True)
+    _worker_compile_cpp(
+        os.path.join(_HEADER_LOCK_DIR, f"{header_hash}.lock"),
+        cpp_builder,
+    )
+
+    return header_full_path
+
+
+def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
+    """Given a device type (and optionally whether we're in AOT Inductor mode), returns
+    the path to the cpp_wrapper header file to be precompiled."""
+    base_device = device.split(":")[0]
+    is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
+    return (
+        "torch/csrc/inductor/"
+        f"{'aoti_include' if aot_mode else 'cpp_wrapper'}/"
+        f"{'array_ref' if is_array_ref else base_device}.h"
+    )
+
+
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
@@ -1959,6 +2088,14 @@ class CppCodeCache:
             raise
 
     @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """
+        Given a device type, returns the path to a CPP header file to be precompiled.
+        Currently, this is only utilized by the cpp_wrapper classes.
+        """
+        return None
+
+    @classmethod
     def load_async(
         cls,
         source_code: str,
@@ -1969,15 +2106,15 @@ class CppCodeCache:
         compile_command = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
-            "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
+            "use_relative_path": config.is_fbcode(),
+            "vec_isa": pick_vec_isa(),
         }
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        command_gen = CppBuilder(
-            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
-        )
+        cpp_build_option = CppTorchDeviceOptions(**compile_command)
+        command_gen = CppBuilder(name="o", sources="i", BuildOption=cpp_build_option)
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
         # So we need get a command_line which contains isa related parameter as a part of hash key.
@@ -1994,10 +2131,18 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(
-                **compile_command,
-                use_relative_path=(config.is_fbcode() and device_type == "cpu"),
-            )
+            # if requested, pre-compile any headers
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and (header_file := cls._get_uncompiled_header(device_type))
+            ):
+                cpp_build_option.precompiled_header = _precompile_header(
+                    header_file,
+                    vec_isa_cmd,
+                    **compile_command,
+                )
+
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2142,7 +2287,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 return NULL;
             }}
             #ifdef Py_GIL_DISABLED
-                PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+                PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
             #endif
             return module;
         }}
@@ -2281,6 +2426,14 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }}
         """
     )
+
+    @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """
+        Given a device type, returns the path to a CPP header file to be precompiled.
+        Currently, this is only utilized by the cpp_wrapper classes.
+        """
+        return _get_cpp_wrapper_header(device)
 
 
 @clear_on_fresh_inductor_cache
@@ -2712,21 +2865,19 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
-        mod = _reload_python_module(key, path)
+        in_toplevel = in_toplevel_process()
+        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        if in_toplevel:
+            cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
             for k, v in attrs.items():
                 setattr(mod, k, v)
 
-        if not (linemap or attrs):
-            mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                _reload_python_module_in_subproc, key, path
-            )
-
-        cls.modules.append(mod)
+        if in_toplevel:
+            cls.modules.append(mod)
         return mod
 
     @classmethod
@@ -2842,6 +2993,8 @@ def _nvcc_compiler_options() -> list[str]:
     if arch == "90":
         # Required by cutlass compilation.
         arch = "90a"
+    if arch == "100":
+        arch = "100a"
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]

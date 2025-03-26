@@ -11,7 +11,7 @@ from typing_extensions import override
 
 import torch
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton
 
 from ..remote_cache import (
     create_cache,
@@ -36,7 +36,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton_package():
+    if has_triton():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
@@ -493,8 +493,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):
