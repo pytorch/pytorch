@@ -601,10 +601,26 @@ class SideEffects:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var, variables.TensorVariable):
                 # NOTE: for historical reasons we never assigned local sources
-                # to newly constructed tensor object. They are always loaded
-                # from output of the fx graph, so one can think of it as having
-                # a "OutputGraphSource" for codegen purposes.
-                continue
+                # to newly constructed tensor object, so we keep it that way.
+                # They are always loaded from output of the fx graph, so one can
+                # think of it as having a "OutputGraphSource" for codegen
+                # purposes.
+                #
+                # However, tensor subclass objects are different, because the
+                # reconstruction logic in `PyCodegen` loads the data tensor from
+                # graph output and then calls `as_subclass`, meaning we must
+                # assign a source to it to ensure we only reconstruct one
+                # subclass instance.
+                if isinstance(
+                    var, variables.torch_function.TensorWithTFOverrideVariable
+                ):
+                    # Don't codegen from temp source assigned from the 1st pass.
+                    cg(var, allow_cache=False)
+                    cg.add_cache(var)
+                    # `add_cache` generates STORE and consumes TOS, but we never
+                    # cleared it. TODO move this call into `add_cache`
+                    cg.clear_tos()
+                    var.source = LocalSource(cg.tempvars[var])
             elif isinstance(var, variables.AutogradFunctionContextVariable):
                 unimplemented_v2(
                     gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",

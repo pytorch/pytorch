@@ -614,7 +614,7 @@ class VariableBuilder:
             # which prevents Dynamo from reading their tensor attributes like
             # shape.
             torch.nn.parameter.UninitializedBuffer,
-            torch.nn.parameter.UninitializedParameter
+            torch.nn.parameter.UninitializedParameter,
         ):
             if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
                 # This case it's either tensor or subclass with default
@@ -2111,7 +2111,10 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
-            or frame_state_entry.scalar is not auto_dynamic
+            or (
+                config.assume_static_by_default
+                and frame_state_entry.scalar is not auto_dynamic
+            )
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2503,15 +2506,16 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
         )
+        # NOTE: [Side effect tracking for newly constructed tensor]
         # For newly constructed objects that have mutable attributes, we usually
         # construct their VariableTracker via `track_object_new`, but since
         # tensor variable construction is a bit different, we handle them
         # speically here. This ensures that codegen will actually generate the
         # attribute mutations on this tensor.
         #
-        # NOTE we pass `proxy` as the `item` argument because we don't really
-        # construct a new dummy object (which UserDefinedObjectVariable, etc.
-        # do).
+        # NOTE we pass a dummy object as the `item` argument to avoid
+        # constructing a dummy _tensor_ object. The object isn't used for
+        # newly constructed VTs anyways.
         tx.output.side_effects._track_obj(
             proxy, var, mutation_type_cls=AttributeMutationNew
         )
