@@ -137,7 +137,7 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
-    def chebyshev_polynomial_t(self):
+    def test_chebyshev_polynomial_t(self):
         self.common(
             torch.special.chebyshev_polynomial_t,
             (torch.rand(128, 128), torch.rand(128, 128)),
