@@ -875,15 +875,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}"
 
 
-_TUNING_PROCESS_POOL: Optional[TuningProcessPool] = None
-
-
+@functools.lru_cache(None)
 def get_tuning_process_pool() -> TuningProcessPool:
-    global _TUNING_PROCESS_POOL
-    if _TUNING_PROCESS_POOL is None:
-        _TUNING_PROCESS_POOL = TuningProcessPool()
-        atexit.register(_TUNING_PROCESS_POOL.shutdown)
-    return _TUNING_PROCESS_POOL
+    pool = TuningProcessPool()
+    atexit.register(pool.shutdown)
+    return pool
 
 
 def benchmark_in_sub_process(
