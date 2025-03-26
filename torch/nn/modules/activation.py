@@ -29,7 +29,6 @@ __all__ = [
     "SELU",
     "GLU",
     "GELU",
-    "SwiGLU",
     "Hardshrink",
     "LeakyReLU",
     "LogSigmoid",
@@ -43,6 +42,7 @@ __all__ = [
     "Softmax",
     "Softmax2d",
     "LogSoftmax",
+    "SwiGLU",
 ]
 
 
@@ -745,25 +745,19 @@ class GELU(Module):
 class SwiGLU(Module):
     r"""Applies the SwiGLU function element-wise.
 
-    The SwiGLU function is also known as the swish_glu function.
-
     SwiGLU is defined as:
 
     .. math::
+        \text{SwiGLU}(x) = a \otimes \text{Swish}(b)
 
-        \text{swiglu}(x, y) = x * swish(y)
-
-    where :math:`\text{swish}(x) = x * \sigma(x)`, and :math:`x` and :math:`y` are
-    split from the input tensor along the given dimension.
-
-    .. note::
-
-    See  `GLU with Swish <https://arxiv.org/pdf/2002.05202v1>`
+    where :math:`x` is split into :math:`a` and :math:`b` along the specified dimension,
+    and :math:`\text{Swish}(b) = b \cdot \sigma(b)`.
 
     Args:
-        dim (int): the dimension on which to split the input. Default: -1
+        dim (int): the dimension along which to split the input. Default: -1
+
     Shape:
-        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means any number of additional
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
