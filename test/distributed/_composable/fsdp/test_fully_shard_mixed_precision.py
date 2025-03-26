@@ -599,10 +599,9 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         fully_shard(model, mp_policy=mp_policy)
         x = torch.randn(256, 2048).cuda()
         x.requires_grad = True
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            out = checkpoint(model, x, use_reentrant=False)
-            loss = out.sum()
-            loss.backward()
+        out = checkpoint(model, x, use_reentrant=False)
+        loss = out.sum()
+        loss.backward()
 
 
 if __name__ == "__main__":

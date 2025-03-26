@@ -216,15 +216,7 @@ class FSDPState(_State):
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
-        if self._training_state == TrainingState.PRE_BACKWARD:
-            if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
-                with torch.profiler.record_function("FSDP::cast_forward_inputs"):
-                    cast_fn = functools.partial(
-                        _cast_fp_tensor, self._mp_policy.param_dtype
-                    )
-                    args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
-            return args, kwargs
-        self._training_state = TrainingState.FORWARD
+        # torch.distributed.breakpoint()
         args, kwargs = self._root_pre_forward(module, args, kwargs)
         if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
             with torch.profiler.record_function("FSDP::cast_forward_inputs"):
@@ -232,6 +224,9 @@ class FSDPState(_State):
                     _cast_fp_tensor, self._mp_policy.param_dtype
                 )
                 args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return args, kwargs
+        self._training_state = TrainingState.FORWARD
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
