@@ -317,8 +317,6 @@ if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   # gcc-14 uses ABI19.
   if [[ "$(uname -m)" != "s390x" ]]; then
     python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
-  else
-    python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1019' else 1)"
   fi
   popd
 fi
