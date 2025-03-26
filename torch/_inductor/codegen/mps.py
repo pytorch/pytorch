@@ -410,6 +410,26 @@ class MetalOverrides(OpOverrides):
     def modified_bessel_i1(x: CSEVariable) -> str:
         return f"c10::metal::modified_bessel_i1_forward({x})"
 
+    @staticmethod
+    def modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k0_forward({x})"
+
+    @staticmethod
+    def modified_bessel_k1(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k1_forward({x})"
+
+    @staticmethod
+    def scaled_modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::scaled_modified_bessel_k0_forward({x})"
+
+    @staticmethod
+    def scaled_modified_bessel_k1(x: CSEVariable) -> str:
+        return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
+
+    @staticmethod
+    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 

@@ -419,7 +419,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         std::ostream& output,
         const WorkNCCL& workNCCL);
 
-   private:
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -615,9 +614,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
+  bool supportsTimeEstimation() const override {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+    return true;
+#else
+    return false;
+#endif
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
+
+  void startTimeEstimate();
+
+  float endTimeEstimate();
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
   c10::intrusive_ptr<Work> endCoalescing(OpType optype);
@@ -862,7 +873,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Use this helper instead of directly checking `useNonblocking_` variable.
   bool useNonblocking();
 
- private:
+ protected:
   int globalRankStart_;
   int globalRankStride_;
 
