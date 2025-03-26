@@ -3088,9 +3088,24 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._prims_common import clone_preserve_strides
+
+        def _maybe_clone_val(node):
+            example_value = node.meta["example_value"]
+            if isinstance(example_value, torch.Tensor):
+                # We need to clone so that when we retrace, we create new
+                # unbacked symbols and will re-insert deferred runtime asserts
+                # into the graph. It's important to re-insert the runtime
+                # asserts so that fake-prop later on will succeed. It's ok to
+                # clone here since the example inputs are only being used for
+                # mutation checking, but this will be a problem if we want to
+                # add alias checking since cloning does not preserve alias
+                # information.
+                return clone_preserve_strides(example_value)
+            return example_value
 
         fake_inputs = [
-            node.meta["example_value"]
+            _maybe_clone_val(node)
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
