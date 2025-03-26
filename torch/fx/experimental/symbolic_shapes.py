@@ -2753,8 +2753,8 @@ class DimConstraints:
     ) -> TypeGuard[torch.export.dynamic_shapes._DerivedDim]:
         return isinstance(dim, torch.export.dynamic_shapes._DerivedDim)
 
-    def _is_dim(self, dim: object) -> TypeGuard[torch.export.dynamic_shapes._Dim]:
-        return isinstance(dim, torch.export.dynamic_shapes._Dim) and not isinstance(
+    def _is_dim(self, dim: object) -> TypeGuard[torch.export.dynamic_shapes.Dim]:
+        return isinstance(dim, torch.export.dynamic_shapes.Dim) and not isinstance(
             dim, torch.export.dynamic_shapes._DerivedDim
         )
 

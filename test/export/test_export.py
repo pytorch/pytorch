@@ -3835,7 +3835,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dynamic_shapes = (
             {"k": {"k": dim}},
-        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*_Dim.*.
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*Dim.*.
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
@@ -12311,7 +12311,7 @@ def forward(self, x):
 
         self.assertExpectedInline(
             _load_dynamic_shapes(spec, from_dict=False),
-            """[[<class 'torch._export.serde.dynamic_shapes.dx'>]]""",
+            """[[Dim('dx', min=4, max=16)]]""",
         )
 
         # check incorrect info in dims

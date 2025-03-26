@@ -8,7 +8,7 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.export.dynamic_shapes import _Dim, _DimHint
+from torch.export.dynamic_shapes import _DimHint, Dim
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.utils import _pytree
 
@@ -157,7 +157,7 @@ def from_dynamic_shapes_to_dynamic_axes(
 def _any_str_or_dim_in_dynamic_shapes(
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
 ) -> bool:
-    """Check if there is any string or _Dim in the dynamic_shapes."""
+    """Check if there is any string or Dim in the dynamic_shapes."""
     flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
     # This indicates the dynamic_shapes includes something we don't support in axes, and it's flattened
     # to itself. Otherwise, flat_dynamic_shapes should be a list of dict/list/tuple (or None).
@@ -166,15 +166,15 @@ def _any_str_or_dim_in_dynamic_shapes(
         for axes in flat_dynamic_shapes
     ):
         return False
-    # both str and _Dim can provide custom names
+    # both str and Dim can provide custom names
     for axes in flat_dynamic_shapes:
         if isinstance(axes, dict):
             for dim in axes.values():
-                if isinstance(dim, (str, _Dim)):
+                if isinstance(dim, (str, Dim)):
                     return True
         elif isinstance(axes, (list, tuple)):
             for dim in axes:
-                if isinstance(dim, (str, _Dim)):
+                if isinstance(dim, (str, Dim)):
                     return True
     return False
 
@@ -190,7 +190,7 @@ def convert_str_to_export_dim(
     #    for example: {"y": {0: "dim_0"}, "x": {1: "dim_1"}}
     #    to {"y": {0: Dim.AUTO}, "x": {1: Dim.AUTO}}
     dynamic_shapes_with_export_dim: list[
-        list[_Dim | _DimHint | None] | dict[int, _Dim | _DimHint | None] | None
+        list[Dim | _DimHint | None] | dict[int, Dim | _DimHint | None] | None
     ] = []
     flat_dynamic_shapes, tree_structure = _flatten_dynamic_shapes_to_axes(
         dynamic_shapes
@@ -199,7 +199,7 @@ def convert_str_to_export_dim(
         if axes is None:
             dynamic_shapes_with_export_dim.append(None)
         elif isinstance(axes, dict):
-            converted_axes_dict: dict[int, _Dim | _DimHint | None] = {}
+            converted_axes_dict: dict[int, Dim | _DimHint | None] = {}
             for axis, dim in axes.items():
                 if isinstance(dim, str):
                     converted_axes_dict[axis] = torch.export.Dim.AUTO
@@ -207,7 +207,7 @@ def convert_str_to_export_dim(
                     converted_axes_dict[axis] = dim
             dynamic_shapes_with_export_dim.append(converted_axes_dict)
         elif isinstance(axes, (list, tuple)):
-            converted_axes_list: list[_Dim | _DimHint | None] = []
+            converted_axes_list: list[Dim | _DimHint | None] = []
             for dim in axes:
                 if isinstance(dim, str):
                     converted_axes_list.append(torch.export.Dim.AUTO)
@@ -292,9 +292,9 @@ def create_rename_mapping(
     return rename_mapping
 
 
-def _get_custom_axis_name(axis: _Dim | str) -> str:
+def _get_custom_axis_name(axis: Dim | str) -> str:
     """Get the custom axis name from a torch.export.Dim."""
-    if isinstance(axis, _Dim):
+    if isinstance(axis, Dim):
         return axis.__name__
     return axis
 
@@ -310,18 +310,18 @@ def _unflatten_dynamic_shapes_with_inputs_tree(
 def _flatten_dynamic_shapes_to_axes(
     dynamic_shapes: dict[str, Any | None] | tuple[Any, ...] | list[Any],
 ) -> tuple[list[Any], _pytree.TreeSpec]:
-    # If it's a dict/list/tuple with torch.export._Dim, we consider it's an axis to dim mapping
+    # If it's a dict/list/tuple with torch.export.Dim, we consider it's an axis to dim mapping
     def is_axes(x) -> bool:
         return (
             isinstance(x, dict)
             and all(
                 isinstance(k, int)
-                and (v is None or isinstance(v, (_Dim, _DimHint, str, int)))
+                and (v is None or isinstance(v, (Dim, _DimHint, str, int)))
                 for k, v in x.items()
             )
         ) or (
             isinstance(x, (list, tuple))
-            and all(v is None or isinstance(v, (_Dim, _DimHint, str, int)) for v in x)
+            and all(v is None or isinstance(v, (Dim, _DimHint, str, int)) for v in x)
         )
 
     return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
