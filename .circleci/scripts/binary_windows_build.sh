@@ -24,7 +24,7 @@ export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
 if [[ os == 'windows' ]]; then
     ./windows/internal/build_wheels.bat
-elif [[ os == 'windows-arm64' ]]; then{
+elif [[ os == 'windows-arm64' ]]; then
     if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
         ./windows/arm64/build_libtorch.bat
     elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
