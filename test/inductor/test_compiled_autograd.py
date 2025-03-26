@@ -2801,7 +2801,12 @@ main()
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
 
-        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
+        if inductor_config.cpp_wrapper:
+            self.assertIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        else:
+            self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     def test_cudagraphs_cpu_graph(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
@@ -2834,7 +2839,10 @@ main()
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            2 if inductor_config.cpp_wrapper else 0,
+        )
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
@@ -2927,7 +2935,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            2 if inductor_config.cpp_wrapper else 1,
+        )
 
     def test_logs(self):
         logs, ctx = logs_to_string(
