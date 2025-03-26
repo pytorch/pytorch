@@ -1591,7 +1591,7 @@ float chebyshev_polynomial_u_forward(T x, int64_t n) {
 
   auto q = 2.0 * x;
   if (n == 1) {
-    return T(q);
+    return q;
   }
 
   auto p = 1.0;
@@ -1609,7 +1609,7 @@ float chebyshev_polynomial_u_forward(T x, int64_t n) {
 template <typename T>
 float chebyshev_polynomial_v_forward(T x, int64_t n) {
   if (n < 0) {
-    return T(0.0);
+    return 0.0;
   }
 
   if (::metal::fabs(x) == 1.0) {
@@ -1671,13 +1671,13 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
     }
 
     if (n % 2 == 0) {
-      return T(1.0);
+      return 1.0;
     }
 
-    return T(-1.0);
+    return -1.0;
   }
 
-  if ((n > 8) && (::metal::fabs(x) < T(1.0))) {
+  if ((n > 8) && (::metal::fabs(x) < 1.0)) {
     const auto acos_x = ::metal::precise::acos(x);
     if (::metal::precise::cos(.5 * acos_x) != 1.0) {
       return ::metal::precise::sin((n + 0.5) * acos_x) /
