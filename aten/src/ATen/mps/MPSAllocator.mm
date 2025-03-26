@@ -732,6 +732,9 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
+    if (!buffer_block) {
+      buffer_block = get_allocated_buffer_block_by_cpu_ptr(ptr);
+    }
     TORCH_INTERNAL_ASSERT(buffer_block);
     const BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
@@ -836,7 +839,7 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     return _getAllocImpl().isSharedBuffer(ptr);
   }
   bool isSharedBufferCPUPtr(const void* cpu_ptr) const override {
-    return _getAllocImpl().isSharedBufferCPUPtr(ptr);
+    return _getAllocImpl().isSharedBufferCPUPtr(cpu_ptr);
   }
   bool isSharedStorageSupported() const override {
     return m_has_unified_memory;
@@ -944,7 +947,7 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
 
   static void Delete(void* ptr) {
     if (ptr) {
-      void* cpu_ptr = _getAllocImpl().free(maybe_convert_cpu_ptr_to_device_ptr(ptr));
+      void* cpu_ptr = _getAllocImpl().free(ptr);
     }
   }
 
@@ -952,6 +955,15 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   // since it has to lock the mutex and search a map each time.
   void* maybe_convert_cpu_ptr_to_device_ptr(void* ptr) const {
     void* device_ptr = getSharedDevicePtrFromCPUPtr(ptr).first;
+    if (device_ptr) {
+      return device_ptr;
+    } else {
+      return ptr;
+    }
+  }
+
+  const void* maybe_convert_cpu_ptr_to_device_ptr(const void* ptr) const {
+    const void* device_ptr = getSharedDevicePtrFromCPUPtr(ptr).first;
     if (device_ptr) {
       return device_ptr;
     } else {
@@ -966,13 +978,13 @@ struct TORCH_API MPSPinnedAllocator : public MPSAllocator {
 
   DataPtr allocate(const size_t nbytes) override {
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
-    void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf);
+    void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
     return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU, 0)};
   }
 
   DataPtr allocScalarBufferWithValue(void* value, size_t size) const override {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
-    void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf);
+    void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
     return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU, 0)};
   }
 };
@@ -989,7 +1001,7 @@ MPSAllocator& _getPrivateAllocator() {
 }
 
 MPSPinnedAllocator& _getPinnedAllocator() {
-  static MPSPinnedAllocator s_mps_pinned_alloc();
+  static MPSPinnedAllocator s_mps_pinned_alloc;
   return s_mps_pinned_alloc;
 }
 } // anonymous namespace
