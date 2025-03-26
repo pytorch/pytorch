@@ -664,9 +664,16 @@ class _MinimizerBase:
             last_node_report.append("Start searching for last node in culprit")
             self.print_report(last_node_report)
             end_idx = self._block_traverse_impl(nodes, start_idx, end_idx, True)
-            last_node_report.extend(
-                ["Finish Pass 1", f"Find end_idx = {end_idx}:{nodes[end_idx].name}"]
-            )
+            if end_idx == len(nodes):
+                # no culprits found
+                last_node_report.extend(
+                    ["Finish Pass 1", f"No culprits found from {first_node_name} to {last_node_name}"]
+                )
+                end_idx -= 1
+            else:
+                last_node_report.extend(
+                    ["Finish Pass 1", f"Find end_idx = {end_idx}:{nodes[end_idx].name}"]
+                )
             self.print_report(last_node_report)
 
         # step 2: reduce culprit block to (start_idx, end_idx)
@@ -678,12 +685,19 @@ class _MinimizerBase:
             )
             first_node_report.append("*" * 50)
             self.reports.append(first_node_report)
-            first_node_report.extend(
-                [
-                    "Finish Pass 2",
-                    f"Find start_idx = {start_idx}:{nodes[start_idx].name}",
-                ]
-            )
+            if start_idx == -1:
+                # no culprits found
+                first_node_report.extend(
+                    ["Finish Pass 2", f"No culprits found from {first_node_name} to {last_node_name}"]
+                )
+                start_idx += 1
+            else:
+                first_node_report.extend(
+                    [
+                        "Finish Pass 2",
+                        f"Find start_idx = {start_idx}:{nodes[start_idx].name}",
+                    ]
+                )
             self.print_report(first_node_report)
 
         # step 3: form module with minimum culprits
@@ -716,7 +730,7 @@ class _MinimizerBase:
             self._run_and_compare(split_module, submod_name, [output_node_name])
             self.print_report(report)
         except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
-            report.append(f"Found culprit {cur_nodes}")
+            report.append(f"Found culprit {list(dict.fromkeys(nodes))}")
             self.print_report(report)
             return culprits
 
