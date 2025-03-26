@@ -10,6 +10,7 @@
 #include <pybind11/gil.h>
 
 // Include some often-used cpp_wrapper headers, for precompiling.
+#include <c10/util/BFloat16.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
