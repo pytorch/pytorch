@@ -40,6 +40,16 @@ namespace {
     }                                                                         \
   }
 
+py::object create_self_python_object(const c10::TensorImpl* self) {
+  auto self_t =
+      TensorBase(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
+                     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+                 reclaim(const_cast<c10::TensorImpl*>(self)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  self_t.unsafeReleaseTensorImpl();
+  return self_p;
+}
+
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
@@ -196,13 +206,7 @@ py::object torchDispatchFromTensorImpl(
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
 
   std::vector<PyObject*> overloaded_args;
-  // TODO: there should be a shorter way to spell this
-  // TODO: fix the constness of target
-  at::Tensor self_t = at::Tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  auto self_p = create_self_python_object(self);
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
@@ -939,11 +943,7 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   HANDLE_TH_ERRORS
-  Tensor self_t =
-      Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-             unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  auto self_p = create_self_python_object(self);
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
 }
