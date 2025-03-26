@@ -1021,13 +1021,35 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
 
     def test_newly_constructed_tensor_subclass_attr_mutation(self):
-        # Make sure the attribute mutation is handled both during Dynamo tracing
+        # Make sure the attribute mutation for newly constructed tensor subclass
+        # object (from constructor call) is handled both during Dynamo tracing
         # and codegen-ed to be visible outside `torch.compile`.
         class MySubclass(torch.Tensor):
             pass
 
         def f():
             x = MySubclass(torch.ones(2))
+            x.bar = 42
+            return x
+
+        opt_f = compile_full_eager(f)
+
+        with traceable_subclass(MySubclass):
+            res = f()
+            ref = opt_f()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res.bar, ref.bar)
+
+    def test_as_subclass_attr_mutation(self):
+        # Make sure the attribute mutation for newly constructed tensor subclass
+        # object (from as_subclass call) is handled both during Dynamo tracing
+        # and codegen-ed to be visible outside `torch.compile`.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def f():
+            x = torch.ones(2).as_subclass(MySubclass)
             x.bar = 42
             return x
 

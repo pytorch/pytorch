@@ -67,7 +67,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import AttributeMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -788,9 +788,14 @@ class TensorVariable(VariableTracker):
 
             tx = InstructionTranslator.current_tx()
             py_cls = cls.as_python_constant()
-            return TensorWithTFOverrideVariable.from_tensor_var(
+            var = TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, cls.source
             )
+            # See NOTE [Side effect tracking for newly constructed tensor]
+            tx.output.side_effects._track_obj(
+                object(), var, mutation_type_cls=AttributeMutationNew
+            )
+            return var
 
     def method_get_device(self):
         if isinstance(self.device, torch.device):
@@ -1470,7 +1475,7 @@ class TensorSubclassVariable(VariableTracker):
         var = impl()
         # See NOTE [Side effect tracking for newly constructed tensor]
         tx.output.side_effects._track_obj(
-            object(), var, mutation_type_cls=variables.base.AttributeMutationNew
+            object(), var, mutation_type_cls=AttributeMutationNew
         )
         return var
 
