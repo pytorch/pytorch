@@ -7,22 +7,37 @@
 #define C10_METAL_CONSTEXPR constexpr
 #endif
 
+#if !defined(__METAL__) || __METAL_VERSION__ >= 310
+#define C10_METAL_ALL_TYPES_FUNCTOR(_) \
+  _(Byte, 0)                           \
+  _(Char, 1)                           \
+  _(Short, 2)                          \
+  _(Int, 3)                            \
+  _(Long, 4)                           \
+  _(Half, 5)                           \
+  _(Float, 6)                          \
+  _(Bool, 11)                          \
+  _(BFloat16, 15)
+#else
+#define C10_METAL_ALL_TYPES_FUNCTOR(_) \
+  _(Byte, 0)                           \
+  _(Char, 1)                           \
+  _(Short, 2)                          \
+  _(Int, 3)                            \
+  _(Long, 4)                           \
+  _(Half, 5)                           \
+  _(Float, 6)                          \
+  _(Bool, 11)
+#endif
+
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 
 enum class ScalarType {
-  Byte = 0,
-  Char = 1,
-  Short = 2,
-  Int = 3,
-  Long = 4,
-  Half = 5,
-  Float = 6,
-  Bool = 11,
-#if !defined(__METAL__) || __METAL_VERSION__ >= 310
-  BFloat16 = 15,
-#endif
+#define _DEFINE_ENUM_VAL_(_v, _n) _v = _n,
+  C10_METAL_ALL_TYPES_FUNCTOR(_DEFINE_ENUM_VAL_)
+#undef _DEFINE_ENUM_VAL_
 };
 
 } // namespace metal
