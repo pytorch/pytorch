@@ -133,9 +133,9 @@ mm_template = TritonTemplate(
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
         if USE_FAST_ACCUM:
-            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
+            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         else:
-            acc += tl.dot(a, b, out_dtype=ACC_TYPE)
+            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -204,7 +204,10 @@ mm_template = TritonTemplate(
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        if USE_FAST_ACCUM:
+            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        else:
+            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)

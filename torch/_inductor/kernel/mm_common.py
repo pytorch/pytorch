@@ -495,6 +495,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
+        USE_FAST_ACCUM=False, # Option for _scaled_mm
         ACC_TYPE=acc_type(layout.dtype),
         num_stages=config.num_stages,
         num_warps=config.num_warps,
