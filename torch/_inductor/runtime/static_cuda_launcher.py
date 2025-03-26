@@ -170,6 +170,9 @@ class StaticallyLaunchedCudaKernel:
         # Remove objects that are no longer valid for pickling
         state = self.__dict__.copy()
         state["function"] = None
+        # Cubin paths aren't consistent across processes, so we clear
+        # and reload them.
+        state["cubin_path"] = None
         return state
 
     def run(
