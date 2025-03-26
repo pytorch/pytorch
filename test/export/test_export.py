@@ -7849,6 +7849,16 @@ graph():
         )
         self.assertEqual(ep.module()(*inputs), m3(*inputs))
 
+    def test_operator_aten_tensor_mode_variant(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.div.Tensor_mode(x, 2, rounding_mode="floor")
+
+        m = Module()
+        args = (torch.randn(4, 3),)
+        ep = export(m, args)
+        self.assertEqual(ep.module()(*args), m(*args))
+
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
             def forward(self, scores, mask):
@@ -11681,6 +11691,16 @@ graph():
             "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
         ).run(gm_torch_ir.code)
 
+    def test_sym_float_operators(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return -(x.max().item() / 2) + x
+
+        m = Module()
+        args = (torch.ones(4),)
+        ep = export(m, args)
+        self.assertEqual(ep.module()(*args), m(*args))
+
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
@@ -13445,7 +13465,6 @@ class TestExportCustomClass(TorchTestCase):
         )
 
         decomp_table = default_decompositions()
-        del decomp_table[torch.ops.aten.elu.default]
 
         ep = ep.run_decompositions(
             decomp_table=decomp_table,
