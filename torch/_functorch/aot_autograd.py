@@ -23,14 +23,10 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import OutputCode
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    _pytree_subclasses_that_lose_info,
-    make_fx,
-)
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -1072,7 +1068,6 @@ def aot_module_simplified(
     keep_inference_input_mutations=False,
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1168,7 +1163,6 @@ def aot_module_simplified(
                 fake_flat_args,
                 aot_config,
                 cudagraphs,
-                boxed_forward_device_index,
                 local,
                 remote,
             )
@@ -1636,12 +1630,18 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
+    def is_leaf(x):
+        # Ideally is_leaf should not be needed when mapping, but it seems that
+        # subclasses of a standard container X may sometimes map to X, which
+        # destroys information and can cause future mapping to fail.
+        known_subclasses_that_lose_info = (
+            torch.Size,
+            # add more here if needed
+        )
+        return isinstance(x, known_subclasses_that_lose_info)
+
     # save state of attributes before enter
-    snapshot = pytree.tree_map(
-        lambda x: x,
-        _get_attributes(mod),
-        is_leaf=lambda x: type(x) in _pytree_subclasses_that_lose_info,
-    )
+    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod), is_leaf=is_leaf)
     try:
         yield
     finally:

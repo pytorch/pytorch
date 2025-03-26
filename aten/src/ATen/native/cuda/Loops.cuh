@@ -41,7 +41,7 @@ static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorI
   return OffsetCalculator<num_outputs>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
 }
 
-template <bool reverted_idx = false, typename func_t, typename policy_t>
+template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
@@ -49,8 +49,6 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   constexpr int elems_per_thread = policy_t::tws;
 
   int idx = blockIdx.x;
-  if constexpr (reverted_idx)
-    idx = gridDim.x - blockIdx.x - 1;
 
   return_t results[elems_per_thread];
   args_t args[elems_per_thread];

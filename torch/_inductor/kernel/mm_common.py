@@ -8,7 +8,7 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
+from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -17,6 +17,7 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
+    ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
@@ -179,7 +180,6 @@ mm_kernel_configs = (
         {"config": (128, 128, 32, 3, 4), "cond": True},
         {"config": (128, 128, 64, 3, 4), "cond": True},
         {"config": (128, 128, 64, 5, 8), "cond": True},
-        {"config": (128, 256, 64, 3, 8), "cond": True},
     ]
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
     else [
@@ -455,16 +455,14 @@ def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
     return False
 
 
-@SymbolicGridFn
-def mm_grid(m, n, meta, *, cdiv):
+def mm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-@SymbolicGridFn
-def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),

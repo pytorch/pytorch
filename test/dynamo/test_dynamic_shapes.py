@@ -49,12 +49,6 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        # When we unspecialize float, we wobble tests by changing
-        # the op count since previously we would just specialize and constant
-        # fold floats into the graph, whereas when we unspecialize we will have
-        # ops for item, add, and all other tensorified operations. Since these
-        # tests really aren't testing that, we purposely specialize floats here.
-        (config, "specialize_float", True),
         (fx_config, "translation_validation", TEST_Z3),
         (fx_config, "check_shape_env_recorded_events", True),
         (fx_config, "validate_shape_env_version_key", True),

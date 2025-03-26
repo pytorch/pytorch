@@ -12,7 +12,6 @@ on an NVIDIA GPU with compute capability >= 3.0.
 
 import builtins
 import ctypes
-import functools
 import glob
 import importlib
 import inspect
@@ -167,7 +166,6 @@ if sys.platform == "win32":
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
-        py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -180,13 +178,7 @@ if sys.platform == "win32":
 
         dll_paths = [
             p
-            for p in (
-                th_dll_path,
-                py_dll_path,
-                base_py_dll_path,
-                usebase_path,
-                py_root_bin_path,
-            )
+            for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path)
             if os.path.exists(p)
         ]
 
@@ -1330,9 +1322,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
-        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1374,6 +1364,8 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
@@ -2232,7 +2224,7 @@ del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 def compiled_with_cxx11_abi() -> builtins.bool:
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
-    return True
+    return _C._GLIBCXX_USE_CXX11_ABI
 
 
 from torch import _library as _library, _ops as _ops
@@ -2539,14 +2531,9 @@ def compile(
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
         raise RuntimeError("torch.compile is not supported on Python 3.14+")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
-        3,
-        13,
-        3,
-    ):
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
         raise RuntimeError(
-            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
-            "Please use Python 3.13.3+."
+            "torch.compile is not supported on Python built with GIL disabled"
         )
 
     # Decorator mode
@@ -2703,7 +2690,6 @@ else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-@functools.cache
 def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).

@@ -1,8 +1,5 @@
 # mypy: allow-untyped-defs
-"""Dispatcher for AtenLib functions from onnx-script.
-
-This is a deprecated module to be removed.
-"""
+"""Dispatcher for AtenLib functions from onnx-script."""
 
 from __future__ import annotations
 
@@ -29,7 +26,7 @@ if TYPE_CHECKING:
         graph_building as onnxscript_graph_building,
     )
 
-    from torch.onnx._internal._exporter_legacy import OnnxRegistry
+    from torch.onnx import OnnxRegistry
 
 
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(

@@ -11,7 +11,7 @@
 #include <thread>
 #include <unordered_set>
 
-static bool has_xpu() {
+bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
 
@@ -98,7 +98,7 @@ TEST(XPUStreamTest, StreamBehavior) {
   EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
-static void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
+void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);
   cur_thread_stream = {c10::xpu::getCurrentXPUStream()};
@@ -153,11 +153,7 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
   EXPECT_TRUE(result_pair.second);
 }
 
-static void asyncMemCopy(
-    sycl::queue& queue,
-    int* dst,
-    int* src,
-    size_t numBytes) {
+void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
   queue.memcpy(dst, src, numBytes);
 }
 

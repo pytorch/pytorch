@@ -509,7 +509,6 @@ def fold_weight(
                     packed_weight_name.replace(":", "_")
                     .replace("/", "_")
                     .replace("|", "_")
-                    .replace(" ", "")
                     .lower()
                 )
                 original_weights_lookup[key_name] = original_weights_lookup[

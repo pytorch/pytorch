@@ -398,12 +398,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
-    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
-        return self.features.select_index_dtype()
-
     @property
     def index_dtype(self) -> str:
-        return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
+        return self.dtype_to_str(self.features.select_index_dtype())
 
     def want_no_x_dim(self) -> bool:
         return False
@@ -427,14 +424,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             }
 
         grid_dims = ["x", "y", "z"]
-        pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = pointwise_tensor_dims
+            tensor_dims = grid_dims
         else:
-            tensor_dims = pointwise_tensor_dims + reduction_dims
+            tensor_dims = grid_dims + reduction_dims
 
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
@@ -818,10 +814,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         return self.codegen_indexing(simp_index)
 
-    def active_range_trees(self) -> list[IterationRangesRoot]:
-        return [
+    def active_range_trees(self, reorder: bool = False) -> list[IterationRangesRoot]:
+        trees = [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
+        if reorder and len(trees) > 1:
+            count = sum(t.prefix in "xyz" for t in trees)
+            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
+                t.prefix for t in trees[:count]
+            ]
+            trees[:count] = reversed(trees[:count])
+        return trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -996,25 +999,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     log.warning(msg)
 
                     stride_order_list = [
-                        ir.get_stride_order(
-                            V.graph.get_buffer(name).get_layout().stride
+                        (
+                            ir.get_stride_order(
+                                V.graph.get_buffer(name).get_layout().stride
+                            )
+                            if V.graph.try_get_buffer(name)
+                            else None
                         )
-                        if V.graph.try_get_buffer(name)
-                        else None
                         for name in call_args
                     ]
                     size_list = [
-                        V.graph.get_buffer(name).get_layout().size
-                        if V.graph.try_get_buffer(name)
-                        else None
+                        (
+                            V.graph.get_buffer(name).get_layout().size
+                            if V.graph.try_get_buffer(name)
+                            else None
+                        )
                         for name in call_args
                     ]
                     source_list = [
-                        "GraphInput"
-                        if name in V.graph.graph_inputs
-                        else "IntermediateBuffer"
-                        if name in V.graph.name_to_buffer
-                        else None
+                        (
+                            "GraphInput"
+                            if name in V.graph.graph_inputs
+                            else (
+                                "IntermediateBuffer"
+                                if name in V.graph.name_to_buffer
+                                else None
+                            )
+                        )
                         for name in call_args
                     ]
 
@@ -1553,10 +1564,13 @@ class SIMDScheduling(BaseScheduling):
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
+                assert kernel.meta is not None, "meta is None"
+                grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
                 )
 
             if only_gen_src_code:
@@ -1737,8 +1751,13 @@ class SIMDScheduling(BaseScheduling):
                 if CandidateTiling.is_good_size(tiled_groups[1]):
                     score *= 2
 
-                if V.graph.sizevars.statically_known_geq(
-                    score, sympy_product(itertools.chain(ranges, reduction_ranges))
+                if (
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        score
+                        - sympy_product(itertools.chain(ranges, reduction_ranges)),
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    >= 0
                 ):
                     tilings.append(
                         CandidateTiling(
@@ -1999,20 +2018,36 @@ class SIMDScheduling(BaseScheduling):
             # of stragglers which is annoying to generate code for.
             #
             # NB: More than three max tiles is not enabled by default.
-
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.statically_known_equals(a1 - b1, 0):
+                if (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    == 0
+                ):
                     return None
-                if V.graph.sizevars.statically_known_lt(a1 - b1, 0):
+                if (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    < 0
+                ):
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert V.graph.sizevars.statically_known_gt(a1 - b1, 0)
-                if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
+                assert (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    > 0
+                )
+                if not V.graph.sizevars.size_hint(
+                    a1 % b1 == 0, fallback=config.unbacked_symint_fallback
+                ):
                     return None
 
                 new_tiling = {
@@ -2107,9 +2142,8 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        return V.graph.sizevars.statically_known_geq(
-            s, 32
-        ) and V.graph.sizevars.statically_known_multiple_of(s, 32)
+        s = V.graph.sizevars.size_hint(s, fallback=config.unbacked_symint_fallback)
+        return s >= 32 and s % 32 == 0
 
 
 class CantSplit(Exception):

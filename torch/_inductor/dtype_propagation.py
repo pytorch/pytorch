@@ -181,7 +181,7 @@ class DtypePropagationOpsHandler:
         ):
             return upcast_compute_type(dtype)
 
-        return V.kernel.get_index_dtype_as_torch_dtype()
+        return torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
 
     @staticmethod
     def to_dtype(

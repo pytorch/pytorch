@@ -314,13 +314,6 @@ test_python() {
   assert_git_not_dirty
 }
 
-test_lazy_tensor_meta_reference_disabled() {
-  export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
-  echo "Testing lazy tensor operations without meta reference"
-  time python test/run_test.py --include lazy/test_ts_opinfo.py --verbose
-  export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
-}
-
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -483,8 +476,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
-elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
-  DYNAMO_BENCHMARK_FLAGS+=(--inductor --inductor-compile-mode max-autotune)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -761,8 +752,6 @@ test_dynamo_benchmark() {
         test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
-    elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
@@ -1481,7 +1470,7 @@ test_executorch() {
   bash examples/models/llama3_2_vision/install_requirements.sh
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
-  bash .ci/scripts/setup-linux.sh --build-tool cmake
+  bash .ci/scripts/setup-linux.sh cmake
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
@@ -1527,27 +1516,6 @@ test_linux_aarch64() {
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
-test_operator_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  TEST_DIR=$(pwd)
-
-  test_inductor_set_cpu_affinity
-
-  cd benchmarks/operator_benchmark/pt_extension
-  python setup.py install
-
-  cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
-
-  pip_install pandas
-  python check_perf_csv.py \
-      --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
-}
-
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1577,19 +1545,6 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
-  fi
-elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
-  TEST_MODE="short"
-
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *long* ]]; then
-      TEST_MODE="long"
-    elif [[ "${TEST_CONFIG}" == *all* ]]; then
-      TEST_MODE="all"
-    fi
-
-    test_operator_benchmark cpu ${TEST_MODE}
-
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
@@ -1653,7 +1608,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
-  test_inductor_aoti
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
@@ -1673,7 +1627,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
   test_python_shard 1

@@ -43,8 +43,8 @@ def _load_boolean_flag(
     return state
 
 
-PLACEHOLDER: bool = _load_boolean_flag(
-    "TORCH_ONNX_PLACEHOLDER",
-    this_will="do nothing",
+USE_EXPERIMENTAL_LOGIC: bool = _load_boolean_flag(
+    "TORCH_ONNX_USE_EXPERIMENTAL_LOGIC",
+    this_will="use ExportedProgram and the new torch.onnx export logic",
     default=True,
 )

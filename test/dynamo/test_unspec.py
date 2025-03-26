@@ -653,7 +653,14 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y1), fn(x, y1))
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
-            self.assertEqual(cnt.frame_count, 1)
+            if i == 0:
+                # This is kind of quirky part of automatic dynamic,
+                # since it just uses source name + tx.f_code as the key
+                # subsequent recompilations will actually reuse the automatic
+                # dynamic choices.
+                self.assertEqual(cnt.frame_count, 2)
+            else:
+                self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):

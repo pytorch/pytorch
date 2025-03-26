@@ -80,7 +80,7 @@ def grep_symbols(lib: str, patterns: list[Any]) -> list[str]:
         return functools.reduce(list.__add__, (x.result() for x in tasks), [])
 
 
-def check_lib_symbols_for_abi_correctness(lib: str) -> None:
+def check_lib_symbols_for_abi_correctness(lib: str, pre_cxx11_abi: bool = True) -> None:
     print(f"lib: {lib}")
     cxx11_symbols = grep_symbols(lib, LIBTORCH_CXX11_PATTERNS)
     pre_cxx11_symbols = grep_symbols(lib, LIBTORCH_PRE_CXX11_PATTERNS)
@@ -88,12 +88,28 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
     num_pre_cxx11_symbols = len(pre_cxx11_symbols)
     print(f"num_cxx11_symbols: {num_cxx11_symbols}")
     print(f"num_pre_cxx11_symbols: {num_pre_cxx11_symbols}")
-    if num_pre_cxx11_symbols > 0:
-        raise RuntimeError(
-            f"Found pre-cxx11 symbols, but there shouldn't be any, see: {pre_cxx11_symbols[:100]}"
+    if pre_cxx11_abi:
+        if num_cxx11_symbols > 0:
+            raise RuntimeError(
+                f"Found cxx11 symbols, but there shouldn't be any, see: {cxx11_symbols[:100]}"
+            )
+        if num_pre_cxx11_symbols < 1000:
+            raise RuntimeError("Didn't find enough pre-cxx11 symbols.")
+        # Check for no recursive iterators, regression test for https://github.com/pytorch/pytorch/issues/133437
+        rec_iter_symbols = grep_symbols(
+            lib, [re.compile("std::filesystem::recursive_directory_iterator.*")]
         )
-    if num_cxx11_symbols < 100:
-        raise RuntimeError("Didn't find enought cxx11 symbols")
+        if len(rec_iter_symbols) > 0:
+            raise RuntimeError(
+                f"recursive_directory_iterator in used pre-CXX11 binaries, see; {rec_iter_symbols}"
+            )
+    else:
+        if num_pre_cxx11_symbols > 0:
+            raise RuntimeError(
+                f"Found pre-cxx11 symbols, but there shouldn't be any, see: {pre_cxx11_symbols[:100]}"
+            )
+        if num_cxx11_symbols < 100:
+            raise RuntimeError("Didn't find enought cxx11 symbols")
 
 
 def main() -> None:
@@ -105,8 +121,9 @@ def main() -> None:
         else:
             install_root = Path(distutils.sysconfig.get_python_lib()) / "torch"
 
-    libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
-    check_lib_symbols_for_abi_correctness(libtorch_cpu_path)
+    libtorch_cpu_path = install_root / "lib" / "libtorch_cpu.so"
+    pre_cxx11_abi = "cxx11-abi" not in os.getenv("DESIRED_DEVTOOLSET", "")
+    check_lib_symbols_for_abi_correctness(libtorch_cpu_path, pre_cxx11_abi)
 
 
 if __name__ == "__main__":

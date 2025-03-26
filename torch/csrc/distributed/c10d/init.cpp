@@ -2506,10 +2506,6 @@ Arguments:
               "supports_coalescing",
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
-          .def_property_readonly(
-              "supports_time_estimate",
-              &::c10d::Backend::supportsTimeEstimation,
-              "(test whether the backend supports collective time estimation)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -2998,10 +2994,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               R"(Create a new ProcessGroupNCCL instance.)")
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
-          .def(
-              "_start_time_estimate",
-              &::c10d::ProcessGroupNCCL::startTimeEstimate)
-          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
           .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)

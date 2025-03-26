@@ -5260,50 +5260,6 @@ def zeros_like(
     return res
 
 
-@register_meta([aten.ones.default, aten.ones.out])
-@out_wrapper()
-def meta_ones(
-    size,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    requires_grad=False,
-):
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    if device is None:
-        device = torch.get_default_device()
-    if layout is None:
-        layout = torch.strided
-    return torch.empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
-    )
-
-
-@register_meta([aten.zeros.default, aten.zeros.out])
-@out_wrapper()
-def meta_zeros(
-    size,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    requires_grad=False,
-):
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    if device is None:
-        device = torch.get_default_device()
-    if layout is None:
-        layout = torch.strided
-    return torch.empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
-    )
-
-
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -5627,20 +5583,7 @@ def meta__scaled_dot_product_cudnn_attention(
     S_KV = key.size(2)
     D_V = value.size(-1)
 
-    res_shape = (B, H, S_Q, D_V)
-    if tuple(query.shape) == res_shape:
-        query_t = query.transpose(1, 2)
-        res = torch.empty_like(query_t).transpose(1, 2)
-    else:
-        dim_order = sorted(
-            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
-        )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
-
+    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
     logsum_exp = torch.empty(
         (B, H, S_Q),
         dtype=torch.float,

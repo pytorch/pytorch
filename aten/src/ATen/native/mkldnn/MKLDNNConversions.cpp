@@ -182,7 +182,7 @@ Tensor mkldnn_reorder_conv2d_weight(
       dilation_expanded,
       groups,
       ideep::algorithm::convolution_direct,
-      ideep::prop_kind::forward_inference,
+      ideep::prop_kind::forward,
       w.get_data_type(),
       src_dims,
       ideep::attr_t(),
@@ -229,7 +229,7 @@ Tensor mkldnn_reorder_conv3d_weight(
       dilation_expanded,
       groups,
       ideep::algorithm::convolution_direct,
-      ideep::prop_kind::forward_inference,
+      ideep::prop_kind::forward,
       w.get_data_type(),
       src_dims,
       ideep::attr_t(),
@@ -273,8 +273,7 @@ static Tensor mkldnn_reorder_linear_weight(
       {out_features, in_features},
       input_size,
       /* weight dtype */ dtype,
-      /* src dtype */ dtype,
-      ideep::prop_kind::forward_inference);
+      /* src dtype */ dtype);
   ideep::tensor result;
   result.init(packed_desc);
   result.feed_from(w);

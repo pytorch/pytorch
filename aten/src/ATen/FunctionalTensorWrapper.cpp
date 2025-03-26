@@ -737,7 +737,7 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
 }
 
 template <typename T>
-static bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
+bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   if (list.size() == 0) return false;
   auto functional_count = 0;
   for (const auto& tensor : list) {
@@ -803,7 +803,7 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
-thread_local static bool _functionalizationReapplyViews;
+thread_local bool _functionalizationReapplyViews;
 
 bool getFunctionalizationReapplyViewsTLS() {
   return _functionalizationReapplyViews;

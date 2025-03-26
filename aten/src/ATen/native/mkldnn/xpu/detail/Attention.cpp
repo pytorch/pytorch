@@ -311,8 +311,9 @@ void gpu_float_sdpa(
     bool is_causal,
     float softmax_scale,
     const Tensor& output) {
-  auto& eng = GpuEngineManager::Instance().get_engine();
-  auto& strm = GpuStreamManager::Instance().get_stream();
+  auto eng = GpuEngineManager::Instance().get_engine(
+      {c10::kXPU, c10::xpu::current_device()});
+  auto strm = GpuStreamManager::Instance().get_stream();
 
   const auto get_tril_mask = [&]() {
     auto opts = query.options();

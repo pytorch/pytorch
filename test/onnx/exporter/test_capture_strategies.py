@@ -15,7 +15,6 @@ class ExportStrategiesTest(common_utils.TestCase):
         [
             _capture_strategies.TorchExportStrategy,
             _capture_strategies.TorchExportNonStrictStrategy,
-            _capture_strategies.TorchExportDraftExportStrategy,
             _capture_strategies.JitTraceConvertStrategy,
         ],
         name_fn=lambda strategy_cls: strategy_cls.__name__,
@@ -32,45 +31,6 @@ class ExportStrategiesTest(common_utils.TestCase):
         b = torch.tensor(1.0)
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
-        ep = result.exported_program
-        assert ep is not None
-        torch.testing.assert_close(ep.module()(a, b), model(a, b))
-
-    def test_jit_conversion_on_data_dependent_model(self):
-        class Model(torch.nn.Module):
-            def forward(self, a, b):
-                if a.sum() > 0:
-                    return a.cos()
-                # The branch is expected to be specialized
-                return b.sin()
-
-        model = Model()
-        a = torch.tensor(0.0)
-        b = torch.tensor(1.0)
-
-        strategy = _capture_strategies.JitTraceConvertStrategy()
-        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=None)
-        ep = result.exported_program
-        assert ep is not None
-        torch.testing.assert_close(ep.module()(a, b), model(a, b))
-
-    def test_draft_export_on_data_dependent_model(self):
-        class Model(torch.nn.Module):
-            def forward(self, a, b):
-                if a.sum() > 0:
-                    return a.cos()
-                # The branch is expected to be specialized and a warning is logged
-                return b.sin()
-
-        model = Model()
-        a = torch.tensor(0.0)
-        b = torch.tensor(1.0)
-
-        strategy = _capture_strategies.TorchExportDraftExportStrategy()
-        with self.assertLogs("torch.export", level="WARNING") as cm:
-            result = strategy(model, (a, b), kwargs=None, dynamic_shapes=None)
-            expected_warning = "1 issue(s) found during export, and it was not able to soundly produce a graph."
-            self.assertIn(expected_warning, str(cm.output))
         ep = result.exported_program
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
