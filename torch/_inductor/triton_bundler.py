@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 import os
@@ -43,6 +44,21 @@ class TritonKernelArtifact:
 
 
 @dataclasses.dataclass(frozen=True)
+class StaticallyLaunchedAutotuner:
+    """
+    Represents a statically compiled CachingAutotuner object that we can
+    save directly in the cache. A CachingAutotuner is made up of a list of
+    StaticTritonCompileResults, each of which uses the cubin from a TritonKernelArtifact.
+
+    Statically saved here have their cubin files saved by a corresponding TritonBundleEntry.
+    """
+
+    cache_key: str
+    kernel_name: str
+    kernel: "CachingAutotuner"  # type: ignore[name-defined] # noqa: F821
+
+
+@dataclasses.dataclass(frozen=True)
 class TritonKernelArtifacts:
     """
     Collection of artifacts for a particular kernel.
@@ -60,6 +76,17 @@ class TritonBundlerMetadata:
     """
 
     cached_kernel_names: list[str]
+    statically_launched_kernel_names: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class TritonBundle:
+    """
+    Serializable bundle to save into FXGraphCache
+    """
+
+    kernel_artifacts: list[TritonKernelArtifacts]
+    static_autotuners: list[StaticallyLaunchedAutotuner]
 
 
 class TritonBundler:
@@ -79,6 +106,7 @@ class TritonBundler:
     """
 
     _entries: Optional[list[TritonBundleEntry]] = None
+    _static_autotuners: Optional[list[StaticallyLaunchedAutotuner]] = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinal value for search and replace
@@ -112,6 +140,7 @@ class TritonBundler:
         log.debug("TritonBundler.begin_compile is called")
         assert cls._entries is None
         cls._entries = []
+        cls._static_autotuners = []
 
     @classmethod
     def end_compile(cls) -> None:
@@ -121,6 +150,7 @@ class TritonBundler:
         """
         log.debug("TritonBundler.end_compile is called")
         cls._entries = None
+        cls._static_autotuners = None
 
     @classmethod
     def put(cls, kernel_hash: str, device: int) -> None:
@@ -134,19 +164,88 @@ class TritonBundler:
             )
 
     @classmethod
+    def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
+        if (entries := cls._static_autotuners) is not None:
+            # Clear a bunch of unpicklable values and make a copy to save
+            # for FXGraphCache
+            old_values = kernel.prepare_for_pickle()
+            new_kernel = copy.deepcopy(kernel)
+            entries.append(
+                StaticallyLaunchedAutotuner(
+                    key,
+                    new_kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
+                    new_kernel,
+                )
+            )
+            # Put the values back since we need it to use now
+            (
+                kernel.fn.fn,
+                kernel.fn.__globals__,
+                kernel.fn.used_global_vals,
+                kernel.fn.repr,
+                kernel.launchers,
+            ) = old_values
+
+    @classmethod
+    def collect_static_autotuners(
+        cls,
+    ) -> tuple[list[StaticallyLaunchedAutotuner], list[str]]:
+        if not cls._static_autotuners:
+            return [], []
+        else:
+            log.info(
+                "Saving %d statically launchable CachingAutotuners",
+                len(cls._static_autotuners),
+            )
+            static_autotuner_names = [i.kernel_name for i in cls._static_autotuners]
+            counters["inductor"]["triton_bundler_save_static_autotuner"] += 1
+            return cls._static_autotuners, static_autotuner_names
+
+    @classmethod
+    def load_autotuners(
+        cls, static_autotuners: Optional[list[StaticallyLaunchedAutotuner]]
+    ) -> list[str]:
+        """
+        Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
+        cache.
+        """
+        if not static_autotuners:
+            return []
+
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.codecache import StaticAutotunerFuture
+
+        log.info("Loading %d statically launchable autotuners", len(static_autotuners))
+        kernel_names = []
+        with dynamo_timed("TritonBundler.load_cached_static_autotuners"):
+            for result in static_autotuners:
+                # We make a future instead of returning the kernel here so that
+                # kernels that are not statically launchable (i.e. cache miss)
+                # can launch a worker without waiting on the blocking step of
+                # StaticAutotunerFuture.result().
+                CompiledTritonKernels._cache[result.cache_key] = StaticAutotunerFuture(
+                    result.kernel
+                )
+                counters["inductor"]["triton_bundler_load_static_autotuner"] += 1
+                kernel_names.append(result.kernel_name)
+        return kernel_names
+
+    @classmethod
     def collect(
         cls,
-    ) -> tuple[list[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
+    ) -> tuple[TritonBundle, Optional[TritonBundlerMetadata]]:
         """
         This is the main function called when a cache write happens. This function
         converts all the previously remembered kernels into bundled format so that
         it can be written into a cache entry.
         This function also finalizes the current bundle.
         """
+        from torch._inductor import config
+
         if not TritonBundler.is_enabled():
             cls.end_compile()
             set_feature_use("triton_bundling", False)
-            return [], None
+            return TritonBundle([], []), None
         set_feature_use("triton_bundling", True)
 
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
@@ -199,14 +298,21 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
+                if config.use_static_cuda_launcher:
+                    static_autotuners, static_kernel_names = (
+                        cls.collect_static_autotuners()
+                    )
+                else:
+                    static_autotuners = []
+                    static_kernel_names = []
                 cls.end_compile()
-                return result, TritonBundlerMetadata(kernel_names)
-            return [], None
+                return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
+                    kernel_names, static_kernel_names
+                )
+            return TritonBundle([], []), None
 
     @staticmethod
-    def read_and_emit(
-        bundle: list[TritonKernelArtifacts],
-    ) -> Optional[TritonBundlerMetadata]:
+    def read_and_emit(bundle: TritonBundle) -> Optional[TritonBundlerMetadata]:
         """
         This is the main function called when a cache read happens. This function
         converts the bundled format back into individual files and writes them
@@ -219,6 +325,8 @@ class TritonBundler:
         Exclusive access means that no other process should be writing to
         or reading from the target directory.
         """
+        from torch._inductor import config
+
         if not TritonBundler.is_enabled():
             return None
 
@@ -227,7 +335,7 @@ class TritonBundler:
         ):
             kernel_names: list[str] = []
 
-            for artifacts in bundle:
+            for artifacts in bundle.kernel_artifacts:
                 basedir = triton_cache_dir(artifacts.device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
@@ -272,4 +380,10 @@ class TritonBundler:
                     # Atomic on POSIX systems
                     os.replace(tmp_dir, directory)
 
-            return TritonBundlerMetadata(kernel_names)
+            if config.use_static_cuda_launcher:
+                static_kernel_names = TritonBundler.load_autotuners(
+                    bundle.static_autotuners
+                )
+            else:
+                static_kernel_names = []
+            return TritonBundlerMetadata(kernel_names, static_kernel_names)

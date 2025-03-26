@@ -265,7 +265,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
           args, "ssii", &filePath, &funcName, &sharedMemBytes, &device_ptr)) {
     return nullptr;
   }
-  CUdevice device = reinterpret_cast<CUdevice>(device_ptr); // NOLINT
+  CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
   CUfunction func = nullptr;
   func = loadKernel(filePath, funcName, sharedMemBytes, device);
   // Taken from triton/nvidia/backend/driver.c

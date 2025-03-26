@@ -10,7 +10,7 @@ import torch.func
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
 
@@ -62,12 +62,11 @@ class Functionalize(_pass.Transform):
 
     def __init__(
         self,
-        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
         allow_fake_constant: bool | None = False,
     ):
-        super().__init__(diagnostic_context, module)
+        super().__init__(module)
         self.enable_dynamic_axes = enable_dynamic_axes
         self.allow_fake_constant = allow_fake_constant
 
