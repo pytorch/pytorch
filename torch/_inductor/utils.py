@@ -109,9 +109,6 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
-# inductor graph partition on a custom op if it is registered here
-non_cudagraphable_custom_ops: OrderedSet[str] = OrderedSet()
-
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
@@ -2779,25 +2776,7 @@ def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
 
 
-def register_custom_op_support_cudagraph(
-    operator: torch._library.custom_ops.CustomOpDef,
-    is_cudagraphable: bool,
-) -> None:
-    # register a custom op to be partitioned
-    names = [
-        "torch.ops",
-        operator._namespace,
-        operator._name,
-        operator._opoverload._overloadname,
-    ]
-    name = ".".join(names)
-    if is_cudagraphable:
-        non_cudagraphable_custom_ops.remove(name)
-    else:
-        non_cudagraphable_custom_ops.add(name)
-
-
-def is_non_cudagraphable_custom_op(node: Operation) -> bool:
+def is_cudagraph_unsafe_custom_op(node: Operation) -> bool:
     """
     Returns True if the node is a custom op that is not cudagraphable.
     """
@@ -2806,8 +2785,11 @@ def is_non_cudagraphable_custom_op(node: Operation) -> bool:
     if not isinstance(node, ir.FallbackKernel):
         return False
 
-    if python_kernel_name := getattr(node, "python_kernel_name", None):
-        return python_kernel_name in non_cudagraphable_custom_ops
+    if (
+        isinstance(node.op_overload, torch._ops.OpOverload)
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+    ):
+        return True
 
     return False
 
