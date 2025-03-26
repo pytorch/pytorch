@@ -8,6 +8,8 @@ from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
 
+import torch
+
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
@@ -55,7 +57,7 @@ class _ProcessGroupInitInfo:
     tcp_store_master_port: int
 
     def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
-        self.local_rank = dist.get_node_local_rank(fallback_rank=0)
+        self.local_rank = dist.get_node_local_rank(fallback_rank=dist.get_rank(process_group)%8)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
 
@@ -176,13 +178,12 @@ class _AsyncCheckpointProcess:
             os.environ["LOCAL_RANK"] = str(pg_init_info.local_rank)
             os.environ["RANK"] = str(pg_init_info.global_rank)
             os.environ["WORLD_SIZE"] = str(pg_init_info.world_size)
+            torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
 
             logger.info(
                 "Initializing dist.ProcessGroup in checkpoint background process"
             )
-            # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(backend=dist.Backend.GLOO)
-            dist.barrier()
+            dist.init_process_group()
 
             logger.info("Checkpoint background process is running...")
             send.put(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
