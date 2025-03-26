@@ -13,6 +13,7 @@ from torch._higher_order_ops.torchbind import CallTorchBind, enable_torchbind_tr
 from torch._inductor import aot_compile, ir
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -77,6 +78,22 @@ class TestTorchbind(TestCase):
         compiled = torch._inductor.compile(ep.module(), inputs)
 
         new_res = compiled(*inputs)
+        self.assertTrue(torch.allclose(orig_res, new_res))
+
+    def test_torchbind_compile_symint(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
+                return a
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+        new_res = torch.compile(m, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(orig_res, new_res))
 
     def test_torchbind_compile(self):
@@ -285,6 +302,50 @@ class TestTorchbind(TestCase):
         aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
         # TODO: add accuracy test after we support loading and running compiled models with
         # torchbind objects.
+
+    def test_torchbind_list_return_aot_compile(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_list_return(self.attr, x)
+                y = a[0] + a[1] + a[2]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+
+        # We can't directly torch.compile because dynamo doesn't trace ScriptObjects yet
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
+
+        # TODO: add accuracy test after we support loading and running compiled models with
+        # torchbind objects.
+
+    @requires_gpu()
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_torchbind_compile_gpu_op_symint_graph_partition(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
+                a_cuda = a.to(device=GPU_TYPE)
+                return a_cuda + 1
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+        new_res = torch.compile(m, backend="inductor")(*inputs)
+        self.assertTrue(torch.allclose(orig_res, new_res))
 
 
 if __name__ == "__main__":

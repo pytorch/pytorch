@@ -179,6 +179,9 @@ class BackwardBfsArgIter:
         else:
             self._queue.append(arg)
 
+    def __str__(self) -> str:
+        return f"BackwardBfsArgIter(cur={self._cur}, queue={self._queue})"
+
 
 class GraphRegionTracker:
     """
@@ -315,7 +318,11 @@ def fully_expand_region_group(
         region_it.add_children(node)
 
     current_node = region_iters[0].next()
-    assert current_node is not None
+
+    # No children
+    if current_node is None:
+        return
+
     # Loop incrementally adding new nodes to each region
     # regions are only expanded if the node to add is valid
     # for ALL regions

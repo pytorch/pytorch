@@ -3912,6 +3912,11 @@ Please use `add.register_fake` to add an fake impl.""",
 
     def test_any_requires_grad(self):
         test_fn = torch._C._any_requires_grad
+        # Regression test on not leaking kwargs
+        t = torch.randn(2, 2)
+        t_refcount = sys.getrefcount(t)
+        test_fn(t, a=t)
+        assert sys.getrefcount(t) == t_refcount
 
         self.assertTrue(
             test_fn(
@@ -3936,6 +3941,11 @@ Please use `add.register_fake` to add an fake impl.""",
 
     def test_any_output_is_alias_to_input_or_output(self):
         test_fn = torch._C._any_output_is_alias_to_input_or_output
+        # Regression test on not leaking kwargs
+        t = torch.randn(2, 2)
+        t_refcount = sys.getrefcount(t)
+        test_fn((t,), {"a": t}, ())
+        assert sys.getrefcount(t) == t_refcount
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
