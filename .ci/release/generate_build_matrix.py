@@ -68,9 +68,9 @@ def _generate_docker_tag() -> str:
 
 
 # Dictionary of extra install requirements keyed by (accelerator_type, accelerator_version)
-EXTRA_INSTALL_REQUIREMENTS: dict[tuple[CpuArch, str, str], list[str]] = {
+EXTRA_INSTALL_REQUIREMENTS: dict[tuple[str, str], list[str]] = {
     # CUDA 11.8
-    (CpuArch.X86_64, "cuda", "11.8"): [
+    ("cuda", "11.8"): [
         "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
         "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -84,7 +84,7 @@ EXTRA_INSTALL_REQUIREMENTS: dict[tuple[CpuArch, str, str], list[str]] = {
         "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ],
     # CUDA 12.6
-    (CpuArch.X86_64, "cuda", "12.6"): [
+    ("cuda", "12.6"): [
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -101,7 +101,7 @@ EXTRA_INSTALL_REQUIREMENTS: dict[tuple[CpuArch, str, str], list[str]] = {
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ],
     # CUDA 12.8
-    (CpuArch.X86_64, "cuda", "12.8"): [
+    ("cuda", "12.8"): [
         "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -118,7 +118,7 @@ EXTRA_INSTALL_REQUIREMENTS: dict[tuple[CpuArch, str, str], list[str]] = {
         "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ],
     # XPU
-    (CpuArch.X86_64, "xpu", ""): [
+    ("xpu", ""): [
         "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
         "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
         "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
@@ -178,20 +178,20 @@ class BinaryBuild:
     def get_extra_install_requirements(self) -> list[str]:
         """Returns the extra install requirements for this build configuration
 
-        We need to keep the install requirements for packages 'mostly' consistent across most of our
-        packages for compat with package managers like uv + poetry. This is because they only read METADATA
-        from the first wheel found on the index (which is typically the cuda-aarch64 wheels)
+        We need to keep the install requirements for packages 'mostly' consistent across
+        packages with like accelerator types + versions for compat with package managers like uv + poetry.
+        This is because they only read METADATA from the first wheel found on the index, which can be inconsistent
+        across different accelerator types + versions.
 
-        Since we publish our stable cuda wheels for x86_64 to PyPI, we can use that as the default.
+        TODO: We need to also ensure that packages uploaded to PyPI are consistent with their requirements as well,
+              but to do that we will probably need to modify the wheel prior to uploading it to PyPI since doing
+              these dependencies for wheels published on download.pytorch.org can create tricky situations. Like
+              where cpu binary packages for linux depend on cuda dependencies.
+
         See https://github.com/pytorch/pytorch/issues/146679 for more details.
         """
-        key = (self.cpu_arch, self.accelerator_type, self.accelerator_version)
-        requirements = EXTRA_INSTALL_REQUIREMENTS.get(
-            key,
-            EXTRA_INSTALL_REQUIREMENTS.get(
-                (CpuArch.X86_64, "cuda", STABLE_CUDA_VERSION), []
-            ),
-        )
+        key = (self.accelerator_type, self.accelerator_version)
+        requirements = EXTRA_INSTALL_REQUIREMENTS.get(key, [])
         return requirements
 
 
@@ -374,7 +374,7 @@ def validate_nccl_dep_consistency() -> None:
     for build in MANYWHEEL_BUILDS:
         if isinstance(build, CudaBuild):
             nccl_release_tag = read_nccl_pin(build.accelerator_version)
-            key = (build.cpu_arch, build.accelerator_type, build.accelerator_version)
+            key = (build.accelerator_type, build.accelerator_version)
 
             wheel_nccl_version = ""
             requirements = EXTRA_INSTALL_REQUIREMENTS.get(key, [])
