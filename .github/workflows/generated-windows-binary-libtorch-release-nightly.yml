@@ -132,13 +132,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: libtorch-cpu-shared-with-deps-release
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -152,6 +145,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cpu-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   libtorch-cpu-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -379,13 +379,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: libtorch-cuda11_8-shared-with-deps-release
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -399,6 +392,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda11_8-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   libtorch-cuda11_8-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -628,13 +628,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: libtorch-cuda12_6-shared-with-deps-release
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -648,6 +641,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_6-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   libtorch-cuda12_6-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -877,13 +877,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: libtorch-cuda12_8-shared-with-deps-release
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -897,6 +890,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_8-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   libtorch-cuda12_8-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:

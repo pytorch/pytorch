@@ -155,6 +155,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
+      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
 {%- endif %}
       - uses: !{{ common.upload_artifact_action }}
         if: always()
@@ -163,7 +164,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:

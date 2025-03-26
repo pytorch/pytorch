@@ -135,19 +135,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:

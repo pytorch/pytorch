@@ -129,13 +129,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_9-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -149,6 +142,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_9-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -365,13 +365,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_9-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -385,6 +378,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_9-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -603,13 +603,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_9-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -623,6 +616,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_9-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -841,13 +841,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_9-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -861,6 +854,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_9-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -1078,13 +1078,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_9-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1098,6 +1091,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_9-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -1313,13 +1313,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1333,6 +1326,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -1549,13 +1549,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1569,6 +1562,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -1787,13 +1787,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1807,6 +1800,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -2025,13 +2025,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2045,6 +2038,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -2262,13 +2262,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2282,6 +2275,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -2497,13 +2497,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_11-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2517,6 +2510,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -2733,13 +2733,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_11-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2753,6 +2746,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -2971,13 +2971,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_11-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2991,6 +2984,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -3209,13 +3209,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_11-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3229,6 +3222,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -3446,13 +3446,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_11-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3466,6 +3459,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -3681,13 +3681,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3701,6 +3694,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -3917,13 +3917,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3937,6 +3930,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -4155,13 +4155,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -4175,6 +4168,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -4393,13 +4393,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -4413,6 +4406,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -4630,13 +4630,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -4650,6 +4643,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -4865,13 +4865,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -4885,6 +4878,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -5101,13 +5101,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -5121,6 +5114,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -5339,13 +5339,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -5359,6 +5352,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -5577,13 +5577,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -5597,6 +5590,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -5814,13 +5814,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -5834,6 +5827,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -6049,13 +6049,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13t-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -6069,6 +6062,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13t-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -6285,13 +6285,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13t-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -6305,6 +6298,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-cuda11_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13t-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -6523,13 +6523,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13t-cuda12_6
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -6543,6 +6536,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-cuda12_6
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13t-cuda12_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -6761,13 +6761,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13t-cuda12_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -6781,6 +6774,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-cuda12_8
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13t-cuda12_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -6998,13 +6998,6 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13t-xpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -7018,6 +7011,13 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-xpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13t-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
