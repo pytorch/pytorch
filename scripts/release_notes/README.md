@@ -39,33 +39,33 @@ If you already have a commit list and want to update it, use the following comma
 
 #### Exploration and cleanup
 
-In this folder is an ipython notebook that I used for exploration and finding relevant commits. For example the commitlist attempts to categorize commits based off the `release notes:` label. Users of PyTorch often add new release notes labels. This Notebook has a cell that can help you identify new labels.
+In this folder is an IPython notebook that I used for exploration and finding relevant commits. For example, the commitlist attempts to categorize commits based off the `release notes:` label. Users of PyTorch often add new release notes labels. This notebook has a cell that can help you identify new labels.
 
 There is a list of all known categories defined in `common.py`. It has designations for types of categories as well such as `_frontend`.
 
-The `categorize` function in commitlist.py does an adequate job of adding the appropriate categories. Since new categories though may be created for your release you may find it helpful to add new heuristics around files changed to help with categorization.
+The `categorize` function in `commitlist.py` does an adequate job of adding the appropriate categories. Since new categories though may be created for your release you may find it helpful to add new heuristics around files changed to help with categorization.
 
 If you update the automatic categorization you can run the following to update the commit list.
 `python commitlist.py --rerun_with_new_filters` Note that this will only update the commits in the commit list that have a category of "Uncategorized".
 
-One you have dug through the commits and done as much automated categorization you can run the following for an interface to categorize any remaining commits.
+One you have dug through the commits and done as much automated categorization as possible, you can run the following for an interface to categorize any remaining commits.
 
 #### Training a commit classifier
-I added scripts to train a commit classifier from the set of labeled commits in commitlist.csv. This will utilize the title, author, and files changed features of the commits. The file requires torchtext, and tqdm. I had to install torchtext from source but if you are also a PyTorch developer this would likely already be installed.
+I added scripts to train a commit classifier from the set of labeled commits in `commitlist.csv`. This will utilize the title, author, and files changed features of the commits. The file requires TorchText, and [tqdm](https://tqdm.github.io/). I had to install TorchText from source but if you are also a PyTorch developer this would likely already be installed.
 
-- There should already exist a `results/` directory from gathering the commitlist.csv. The next step is to create `mkdir results/classifier`
+- There should already exist a `results/` directory from gathering the `commitlist.csv`. The next step is to create `mkdir results/classifier`.
 - Run `python classifier.py --train` This will train the model and save for inference.
-- Run `python categorize.py --use_classifier` This will pre-populate the output with the most likely category. And pressing enter will confirm selection.
+- Run `python categorize.py --use_classifier` This will pre-populate the output with the most likely category. Pressing enter will confirm selection.
  - Or run `python categorize.py` to label without the classifier.
 
-The interface modifies results/commitlist.csv. If you want to take a coffee break, you can CTRL-C out of it (results/commitlist.csv gets written to on each categorization) and then commit and push results/commitlist.csv to a branch for safekeeping.
+The interface modifies `results/commitlist.csv`. If you want to take a coffee break, you can CTRL-C out of it (`results/commitlist.csv` gets written to on each categorization) and then commit and push `results/commitlist.csv` to a branch for safekeeping.
 
-If you want to revert a change you just made, you can edit results/commitlist.csv directly.
+If you want to revert a change you just made, you can edit `results/commitlist.csv` directly.
 
 For each commit, after choosing the category, you can also choose a topic. For the frontend category, you should take the time to do it to save time in the next step. For other categories, you can do it but only of you are 100% sure as it is confusing for submodule owners otherwise.
 
 The categories are as follow:
- Be sure to update this list if you add a new category to common.py
+ Be sure to update this list if you add a new category to `common.py`.
 
 * jit: Everything related to the jit (including tensorexpr)
 * quantization: Everything related to the quantization mode/passes/operators
@@ -74,17 +74,17 @@ The categories are as follow:
 * caffe2: Everything that happens in the caffe2 folder. No need to add any topics here as these are ignored (they don’t make it into the final release notes)
 * distributed: Everything related to distributed training and rpc
 * visualization: Everything related to tensorboard and visualization in general
-* releng: Everything related to release engineering (circle CI, docker images, etc)
+* releng: Everything related to release engineering (Circle CI, Docker images, etc)
 * amd: Everything related to rocm and amd CPUs
 * cuda: Everything related to cuda backend
 * benchmark: Everything related to the opbench folder and utils.benchmark submodule
-* package: Everything related to torch.package
+* package: Everything related to `torch.package`
 * performance as a product: All changes that improve perfs
 * profiler: Everything related to the profiler
 * composability: Everything related to the dispatcher and ATen native binding
-* fx: Everything related to torch.fx
+* fx: Everything related to `torch.fx`
 * code_coverage: Everything related to the code coverage tool
-* vulkan: Everything related to vulkan support (mobile GPU backend)
+* vulkan: Everything related to Vulkan support (mobile GPU backend)
 * skip: Everything that is not end user or dev facing like code refactoring or internal implementation changes
 * frontend: To ease your future work, we split things here (may be merged in the final document)
     * python_api
@@ -103,38 +103,38 @@ The categories are as follow:
 
 The topics are as follow:
 
-* bc_breaking: All commits marked as BC-breaking (the script should highlight them). If any other commit look like it could be BC-breaking, add it here as well!
-* deprecation: All commits introducing deprecation. Should be clear from commit msg.
-* new_features: All commits introducing a new feature (new functions, new submodule, new supported platform etc)
-* improvements: All commits providing improvements to existing feature should be here (new backend for a function, new argument, better numerical stability)
-* bug fixes: All commits that fix bugs and behaviors that do not match the documentation
-* performance: All commits that are here mainly for performance (we separate this from improvements above to make it easier for users to look for it)
-* documentation: All commits that add/update documentation
-* devs: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, cpp extensions, etc
+* bc_breaking: All commits marked as BC (backwards-compatibility)-breaking (the script should highlight them). If any other commit look like it could be BC-breaking, add it here as well!
+* deprecation: All commits introducing deprecation. Should be clear from commit message.
+* new_features: All commits introducing a new feature (new functions, new submodule, new supported platform).
+* improvements: All commits providing improvements to existing feature should be here (new backend for a function, new argument, better numerical stability).
+* bug fixes: All commits that fix bugs and behaviors that do not match the documentation.
+* performance: All commits that are here mainly for performance (we separate this from improvements above to make it easier for users to look for it).
+* documentation: All commits that add/update documentation.
+* devs: All commits that are not end-user facing but still impact people that compile from source, develop into PyTorch, extend PyTorch, cpp extensions.
 * unknown
 
 
-### Part 3: export categories to markdown
+### Part 3: export categories to Markdonw
 
-`python commitlist.py --export_markdown`
+`python commitlist.py --export_Markdown`
 
-The above exports results/commitlist.csv to markdown by listing every commit under its respective category.
-It will create one file per category in the results/export/ folder.
+The above exports `results/commitlist.csv` to Markdown by listing every commit under its respective category.
+It will create one file per category in the `results/export/` folder.
 
-This part is a little tedious but it seems to work. May want to explore using pandoc to convert the markdown to google doc format.
+This part is a little tedious but it seems to work. May want to explore using [Pandoc(https://pandoc.org/)] to convert the Markdown to Google Docs format.
 
 1. Make sure you are using the light theme of VSCode.
-2. Open a preview of the markdown file and copy the Preview.
-3. In the correct google doc copy the preview and make sure to paste WITH formatting.
-4. You can now send these google docs to the relevant submodule owners for review.
-5. Install the google doc extension [docs to markdown](https://github.com/evbacher/gd2md-html)
-6. Start to compile back down these markdown files into a single markdown file.
+2. Open a preview of the Markdown file and copy the preview.
+3. In the correct Google Doc, paste the preview and make sure to paste WITH formatting.
+4. You can now send these Google Docs to the relevant submodule owners for review.
+5. Install the Google Docs extension [Google Docs to Markdown](https://github.com/evbacher/gd2md-html)
+6. Start to compile back down these Markdown files into a single Markdown file.
 
-`TODO`: This is by far the most manual process and is ripe for automation. If the next person up would like to investigate Google Doc APIS there is some room hor improvement here.
+`TODO`: This is by far the most manual process and is ripe for automation. If the next person up would like to investigate Google Doc APIs there is some room for improvement here.
 
 ### Part 4: Cherry Picks
 
-You will likely have started this process prior to the branch-cut being finalized. This means Cherry Picks.
+You will likely have started this process prior to the branch-cut being finalized. This means cherry picks.
 This was my process for keeping track. I use a notes app to log my progress as I periodically incorporate the new cherry picks.
 I will have initially ran something like:
 ``` Bash
@@ -173,7 +173,7 @@ for category in categories:
 
 ```
 
-This will create new markdown files only from cherry picked commits. And I manually copied and pasted these into the submodule google docs and commented so that
+This will create new Markdown files only from cherry-picked commits. I manually copied and pasted these into the submodule Google Docs and commented so that
 the submodule owners will see these new commits.
 
 
@@ -181,17 +181,17 @@ the submodule owners will see these new commits.
 I pretty much followed the run book here. One thing I did was use the [markdown-all-in-one](https://marketplace.visualstudio.com/items?itemName=yzhang.markdown-all-in-one)
 extension to create a table of contents which was really helpful in jumping to sections and copy and pasting the appropriate commits.
 
-You will then create a release at [Pytorch Release](https://github.com/pytorch/pytorch/releases) and if you save as a draft you can see how it will be rendered.
+You will then create a release at [PyTorch Release](https://github.com/pytorch/pytorch/releases) and if you save as a draft you can see how it will be rendered.
 
 
 
 #### Tidbits
-You will probably have a release note that doesn't fit into the character limit of github. I used the following regex:
-`\[#(\d+)\]\(https://github.com/pytorch/pytorch/pull/\d+\)` to replace the full lunks to (#<pull-request-number>).
-This will get formatted correctly in the github UI and can be checked when creating a draft release.
+You will probably have a release note that doesn't fit into the character limit of GitHub. I used the following regex:
+`\[#(\d+)\]\(https://github.com/pytorch/pytorch/pull/\d+\)` to replace the full links to (#<pull-request-number>).
+This will get formatted correctly in the GitHub UI and can be checked when creating a draft release.
 
 
-The following markdown code is helpful for creating side-by-side tables of BC breaking/ deprecated code:
+The following Markdown code is helpful for creating side-by-side tables of BC-breaking/deprecated code:
 
 
 ``` Markdown
