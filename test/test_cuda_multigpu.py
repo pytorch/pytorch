@@ -8,8 +8,8 @@ import io
 import queue
 import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
 from itertools import chain, repeat
 from typing import NamedTuple, Union
