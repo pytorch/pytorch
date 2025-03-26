@@ -20,7 +20,7 @@ sycl::event scaled_matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
     const at::Tensor& mat2,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& bias,
     const at::Tensor& scale_a,
     const at::Tensor& scale_b,
     Attr attr,
