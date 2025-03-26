@@ -816,13 +816,14 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dgamma,
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
-  if (M > 64 * 1024 && N / kWarpSize < 64) {
+  constexpr int block_dim_x = 32;
+  const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  if (M > 64 * 1024 && N / block_dim_x < sm_count / 2) {
     // We have a situation where M >> N and N is small.
     // In this case we can speed up the computation by parallelizing in the M dimension.
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
     // gradient in the first pass. Then we do a .sum(0) to do a final reduction.
     // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
-    constexpr int block_dim_x = 32;
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
     bool aligned_grid = (M % rows_per_block_y == 0) && (N % block_dim_x == 0);
@@ -858,13 +859,13 @@ void LaunchGammaBetaBackwardCUDAKernel(
     // For small M it is faster to have a smaller tile, otherwise we could have idle threads.
     // For larger M we use a bigger tile size.
     if (M < 64) {
-      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, 32, 1, 8>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 1, 8>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else if (M < 128) {
-      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, 32, 8, 64>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 8, 64>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else if (M < 256) {
-      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, 32, 16, 128>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 128>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else {
-      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, 32, 32, 256>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     }
   }
 }
