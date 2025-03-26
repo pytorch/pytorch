@@ -437,6 +437,7 @@ S390X_TESTLIST = [
     "inductor/test_b2b_gemm",
     "inductor/test_benchmark_fusion",
     "inductor/test_benchmarking",
+    "inductor/test_best_config",
     "inductor/test_binary_folding",
     "inductor/test_block_analysis",
     "inductor/test_ck_backend",
