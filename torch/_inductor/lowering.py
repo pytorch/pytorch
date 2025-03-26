@@ -1947,7 +1947,7 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
                 aten.cat.default,
                 aten._scaled_mm.default,
             )
-            or is_view(node.target)
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
 
     return False
