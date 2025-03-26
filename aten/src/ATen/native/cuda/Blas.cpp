@@ -121,6 +121,9 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
  *
  * The transpose flags are derived from the layouts of the passed in tensors
  *
+ * If the operands are in packed float4 format, `k`, `lda` and `ldb` are adjusted
+ * to their unpacked values to match what cuBLAS expects.
+ *
  * @param mat1 First input matrix
  * @param mat2 Second input matrix
  * @param c Output matrix (result)
@@ -173,6 +176,14 @@ struct cublasCommonArgs {
     result_ld = result->stride(transpose_result ? 0 : 1);
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
+
+    // cuBLAS expects unpacked values of `k`, `lda` and `ldb`, adjust for 4x2 packing
+    // if the gemm operands are in packed float4
+    if (mat1.dtype() == at::kFloat4_e2m1fn_x2 && mat2.dtype() == at::kFloat4_e2m1fn_x2) {
+      k = k * 2;
+      lda = lda * 2;
+      ldb = ldb * 2;
+    }
   }
 
   // Matrix members
@@ -980,7 +991,7 @@ enum class ScalingType : std::uint8_t {
  * ---------------------------
  * Conditions and corresponding Scaling Types:
  *
- * - If scale tensors are Float8_e8m0fnu:
+ * - If scale tensors are both `Float8_e8m0fnu` or `Float8_e4m3fn`:
  *   - Returns BlockWise (with additional size checks).
  *
  * - If scale_a.numel() == 1 && scale_b.numel() == 1:
@@ -1001,14 +1012,22 @@ ScalingType get_scaling_type(
     int64_t dim_m,
     int64_t dim_k,
     int64_t dim_n) {
-  // Check for BlockWise scaling (FP8_E8M0 types)
-  if (scale_a.scalar_type() == scale_b.scalar_type() &&
-      scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
-    constexpr int64_t BLOCK_SIZE_K = 32;
+  // Check for BlockWise scaling (FP8_E8M0 and FP8_E4M3 types)
+  if ((scale_a.scalar_type() == scale_b.scalar_type()) &&
+      ((scale_a.scalar_type() == at::kFloat8_e8m0fnu) || (scale_a.scalar_type() == at::kFloat8_e4m3fn))) {
+    const bool is_nvfp4 = scale_a.scalar_type() == at::kFloat8_e4m3fn;
+
+    // cuBLAS's mxfp8 gemm: block_size is 1 scale per 32 elements
+    // cuBLAS's nvfp4 gemm: block_size is 1 scale per 16 unpacked elements.
+    const auto BLOCK_SIZE_K = is_nvfp4 ? 16 : 32;
+
     constexpr int64_t BLOCK_SIZE_MN = 128;
 
+    // adjust for fp4x2 packing if necessary
+    const auto dim_k_unpacked = is_nvfp4 ? dim_k * 2 : dim_k;
+
     auto ceil_div = [](auto a, auto b) { return (a + b - 1) / b; };
-    auto num_k_blocks = ceil_div(dim_k, BLOCK_SIZE_K);
+    auto num_k_blocks = ceil_div(dim_k_unpacked, BLOCK_SIZE_K);
     auto padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4;
 
     // TODO: We might want to enforce some structure on the shapes of the scale
@@ -1149,13 +1168,16 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
-  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat1.scalar_type()) || mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat1 to be Float8 or Float4_x2 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()) || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat2 to be Float8 or Float4_x2 matrix got ", mat2.scalar_type());
 #ifndef USE_ROCM
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
 #endif
+  if (use_fast_accum) {
+    TORCH_CHECK(mat1.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat2.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat1` or `mat2` tensors have the `Float4_e2m1fn_x2` dtype.");
+  }
   if (bias) {
     TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,

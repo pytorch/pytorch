@@ -1552,6 +1552,8 @@ void scaled_gemm(
     ScalarType result_dtype,
     bool use_fast_accum,
     bool use_rowwise) {
+  // Note: see `cublasCommonArgs` for various non-intuitive manupulations
+  // of input arguments to this function.
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
@@ -1570,7 +1572,7 @@ void scaled_gemm(
 #else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
-#endif
+#endif  // if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
@@ -1583,11 +1585,11 @@ void scaled_gemm(
         at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
   }
-#endif
+#endif // ifndef USE_ROCM
 #ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
-#endif
+#endif // ifndef USE_ROCM
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
 #ifdef USE_ROCM
@@ -1595,7 +1597,7 @@ void scaled_gemm(
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
 #else
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
-#endif
+#endif // ifdef USE_ROCM
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
   if (bias_ptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
@@ -1609,7 +1611,14 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
 #else
     TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 and above");
-#endif // CUDA_VERSION >= 12080
+#endif // if CUDA_VERSION >= 12080
+  } else if (mat1_scale_dtype == kFloat8_e4m3fn && mat2_scale_dtype == kFloat8_e4m3fn) {
+#if CUDA_VERSION >= 12080
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+#else
+    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e4m3fn` scales is only supported for CUDA 12.8 and above");
+#endif // if CUDA_VERSION >= 12080
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
@@ -1677,7 +1686,7 @@ void scaled_gemm(
         }
     }
     TORCH_CHECK(found, "could not find valid hipblaslt solution");
-#endif
+#endif // ifndef USE_ROCM
   }
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
@@ -1692,7 +1701,7 @@ void scaled_gemm(
       result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
 #else
       nullptr,
-#endif
+#endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),
@@ -1725,7 +1734,7 @@ void scaled_gemm(
       " scaleType ",
       scaleType);
   return;
-#endif // CUDA_VERSION >= 11080 || defined(USE_ROCM)
+#endif // if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   TORCH_CHECK(false, "scaled_gemm is only supported for CUDA 11.8 and above");
 }
 
