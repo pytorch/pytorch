@@ -803,6 +803,8 @@ class FunctionalizeCtxWrapper:
     class and then use the subgraph as the hash.
     """
 
+    # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
+    @torch._disable_dynamo
     def __init__(self, ctx, subgraph):
         self.ctx = ctx
         self.subgraph = subgraph
