@@ -2037,9 +2037,42 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+        have_indirect_broadcast = False
+        for node in EnableReduction.filter(node_schedule):
+            # save iter vars in indirect broadcast memory reads
+            indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
+            for read in node.read_writes.reads:
+                if (
+                    isinstance(read, MemoryDep)
+                    and hasattr(read, "indirect_broadcast")
+                    and read.indirect_broadcast
+                ):
+                    indirect_broadcast_pairs.append(read.indirect_broadcast)
+
+            if indirect_broadcast_pairs:
+                have_indirect_broadcast = True
+                tail: list[int] = []
+                for pair in indirect_broadcast_pairs:
+                    # indirect load dimension
+                    idx_first = node._body.iter_vars.index(pair[0])
+                    # broadcast dimension
+                    idx_second = node._body.iter_vars.index(pair[1])
+                    # move the indirect load dimension to the end of the list, where it will be the innermost dimension.
+                    # if we have multiple pairs sharing the indirect load dimension, e.g. [(p1, p0), (p1, p0)],
+                    # we will move the shared dimension p0 to the end of the list, which is the innermost dimension.
+                    for idx in [idx_second, idx_first]:
+                        if idx in tail:
+                            tail.remove(idx)
+                        tail.append(idx)
+                remaining = [
+                    i for i in range(len(node._body.iter_vars)) if i not in tail
+                ]
+                new_order = remaining + tail
+                if new_order != list(range(len(node._body.sizes[0]))):
+                    node.apply_new_loop_order(new_order)
 
         # Optionally, prefer tiling into as many dimensions as possible.
-        if config.triton.prefer_nd_tiling:
+        if config.triton.prefer_nd_tiling or have_indirect_broadcast:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
                 + ranked_tilings

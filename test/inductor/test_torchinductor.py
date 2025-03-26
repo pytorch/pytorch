@@ -35,6 +35,7 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
+    expectedFailureDynamic,
     expectedFailureCodegenDynamic,
     rand_strided,
     reset_rng_state,
@@ -7542,6 +7543,38 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    @expectedFailureDynamic
+    @requires_gpu()
+    def test_indirect_broadcast_embedding(self):
+        if self.device == 'cpu':
+            raise unittest.SkipTest("Skipping test on CPU")
+        B, T, D, V = (8, 2048, 4096, 2048)
+        op = nn.Embedding(V, D).to(self.device).to(torch.float32)
+        _input = torch.randint(0, V, (B, T), device=self.device)
+        self.common(op, (_input,), check_lowp=False)
+        compiled_op = torch.compile(op)
+        code = run_and_get_triton_code(
+            compiled_op,
+            _input,
+        )
+        # Check if the indices tensor are accessed via x dimension and the tiling works
+        for string in [
+            "xnumel = 16384",
+            "xoffset = tl.program_id(0) * XBLOCK",
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:, None]",
+            "x1 = xindex",
+            "tmp0 = tl.load(in_ptr0 + (x1), None,",
+        ]:
+            self.assertTrue(string in code)
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            torch_ms = do_bench(lambda: op(_input))
+            print(f"{torch_ms=:.3f}")
+            inductor_ms = do_bench(lambda: compiled_op(_input))
+            print(f"{inductor_ms=:.3f}")
+            print(f"speedup={torch_ms/inductor_ms:.2f}x")
 
     def test_roi_align(self):
         if not has_torchvision_roi_align():
