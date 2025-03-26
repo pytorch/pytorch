@@ -41,10 +41,13 @@ fbscribelogger==0.1.7
 #Pinned versions: 0.1.6
 #test that import:
 
-flatbuffers==2.0
+flatbuffers==2.0 ; platform_machine != "s390x"
 #Description: cross platform serialization library
 #Pinned versions: 2.0
 #test that import:
+
+flatbuffers ; platform_machine == "s390x"
+#Description: cross platform serialization library; Newer version is required on s390x for new python version
 
 hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -102,10 +105,10 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-#ninja
-#Description: build system.  Note that it install from
-#here breaks things so it is commented out
-#Pinned versions: 1.10.0.post1
+ninja==1.11.1.3
+#Description: build system. Used in some tests. Used in build to generate build
+#time tracing information
+#Pinned versions: 1.11.1.3
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.49.0 ; python_version < "3.9"
@@ -294,7 +297,7 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.5
+jinja2==3.1.6
 #Description: jinja2 template engine
 #Pinned versions: 3.1.4
 #test that import:
@@ -353,7 +356,7 @@ parameterized==0.8.1
 #Pinned versions: 1.24.0
 #test that import: test_sac_estimator.py
 
-pwlf==2.2.1 ; python_version >= "3.8"
+pwlf==2.2.1
 #Description: required for testing torch/distributed/_tools/sac_estimator.py
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
@@ -365,10 +368,9 @@ PyYAML
 pyzstd
 setuptools
 
-ninja==1.11.1 ; platform_machine == "aarch64"
 scons==4.5.2 ; platform_machine == "aarch64"
 
-pulp==2.9.0 ; python_version >= "3.8"
+pulp==2.9.0
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py

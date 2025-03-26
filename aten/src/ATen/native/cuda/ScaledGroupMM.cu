@@ -22,7 +22,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
-#include <ATen/native/cuda/cutlass_utils.hpp>
+#include <ATen/native/cuda/cutlass_utils.cuh>
 
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
@@ -478,7 +478,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        stride_A,
        (const DtypeB**)inputB_ptrs,
        stride_B},
-      {{{{inputB_scale_ptrs}, {inputA_scale_ptrs}}},
+      {{{{inputB_scale_ptrs}, {{inputA_scale_ptrs}, {}, {}}, {}}, {}},
        (const DtypeOutput**)output_ptrs,
        stride_output,
        output_ptrs,
