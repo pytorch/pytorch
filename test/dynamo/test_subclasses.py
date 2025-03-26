@@ -992,8 +992,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             return x + 1, y + 2, x_shape, x.tensor_shape, y.tensor_shape
 
         with traceable_subclass(MySubclass):
-            x0 = torch.randn(2, 2).as_subclass(MySubclass)
-            x1 = x0.clone().as_subclass(MySubclass)
+            x0 = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+            x1 = torch.nn.Parameter(x0.clone().as_subclass(MySubclass))
 
             fn_opt = compile_full_eager(fn)
 
@@ -1001,6 +1001,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res_act = fn_opt(x1)
             self.assertEqual(res_exp, res_act)
             self.assertEqual(x0, x1)
+            self.assertEqual(x0.tensor_shape, x1.tensor_shape)
 
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
