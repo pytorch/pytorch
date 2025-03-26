@@ -1443,28 +1443,36 @@ class TensorSubclassVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Handle `Subclass(existing_tensor)` calls.
-        if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .torch_function import TensorWithTFOverrideVariable
+        def impl():
+            if len(args) == 1 and isinstance(args[0], TensorVariable):
+                from .torch_function import TensorWithTFOverrideVariable
 
-            # This simulates `__new__` and _assumes_ it doesn't have
-            # side-effects that matters to Dynamo tracing. TODO trace through
-            # `__new__`.
-            var = TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, self.source
-            )
-
-            # Let Dynamo trace through custom `__init__`
-            init_func = self.value.__init__
-            # TODO builder should be able to handle `torch.Tensor.__init__`,
-            # which is `object.__init__`, so that we can remove this check.
-            if init_func is not torch.Tensor.__init__:
-                cls_kwargs = kwargs or {}
-                VariableTracker.build(tx, init_func).call_function(
-                    tx, [var], cls_kwargs
+                # This simulates `__new__` and _assumes_ it doesn't have
+                # side-effects that matters to Dynamo tracing. TODO trace through
+                # `__new__`.
+                var = TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, args[0], self.value, self.source
                 )
-            return var
 
-        return super().call_function(tx, args, kwargs)
+                # Let Dynamo trace through custom `__init__`
+                init_func = self.value.__init__
+                # TODO builder should be able to handle `torch.Tensor.__init__`,
+                # which is `object.__init__`, so that we can remove this check.
+                if init_func is not torch.Tensor.__init__:
+                    cls_kwargs = kwargs or {}
+                    VariableTracker.build(tx, init_func).call_function(
+                        tx, [var], cls_kwargs
+                    )
+                return var
+
+            return super().call_function(tx, args, kwargs)
+
+        var = impl()
+        # See NOTE [Side effect tracking for newly constructed tensor]
+        tx.output.side_effects._track_obj(
+            object(), var, mutation_type_cls=variables.base.AttributeMutationNew
+        )
+        return var
 
     def as_python_constant(self):
         return self.value
