@@ -309,17 +309,20 @@ AllocationRef::AllocationRef(
       device_idx(device_idx) {}
 
 AllocationRef::~AllocationRef() {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // Leak the cuda allocations during static deinitialization
   if (is_finalizing()) {
     return;
   }
-  auto driver_api = c10::cuda::DriverAPI::get();
   c10::cuda::CUDAGuard guard(device_idx);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  // Leak the cuda allocations during static deinitialization
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size));
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_HIP_CHECK(hipMemRelease(handle));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -638,10 +641,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+
+  size_t signal_pad_offset = at::round_up(size, 16UL);
+  size_t block_size = signal_pad_offset + signal_pad_size;
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
-
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -667,6 +672,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
   prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+
   size_t granularity;
   C10_HIP_CHECK(hipMemGetAllocationGranularity(
       &granularity, &prop, hipMemAllocationGranularityRecommended));
@@ -842,7 +849,7 @@ static void init_multicast_for_block(
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr,
     const std::optional<std::string>& group_name) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+
   auto block = find_block(ptr);
   if (block == nullptr) {
     return nullptr;
@@ -977,10 +984,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       group_info.world_size);
   block->symm_mems[group_name_] = symm_mem;
   return symm_mem;
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {

@@ -7,6 +7,9 @@
 #endif
 
 #include <ATen/ATen.h>
+#if defined(USE_ROCM)
+#include <hip/hip_bf16.h>
+#endif
 #if !defined(USE_ROCM)
 #include <cuda_bf16.h>
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
@@ -33,6 +36,15 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
   ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
+#elif defined(USE_ROCM)
+  if (Sem == std::memory_order_acquire || Sem == std::memory_order_acq_rel){
+      __threadfence_system();
+  }
+  uint32_t old_val = atomicCAS_system(addr, compare, val);
+  if (Sem == std::memory_order_release || Sem == std::memory_order_acq_rel){
+      __threadfence_system();
+  }
+  return old_val;
 #else
   CUDA_KERNEL_ASSERT(false);
   return 0;
@@ -41,7 +53,7 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 
 __device__ __forceinline__ void trap() {
 #if defined(USE_ROCM)
-  assert(0);
+    abort();
 #else
   __trap();
 #endif
@@ -49,8 +61,7 @@ __device__ __forceinline__ void trap() {
 
 __device__ __forceinline__ size_t global_timer_ns() {
 #if defined(USE_ROCM)
-  CUDA_KERNEL_ASSERT(false);
-  return 0;
+  return __builtin_amdgcn_s_memtime() / 2.1; //@TODO hardcoded GPU freq as 2.1GHz on MI300x 
 #else
   size_t val;
   asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
@@ -244,14 +255,10 @@ __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
 #endif
 }
 
-#if defined(USE_ROCM)
-using __nv_bfloat162 = uint32_t;
-#endif
-
 template <typename T>
 __device__ __inline__ T add_bf16x2(T a, T b) {
   static_assert(sizeof(T) == 4);
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
   return T{};
 #else
