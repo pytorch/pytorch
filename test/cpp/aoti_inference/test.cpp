@@ -416,7 +416,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
   // We should only have one set of buffer (#2), available memory should equal
   // initial memory minus the folded constants.
-  SSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
+  ASSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
 
   // We update random weights to buffer #1 and run const fold.
   // We will have 2 full set of data plus 2 set of const-folded data.
