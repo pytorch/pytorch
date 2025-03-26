@@ -1,0 +1,7 @@
+Dynamo cannot query the property of the relevant tensor subclass, when wrapping
+it into a VT:
+```python
+class TensorSubclassTorchFunctionClass(torch.Tensor):
+    def __torch_function__(self, *args, **kwargs):
+            pass
+```

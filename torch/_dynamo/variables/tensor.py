@@ -67,9 +67,10 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import AttributeMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+from .user_defined import UserDefinedClassVariable
 
 
 try:
@@ -410,8 +411,6 @@ class TensorVariable(VariableTracker):
         return ConstantVariable(ret_val)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from . import UserDefinedClassVariable
-
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
@@ -613,7 +612,7 @@ class TensorVariable(VariableTracker):
         """
 
         # This is seen in inspect signature where we check if the value is a default value
-        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+        if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
 
         try:
@@ -788,9 +787,14 @@ class TensorVariable(VariableTracker):
 
             tx = InstructionTranslator.current_tx()
             py_cls = cls.as_python_constant()
-            return TensorWithTFOverrideVariable.from_tensor_var(
+            var = TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, cls.source
             )
+            # See NOTE [Side effect tracking for newly constructed tensor]
+            tx.output.side_effects._track_obj(
+                object(), var, mutation_type_cls=AttributeMutationNew
+            )
+            return var
         unimplemented(
             "Argument of `as_subclass` must be a tensor subclass which Dynamo supports tracing"
         )
@@ -1434,11 +1438,7 @@ class FakeItemVariable(TensorVariable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
 
 
-class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs) -> None:
-        self.value = value
-        super().__init__(*args, **kwargs)
-
+class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1487,7 +1487,7 @@ class TensorSubclassVariable(VariableTracker):
 
         # See NOTE [Side effect tracking for newly constructed tensor]
         tx.output.side_effects._track_obj(
-            object(), var, mutation_type_cls=variables.base.AttributeMutationNew
+            object(), var, mutation_type_cls=AttributeMutationNew
         )
         return var
 
