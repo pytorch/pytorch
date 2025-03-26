@@ -217,6 +217,11 @@ class SuperVariable(VariableTracker):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
             ).call_function(tx, [self.objvar] + args, kwargs)
+        elif isinstance(inner_fn, types.MethodDescriptorType):
+            # FunctionType but implementation is in C, we support some of these,
+            # e.g., tensor ops like `torch.Tensor.to`.
+            fn_var = VariableTracker.build(tx, inner_fn, source)
+            return fn_var.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source
@@ -298,8 +303,7 @@ class SuperVariable(VariableTracker):
                     tx_old
                 )
 
-        args = [self.objvar] + args
-        return VariableTracker.build(tx, inner_fn).call_function(tx, args, kwargs)
+        unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class ExceptionVariable(VariableTracker):
