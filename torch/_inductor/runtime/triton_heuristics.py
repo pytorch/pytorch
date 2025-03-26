@@ -281,10 +281,9 @@ class CachingAutotuner(KernelInterface):
         allows us to efficiently cache it in FXGraphCache
         """
         assert self.compile_results
-        for x in self.compile_results:
-            if not isinstance(x, StaticTritonCompileResult):
-                return False
-        return True
+        return all(
+            isinstance(x, StaticTritonCompileResult) for x in self.compile_results
+        )
 
     def set_compile_info(
         self, compile_id: Optional[CompileId], is_backward: bool
@@ -296,6 +295,7 @@ class CachingAutotuner(KernelInterface):
         self,
         warm_cache_only=False,
         reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
+        static_triton_bundle_key: Optional[str] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -308,6 +308,8 @@ class CachingAutotuner(KernelInterface):
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
             self._precompile_worker()
+            if static_triton_bundle_key is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
 
@@ -473,15 +475,24 @@ class CachingAutotuner(KernelInterface):
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
         self.launchers = launchers
 
-    def prepare_for_pickle(self):
+    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
+        Returns a tuple of old values
         """
+        old_values = (
+            self.fn.fn,
+            self.fn.__globals__,
+            self.fn.used_global_vals,
+            self.fn.repr,
+            self.launchers,
+        )
         self.fn.fn = None
         self.fn.__globals__ = None
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+        return old_values
 
     def __getstate__(self) -> dict[str, Any]:
         assert not self.launchers, (

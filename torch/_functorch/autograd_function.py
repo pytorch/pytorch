@@ -773,5 +773,8 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         return ApplyTemplate.apply(*new_fwd_args)
 
+    def cacheable(self):
+        return torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+
 
 autograd_function_apply = AutogradFunctionApply()
