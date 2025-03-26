@@ -843,7 +843,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
     if (dbeta->defined()) {
-      auto dbeta = dgamma->options();
+      auto options = dbeta->options();
       dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
