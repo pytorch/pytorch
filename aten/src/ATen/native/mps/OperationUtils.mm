@@ -1038,10 +1038,19 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
         mtl_setArgs(computeEncoder, out, input, other);
+        if (cast_needed) {
+          std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                               static_cast<int>(c10::elementSize(other.scalar_type())),
+                                               static_cast<int>(input.scalar_type()),
+                                               static_cast<int>(other.scalar_type())};
+          mtl_setBytes(computeEncoder, size_and_types, 3);
+        }
       } else {
         // Please note that shapes and strides of the iterator might be
         // different than that of its operands, for example binary op
         // between 4x4 tensor and scalar will result in 1D 16 element iterator
+        std::array<int, 3> ndim_and_types = {
+            iter.ndim(), static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
         mtl_setArgs(computeEncoder,
                     out,
                     input,
@@ -1050,14 +1059,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
                     iter.strides(0),
                     iter.strides(1),
                     iter.strides(2),
-                    iter.ndim());
-      }
-      if (cast_needed) {
-        std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
-                                             static_cast<int>(c10::elementSize(other.scalar_type())),
-                                             static_cast<int>(input.scalar_type()),
-                                             static_cast<int>(other.scalar_type())};
-        mtl_setBytes(computeEncoder, size_and_types, 3);
+                    ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
       getMPSProfiler().endProfileKernel(binaryPSO);
