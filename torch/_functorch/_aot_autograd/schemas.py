@@ -172,7 +172,10 @@ class MemoryFormatMeta:
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
-        use_memory_format: bool = is_traceable_wrapper_subclass(t)
+        use_memory_format: bool = (
+            not torch._functorch.config.guess_tangent_strides_as_outputs
+            or is_traceable_wrapper_subclass(t)
+        )
         if not use_memory_format:
             is_static_shape = True
             for s in itertools.chain(t.shape, t.stride()):
