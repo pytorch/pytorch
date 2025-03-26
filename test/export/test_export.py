@@ -6822,9 +6822,6 @@ def forward(self, b_a_buffer, x):
             )
 
     def test_export_scan_pytree_output(self):
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
-
         def add(carry, accum):
             return carry + carry, (accum[0]["moo"] + 1, accum[0]["moo2"] + 1)
 
