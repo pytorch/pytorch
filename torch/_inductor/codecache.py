@@ -2896,12 +2896,6 @@ class PyCodeCache:
                     os.remove(mod.__file__)
                 except FileNotFoundError:
                     pass
-            for mod in cls.modules_no_attr.values():
-                try:
-                    assert mod.__file__
-                    os.remove(mod.__file__)
-                except FileNotFoundError:
-                    pass
         cls.modules.clear()
         cls.modules_no_attr.clear()
 
