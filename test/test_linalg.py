@@ -109,28 +109,29 @@ def find_tunableop_result(results, OpSig, ParamSig):
             return inner_tuple
     return None
 
-def compare_untuned_tuned_param_sig(untuned_filename, tuned_filename):
-    # Compare Param Signature of untuned and tuned Tunableop results
-    # file. Verify that for each Param Signature in the untuned file
+def compare_untuned_tuned_entries(untuned_filename, tuned_filename):
+    # Compare the entries of untuned and tuned Tunableop results
+    # file. Verify that for each Op+Param Signature in the untuned file
     # there is a matching one in the tuned results file.
     import csv
     ok = False
     with open(untuned_filename) as file1:
         with open(tuned_filename) as file2:
             untuned_reader = csv.reader(file1)
-            untuned_csv_entries = [row[1] for row in untuned_reader]
+            untuned_csv_entries = {(row[0], row[1]) for row in untuned_reader}
 
             tuned_reader = csv.reader(file2)
             for _ in range(5):  # Skip the first 5 lines for the validator
                 next(tuned_reader, None)
 
-            result_csv_entries = [row[1] for row in tuned_reader]
+            result_csv_entries = {(row[0], row[1]) for row in tuned_reader}
 
-            for value in untuned_csv_entries:
-                if value in result_csv_entries:
-                    ok = True
-                else:
-                    ok = False
+            missing = untuned_csv_entries - result_csv_entries
+
+            if missing:
+                ok = False
+            else:
+                ok = True
 
     return ok
 
@@ -4768,7 +4769,7 @@ class TestLinalg(TestCase):
             self.assertGreater(os.path.getsize(result_filename), 0)
 
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
             self.assertTrue(ok)
 
     @onlyCUDA
@@ -4866,7 +4867,7 @@ class TestLinalg(TestCase):
             self.assertGreater(os.path.getsize(result_filename), 0)
 
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
             self.assertTrue(ok)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
@@ -5282,7 +5283,7 @@ class TestLinalg(TestCase):
             self.assertGreater(os.path.getsize(result_filename), 0)
 
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
             self.assertTrue(ok)
 
     @onlyCUDA
@@ -5498,7 +5499,7 @@ class TestLinalg(TestCase):
                 self.assertGreater(os.path.getsize(result_filename), 0)
 
                 # Compare Param Signature of untuned and tuned results
-                ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+                ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
                 self.assertTrue(ok)
 
         finally:
