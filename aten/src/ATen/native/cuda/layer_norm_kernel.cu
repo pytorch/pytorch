@@ -833,16 +833,17 @@ void LaunchGammaBetaBackwardCUDAKernel(
     blocks.y = (M + rows_per_block_y - 1) / rows_per_block_y;
     constexpr int max_grid_size = 64 * 1024 / 2;
     blocks.y = std::min<unsigned int>(max_grid_size / blocks.x, blocks.y);
-    auto options = dgamma->options();
     Tensor dgamma_blocks;
     Tensor dbeta_blocks;
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
     if (dgamma->defined()) {
+      auto options = dgamma->options();
       dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
     if (dbeta->defined()) {
+      auto dbeta = dgamma->options();
       dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
