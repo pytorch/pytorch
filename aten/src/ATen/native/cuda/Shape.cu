@@ -507,7 +507,8 @@ TORCH_IMPL_FUNC(cat_out_cuda)
             kBool,
             kBFloat16,
             AT_EXPAND(AT_FLOAT8_TYPES),
-            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+            kFloat4_e2m1fn_x2);
       }
   } else if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
@@ -542,7 +543,9 @@ TORCH_IMPL_FUNC(cat_out_cuda)
             kFloat8_e4m3fnuz,
             kFloat8_e5m2,
             kFloat8_e5m2fnuz,
-            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+            // TODO(#146647): extend this to other shell dtypes
+            kFloat4_e2m1fn_x2);
       }
   } else {
     int64_t offset = 0;
