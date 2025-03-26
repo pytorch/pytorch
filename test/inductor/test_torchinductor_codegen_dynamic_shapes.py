@@ -176,7 +176,6 @@ test_failures = {
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
@@ -386,9 +385,7 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
