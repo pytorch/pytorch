@@ -170,6 +170,7 @@ class TritonBundler:
             # for FXGraphCache
             old_values = kernel.prepare_for_pickle()
             new_kernel = copy.deepcopy(kernel)
+            new_kernel._reload_kernel = None
             entries.append(
                 StaticallyLaunchedAutotuner(
                     key,
