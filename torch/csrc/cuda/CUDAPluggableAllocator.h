@@ -37,7 +37,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
   cudaStream_t stream_;
 };
 
-#if defined(TORCH_HIP_VERSION)
+#if defined(USE_ROCM)
 using streamType = c10::hip::HIPStream;
 #else
 using streamType = c10::cuda::CUDAStream;
