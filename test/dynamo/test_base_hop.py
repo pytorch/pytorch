@@ -121,7 +121,7 @@ class GraphModule(torch.nn.Module):
             str(schemas[0]),
             # See Note [schema for signle return item with parenthesis] for why
             # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any arg0, Tensor(!) arg1, Tensor(!) arg2, str scheme="\\"nf4\\"") -> ((Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any(arg0) arg0, Tensor(arg1!) arg1, Tensor(arg2!) arg2, str(scheme) scheme="\\"nf4\\"") -> ((Tensor)(out) out)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
@@ -153,7 +153,7 @@ class GraphModule(torch.nn.Module):
             str(schemas[0]),
             # See Note [schema for signle return item with parenthesis] for why
             # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any arg0, Tensor(!) arg1, Tensor arg2, str scheme="\\"nf4\\"") -> ((Tensor, Tensor, Tensor, Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any(arg0) arg0, Tensor(arg1!) arg1, Tensor(arg2) arg2, str(scheme) scheme="\\"nf4\\"") -> ((Tensor, Tensor, Tensor, Tensor)(out) out)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)

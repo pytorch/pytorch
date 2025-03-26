@@ -320,9 +320,11 @@ TypePtr createTupleType(std::vector<TypePtr> types) {
 
 AliasInfo createAliasInfo(std::string arg_name, bool is_write) {
   auto alias_info = AliasInfo();
-  // This follows the schema parser implmentation
-  alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + arg_name));
+  // We need to addBeforeSet and afterSet so that the alias info
+  // gets printed correctly. Otherwise, they're ignored when we
+  // turn Argument into a string.
+  alias_info.addBeforeSet(Symbol::fromQualString("alias::" + arg_name));
+  alias_info.addAfterSet(Symbol::fromQualString("alias::" + arg_name));
   alias_info.setIsWrite(is_write);
   return alias_info;
 }
