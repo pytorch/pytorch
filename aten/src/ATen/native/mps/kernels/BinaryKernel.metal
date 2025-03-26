@@ -54,6 +54,27 @@ struct chebyshev_polynomial_t_functor {
   }
 };
 
+struct chebyshev_polynomial_u_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::chebyshev_polynomial_u_forward(a, b));
+  }
+};
+
+struct chebyshev_polynomial_v_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::chebyshev_polynomial_v_forward(a, b));
+  }
+};
+
+struct chebyshev_polynomial_w_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::chebyshev_polynomial_w_forward(a, b));
+  }
+};
+
 struct nextafter_functor {
 #if __METAL_VERSION__ < 310
   template <typename U>
@@ -137,6 +158,12 @@ REGISTER_BINARY_OP(xlog1py, float, float);
 REGISTER_BINARY_OP(xlog1py, half, half);
 REGISTER_BINARY_OP(chebyshev_polynomial_t, float, float);
 REGISTER_BINARY_OP(chebyshev_polynomial_t, half, half);
+REGISTER_BINARY_OP(chebyshev_polynomial_u, float, float);
+REGISTER_BINARY_OP(chebyshev_polynomial_u, half, half);
+REGISTER_BINARY_OP(chebyshev_polynomial_v, float, float);
+REGISTER_BINARY_OP(chebyshev_polynomial_v, half, half);
+REGISTER_BINARY_OP(chebyshev_polynomial_w, float, float);
+REGISTER_BINARY_OP(chebyshev_polynomial_w, half, half);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
@@ -146,6 +173,9 @@ REGISTER_BINARY_OP(nextafter, bfloat, bfloat);
 REGISTER_BINARY_OP(zeta, bfloat, bfloat);
 REGISTER_BINARY_OP(xlog1py, bfloat, bfloat);
 REGISTER_BINARY_OP(chebyshev_polynomial_t, bfloat, bfloat);
+REGISTER_BINARY_OP(chebyshev_polynomial_u, bfloat, bfloat);
+REGISTER_BINARY_OP(chebyshev_polynomial_v, bfloat, bfloat);
+REGISTER_BINARY_OP(chebyshev_polynomial_w, bfloat, bfloat);
 #endif
 
 // Complex binary functions
