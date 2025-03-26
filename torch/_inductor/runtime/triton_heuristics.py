@@ -534,9 +534,18 @@ class CachingAutotuner(KernelInterface):
             ),
         )
 
+        if self.device_props.type == "mtia":
+            from mtia.host_runtime.torch_mtia.acc_flags import (  # type: ignore[import-not-found]
+                build_codename,
+            )
+
+            arch = build_codename()
+        else:
+            arch = compile_meta["cc"]
+
         target = GPUTarget(
             compile_meta["device_type"],
-            compile_meta["cc"],
+            arch,
             cc_warp_size(compile_meta["cc"]),
         )
 
@@ -1137,10 +1146,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> Optional[StaticallyLaunchedCudaKernel]:
-        def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if not torch._inductor.config.use_static_cuda_launcher:
-                raise CannotStaticallyLaunchKernel("Static launcher disabled")
+        if not torch._inductor.config.use_static_cuda_launcher:
+            return None
 
+        def check_can_launch() -> StaticallyLaunchedCudaKernel:
             if triton_meta.get("device_type", None) != "cuda":
                 # Only cuda kernels
                 raise CannotStaticallyLaunchKernel("Non-cuda device")

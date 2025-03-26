@@ -45,7 +45,9 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_benchmark_name,
+    IndentedBuffer,
     LineContext,
     sympy_product,
     sympy_str,
@@ -57,7 +59,6 @@ from .common import (
     ArgName,
     CodeGen,
     DeferredLine,
-    IndentedBuffer,
     PythonPrinter,
     WorkspaceArg,
     WorkspaceZeroMode,
@@ -136,6 +137,7 @@ def user_defined_kernel_grid_fn_code(
     configs: list[triton.Config],  # type: ignore[name-defined]
     grids: list[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
+    original_fxnode_name: Optional[str] = None,
 ) -> tuple[str, str]:
     output = IndentedBuffer()
 
@@ -144,6 +146,7 @@ def user_defined_kernel_grid_fn_code(
 
     def determine_grid(
         grid: TritonGrid,
+        example_grid: Optional[TritonGrid] = None,
     ):
         """
         This function return a tuple of two values: the first one is for the real grid
@@ -156,13 +159,15 @@ def user_defined_kernel_grid_fn_code(
             return grid, grid
         # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        if not example_grid:
+            example_grid = sympy_grid
         return (
             wrapper.codegen_python_shape_tuple(sympy_grid),
             (
                 wrapper.codegen_python_shape_tuple(
                     tuple(
                         wrapper.generate_example_arg_value(g, type(g))
-                        for g in sympy_grid
+                        for g in example_grid  # type: ignore[union-attr]
                     )
                 )
                 if config.triton.autotune_at_compile_time
@@ -187,8 +192,17 @@ def user_defined_kernel_grid_fn_code(
         else contextlib.nullcontext()
     )
     with output.indent(), kernel_autotune_calls_indent:
+        if (
+            config.triton.autotune_at_compile_time
+            and original_fxnode_name
+            and V.graph.autotuning_grids
+            and original_fxnode_name in V.graph.autotuning_grids
+        ):
+            example_grids = V.graph.autotuning_grids[original_fxnode_name]
+        else:
+            example_grids = [None] * len(grids)
         if len(grids) == 1:
-            grid, example_grid = determine_grid(grids[0])
+            grid, example_grid = determine_grid(grids[0], example_grids[0])
             writeline(f"return {grid}", f"return {example_grid}")
         else:
             assert len(grids) > 1
@@ -199,8 +213,10 @@ def user_defined_kernel_grid_fn_code(
             # TODO(aakhundov): the sorting below is generally not sufficient, so
             # maybe we'll need to restrict the supported cases to identical kwarg
             # names in all autotuning configs.
-            for grid, c in sorted(
-                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            for grid, c, example_grid in sorted(
+                zip(grids, configs, example_grids),
+                key=lambda x: len(x[1].kwargs),
+                reverse=True,
             ):
                 if c.kwargs:
                     guards = [
@@ -209,7 +225,7 @@ def user_defined_kernel_grid_fn_code(
                     guards = " and ".join(guards)
                 else:
                     guards = "True"  # for configs with empty kwargs
-                grid, example_grid = determine_grid(grid)
+                grid, example_grid = determine_grid(grid, example_grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
                     continue
@@ -601,6 +617,9 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names = OrderedSet[str]()
+        # Map key is the kernel argument name; value is a tuple of the resulting example
+        # tensor name with the kernel where that tensor was most recently used.
+        self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -1227,6 +1246,11 @@ class PythonWrapperCodegen(CodeGen):
         """
         )
         scope = {}  # type: ignore[var-annotated]
+        if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
+            scope = {
+                self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
+                for idx, v in enumerate(V.graph.autotuning_inputs)
+            }
         tuning_code = (
             self.kernel_autotune_defs.getvalue()
             + "\n"
@@ -2066,8 +2090,10 @@ class PythonWrapperCodegen(CodeGen):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
@@ -2103,37 +2129,64 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
-            tensor_args = {}
+            def get_autotune_deletion_call() -> str:
+                """After all the autotune kernel calls have been written (i.e.
+                self.kernel_autotune_example_args is complete), returns a deletion call
+                for all autotune example tensors that are unnecessary after kernel_name
+                is called."""
+                tensors_to_delete = [
+                    tensor
+                    for tensor, kn in self.kernel_autotune_example_args.values()
+                    if kn == kernel_name
+                ]
+                if tensors_to_delete:
+                    return f"del {', '.join(tensors_to_delete)}\n"
+                return ""
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
+                assert raw_keys is None, "keys are not None but args are"
+                raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
                 assert len(raw_args) == len(call_args), (
                     "call_args and raw_args do not match"
                 )
 
-            for i, (arg, arg_type, raw_arg) in enumerate(
-                zip(call_args, arg_types, raw_args)
+            autotune_args = None
+            if original_fxnode_name and V.graph.autotuning_mapping:
+                autotune_args = V.graph.autotuning_mapping.get(
+                    original_fxnode_name, None
+                )
+            for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
+                zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
                 if isinstance(arg, str) and "=" in str(arg):
                     # arg may be passed in a kwarg style, and then we need to extract its value
                     key, arg = arg.split("=")
 
-                if isinstance(arg_type, torch_dtype):
+                triton_input: Optional[str] = None
+                if autotune_args and raw_key in autotune_args:
+                    triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                        autotune_args[raw_key]
+                    )
+
+                if triton_input:
+                    arg_str = triton_input
+                elif isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
-                        tensor_args[arg] = arg_str
-                    elif arg not in tensor_args:
+                    elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
                             arg, arg_type, raw_arg, i
                         )
-                        tensor_args[arg] = arg_str
                     else:
-                        arg_str = tensor_args[arg]
+                        arg_str = self.kernel_autotune_example_args[arg][0]
+                    self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
@@ -2142,7 +2195,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
-                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+                DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
@@ -2524,9 +2577,11 @@ class PythonWrapperCodegen(CodeGen):
         input_deallocation = partition_signatures.input_deallocation
         output_nodes = partition_signatures.output_nodes
 
-        inputs = ", ".join(input_deallocation.keys()) + (
-            "," if len(input_deallocation) == 1 else ""
-        )
+        input_names = list(input_deallocation.keys()) + [
+            symbol_input.name for symbol_input in partition_signatures.symbol_inputs
+        ]
+
+        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
 
         output_names = [node.get_name() for node in output_nodes]
         outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
@@ -2781,7 +2836,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_input_names(self) -> list[str]:
         if signature := self.partition_signatures:
-            names = list(signature.input_nodes.keys())
+            names = list(signature.input_nodes.keys()) + [
+                symbol_input.name for symbol_input in signature.symbol_inputs
+            ]
         else:
             names = V.graph.graph_input_names
         return names
