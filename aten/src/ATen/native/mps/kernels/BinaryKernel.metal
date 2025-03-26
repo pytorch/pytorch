@@ -117,41 +117,41 @@ struct complex_mul_functor {
   }
 };
 
-REGISTER_BINARY_INDEXING_OP(copysign, long);
-REGISTER_BINARY_INDEXING_OP(copysign, int);
-REGISTER_BINARY_INDEXING_OP(copysign, float);
-REGISTER_BINARY_INDEXING_OP(copysign, half);
-REGISTER_BINARY_INDEXING_OP(copysign, short);
-REGISTER_BINARY_INDEXING_OP(copysign, uchar);
-REGISTER_BINARY_INDEXING_OP(copysign, char);
-REGISTER_BINARY_INDEXING_OP(copysign, bool);
-REGISTER_BINARY_INDEXING_OP(fmax, float);
-REGISTER_BINARY_INDEXING_OP(fmax, half);
-REGISTER_BINARY_INDEXING_OP(fmin, float);
-REGISTER_BINARY_INDEXING_OP(fmin, half);
-REGISTER_BINARY_INDEXING_OP(nextafter, float);
-REGISTER_BINARY_INDEXING_OP(nextafter, half);
-REGISTER_BINARY_INDEXING_OP(zeta, float);
-REGISTER_BINARY_INDEXING_OP(zeta, half);
-REGISTER_BINARY_INDEXING_OP(xlog1py, float);
-REGISTER_BINARY_INDEXING_OP(xlog1py, half);
-REGISTER_BINARY_INDEXING_OP(chebyshev_polynomial_t, float);
-REGISTER_BINARY_INDEXING_OP(chebyshev_polynomial_t, half);
+REGISTER_BINARY_OP(copysign, long, float);
+REGISTER_BINARY_OP(copysign, int, float);
+REGISTER_BINARY_OP(copysign, float, float);
+REGISTER_BINARY_OP(copysign, half, half);
+REGISTER_BINARY_OP(copysign, short, float);
+REGISTER_BINARY_OP(copysign, uchar, float);
+REGISTER_BINARY_OP(copysign, char, float);
+REGISTER_BINARY_OP(copysign, bool, float);
+REGISTER_BINARY_OP(fmax, float, float);
+REGISTER_BINARY_OP(fmax, half, half);
+REGISTER_BINARY_OP(fmin, float, float);
+REGISTER_BINARY_OP(fmin, half, half);
+REGISTER_BINARY_OP(nextafter, float, float);
+REGISTER_BINARY_OP(nextafter, half, half);
+REGISTER_BINARY_OP(zeta, float, float);
+REGISTER_BINARY_OP(zeta, half, half);
+REGISTER_BINARY_OP(xlog1py, float, float);
+REGISTER_BINARY_OP(xlog1py, half, half);
+REGISTER_BINARY_OP(chebyshev_polynomial_t, float, float);
+REGISTER_BINARY_OP(chebyshev_polynomial_t, half, half);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
-REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
-REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
-REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
-REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
-REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
-REGISTER_BINARY_INDEXING_OP(chebyshev_polynomial_t, bfloat);
+REGISTER_BINARY_OP(copysign, bfloat, bfloat);
+REGISTER_BINARY_OP(fmax, bfloat, bfloat);
+REGISTER_BINARY_OP(fmin, bfloat, bfloat);
+REGISTER_BINARY_OP(nextafter, bfloat, bfloat);
+REGISTER_BINARY_OP(zeta, bfloat, bfloat);
+REGISTER_BINARY_OP(xlog1py, bfloat, bfloat);
+REGISTER_BINARY_OP(chebyshev_polynomial_t, bfloat, bfloat);
 #endif
 
 // Complex binary functions
-REGISTER_BINARY_INDEXING_OP(polar, float);
-REGISTER_BINARY_INDEXING_OP(polar, half);
-REGISTER_BINARY_INDEXING_OP(make_complex, float);
-REGISTER_BINARY_INDEXING_OP(make_complex, half);
-REGISTER_BINARY_INDEXING_OP(complex_mul, float2);
-REGISTER_BINARY_INDEXING_OP(complex_mul, half2);
+REGISTER_BINARY_OP(polar, float, float2);
+REGISTER_BINARY_OP(polar, half, half2);
+REGISTER_BINARY_OP(make_complex, float, float2);
+REGISTER_BINARY_OP(make_complex, half, half2);
+REGISTER_BINARY_OP(complex_mul, float2, float2);
+REGISTER_BINARY_OP(complex_mul, half2, half2);
