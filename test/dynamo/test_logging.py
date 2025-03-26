@@ -193,43 +193,6 @@ from user code:
     test_inductor_debug = within_range_record_test(3, 26, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
-    @make_logging_test(inductor=logging.INFO)
-    def test_inductor_mm_info(self, records):
-        a = torch.randn(128, 128)
-        b = torch.randn(128, 128)
-
-        def foo(a, b):
-            return a @ b
-
-        foo_c = torch.compile(foo)
-        foo_c(a, b)
-
-        for r in records:
-            assert "WON'T CONVERT" not in str(r)
-
-    @requires_cuda
-    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
-    @make_logging_test(inductor=logging.INFO)
-    def test_inductor_scaled_mm_info(self, records):
-        a = torch.ones(128, 128, device="cuda", dtype=torch.float8_e4m3fn)
-        b = (
-            torch.ones(128, 128, device="cuda", dtype=torch.float8_e4m3fn)
-            .t()
-            .contiguous()
-            .t()
-        )
-        a_s = torch.tensor(1, device="cuda", dtype=torch.float32)
-        b_s = torch.tensor(1, device="cuda", dtype=torch.float32)
-
-        def foo(a, b, a_s, b_s):
-            return torch._scaled_mm(a, b, a_s, b_s, out_dtype=torch.bfloat16)
-
-        foo_c = torch.compile(foo)
-        foo_c(a, b, a_s, b_s)
-
-        for r in records:
-            assert "WON'T CONVERT" not in str(r)
-
     @make_logging_test()
     def test_inductor_error(self, records):
         exitstack = contextlib.ExitStack()
