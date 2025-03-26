@@ -271,28 +271,32 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_allreduce_in_cudagraph(self):
-        pg = self.pg
         local_device_idx = self.rank_to_GPU[self.rank][0]
-        with torch.cuda.device(local_device_idx):
-            xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+        # This device setting is needed by the CUDAGraph API to understand on
+        # which device to find the current stream
+        torch.cuda.set_device(local_device_idx)
+        xs = torch.FloatTensor([1]).cuda(local_device_idx)
 
-            # single warmup
-            pg.allreduce(xs).wait()
-            # 1 + 1 + ...  = world_size
-            expected_val = self.world_size
-            self.assertEqual(xs[0].item(), expected_val)
+        # single warmup
+        c10d.all_reduce(xs, group=self.pg)
+        # 1 + 1 + ...  = world_size
+        expected_val = self.world_size
+        self.assertEqual(xs.item(), expected_val)
 
+        # Use a loop to test re-capture
+        for _ in range(2):
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
-                pg.allreduce(xs).wait()
+                c10d.all_reduce(xs, group=self.pg)
+                c10d.broadcast(xs, src=0, group=self.pg)
             # Graph capture should not change the tensor value
-            self.assertEqual(xs[0].item(), expected_val)
+            self.assertEqual(xs.item(), expected_val)
 
             graph.replay()
             expected_val *= self.world_size
             graph.replay()
             expected_val *= self.world_size
-            self.assertEqual(xs[0].item(), expected_val)
+            self.assertEqual(xs.item(), expected_val)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
