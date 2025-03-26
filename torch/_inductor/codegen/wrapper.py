@@ -514,17 +514,6 @@ class ExternKernelOutLine(WrapperLine):
 
 
 @dataclasses.dataclass
-class FallbackKernelLine(WrapperLine):
-    wrapper: PythonWrapperCodegen
-    node: ir.FallbackKernel
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
-        self.wrapper._generate_extern_kernel_alloc_helper(code, node, args)
-
-
-@dataclasses.dataclass
 class FreeLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: Union[BufferLike, ir.TorchBindObject]
@@ -1213,7 +1202,8 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        self.writeline(FallbackKernelLine(self, node))
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        self.writeline(ExternKernelAllocLine(self, node, args))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

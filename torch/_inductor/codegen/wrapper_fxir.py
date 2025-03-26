@@ -40,7 +40,6 @@ from .wrapper import (
     ExitSubgraphLine,
     ExternKernelAllocLine,
     ExternKernelOutLine,
-    FallbackKernelLine,
     FreeIfNotReusedLine,
     FreeLine,
     Line,
@@ -287,7 +286,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 ExternKernelAllocLine: self._generate_extern_kernel_alloc,
                 ExternKernelOutLine: self._generate_extern_kernel_out,
                 ExitSubgraphLine: self._generate_exit_subgraph,
-                FallbackKernelLine: self._generate_fallback_kernel,
                 FreeLine: self._generate_free,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
                 LineContext: self._generate_line_context,
@@ -552,11 +550,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         node = line.node
         out_node = node.output_view if node.output_view else node
         self._generate_extern_kernel_common(node, out_node)
-
-    def _generate_fallback_kernel(self, line: Line) -> None:
-        assert isinstance(line, FallbackKernelLine)
-        node = line.node
-        self._generate_extern_kernel_common(node, node)
 
     def generate_kernel_call(
         self,
