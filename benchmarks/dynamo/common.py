@@ -3555,7 +3555,7 @@ def run(runner, args, original_dir=None):
         #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = False
 
         torch.backends.mkldnn.deterministic = True
