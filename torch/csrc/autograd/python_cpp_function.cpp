@@ -200,7 +200,7 @@ PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   return THPUtils_packUInt64(fn.sequence_nr());
 }
 
-PyObject* THPCppFunction_set_sequence_nr(
+static PyObject* THPCppFunction_set_sequence_nr(
     PyObject* self,
     PyObject* sequence_nr) {
   HANDLE_TH_ERRORS
@@ -278,7 +278,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyTypeObject* get_default_type() {
+static PyTypeObject* get_default_type() {
   static DefaultFunctionType default_type;
   return &(default_type.type);
 }
@@ -339,7 +339,7 @@ bool THPCppFunction_Check(PyObject* obj) {
   }
 }
 
-PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
+static PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
   THPObjectPtr register_fn(
       PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
   if (!register_fn) {

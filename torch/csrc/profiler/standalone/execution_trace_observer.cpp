@@ -606,15 +606,6 @@ static void handleKernelBackendInfo(
             fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
       }
 
-      // get grid information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("grid") != kwinputs.end(),
-          "grid is missing in triton kernel");
-      fc.inputValues.emplace_back(
-          "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.inputTypes.emplace_back("\"String\"");
-      fc.inputShapes.emplace_back("[]");
-
       // get stream information
       TORCH_INTERNAL_ASSERT(
           kwinputs.find("stream") != kwinputs.end(),

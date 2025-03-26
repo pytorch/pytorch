@@ -7,6 +7,8 @@ from sympy.printing.str import StrPrinter
 
 
 INDEX_TYPE = "int64_t"
+INDEX_TYPE_MAX = (1 << 63) - 1
+INDEX_TYPE_MIN = -1 << 63
 
 
 # This printer contains rules that are supposed to be generic for both C/C++ and
@@ -44,6 +46,15 @@ class ExprPrinter(StrPrinter):
 
     def _print_Identity(self, expr: sympy.Expr) -> str:
         return self._print(expr.args[0])
+
+    def _print_Float(self, expr: sympy.Expr) -> str:
+        if expr._prec == 53:
+            # IEEE-754 double precision have 53 bits. SymPy prints them with
+            # 15 digits, but we need 17 for round-trip correctness
+            return str(sympy.Float(expr, dps=17))
+        else:
+            # We don't use other precisions in pytorch
+            return str(expr)
 
     # This must be implemented because sympy will collect x * x into Pow(x, 2), without
     # any explicit intervention.  We print it just like x * x, notably, we
@@ -266,9 +277,16 @@ class PythonPrinter(ExprPrinter):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
-        return (
-            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
-        )
+        suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
+        i = int(expr)
+        if i > INDEX_TYPE_MAX or i < INDEX_TYPE_MIN:
+            raise OverflowError(f"{i} too big to convert to {INDEX_TYPE}")
+        elif i == INDEX_TYPE_MIN:
+            assert i == (-1) << 63
+            # Writing -9223372036854775808L makes the value overflow
+            # as it is parsed as -(9223372036854775808L) by the C/C++ compiler
+            return f"(-1{suffix} << 63)"
+        return f"{i}{suffix}"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (

@@ -233,6 +233,10 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = self._deduce_value(node)
+
+        if isinstance(out, torch._C.ScriptObject):
+            return out
+
         if out == self.unknown_value:
             return self.unknown_value
 

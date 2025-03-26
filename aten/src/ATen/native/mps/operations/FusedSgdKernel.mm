@@ -60,8 +60,24 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
                                                  const bool is_first_step,
                                                  const std::optional<Tensor>& grad_scale,
                                                  const std::optional<Tensor>& found_inf) {
+  if (lr_tensor.is_cpu()) {
+    return _fused_sgd_with_momentum_kernel_mps_(params,
+                                                grads,
+                                                momentum_buffer_list,
+                                                weight_decay,
+                                                momentum,
+                                                lr_tensor.item<double>(),
+                                                dampening,
+                                                nesterov,
+                                                maximize,
+                                                is_first_step,
+                                                grad_scale,
+                                                found_inf);
+  }
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(native::check_fast_path_restrictions({params, grads, momentum_buffer_list}));
+
+  TORCH_CHECK(lr_tensor.device() == params[0].device(), "lr must be on the same GPU device as the params");
 
   std::vector<std::vector<Tensor>> tensor_lists{params.vec(), grads.vec(), momentum_buffer_list.vec()};
 

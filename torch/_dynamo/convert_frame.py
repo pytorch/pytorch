@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -118,6 +118,7 @@ from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
+    ExceptionStack,
     InstructionTranslator,
     LocalState,
     SpeculationLog,
@@ -137,6 +138,8 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_disable_inference_mode,
+    maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -226,11 +229,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            maybe_disable_inference_mode(),
+            maybe_disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -414,7 +422,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         ps = pstats.Stats(prof)
         try:
             prof.dump_stats(profile_path)
-        except PermissionError:
+        except OSError:
             log.exception("Cannot write to %s", profile_path)
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -463,7 +471,6 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
-        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -471,7 +478,6 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
-        self._dynamism = dynamism
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -480,7 +486,6 @@ class ConvertFrameAssert:
             self._one_graph,
             self._export,
             self._export_constraints,
-            self._dynamism,
         )
 
     def __call__(
@@ -555,6 +560,20 @@ class ConvertFrameAssert:
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
 
+        # skip tracing non-recursive disabled functions
+        # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
+        prev_frame = sys._getframe()
+        while (
+            prev_frame
+            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
+        ):
+            prev_frame = prev_frame.f_back  # type: ignore[assignment]
+        if (
+            prev_frame
+            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+        ):
+            return ConvertFrameReturn(apply_to_code=False)
+
         global initial_global_state
         initial_global_state = GlobalStateGuard()
 
@@ -607,7 +626,6 @@ class ConvertFrameAssert:
                 self._one_graph,
                 self._export,
                 self._export_constraints,
-                self._dynamism,
                 hooks,
                 cache_entry,
                 cache_size,
@@ -623,12 +641,9 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    dynamism: Optional[dict[Any, Any]] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph"""
-    return ConvertFrameAssert(
-        compiler_fn, one_graph, export, export_constraints, dynamism
-    )
+    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
 
 
 from collections import OrderedDict
@@ -663,7 +678,6 @@ def _compile(
     one_graph: bool,
     export: bool,
     export_constraints: Optional[typing.Never],
-    dynamism: Optional[dict[Any, Any]],
     hooks: Hooks,
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
@@ -697,6 +711,7 @@ def _compile(
         nonlocal output
         nonlocal tracer
         speculation_log.restart()
+        exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -710,9 +725,9 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            dynamism,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 
@@ -1197,12 +1212,9 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
-        self._inner_convert = convert_frame_assert(
-            compiler_fn, one_graph=False, dynamism=dynamism
-        )
+        self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
 
     @property
@@ -1304,11 +1316,9 @@ class ConvertFrame:
         return ConvertFrameReturn()
 
 
-def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, dynamism: Optional[dict[Any, Any]] = None
-) -> ConvertFrame:
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    return ConvertFrame(compiler_fn, hooks, dynamism=dynamism)
+    return ConvertFrame(compiler_fn, hooks)
 
 
 # TODO mlazos: add support for same args, or record them
@@ -1332,7 +1342,6 @@ def replay(filename: str) -> None:
             one_graph=False,
             export=False,
             export_constraints=None,
-            dynamism=None,
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             cache_entry=None,

@@ -3,9 +3,6 @@
 TunableOp
 =========
 
-.. note::
-    This is a prototype feature, which means it is at an early stage
-    for feedback and testing, and its components are subject to change.
 
 Overview
 --------

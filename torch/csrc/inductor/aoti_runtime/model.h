@@ -231,6 +231,24 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    // don't bother with any of the run_finished stuff; this is unsafe to call
+    // in a threaded context
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
+  }
+
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,

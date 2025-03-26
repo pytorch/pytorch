@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -156,6 +157,7 @@ def make_fake_inputs(
     # In strict, these steps are spread across multiple files:
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
+    import torch._functorch.config as _config
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
@@ -177,25 +179,29 @@ def make_fake_inputs(
             "co_filename": code.co_filename,
             "co_firstlineno": code.co_firstlineno,
         }
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(
-                tracked_fakes=[],
-                co_fields=co_fields,
-                prefer_deferred_runtime_asserts_over_guards=True,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-            ),
-            allow_non_fake_inputs=True,
-            export=True,
-        )
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = FakeTensorMode(
+                shape_env=ShapeEnv(
+                    tracked_fakes=[],
+                    co_fields=co_fields,
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
+                ),
+                allow_non_fake_inputs=True,
+                export=True,
+            )
     else:
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(
-                tracked_fakes=[],
-                prefer_deferred_runtime_asserts_over_guards=True,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-            ),
-            allow_non_fake_inputs=True,
-        )
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = FakeTensorMode(
+                shape_env=ShapeEnv(
+                    tracked_fakes=[],
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
+                ),
+                allow_non_fake_inputs=True,
+            )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -528,7 +534,7 @@ def _fakify_module_inputs(
 @contextlib.contextmanager
 def _fakify_script_objects(
     mod: torch.nn.Module,
-    args: tuple[Any],
+    args: Sequence[Any],
     kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
 ):

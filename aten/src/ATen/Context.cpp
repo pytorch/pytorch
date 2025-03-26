@@ -588,7 +588,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-thread_local bool override_allow_tf32_flag = false;
+thread_local static bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
   if (!override_allow_tf32_flag) {
@@ -611,7 +611,7 @@ bool NoTF32Guard::should_disable_tf32() {
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool rocm_is_backward_pass;
+thread_local static bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
   rocm_is_backward_pass = true;

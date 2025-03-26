@@ -3,6 +3,8 @@
 
 import unittest
 
+from parameterized import parameterized_class
+
 import torch
 import torch._dynamo
 import torch._functorch
@@ -693,6 +695,25 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_pending_unbacked(self):
+        @mark_compile_region
+        def gn(x):
+            u = x[0].item()
+            return x * u
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+        torch._dynamo.config.capture_scalar_outputs = True
+        opt_fn = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )  # Inductor fails with cpp compilation error
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_bwd_partitioning(self):
         @mark_compile_region
         def gn(x, y):
@@ -772,6 +793,158 @@ class GraphModule(torch.nn.Module):
             return (mm_2, mm_1)
 """,
             )
+
+
+@parameterized_class(
+    [
+        {"strict": False},
+        {"strict": True},
+    ],
+    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
+)
+class TestInvokeSubgraphExport(TestCase):
+    def test_simple_func(self):
+        @mark_compile_region
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x = gn(x, y)
+                x = gn(x, y)
+                return x
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+        self.assertExpectedInline(
+            normalize_gm(ep.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x: "f32[8]", y: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', (x, y));  repeated_subgraph0 = x = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_0', (getitem, y));  repeated_subgraph0_1 = getitem = y = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_1,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (mul,)
+""",
+        )
+
+    @unittest.expectedFailure
+    def test_unbacked(self):
+        @mark_compile_region
+        def gn(x, y):
+            b = x.item()
+            torch._check_is_size(b)
+            torch._check(b < y.shape[0])
+            return y[:b].clone()
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for _ in range(10):
+                    res.append(gn(x, y))
+                return torch.cat(res)
+
+        x = torch.tensor(4)
+        y = torch.randn(8)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        ep = ep.run_decompositions()
+
+        self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+    def test_pending_unbacked(self):
+        class M(torch.nn.Module):
+            @mark_compile_region
+            def gn(self, x):
+                u = x[0].item()
+                return x * u
+
+            def forward(self, x):
+                for _ in range(4):
+                    x = self.gn(x)
+                return x
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(8),),
+            strict=self.strict,
+            dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}},
+        )
+        ep = ep.run_decompositions()
+
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(8, requires_grad=True),),
+            strict=self.strict,
+            dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}},
+        )
+        ep = ep.run_decompositions()
+
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+    def test_simple_method(self):
+        class M(torch.nn.Module):
+            @mark_compile_region
+            def gn(self, x, y):
+                return torch.mul(x, y)
+
+            def forward(self, x, y):
+                x = self.gn(x, y)
+                x = self.gn(x, y)
+                return x
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+    def test_multiple_module(self):
+        b = torch.randn(8)
+
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", b)
+
+            @mark_compile_region
+            def forward(self, x, y):
+                return x * y + self.buf
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_list = torch.nn.ModuleList(N() for _ in range(10))
+
+            def forward(self, x, y):
+                for m in self.mod_list:
+                    x = m(x, y)
+                return x
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
 
 if __name__ == "__main__":

@@ -390,8 +390,8 @@ class MemoryEstimate:
 
     def __repr__(self) -> str:
         return f"""MemoryEstimate(
-            reads={[*itertools.chain(*self.reads.values())]!r},
-            writes={[*itertools.chain(*self.writes.values())]!r}
+            reads={[*itertools.chain.from_iterable(self.reads.values())]!r},
+            writes={[*itertools.chain.from_iterable(self.writes.values())]!r}
         )"""
 
 

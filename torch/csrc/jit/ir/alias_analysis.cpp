@@ -197,8 +197,6 @@ const AliasTypeSet* AliasDb::mapTypeToAliasTypeSetPtr(
   return helper.mapTypeToBorrowedAliasTypeSet(type);
 }
 
-AliasDb::~AliasDb() = default;
-
 // Structure used during analysis to keep track of all writes at a high
 // level. When the analysis is completed, this will be used to construct
 // a more efficient WriteIndex
@@ -279,13 +277,14 @@ AliasDb::AliasDb(
   // Now that we've built the write index, we can null out the WriteRegistry to
   // make future access an error. In this way we prevent the index from getting
   // out of sync (since we have no way of registering new writes)
-  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   writeRegistry_ = nullptr;
 
   // Initialize the write cache
   buildWrittenToLocationsIndex();
   GRAPH_DEBUG(toString());
 }
+
+AliasDb::~AliasDb() = default;
 
 bool AliasDb::isMutable(Node* n) const {
   ValueSet vs;

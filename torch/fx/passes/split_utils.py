@@ -212,6 +212,7 @@ def split_by_tags(
                     comp.getattr_maps[x] = comp.graph.get_attr(
                         x.target, type_expr=x.type
                     )
+                    comp.getattr_maps[x].meta = copy.copy(x.meta)
                 return comp.getattr_maps[x]
 
             # If input is not a placeholder, it should have been put into a component
