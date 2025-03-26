@@ -154,7 +154,7 @@ class AssociativeScanOp(HigherOrderOperator):
             additional_inputs, (tuple, list)
         ), "additional_inputs must be a tuple."
         validate_subgraph_args_types(additional_inputs)
-        return super().__call__(combine_fn, xs, additional_inputs)
+        return super().__call__(combine_fn, xs, tuple(additional_inputs))
 
 
 associative_scan_op = AssociativeScanOp()
