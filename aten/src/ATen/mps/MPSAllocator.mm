@@ -894,7 +894,12 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     return _getAllocImpl().format_size(size);
   }
 
+  // KURT: Maybe we should actually use the clone_from/to_cpu functions, and
+  // also use the MPSPinnedAllocator's overloads?
   void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
+    if (sync) {
+      at::detail::getMPSHooks().deviceSynchronize();
+    }
     void* dest_ = maybe_convert_cpu_ptr_to_device_ptr(dest);
     const void* src_ = maybe_convert_cpu_ptr_to_device_ptr(src);
 

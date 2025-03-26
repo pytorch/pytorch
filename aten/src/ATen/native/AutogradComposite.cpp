@@ -100,11 +100,13 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
       TORCH_CHECK(self.is_pinned(),
         "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
         "is pinned.");
+      TORCH_INTERNAL_ASSERT(self.storage().allocator()->has_unified_memory());
     }
     if (self.device().type() == c10::kMPS && device_opt.value().type() == c10::kCPU) {
       // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
       // the regular CPU allocator.
       allocator_opt = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
+      TORCH_INTERNAL_ASSERT(allocator_opt.value()->has_unified_memory());
 
     } else {
       allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
