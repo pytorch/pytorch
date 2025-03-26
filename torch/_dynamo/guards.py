@@ -75,6 +75,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    NoopGuard,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -3151,5 +3152,7 @@ def install_guard(*guards, skip=0):
     ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
+        if isinstance(guard, NoopGuard):
+            continue
         assert isinstance(guard, Guard)
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
