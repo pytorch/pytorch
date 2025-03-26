@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
@@ -1384,6 +1385,9 @@ except RuntimeError as e:
     # This case pass on Intel GPU, but currently expected failure on other device,
     # please don't forget to remove this skip when remove the xfailIfLinux.
     @skipIfXpu
+    # This case passes on s390x too.
+    # please don't forget to remove this skip when remove the xfailIfLinux.
+    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # https://github.com/pytorch/pytorch/issues/128551
     @xfailIfLinux
     def test_segfault(self):
