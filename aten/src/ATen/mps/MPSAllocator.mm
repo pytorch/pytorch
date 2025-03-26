@@ -947,7 +947,7 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
 
   static void Delete(void* ptr) {
     if (ptr) {
-      void* cpu_ptr = _getAllocImpl().free(ptr);
+      _getAllocImpl().free(ptr);
     }
   }
 
