@@ -398,9 +398,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
+    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
+        return self.features.select_index_dtype()
+
     @property
     def index_dtype(self) -> str:
-        return self.dtype_to_str(self.features.select_index_dtype())
+        return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
 
     def want_no_x_dim(self) -> bool:
         return False

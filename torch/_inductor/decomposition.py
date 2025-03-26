@@ -61,6 +61,7 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_or_,
         aten.clamp_min_,
         aten.dist,
+        aten.elu,
         aten.empty_like,
         aten.flip,
         aten.gelu,
@@ -986,11 +987,9 @@ def max_pool2d_with_indices(
     stride = pad_listlike(stride, 2)
 
     window_size = kernel_size[0] * kernel_size[1]
-    # We fallback when using non-default dilation or when the window size is too large
+    # We fallback when the window size is too large
     if (
-        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
-            kernel_size, dilation
-        )
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size)
         or window_size > torch.iinfo(torch.int8).max
     ):
         return NotImplemented
@@ -1009,6 +1008,7 @@ def max_pool2d_with_indices(
         x.size(-1),
         stride,
         padding,
+        dilation,
     )
     return vals, indices
 

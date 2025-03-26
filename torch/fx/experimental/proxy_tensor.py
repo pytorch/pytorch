@@ -131,6 +131,13 @@ pytree.register_pytree_node(
     ),
     serialized_type_name="torch.Size",
 )
+# Ideally unflattening should not lose info, but we unflatten
+# torch.Size to tuple (see above). This is necessary because the
+# torch.Size constructor only accepts ints whereas our infra often
+# transforms them to non-ints, e.g. symint proxies. Anyway, losing
+# such info can cause pytree mapping or spec matching to fail, so
+# work around this problem using the following dict as needed.
+_pytree_subclasses_that_lose_info = {torch.Size: tuple}
 
 
 def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
@@ -806,6 +813,12 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
+            from .symbolic_shapes import guard_size_oblivious
+
+            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    "Boolean value of Tensor with more than one value is ambiguous"
+                )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer

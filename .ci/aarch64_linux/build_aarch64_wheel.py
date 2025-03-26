@@ -1012,7 +1012,7 @@ if __name__ == "__main__":
         install_condaforge_python(host, args.python_version)
         sys.exit(0)
 
-    python_version = args.python_version if args.python_version is not None else "3.8"
+    python_version = args.python_version if args.python_version is not None else "3.9"
 
     if args.use_torch_from_pypi:
         configure_system(host, compiler=args.compiler, python_version=python_version)

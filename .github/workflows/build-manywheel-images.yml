@@ -99,7 +99,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main

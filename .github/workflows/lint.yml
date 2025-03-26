@@ -207,7 +207,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python 3.9
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           architecture: x64
@@ -254,7 +254,7 @@ jobs:
           echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
       - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.6
           architecture: x64
@@ -264,7 +264,7 @@ jobs:
             **/requirements.txt
       - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64

@@ -54,7 +54,7 @@ jobs:
         uses: actions/download-artifact@v4
       - name: Configure AWS credentials(PyTorch account)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
           aws-region: us-east-1

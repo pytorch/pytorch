@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -185,6 +186,7 @@ def make_fake_inputs(
                     co_fields=co_fields,
                     prefer_deferred_runtime_asserts_over_guards=True,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
                 export=True,
@@ -196,6 +198,7 @@ def make_fake_inputs(
                     tracked_fakes=[],
                     prefer_deferred_runtime_asserts_over_guards=True,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
             )
@@ -531,7 +534,7 @@ def _fakify_module_inputs(
 @contextlib.contextmanager
 def _fakify_script_objects(
     mod: torch.nn.Module,
-    args: tuple[Any],
+    args: Sequence[Any],
     kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
 ):

@@ -373,7 +373,7 @@ void test_aoti_free_buffer() {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
 
-  // We update inactive buffer, this should create one copy (128MB)
+  // We update inactive buffer, this should create one copy (128MB) at buffer #2
   runner->update_inactive_constant_buffer(real_map);
   size_t updateMemory2 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory2, &totalMemory);
@@ -382,7 +382,7 @@ void test_aoti_free_buffer() {
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
-  // We swap and free the inactive buffer.
+  // We swap and free the inactive buffer. (Use #2 and free #1)
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
   size_t postFreeMemory = 0;
@@ -405,12 +405,19 @@ void test_aoti_free_buffer() {
 
   // Test if we directly free the buffer #1.
   runner->free_inactive_constant_buffer();
-  size_t finalMemory = 0;
-  cudaStatus = cudaMemGetInfo(&finalMemory, &totalMemory);
+  cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory, finalMemory);
+  ASSERT_EQ(initMemory, updateMemory1);
+
+  // Free buffer #1 again, since #1 is freed, nothing should change.
+  runner->free_inactive_constant_buffer();
+  cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory, updateMemory1);
 }
 
 class ThreadPool {
