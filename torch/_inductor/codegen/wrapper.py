@@ -619,12 +619,13 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 class ReinterpretLine(MemoryPlanningLine):
     node: BufferLike
     reused_as: BufferLike
-    layout: ir.NonOwningLayout
+    layout: ir.Layout
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
+        assert isinstance(self.layout, ir.NonOwningLayout)
         self.wrapper.codegen_deferred_allocation(
             code, self.node.get_name(), self.layout.view
         )

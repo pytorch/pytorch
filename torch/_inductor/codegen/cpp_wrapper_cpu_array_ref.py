@@ -10,6 +10,7 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
+from .common import IndentedBuffer
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
@@ -640,7 +641,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self, code: IndentedBuffer, kernel: str, args: list[str], device: str, **_
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -662,7 +663,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            code, kernel, wrapped_args, device, debug_args=args
         )
 
     def generate_scatter_fallback(
