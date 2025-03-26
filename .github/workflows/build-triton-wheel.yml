@@ -264,18 +264,18 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials(PyTorch account) for main
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
           aws-region: us-east-1
