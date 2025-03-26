@@ -250,7 +250,7 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
 
     Code below is an adaptation of https://fburl.com/code/ciwofcg4
 
-    Background 1: last answer in https://stackoverflow.com/questions/8981913/how-to-perform-round-to-even-with-floating-point-numbers  # noqa: E501
+    Background 1: last answer in https://stackoverflow.com/q/8981913
     Background 2: Computer Organization and Design, RISC-V edition, Chapter 3.5
     """
     assert x.dtype == torch.float

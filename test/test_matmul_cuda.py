@@ -1077,7 +1077,7 @@ class TestFP8MatmulCuda(TestCase):
                 A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
                 B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
                 A_ref[1][0:BLOCK_SIZE] = 4
-                A.view(torch.uint8)[1][0:(BLOCK_SIZE//2)] = 0b01000100
+                A.view(torch.uint8)[1][0:(BLOCK_SIZE // 2)] = 0b01000100
                 A_scale[1][0] = 2
 
         elif test_case_name == "a_ones_b_scale_modified":
@@ -1098,7 +1098,7 @@ class TestFP8MatmulCuda(TestCase):
                 A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
                 B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
                 B_ref[1][0:BLOCK_SIZE] = 4
-                B.view(torch.uint8)[1][0:(BLOCK_SIZE//2)] = 0b01000100
+                B.view(torch.uint8)[1][0:(BLOCK_SIZE // 2)] = 0b01000100
                 B_scale[1][0] = 2
 
         elif test_case_name == "data_random_scales_one":
@@ -1119,8 +1119,16 @@ class TestFP8MatmulCuda(TestCase):
             else:  # nvfp4
                 # scales all-ones, element data random while being exactly representable in float4_e2m1fn_x2
                 # generate integers in [0, 16] and cast to bfloat16
-                A_ref = _floatx_unpacked_to_f32(torch.randint(0, 16, (M, K), device=device, dtype=torch.uint8), FP4_EBITS, FP4_MBITS).bfloat16()
-                B_ref = _floatx_unpacked_to_f32(torch.randint(0, 16, (N, K), device=device, dtype=torch.uint8), FP4_EBITS, FP4_MBITS).bfloat16()
+                A_ref = _floatx_unpacked_to_f32(
+                    torch.randint(0, 16, (M, K), device=device, dtype=torch.uint8),
+                    FP4_EBITS,
+                    FP4_MBITS
+                ).bfloat16()
+                B_ref = _floatx_unpacked_to_f32(
+                    torch.randint(0, 16, (N, K), device=device, dtype=torch.uint8),
+                    FP4_EBITS,
+                    FP4_MBITS
+                ).bfloat16()
                 A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
                 B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
                 A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
