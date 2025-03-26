@@ -13,6 +13,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
+from contextlib import nullcontext
+from torch.nn.attention.flex_attention import flex_attention
+
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
@@ -42,6 +45,8 @@ def get_total_flops(mode):
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
 
+def causal_mask(score, b, h, q_idx, kv_idx):
+    return q_idx >= kv_idx
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
@@ -358,39 +363,44 @@ class TestFlopCounter(TestCase):
             )
 
             if backend == "math":
-                backend = torch.backends.cuda.sdp_kernel(
+                kernel = torch.backends.cuda.sdp_kernel(
                     enable_flash=False,
                     enable_math=True,
                     enable_mem_efficient=False,
                     enable_cudnn=False,
                 )
             elif backend == "flash":
-                backend = torch.backends.cuda.sdp_kernel(
+                kernel = torch.backends.cuda.sdp_kernel(
                     enable_flash=True,
                     enable_math=False,
                     enable_mem_efficient=False,
                     enable_cudnn=False,
                 )
             elif backend == "mem_efficient":
-                backend = torch.backends.cuda.sdp_kernel(
+                kernel = torch.backends.cuda.sdp_kernel(
                     enable_flash=False,
                     enable_math=False,
                     enable_mem_efficient=True,
                     enable_cudnn=False,
                 )
             elif backend == "cudnn":
-                backend = torch.backends.cuda.sdp_kernel(
+                kernel = torch.backends.cuda.sdp_kernel(
                     enable_flash=False,
                     enable_math=False,
                     enable_mem_efficient=False,
                     enable_cudnn=True,
                 )
+            elif backend == "flex":
+                kernel = nullcontext()
 
             mode = FlopCounterMode()
-            with backend, mode:
-                out = F.scaled_dot_product_attention(
-                    query, key, value, dropout_p=0, is_causal=True
-                )
+            with kernel, mode:
+                if backend == "flex":
+                    y = flex_attention(query, key, value, score_mod=causal_mask)
+                else:
+                    out = F.scaled_dot_product_attention(
+                        query, key, value, dropout_p=0, is_causal=True
+                    )
                 if with_backward:
                     out.sum().backward()
             return int(get_total_flops(mode))
@@ -409,24 +419,26 @@ class TestFlopCounter(TestCase):
 
         flops = [
             run_uniform_flops(backend, with_backward=False)
-            for backend in ["math", "flash", "mem_efficient", "cudnn"]
+            for backend in ["math", "flash", "mem_efficient", "cudnn", "flex"]
         ]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient, flops_fw_cudnn = flops
+        flops_fw_math, flops_fw_flash, flops_fw_efficient, flops_fw_cudnn, flops_fw_flex = flops
         self.assertEqual(flops_fw_math, flops_fw_flash)
         self.assertEqual(flops_fw_math, flops_fw_efficient)
         self.assertEqual(flops_fw_math, flops_fw_cudnn)
+        self.assertEqual(flops_fw_math, flops_fw_flex)
 
         self.assertExpectedInline(str(flops_fw_math), """134217728""")
 
         flops = [
             run_uniform_flops(backend, with_backward=True)
-            for backend in ["math", "flash", "mem_efficient", "cudnn"]
+            for backend in ["math", "flash", "mem_efficient", "cudnn", "flex"]
         ]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn = flops
+        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn, flops_fw_bw_flex = flops
         self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_cudnn)
+        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_flex)
 
         run_nonuniform_flops = functools.partial(
             get_flops,
@@ -439,13 +451,14 @@ class TestFlopCounter(TestCase):
             dtype,
         )
         # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
-        non_uniform_backends = ["math", "mem_efficient"]
+        non_uniform_backends = ["math", "mem_efficient", "flex"]
         flops = [
             run_nonuniform_flops(backend, with_backward=False)
             for backend in non_uniform_backends
         ]
-        flops_fw_math, flops_fw_efficient = flops
+        flops_fw_math, flops_fw_efficient, flops_fw_flex = flops
         self.assertEqual(flops_fw_math, flops_fw_efficient)
+        self.assertEqual(flops_fw_math, flops_fw_flex)
 
         self.assertExpectedInline(str(flops_fw_math), """268435456""")
 
@@ -453,9 +466,10 @@ class TestFlopCounter(TestCase):
             run_nonuniform_flops(backend, with_backward=True)
             for backend in non_uniform_backends
         ]
-        flops_fw_bw_math, flops_fw_bw_efficient = flops
+        flops_fw_bw_math, flops_fw_bw_efficient, flops_fw_bw_flex = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+        self.assertExpectedInline(str(flops_fw_bw_flex), """939524096""")
 
     @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
