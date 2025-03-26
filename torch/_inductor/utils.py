@@ -2776,9 +2776,10 @@ def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
 
 
-def is_cudagraph_unsafe_custom_op(node: Operation) -> bool:
+def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
-    Returns True if the node is a custom op that is not cudagraphable.
+    Returns True if the node is an op that is not cudagraphable.
+    Usually only custom ops have this tag.
     """
     from . import ir
 

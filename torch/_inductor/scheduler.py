@@ -60,7 +60,7 @@ from .utils import (
     GraphPartitionMap,
     IndentedBuffer,
     is_collective,
-    is_cudagraph_unsafe_custom_op,
+    is_cudagraph_unsafe_op,
     is_gpu,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
@@ -3981,7 +3981,7 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if is_cudagraph_unsafe_custom_op(node.node):
+        if is_cudagraph_unsafe_op(node.node):
             return True
 
         return False
