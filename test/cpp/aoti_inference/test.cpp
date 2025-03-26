@@ -331,8 +331,6 @@ void test_aoti_double_buffering_with_tensor_constants() {
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
   size_t allocated, reserved, active;
-  c10::cuda::CUDACachingAllocator::DeviceStats stats =
-      c10::cuda::CUDACachingAllocator::getDeviceStats(0);
 
   std::string data_path =
       (std::filesystem::path(
@@ -340,7 +338,6 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
            .string();
 
   // Memory information variable
-  cudaError_t cudaStatus;
   size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
   size_t FOLDEDDATASIZE = use_runtime_constant_folding
       ? 64 * 1024 * 1024
@@ -375,7 +372,15 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
 
-  // We extract the initial free memory here.
+  // We extract the memory information starting from here.
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
   size_t totalMemory = 0;
@@ -434,7 +439,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   // decrease the active buffer in CachingAllocator instead.
   size_t active1, active2;
   size_t allocated1, allocated2;
-  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   active1 = stats.active_bytes[0].current;
   allocated1 = stats.allocated_bytes[0].current;
   runner->free_inactive_constant_buffer();
@@ -442,7 +447,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   active2 = stats.active_bytes[0].current;
   allocated2 = stats.allocated_bytes[0].current;
   ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
@@ -462,7 +467,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   // CachedAllocator.
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
-  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   active2 = stats.active_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
