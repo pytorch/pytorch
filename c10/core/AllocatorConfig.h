@@ -18,14 +18,14 @@ const size_t kLargeBuffer = 20971520;
 // Environment config parser for Allocator
 class C10_API AllocatorConfig {
  public:
-  static AllocatorConfig& instance();
+  AllocatorConfig(c10::DeviceType t);
 
-  virtual static size_t max_split_size() {
-    return instance().max_split_size_;
+  size_t max_split_size() {
+    return max_split_size_;
   }
 
-  virtual static size_t max_non_split_rounding_size() {
-    return instance().max_non_split_rounding_size_;
+  size_t max_non_split_rounding_size() {
+    return max_non_split_rounding_size_;
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
@@ -33,86 +33,83 @@ class C10_API AllocatorConfig {
   // As an example, if we want 4 divisions between 2's power, this can be done
   // on CUDA device using env variable:
   // PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
-  virtual static size_t roundup_power2_divisions(size_t size);
+  size_t roundup_power2_divisions(size_t size);
 
-  virtual static std::vector<size_t> roundup_power2_divisions() {
-    return instance().roundup_power2_divisions_;
+  std::vector<size_t> roundup_power2_divisions() {
+    return roundup_power2_divisions_;
   }
 
-  virtual static double garbage_collection_threshold() {
-    return instance().garbage_collection_threshold_;
+  double garbage_collection_threshold() {
+    return garbage_collection_threshold_;
   }
 
-  virtual static bool expandable_segments() {
-    return instance().expandable_segments_;
+  bool expandable_segments() {
+    return expandable_segments_;
   }
 
-  virtual static bool release_lock_on_device_malloc() {
-    return instance().release_lock_on_device_malloc_;
+  bool release_lock_on_device_malloc() {
+    return release_lock_on_device_malloc_;
   }
 
-  virtual static std::string last_allocator_settings() {
-    std::lock_guard<std::mutex> lock(instance().last_allocator_settings_mutex_);
-    return instance().last_allocator_settings_;
+  std::string last_allocator_settings() {
+    std::lock_guard<std::mutex> lock(last_allocator_settings_mutex_);
+    return last_allocator_settings_;
   }
 
   /* Pinned memory allocator settings */
-  virtual static bool pinned_use_host_register() {
-    return instance().pinned_use_host_register_;
+  bool pinned_use_host_register() {
+    return pinned_use_host_register_;
   }
 
-  virtual static size_t pinned_num_register_threads() {
-    return instance().pinned_num_register_threads_;
+  size_t pinned_num_register_threads() {
+    return pinned_num_register_threads_;
   }
 
-  virtual static bool pinned_use_background_threads() {
-    return instance().pinned_use_background_threads_;
+  bool pinned_use_background_threads() {
+    return pinned_use_background_threads_;
   }
 
  private:
-  virtual AllocatorConfig(c10::DeviceType t);
-
   /* Internal functions */
-  virtual static size_t pinned_max_register_threads() {
-    // Based on the benchmark results, we see better allocation performance
-    // with 8 threads. However on future systems, we may need more threads
-    // and limiting this to 128 threads.
-    return 128;
-  }
+  virtual void parseArgs(const char* env);
 
   virtual void checkMallocAsyncSupport();
 
-  virtual void parseArgs(const char* env);
-  virtual static void lexArgs(
-      const char* env,
-      std::vector<std::string>& config);
-  virtual static void consumeToken(
+  void lexArgs(const char* env, std::vector<std::string>& config);
+
+  void consumeToken(
       const std::vector<std::string>& config,
       size_t i,
       const char c);
-  virtual size_t parseMaxSplitSize(
+
+  size_t parseMaxSplitSize(const std::vector<std::string>& config, size_t i);
+
+  size_t parseMaxNonSplitRoundingSize(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parseMaxNonSplitRoundingSize(
+
+  size_t parseGarbageCollectionThreshold(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parseGarbageCollectionThreshold(
+
+  size_t parseRoundUpPower2Divisions(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parseRoundUpPower2Divisions(
-      const std::vector<std::string>& config,
-      size_t i);
-  virtual size_t parseAllocatorBackendConfig(
+
+  size_t parseAllocatorBackendConfig(
       const std::vector<std::string>& config,
       size_t i,
       bool& used_MallocAsync);
-  virtual size_t parsePinnedUseHostRegister(
+
+  size_t parsePinnedUseHostRegister(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parsePinnedNumRegisterThreads(
+
+  size_t parsePinnedNumRegisterThreads(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parsePinnedUseBackgroundThreads(
+
+  size_t parsePinnedUseBackgroundThreads(
       const std::vector<std::string>& config,
       size_t i);
 

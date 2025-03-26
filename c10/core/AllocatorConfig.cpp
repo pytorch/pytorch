@@ -7,19 +7,20 @@ namespace c10::CachingAllocator {
 
 namespace {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
-constexpr size_t kMB = 1024 * 1024;
+constexpr size_t kMB = 1024 * 1024ul;
 constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
 constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024 * kMB; // 64GB
+constexpr size_t kPinnedMaxRegisterThreads = 128;
 } // anonymous namespace
 
 AllocatorConfig::AllocatorConfig(c10::DeviceType t)
     : max_split_size_(std::numeric_limits<size_t>::max()),
       max_non_split_rounding_size_(kLargeBuffer),
       garbage_collection_threshold_(0),
-      pinned_num_register_threads_(1),
       expandable_segments_(false),
       release_lock_on_device_malloc_(false),
       pinned_use_host_register_(false),
+      pinned_num_register_threads_(1),
       pinned_use_background_threads_(false),
       device_type_(t) {
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -34,14 +35,12 @@ size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
   const size_t interval_end =
       63 - llvm::countLeadingZeros(kRoundUpPowerOfTwoEnd);
   TORCH_CHECK(
-      (interval_end - interval_start == kRoundUpPowerOfTwoIntervals),
+      interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
 
-  int index = static_cast<int>(log_size) - static_cast<int>(interval_start);
-
-  index = std::max(0, index);
-  index = std::min(index, static_cast<int>(kRoundUpPowerOfTwoIntervals) - 1);
-  return instance().roundup_power2_divisions_[index];
+  auto index = (log_size > interval_start) ? (log_size - interval_start) : 0ul;
+  index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
+  return roundup_power2_divisions_[index];
 }
 
 void AllocatorConfig::lexArgs(
@@ -73,8 +72,7 @@ void AllocatorConfig::consumeToken(
   TORCH_CHECK(
       i < config.size() && config[i] == std::string(1, c),
       "Error parsing CachingAllocator::AllocatorConfig settings, expected ",
-      c,
-      "");
+      c);
 }
 
 size_t AllocatorConfig::parseMaxSplitSize(
@@ -90,12 +88,11 @@ size_t AllocatorConfig::parseMaxSplitSize(
     TORCH_CHECK(
         val_env >= min_allowed_split_size_mb,
         "CachingAllocator option max_split_size_mb too small, must be >= ",
-        min_allowed_split_size_mb,
-        "");
+        min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
     max_split_size_ = val_env * kMB;
   } else {
-    TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
+    TORCH_CHECK(false, "Error, expecting max_split_size_mb value");
   }
   return i;
 }
@@ -113,12 +110,11 @@ size_t AllocatorConfig::parseMaxNonSplitRoundingSize(
     TORCH_CHECK(
         val_env >= min_allowed_split_size_mb,
         "CachingAllocator option max_non_split_rounding_mb too small, must be >= ",
-        min_allowed_split_size_mb,
-        "");
+        min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
     max_non_split_rounding_size_ = val_env * kMB;
   } else {
-    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
+    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value");
   }
   return i;
 }
@@ -132,12 +128,10 @@ size_t AllocatorConfig::parseGarbageCollectionThreshold(
     double val_env = stod(config[i]);
     TORCH_CHECK(
         val_env > 0 && val_env < 1.0,
-        "garbage_collect_threshold is invalid, set it in (0.0, 1.0)",
-        "");
+        "garbage_collect_threshold is invalid, set it in (0.0, 1.0)");
     garbage_collection_threshold_ = val_env;
   } else {
-    TORCH_CHECK(
-        false, "Error, expecting garbage_collection_threshold value", "");
+    TORCH_CHECK(false, "Error, expecting garbage_collection_threshold value");
   }
   return i;
 }
@@ -160,13 +154,11 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
         if (++i < config.size()) {
           val2 = stoi(config[i]);
         } else {
-          TORCH_CHECK(
-              false, "Error parsing roundup_power2_divisions value", "");
+          TORCH_CHECK(false, "Error parsing roundup_power2_divisions value");
         }
         TORCH_CHECK(
             val2 == 0 || llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ",
-            "");
+            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ");
 
         if (std::string_view(val1) == ">") {
           std::fill(
@@ -180,8 +172,7 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
           size_t val1_long = stoul(val1);
           TORCH_CHECK(
               llvm::isPowerOf2_64(val1_long),
-              "For roundups, the intervals have to be power of 2 ",
-              "");
+              "For roundups, the intervals have to be power of 2 ");
 
           size_t index = 63 - llvm::countLeadingZeros(val1_long);
           index = std::clamp(index, 0ul, roundup_power2_divisions_.size() - 1);
@@ -210,15 +201,14 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
       size_t val1 = stoi(config[i]);
       TORCH_CHECK(
           llvm::isPowerOf2_64(val1),
-          "For roundups, the divisons has to be power of 2 ",
-          "");
+          "For roundups, the divisons has to be power of 2 ");
       std::fill(
           roundup_power2_divisions_.begin(),
           roundup_power2_divisions_.end(),
           val1);
     }
   } else {
-    TORCH_CHECK(false, "Error, expecting roundup_power2_divisions value", "");
+    TORCH_CHECK(false, "Error, expecting roundup_power2_divisions value");
   }
   return i;
 }
@@ -227,7 +217,8 @@ size_t AllocatorConfig::parseAllocatorBackendConfig(
     const std::vector<std::string>& config,
     size_t i,
     bool& used_MallocAsync) {
-  std::string backend_name = c10::DeviceTypeName(device_type_) + "MallocAsync";
+  std::string backend_name =
+      c10::DeviceTypeName(device_type_, true) + "MallocAsync";
   consumeToken(config, ++i, ':');
 
   if (++i < config.size()) {
@@ -245,7 +236,7 @@ size_t AllocatorConfig::parseAllocatorBackendConfig(
     //     "Allocator backend parsed at runtime != "
     //     "allocator backend parsed at load time");
   } else {
-    TORCH_CHECK(false, "Error parsing allocator backend value", "");
+    TORCH_CHECK(false, "Error parsing allocator backend value");
   }
   return i;
 }
@@ -254,8 +245,8 @@ size_t AllocatorConfig::parsePinnedUseHostRegister(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
-  std::string env_name =
-      "pinned_use_" + c10::DeviceTypeName(device_type_) + "_host_register";
+  std::string env_name = "pinned_use_" +
+      c10::DeviceTypeName(device_type_, true) + "_host_register";
   if (++i < config.size()) {
     TORCH_CHECK(
         (config[i] == "True" || config[i] == "False"),
@@ -263,7 +254,7 @@ size_t AllocatorConfig::parsePinnedUseHostRegister(
         env_name);
     pinned_use_host_register_ = (config[i] == "True");
   } else {
-    TORCH_CHECK(false, "Error, expecting ", env_name, " value", "");
+    TORCH_CHECK(false, "Error, expecting ", env_name, " value");
   }
   return i;
 }
@@ -273,21 +264,20 @@ size_t AllocatorConfig::parsePinnedNumRegisterThreads(
     size_t i) {
   consumeToken(config, ++i, ':');
   if (++i < config.size()) {
-    size_t val2 = stoi(config[i]);
+    size_t val_env = stoi(config[i]);
     TORCH_CHECK(
-        llvm::isPowerOf2_64(val2),
-        "Number of register threads has to be power of 2 ",
-        "");
-    auto maxThreads = pinned_max_register_threads();
+        llvm::isPowerOf2_64(val_env),
+        "Number of register threads has to be power of 2");
+    // Based on the benchmark results, we see better allocation performance
+    // with 8 threads. However on future systems, we may need more threads
+    // and limiting this to 128 threads.
     TORCH_CHECK(
-        val2 <= maxThreads,
-        "Number of register threads should be less than or equal to " +
-            std::to_string(maxThreads),
-        "");
-    pinned_num_register_threads_ = val2;
+        val_env <= kPinnedMaxRegisterThreads,
+        "Number of register threads should be less than or equal to ",
+        kPinnedMaxRegisterThreads);
+    pinned_num_register_threads_ = val_env;
   } else {
-    TORCH_CHECK(
-        false, "Error, expecting pinned_num_register_threads value", "");
+    TORCH_CHECK(false, "Error, expecting pinned_num_register_threads value");
   }
   return i;
 }
@@ -302,8 +292,7 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
         "Expected a single True/False argument for pinned_use_background_threads");
     pinned_use_background_threads_ = (config[i] == "True");
   } else {
-    TORCH_CHECK(
-        false, "Error, expecting pinned_use_background_threads value", "");
+    TORCH_CHECK(false, "Error, expecting pinned_use_background_threads value");
   }
   return i;
 }
@@ -356,7 +345,8 @@ void AllocatorConfig::parseArgs(const char* env) {
       expandable_segments_ = (config_item_view == "True");
     } else if (
         config_item_view ==
-        ("release_lock_on_" + c10::DeviceTypeName(device_type_) + "malloc")) {
+        ("release_lock_on_" + c10::DeviceTypeName(device_type_, true) +
+         "malloc")) {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
       ++i;
@@ -371,7 +361,7 @@ void AllocatorConfig::parseArgs(const char* env) {
       release_lock_on_device_malloc_ = (config_item_view == "True");
     } else if (
         config_item_view ==
-        ("pinned_use_" + c10::DeviceTypeName(device_type_) +
+        ("pinned_use_" + c10::DeviceTypeName(device_type_, true) +
          "_host_register")) {
       i = parsePinnedUseHostRegister(config, i);
       used_native_specific_option = true;
@@ -395,8 +385,7 @@ void AllocatorConfig::parseArgs(const char* env) {
     TORCH_WARN(
         "backend:",
         device_type_,
-        "MallocAsync ignores max_split_size_mb,"
-        "roundup_power2_divisions, and garbage_collect_threshold.");
+        "MallocAsync ignores max_split_size_mb, roundup_power2_divisions, and garbage_collect_threshold.");
   }
 }
 
@@ -414,7 +403,5 @@ AllocatorConfig* GetAllocatorConfig(const at::DeviceType& t) {
       allocator_config, "AllocatorConfig for ", t, " is not set.");
   return allocator_config;
 }
-
-AllocatorConfig& AllocatorConfig::instance() {}
 
 } // namespace c10::CachingAllocator
