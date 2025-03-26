@@ -367,7 +367,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         f = io.BytesIO()
         torch.onnx.export(mod, (x_in,), f)
 
-        with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
+        with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported"):
             f = io.BytesIO()
             torch.onnx.export(torch.jit.script(mod), (x_in,), f)
 
