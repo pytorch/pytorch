@@ -330,6 +330,8 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args=[self.val_to_arg_str(desc.tensor)],
             arg_types=[desc.tensor.get_dtype()],
             arg_signatures=[None],
+            # these args are passed to initNDTMADescriptor, which is NOT a triton kernel
+            is_triton_kernel=False,
         )
 
         desc_name = desc.name
@@ -348,8 +350,27 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline(f"{fn}({args});")
 
     def generate_args_decl(
-        self, code: Union[IndentedBuffer, Self], call_args, arg_types, arg_signatures
+        self,
+        code: Union[IndentedBuffer, Self],
+        call_args,
+        arg_types,
+        arg_signatures,
+        is_triton_kernel=True,
     ):
+        """
+        Generates any declarations of args to pass into a kernel call, and then returns the arg names.
+
+        In more detail:
+        * declarations: e.g. this function has a side effect of generating lines like `auto var_0 = ...;`
+        * returns: a string with the list of args, e.g. "var_0, var_1"
+
+        call_args: list of call arguments
+        arg_types: list of argument types
+        arg_signatures: list with signatures of all the args
+        is_triton_kernel: whether these are passed into a triton kernel or not. In particular,
+                          calls to triton kernels will have an additional global scratch space
+                          arg injected at the front of the arg list.
+        """
         new_args: list[str] = []
 
         # Add more cases for other types as needed
@@ -402,10 +423,14 @@ class CppWrapperGpu(CppWrapperCpu):
             process_args(arg, arg_type, arg_signature)
 
         if (
-            global_scratch := self.device_codegen.cpp_global_scratch(
-                next(self.arg_var_id)
+            is_triton_kernel
+            and (
+                global_scratch := self.device_codegen.cpp_global_scratch(
+                    next(self.arg_var_id)
+                )
             )
-        ) is not None:
+            is not None
+        ):
             global_scratch_def, global_scratch_var = global_scratch
             code.writeline(global_scratch_def)
             new_args.append(f"&{global_scratch_var}")
