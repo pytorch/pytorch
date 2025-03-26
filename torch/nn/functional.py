@@ -2054,7 +2054,7 @@ See :class:`~torch.nn.Softplus` for more details.
 )
 
 
-def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
+def _get_softmax_dim(name: str, ndim: int, stacklevel: int = 3) -> int:
     warnings.warn(
         f"Implicit dimension choice for {name} has been deprecated. "
         "Change the call to include dim=X as an argument.",
@@ -2070,7 +2070,6 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
 def softmin(
     input: Tensor,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[DType] = None,
 ) -> Tensor:
     r"""Apply a softmin function.
@@ -2088,11 +2087,9 @@ def softmin(
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
+        return handle_torch_function(softmin, (input,), input, dim=dim, dtype=dtype)
     if dim is None:
-        dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
+        dim = _get_softmax_dim("softmin", input.dim())
     if dtype is None:
         ret = (-input).softmax(dim)
     else:
@@ -2103,7 +2100,6 @@ def softmin(
 def softmax(
     input: Tensor,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[DType] = None,
 ) -> Tensor:
     r"""Apply a softmax function.
@@ -2131,11 +2127,9 @@ def softmax(
 
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
+        return handle_torch_function(softmax, (input,), input, dim=dim, dtype=dtype)
     if dim is None:
-        dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
+        dim = _get_softmax_dim("softmax", input.dim())
     if dtype is None:
         ret = input.softmax(dim)
     else:
@@ -2220,7 +2214,6 @@ def gumbel_softmax(
 def log_softmax(
     input: Tensor,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[DType] = None,
 ) -> Tensor:
     r"""Apply a softmax followed by a logarithm.
@@ -2239,11 +2232,9 @@ def log_softmax(
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(
-            log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
+        return handle_torch_function(log_softmax, (input,), input, dim=dim, dtype=dtype)
     if dim is None:
-        dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
+        dim = _get_softmax_dim("log_softmax", input.dim())
     if dtype is None:
         ret = input.log_softmax(dim)
     else:
