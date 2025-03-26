@@ -217,7 +217,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
 
     non_self_args = fn.func.arguments.flat_all[1:]
     non_self_value_bindings = [
-        dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
+        dispatcher.argument(a) for a in non_self_args
     ]
 
     # Generate constructor / clone args for the generated struct.
