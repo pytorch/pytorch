@@ -160,7 +160,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 subgraph, name="subgraph", default_value=None, is_mutated=False
             )
         ]
-        for idx, arg in enumerate(*operands, *kwargs.items()):
+        for idx, arg in enumerate((*operands, *kwargs.items())):
             if isinstance(arg, tuple):
                 # kwargs value are treated as default argument
                 arg_name, example_value = arg
