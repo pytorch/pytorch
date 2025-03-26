@@ -112,6 +112,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -1882,6 +1883,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+#if defined(USE_CUDA) && !defined(USE_ROCM)
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
+#endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
 #endif
@@ -2395,12 +2399,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
-#ifdef _GLIBCXX_USE_CXX11_ABI
-  ASSERT_TRUE(set_module_attr(
-      "_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
-#else
-  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
 // See note [Pybind11 ABI constants]
 #define SET_STR_DEFINE(name) \

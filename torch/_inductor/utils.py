@@ -151,6 +151,24 @@ class align(sympy.Function):
             return value
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionMap:
+    """
+    Mapping from the partition info (e.g., input/output) to the graph info
+    """
+
+    # a unique id of graph partition
+    id: int
+
+    # map partition input/output indices to graph input/output indices. None indicates
+    # a partition input/output is not a graph input/output.
+    input_index_mapping: list[Optional[int]]
+    output_index_mapping: list[Optional[int]]
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
+
+
 def do_bench_using_profiling(
     fn: Callable[[], Any], warmup: int = 25, rep: int = 100
 ) -> float:
@@ -322,8 +340,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    for v in list(tys.values()):
-        tys[v] = v
+    tys.update({v: v for v in list(tys.values())})
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
@@ -617,9 +634,7 @@ def get_kernel_metadata(
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
             if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
-                node_to_idx_map = {}
-                for idx, n in enumerate(single_graph.nodes):
-                    node_to_idx_map[n] = idx
+                node_to_idx_map = {n: idx for idx, n in enumerate(single_graph.nodes)}
                 single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
             inductor_nodes.sort(
                 key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
@@ -888,7 +903,11 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
+                        if isinstance(
+                            result,
+                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
+                        ):
+                            result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
@@ -1337,7 +1356,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma
+    from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
@@ -1362,7 +1381,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     return (
         config.triton.enable_persistent_tma_matmul
-        and has_triton_tma()
+        and has_triton_tma_device()
         and all(_is_tma_compatible(m) for m in matrices)
     )
 
@@ -2605,10 +2624,24 @@ def register_op_dtype_propagation_rules(
     )
 
 
+def get_current_backend() -> str:
+    from torch._inductor.virtualized import V
+
+    device_str = V.graph.get_current_device_or_throw().type
+    if device_str == "cpu":
+        return config.cpu_backend
+    elif device_str == "mps":
+        return "mps"
+    else:
+        return config.cuda_backend
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
-    if config.triton.codegen_upcast_to_fp32 and (
+    if (
         dtype in (torch.float16, torch.bfloat16)
+        and config.triton.codegen_upcast_to_fp32
+        and get_current_backend() == "triton"
     ):
         return torch.float32
     return dtype
@@ -2741,3 +2774,16 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
+
+
+def get_ld_library_path() -> str:
+    path = os.environ.get("LD_LIBRARY_PATH", "")
+    if config.is_fbcode():
+        from libfb.py.parutil import get_runtime_path
+
+        runtime_path = get_runtime_path()
+        if runtime_path:
+            lib_path = os.path.join(runtime_path, "runtime", "lib")
+            path = os.pathsep.join([lib_path, path]) if path else lib_path
+
+    return path
