@@ -21,6 +21,7 @@ source /opt/intel/oneapi/compiler/latest/env/vars.sh
 source /opt/intel/oneapi/pti/latest/env/vars.sh
 source /opt/intel/oneapi/umf/latest/env/vars.sh
 export USE_STATIC_MKL=1
+export TORCH_XPU_ARCH_LIST=pvc,bmg-g21,lnl-m,ats-m150,arl-h,mtl-h
 
 WHEELHOUSE_DIR="wheelhousexpu"
 LIBTORCH_HOUSE_DIR="libtorch_housexpu"
