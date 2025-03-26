@@ -20,12 +20,12 @@ namespace at {
 // We haven't made a decision on that yet so we are temporarily banning random
 // operations inside of vmap while we gather user feedback.
 
-template <typename... Args> Tensor unsupportedRandomOp(Args... args) {
+template <typename... Args> static Tensor unsupportedRandomOp(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }
 
-template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
+template <typename... Args> static Tensor& unsupportedRandomOp_(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }

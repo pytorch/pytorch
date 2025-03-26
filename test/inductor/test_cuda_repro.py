@@ -4,6 +4,7 @@
 import functools
 import gc
 import math
+import os
 import sys
 import unittest
 
@@ -17,6 +18,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import (
     run_and_get_code,
@@ -39,6 +41,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     xfailIfPy312Plus,
 )
+
+
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 requires_multigpu = functools.partial(
@@ -315,6 +320,32 @@ class CudaReproTests(TestCase):
                 )
                 self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
 
+    def _test_split_reduction_impl(self, x):
+        def max(x):
+            return torch.max(x)
+
+        max_c = torch.compile(max)
+
+        out, code = run_and_get_code(max_c, x)
+        self.assertEqual(out, max(x))
+
+        if DO_PERF_TEST:
+            ms_c = benchmarker.benchmark_gpu(lambda: max_c(x))
+            ms_eager = benchmarker.benchmark_gpu(lambda: max(x))
+            print(f"compile {ms_c=:.03f}, eager {ms_eager=:.03f}")
+
+    def test_split_reduction_transposed(self):
+        x = torch.randn(4096, 8192, dtype=torch.bfloat16, device="cuda")
+        x = x.t().contiguous().t()
+
+        self._test_split_reduction_impl(x)
+
+    def test_split_reduction_channels_last(self):
+        x = torch.randn(4096, 8192, dtype=torch.bfloat16, device="cuda")
+        x = x.reshape([256, 256, 256, 2]).to(memory_format=torch.channels_last)
+
+        self._test_split_reduction_impl(x)
+
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
         from torch import device
@@ -550,7 +581,7 @@ class CudaReproTests(TestCase):
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         def autotune(configs, meta):
@@ -570,6 +601,7 @@ class CudaReproTests(TestCase):
                     reset_to_zero_arg_names=[],
                     optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
+                    inductor_meta={"grid_type": "Grid1D"},
                 )
 
             return decorator
@@ -609,8 +641,8 @@ class CudaReproTests(TestCase):
         inout2 = inout1.clone()
 
         stream0 = get_cuda_stream(0)
-        kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)
-        kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)
+        kernel.run(inout1, in0, xnumel, stream=stream0)
+        kernel.run(inout2, in0, xnumel, stream=stream0)
 
         assert same(
             inout1, inout2, tol=0.001, equal_nan=True

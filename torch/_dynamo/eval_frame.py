@@ -323,9 +323,12 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and (
-            trace_rules.check(self._orig_mod.forward)
-            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+        elif config.wrap_top_frame or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and (
+                trace_rules.check(self._orig_mod.forward)
+                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -656,7 +659,12 @@ class _TorchDynamoContext:
                 except Unsupported as e:
                     if config.verbose:
                         raise
-                    raise e.with_traceback(None) from None
+                    # strip internal tracebacks from causes
+                    cur_exn: BaseException = e
+                    while cur_exn.__cause__ is not None:
+                        cur_exn.__cause__.with_traceback(None)
+                        cur_exn = cur_exn.__cause__
+                    raise e.with_traceback(None) from e.__cause__
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -757,12 +765,15 @@ class OptimizeContext(_TorchDynamoContext):
         )
 
         if config.compiled_autograd:
+            _dynamic = self._dynamic
+            if _dynamic is None:
+                _dynamic = not torch._dynamo.config.assume_static_by_default
 
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=self._dynamic
+                    compiler_fn, dynamic=_dynamic
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -893,49 +904,35 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
-def raise_if_dynamo_unavailable() -> None:
+def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
+        3,
+        13,
+        3,
+    ):
         raise RuntimeError(
-            "torch.compile is not supported on Python built with GIL disabled"
+            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
+            "Please use Python 3.13.3+."
         )
 
 
-def is_dynamo_supported() -> bool:
+def is_dynamo_supported():
     try:
-        raise_if_dynamo_unavailable()
+        check_if_dynamo_supported()
         return True
     except Exception:
         return False
 
 
-def raise_if_inductor_unavailable(device: torch.device | str | None = None) -> None:
-    from torch._inductor.codegen.common import (
-        get_scheduling_for_device,
-        init_backend_registration,
-    )
-
-    raise_if_dynamo_unavailable()
-
-    init_backend_registration()
-
-    if device is None:
-        device = torch.get_default_device()
-    elif isinstance(device, str):
-        device = torch.device(device)
-
-    scheduling_factory = get_scheduling_for_device(device.type)
-    if scheduling_factory is None:
-        raise RuntimeError(
-            f"No Inductor scheduling factory registered for {device.type}"
-        )
-    scheduling_factory(None).raise_if_unavailable(device)
+def check_if_inductor_supported():
+    check_if_dynamo_supported()
 
 
-def is_inductor_supported(device: torch.device | str | None = None) -> bool:
+def is_inductor_supported():
     try:
-        raise_if_inductor_unavailable(device)
+        check_if_inductor_supported()
         return True
     except Exception:
         return False
@@ -998,7 +995,7 @@ def _optimize(
         @torch._dynamo.optimize()
         def toy_example(a, b): ...
     """
-    raise_if_dynamo_unavailable()
+    check_if_dynamo_supported()
     check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
@@ -1566,7 +1563,7 @@ def export(
         f = _f
         specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
-        raise_if_dynamo_unavailable()
+        check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
             assert aten_graph, (
