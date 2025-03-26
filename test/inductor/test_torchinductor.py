@@ -14178,12 +14178,43 @@ if RUN_GPU:
 
                 return torch.cond(p, true_fn, false_fn, [b])
 
+            compiled_f = torch.compile(f)
+
+            # static shape
             p = torch.tensor([True], device=self.device)
             a = torch.ones([2, 3], device=self.device)
-
-            compiled_f = torch.compile(f)
             eager_out = f(p, a)
             compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+            # dynamic shape with backed symint
+            p = torch.tensor([True], device=self.device)
+            a = torch.ones([4, 5], device=self.device)
+            eager_out = f(p, a)
+            compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_graph_partition_unbacked_symint_multi_output_layout(self):
+            def f(p, size_tensor):
+                size_val = size_tensor.item()
+                b = torch.ones([size_val, 3], device="cuda")
+
+                def true_fn(x):
+                    return torch.cos(x), torch.cos(x) + 1
+
+                def false_fn(x):
+                    return torch.sin(x), torch.sin(x) + 1
+
+                cond_out = torch.cond(p, true_fn, false_fn, [b])
+                return cond_out[0] + cond_out[1]
+
+            compiled_f = torch.compile(f)
+            p = torch.tensor([True], device="cuda")
+            size_tensor = torch.tensor(2, device="cuda")
+            eager_out = f(p, size_tensor)
+            compiled_out = compiled_f(p, size_tensor)
             self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
@@ -14209,9 +14240,6 @@ if RUN_GPU:
             self.assertEqual(compiled_out, f(x, y))
 
         @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
-        # https://github.com/halide/Halide/issues/8308
-        @config.patch("halide.scheduler_cpu", "Mullapudi2016")
-        @config.patch("halide.scheduler_cuda", "Li2018")
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_symint_from_nested_indirect_indexing(self):

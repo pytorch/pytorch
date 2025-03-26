@@ -2261,7 +2261,7 @@ class Scheduler:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
-                node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
+                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
@@ -2326,7 +2326,7 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
-            for s in out.get_unbacked_symbol_uses():
+            for s in out.get_free_symbol_uses(unbacked_only=True):
                 assert s in unbacked_symbol_to_origin_node, (
                     f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                 )
@@ -4065,9 +4065,13 @@ class Scheduler:
                     | free_symbols(layout.stride)
                     | free_symbols(layout.offset)
                 )
-            if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                # symint may be used as index in layout.target
-                free_symbol_uses.update(get_layout_symints(layout.target))
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    # symint may be used as index in layout.target
+                    free_symbol_uses.update(get_layout_symints(layout.target))
+            else:
+                assert layout is None, (
+                    f"Expect layout to be None but found layout={layout}"
+                )
             return free_symbol_uses
 
         def get_scheduler_node_symbol_uses(
@@ -4094,12 +4098,13 @@ class Scheduler:
             Gets symbols used in input node shapes, strides, and offsets.
             """
             if isinstance(node, ir.TorchBindObject):
+                # TorchBindObject does not involve dynamic shapes yet
                 return OrderedSet()
             elif isinstance(node, ir.IRNode):
                 return get_layout_symints(node)
-            elif isinstance(node, sympy.Expr):
-                return OrderedSet(node)
             else:
+                # node cannot be sympy.Expr since node comes from read_writes and
+                # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
         def filter_symbols(
@@ -4121,9 +4126,6 @@ class Scheduler:
                         SymT.UNBACKED_INT,
                         SymT.UNBACKED_FLOAT,
                         SymT.PRECOMPUTED_SIZE,
-                        SymT.XBLOCK,
-                        SymT.YBLOCK,
-                        SymT.ZBLOCK,
                     ),
                 )
             )
