@@ -89,6 +89,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
+      !{{ set_runner_specific_vars() }}
 {%- if os == "windows-arm64" %}      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
@@ -140,7 +141,6 @@ jobs:
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
 {%- endif %}
-      !{{ set_runner_specific_vars() }}
       - name: Populate binary env
         shell: bash
         run: |
