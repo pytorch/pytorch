@@ -518,8 +518,6 @@ void f8f8bf16_rowwise_impl_sm89(
   using ThreadblockSwizzle =
       cutlass::gemm::threadblock::ThreadblockSwizzleStreamK;
 
-  // TODO: instead of fixing these values, implement logic alike to
-  // what is used for SM90+.
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
 
   using Operator = std::conditional_t<
