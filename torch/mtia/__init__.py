@@ -29,6 +29,8 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()
 
+rng_supported_mesh = True
+
 
 if hasattr(torch._C, "_mtia_exchangeDevice"):
     _exchange_device = torch._C._mtia_exchangeDevice
