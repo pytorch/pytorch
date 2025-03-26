@@ -700,11 +700,6 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   return -1;
 }
 
-bool MPSHeapAllocatorImpl::hasBuffer(const void* ptr) {
-  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
-  return buffer_block;
-}
-
 void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
