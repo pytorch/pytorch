@@ -838,8 +838,7 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
         python_include_dirs.append(python_include_path)
 
     if _IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        python_lib_path = [(Path(sysconfig.get_path("include", scheme="nt" )).parent / "libs").absolute()]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
