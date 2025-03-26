@@ -93,6 +93,7 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -123,12 +124,9 @@ class TestFxGraphCache(TestCase):
         a_orig = torch.rand(25, dtype=dtype, device=device)
         b_orig = torch.rand(5, 5, dtype=dtype, device=device)
 
-        compile_threads = 1 if use_static_cuda_launcher else config.compile_threads
-
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_cuda_launcher=use_static_cuda_launcher,
-            compile_threads=compile_threads,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -985,6 +983,7 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_cuda_launcher", (False, True))
     def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
