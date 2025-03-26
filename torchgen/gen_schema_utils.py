@@ -86,7 +86,7 @@ class FunctionSchemaGen:
         example_outputs: tuple[Any, ...],
     ) -> FunctionSchema:
         args = []
-        for i, (name, inp) in enumerate(example_inputs):
+        for name, inp in example_inputs:
             args.append(ArgumentGen.from_example(name, inp, None, None))
         # ignore the annotations and other attributes for now, we could add more when needed.
         arguments = Arguments(
