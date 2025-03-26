@@ -274,7 +274,7 @@ def make_tensor_mismatch_msg(
         actual_flat = actual_flat.to(torch.int64)
         expected_flat = expected_flat.to(torch.int64)
 
-    if actual.dtype.is_floating_point() and actual.dtype.element_size() == 1:
+    if actual.dtype.is_floating_point and actual.element_size() == 1:
         actual_flat = actual_flat.to(torch.float32)
         expected_flat = expected_flat.to(torch.float32)
     abs_diff = torch.abs(actual_flat - expected_flat)

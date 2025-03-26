@@ -149,9 +149,12 @@ class TestDTypeInfo(TestCase):
             torch.float8_e5m2fnuz,
             torch.float8_e8m0fnu,
         ]:
-            x = torch.tensor([3.14, 3.14], dtype=dtype)
+            x = torch.tensor([1.0, 3.14], dtype=dtype)
             y = torch.tensor([3.14, 3.14], dtype=dtype)
-            torch.testing.assert_close(x, y)
+            z = torch.tensor([1.0, 3.14], dtype=dtype)
+            with self.assertRaises(AssertionError):
+                torch.testing.assert_close(x, y)
+            torch.testing.assert_close(x, z)
 
 
 if __name__ == "__main__":
