@@ -18,6 +18,7 @@ from .memory_format import (
     convert_conv2d_weight_memory_format,
     convert_conv3d_weight_memory_format,
 )
+from .scale_grad import scale_grad_, scale_grad_autograd_apply
 from .spectral_norm import remove_spectral_norm, spectral_norm
 from .weight_norm import remove_weight_norm, weight_norm
 
@@ -25,6 +26,8 @@ from .weight_norm import remove_weight_norm, weight_norm
 __all__ = [
     "clip_grad_norm",
     "clip_grad_norm_",
+    "scale_grad_",
+    "scale_grad_autograd_apply",
     "clip_grads_with_norm_",
     "clip_grad_value_",
     "convert_conv2d_weight_memory_format",

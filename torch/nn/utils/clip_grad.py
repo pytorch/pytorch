@@ -44,6 +44,7 @@ def _no_grad(func):
 @_no_grad
 def _get_total_norm(
     tensors: _tensor_or_tensors,
+    scaler: Optional[Tensor] = None,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
@@ -117,6 +118,7 @@ def _clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
+    scaler: Optional[Tensor] = None,
     foreach: Optional[bool] = None,
 ) -> None:
     r"""Scale the gradients of an iterable of parameters given a pre-calculated total norm and desired max norm.
@@ -181,6 +183,7 @@ def clip_grad_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     norm_type: float = 2.0,
+    scaler: Optional[Tensor] = None,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
 ) -> torch.Tensor:
@@ -217,7 +220,7 @@ def clip_grad_norm_(
         parameters = list(parameters)
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
-    _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
+    _clip_grads_with_norm_(parameters, max_norm, total_norm, scaler, foreach)
     return total_norm
 
 
