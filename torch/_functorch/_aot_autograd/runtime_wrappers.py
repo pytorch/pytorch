@@ -1935,6 +1935,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def forward(ctx, *deduped_flat_tensor_args):
+                print("XXX CompiledFunction.forward RUNTIME")
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
                     bw_state = args[backward_state_indices[0]]
@@ -1989,6 +1990,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
+                from contextlib import nullcontext
+                # TODO XXX: Disable eager saved tensors hooks properly
+                # with torch.autograd.graph.disable_saved_tensors_hooks("TBD") if torch._C._autograd._saved_tensors_hooks_is_enabled() else nullcontext():
                 ctx.save_for_backward(
                     *(
                         x.detach() if x._is_view() else x
@@ -2080,6 +2084,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                print("XXX CompiledFunction.backward RUNTIME")
                 all_args = _backward_prologue_functional(
                     ctx.saved_tensors,
                     ctx.symints,

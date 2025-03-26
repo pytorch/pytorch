@@ -2458,7 +2458,11 @@ def _wrap_fx_proxy(
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
-    with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+    import contextlib
+
+    with (
+        contextlib.nullcontext()
+    ):  # torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.

@@ -471,6 +471,51 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_pop_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
+  m.def(
+      "_top_saved_tensors_default_hooks",
+      [](bool ignore_is_tracing) -> std::optional<std::pair<py::function, py::function>> {
+        auto out = at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing);
+
+        if (!out.has_value()) {
+          return std::nullopt;
+        }
+
+        auto [pack_hook, unpack_hook] = *out;
+
+        py::gil_scoped_acquire gil;
+
+        py::function pack_hook_ =
+            py::reinterpret_steal<py::function>(pack_hook.release());
+
+        py::function unpack_hook_ =
+            py::reinterpret_steal<py::function>(unpack_hook.release());
+
+        return std::make_pair(pack_hook_, unpack_hook_);
+      }
+
+  );
+  m.def(
+      "_get_all_saved_tensors_default_hooks",
+      [](bool ignore_is_tracing) -> std::optional<std::vector<std::pair<py::function, py::function>>> {
+        auto out = at::SavedTensorDefaultHooks::get_all_hooks(ignore_is_tracing);
+        if (!out.has_value()) {
+          return std::nullopt;
+        }
+
+        // TODO XXX: Why gil is needed here and why we do release?
+        py::gil_scoped_acquire gil;
+
+        std::vector<std::pair<py::function, py::function>> ret;
+        for (auto [pack_hook, unpack_hook] : *out) {
+          ret.push_back(std::make_pair(
+            py::reinterpret_steal<py::function>(pack_hook.release()),
+            py::reinterpret_steal<py::function>(unpack_hook.release())
+          ));
+        }
+        return ret;
+      }
+
+  );
 
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
@@ -1587,3 +1632,4 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace torch::autograd
+ 

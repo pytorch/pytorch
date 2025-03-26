@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
@@ -29,12 +30,13 @@ from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import is_sym_node, make_fx
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torchgen.utils import dataclass_repr
+from torch.types import py_sym_types
 
 from .. import config
 from .autograd_cache import (
@@ -877,13 +879,160 @@ def aot_dispatch_autograd(
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-            num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
+            num_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = [
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
+            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_saved_tensors = len(fw_outs_saved_for_bw) - num_symints_saved_for_bw
+
+            # TODO XXX: Note about handling saved_tensors_hooks
+            #
+            hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+
+            print(f"XXX JIT_COMP_RUNTIME_WRAP hooks:{hooks}")
+            # TODO XXX: Set compilation guards on hooks py objects, to recompile if previous hooks changed
+            if hooks:
+                # TODO: XXX Support stacked hooks
+                pack_hook, unpack_hook = hooks
+                assert pack_hook and unpack_hook
+                fw_g = fw_module.graph
+                bw_g = bw_module.graph
+                bw_g_inputs = bw_g.find_nodes(op="placeholder")
+                print(f"XXX FW_GRAPH BEFORE:{fw_g}")
+                print(f"XXX BW_GRAPH BEFORE:{bw_g}")
+
+                fw_out_n = fw_g.output_node()
+                fw_out_args = list(fw_out_n.args[0])
+                fw_outs_insert_tensors = []
+                fw_outs_insert_non_tensors = []
+                for saved in fw_outs_saved_for_bw:
+                    val = saved.meta["val"]
+                    if isinstance(val, torch.Tensor):
+                        pack_gm = make_fx(pack_hook)(val)
+                        pack_g = pack_gm.graph
+                        print(f"XXX PACK_GRAPH:{pack_g}")
+                        pack_out_val = pack_gm(val)
+                        # Install pack_g as eiplogue of fw_module and replace saved outputs with pack_g outputs
+                        pack_g_inputs = pack_g.find_nodes(op="placeholder")
+                        assert len(pack_g_inputs) == 1
+                        env = {pack_g_inputs[0]: saved}
+                        with fw_g.inserting_after(saved):
+                            new_out_n = None
+                            for node in pack_g.nodes:
+                                if node.op == "placeholder":
+                                    continue
+                                new_n = fw_g.node_copy(node, lambda n: env[n])
+                                env[node] = new_n
+                                if node.op == "output":
+                                    new_out_n = new_n
+
+                        assert new_out_n
+                        for n in pytree.tree_leaves(new_out_n.args[0]):
+                            if not isinstance(n, torch.fx.Node):
+                                continue
+
+                            out_val = n.meta["val"]
+                            if isinstance(out_val, torch.Tensor):
+                                fw_outs_insert_tensors.append(n)
+                            elif is_sym_node(n):
+                                fw_outs_insert_non_tensors.append(n)
+
+                        fw_g.erase_node(new_out_n)
+
+                        # Install unpack_g as prologue of bw_module
+                        unpack_gm = make_fx(unpack_hook)(pack_out_val)
+                        unpack_out_val = unpack_gm(pack_out_val)
+                        unpack_g = unpack_gm.graph
+                        print(f"XXX PACK_OUT_VAL:{pack_out_val}")
+                        print(f"XXX UNPACK_OUT_VAL:{unpack_out_val}")
+                        print(f"XXX UNPACK_GRAPH:{unpack_g}")
+
+
+                        def find_saved_in_bw_inputs(bw_inputs):
+                            for n in bw_inputs:
+                                # TODO: XXX Recheck validity of this identificaiton :)
+                                if n.name == saved.name:
+                                    return n
+
+                        bw_g_input = find_saved_in_bw_inputs(bw_g_inputs)
+                        assert bw_g_input
+                        # Replace bw_g input with copy of output of pack
+
+                        unpack_g_inputs = unpack_g.find_nodes(op="placeholder")
+                        env = {}
+                        # Adding unpack inputs to bw graph instead of saved
+                        for unp_in_n, val in zip(
+                            unpack_g_inputs, pytree.tree_leaves(pack_out_val)
+                        ):
+                            is_sym = isinstance(val, py_sym_types)
+                            if isinstance(val, torch.Tensor) or is_sym:
+                                new_node_name = bw_g_input.name + "_" + unp_in_n.name
+                                # Backward calling convention: ctx_symints...ctx_saved_tensors...
+                                if is_sym:
+                                    with bw_g.inserting_before(bw_g_inputs[0]):
+                                        new_n = bw_g.placeholder(new_node_name)
+                                else:
+                                    with bw_g.inserting_before(bw_g_inputs[num_saved_for_bw]):
+                                        new_n = bw_g.placeholder(new_node_name)
+                                new_n.meta["val"] = val
+                                env[unp_in_n] = new_n
+                            else:
+                                # Inline values of non-Tensor, non-SymScalars
+                                env[unp_in_n] = val
+
+                        new_out_n = None
+                        with bw_g.inserting_before(bw_g_inputs[-1]):
+                            for node in unpack_g.nodes:
+                                if node.op == "placeholder":
+                                    continue
+                                new_n = bw_g.node_copy(node, lambda n: env[n])
+                                env[node] = new_n
+                                if node.op == "output":
+                                    new_out_n = new_n
+
+                        # TODO XXX: Debug why unpack graph produces [node] instead of node
+                        # For unpack function
+                        # def unpack_dev_sym_cpu(packed):
+                        #   device, dim0, tensor = packed
+                        #   return tensor.to(device=device) * dim0
+                        #
+                        # assert len(new_out_n.args) == 1
+                        # print(f"XXX NEW_OUT_N.ARGS:{new_out_n.args}")
+                        # unpack_saved_tensor_n = new_out_n.args[0]
+                        unpack_saved_tensor_n = pytree.tree_leaves(new_out_n.args)[0]
+
+                        bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
+                        bw_g.erase_node(new_out_n)
+                        bw_g.erase_node(bw_g_input)
+                fw_out_n.args = (
+                    tuple(
+                        pytree.tree_leaves((
+                            fw_outs[:num_inner_fwd_outputs],
+                            fw_outs_insert_tensors,
+                            fw_outs_insert_non_tensors,
+                            symint_outs_saved_for_bw,
+                        ))
+                    ),
+                )
+                print(f"\nXXX FW_GRAPH AFTER:{fw_g}")
+                print(f"\nXXX BW_GRAPH AFTER:{bw_g}")
+                fw_g.lint()
+                bw_g.lint()
+                # TODO: Refactor compute below to deduplicate
+                fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
+                fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
+                num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
+                num_saved_for_bw = len(fw_outs_saved_for_bw)
+                symint_outs_saved_for_bw = [
+                    n for n in fw_outs_saved_for_bw if is_sym_node(n)
+                ]
+                num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+                num_saved_tensors = len(fw_outs_saved_for_bw) - num_symints_saved_for_bw
+
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+
 
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(

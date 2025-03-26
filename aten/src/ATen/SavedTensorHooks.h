@@ -15,7 +15,7 @@ namespace impl {
 
 struct TORCH_API SavedTensorDefaultHooksTLS {
   // PyObject is defined in c10/util/python_stub.h
-  std::stack<std::pair<c10::SafePyObject, c10::SafePyObject>> stack;
+  std::vector<std::pair<c10::SafePyObject, c10::SafePyObject>> stack;
 
   // See NOTE: [Disabling SavedTensorDefaultHooks] for context
   // NOTE: [disabled_error_message invariant]
@@ -36,7 +36,9 @@ struct TORCH_API SavedTensorDefaultHooks {
       c10::SafePyObject unpack_hook);
   static std::pair<c10::SafePyObject, c10::SafePyObject> pop_hooks();
   static std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-  get_hooks();
+  get_hooks(bool ignore_is_tracing = false);
+  static std::optional<std::vector<std::pair<SafePyObject, SafePyObject>>>
+  get_all_hooks(bool ignore_is_tracing = false);
   static void lazy_initialize();
 
   static const impl::SavedTensorDefaultHooksTLS& get_tls_state();
