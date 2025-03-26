@@ -283,7 +283,7 @@ class CausalBias(torch.Tensor):
         """Defines the behavior of torch.nn.functional.scaled_dot_product_attention when the attn_bias is an AttnBias"""
         if kwargs is None:
             kwargs = {}
-        if func == torch.nn.functional.scaled_dot_product_attention:
+        if func is torch.nn.functional.scaled_dot_product_attention:
             return cls._dispatch(*args, **kwargs)
         return super().__torch_function__(func, types, args, kwargs)
 
