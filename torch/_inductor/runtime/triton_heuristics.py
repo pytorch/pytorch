@@ -280,7 +280,8 @@ class CachingAutotuner(KernelInterface):
         Checks if every compiled kernel is statically launchable, which
         allows us to efficiently cache it in FXGraphCache
         """
-        assert self.compile_results
+        if not self.compile_results:
+            return False
         return all(
             isinstance(x, StaticTritonCompileResult) for x in self.compile_results
         )

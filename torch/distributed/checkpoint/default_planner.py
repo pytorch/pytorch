@@ -126,13 +126,10 @@ class DefaultSavePlanner(SavePlanner):
 
         return self.plan
 
-    def _dedup_save_plans(self, all_plans: list[SavePlan]) -> list[SavePlan]:
-        return dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
-
     def _create_global_plan(
         self, all_plans: list[SavePlan]
     ) -> tuple[list[SavePlan], Metadata]:
-        deduped_plans = self._dedup_save_plans(all_plans)
+        deduped_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(deduped_plans)
 
