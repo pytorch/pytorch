@@ -272,9 +272,8 @@ sycl::event scaled_matmul(
     const at::Tensor& scale_b,
     Attr attr,
     const std::vector<sycl::event>& deps = {}) {
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  dnnl::engine engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   // Validation checks have passed lets resize the output to actual size
   IntArrayRef mat1_sizes = mat1.sizes();
