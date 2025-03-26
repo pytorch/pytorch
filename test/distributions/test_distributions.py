@@ -152,7 +152,7 @@ def is_all_nan(tensor):
 Example = namedtuple("Example", ["Dist", "params"])
 
 
-# Register all distributions for generic tests.
+# Register all distributions for generic tests by appending to this list.
 def _get_examples():
     return [
         Example(
@@ -340,16 +340,6 @@ def _get_examples():
                 {
                     "concentration": torch.randn(1).exp().requires_grad_(),
                     "rate": torch.randn(1).exp().requires_grad_(),
-                },
-            ],
-        ),
-        Example(
-            GeneralizedPareto,
-            [
-                {
-                    "loc": torch.randn(5, 5, requires_grad=True).mul(10),
-                    "scale": torch.randn(5, 5).abs().requires_grad_(),
-                    "concentration": torch.randn(5, 5).div(10).requires_grad_(),
                 },
             ],
         ),
@@ -811,9 +801,19 @@ def _get_examples():
                 },
             ],
         ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.randn(5, 5, requires_grad=True).mul(10),
+                    "scale": torch.randn(5, 5).abs().requires_grad_(),
+                    "concentration": torch.randn(5, 5).div(10).requires_grad_(),
+                },
+            ],
+        ),
     ]
 
-
+# Register all distributions for bad examples by appending to this list.
 def _get_bad_examples():
     return [
         Example(
@@ -952,21 +952,6 @@ def _get_bad_examples():
                 {
                     "concentration": torch.tensor([1.0, 1.0], requires_grad=True),
                     "rate": torch.tensor([0.0, 0.0], requires_grad=True),
-                },
-            ],
-        ),
-        Example(
-            GeneralizedPareto,
-            [
-                {
-                    "loc": torch.tensor([0.0, 0.0], requires_grad=True),
-                    "scale": torch.tensor([-1.0, -100.0], requires_grad=True),
-                    "concentration": torch.tensor([0.0, 0.0], requires_grad=True),
-                },
-                {
-                    "loc": torch.tensor([1.0, 1.0], requires_grad=True),
-                    "scale": torch.tensor([0.0, 0.0], requires_grad=True),
-                    "concentration": torch.tensor([-1.0, -100.0], requires_grad=True),
                 },
             ],
         ),
@@ -1222,6 +1207,21 @@ def _get_bad_examples():
                 {
                     "concentration": torch.tensor([1.0, 1.0], requires_grad=True),
                     "rate": torch.tensor([0.0, 0.0], requires_grad=True),
+                },
+            ],
+        ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "scale": torch.tensor([-1.0, -100.0], requires_grad=True),
+                    "concentration": torch.tensor([0.0, 0.0], requires_grad=True),
+                },
+                {
+                    "loc": torch.tensor([1.0, 1.0], requires_grad=True),
+                    "scale": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "concentration": torch.tensor([-1.0, -100.0], requires_grad=True),
                 },
             ],
         ),
@@ -7003,8 +7003,6 @@ class TestJit(DistributionsTestCase):
                 expected,
                 actual,
                 msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-                atol=4e-5,
-                rtol=5e-6,
             )
 
     @set_default_dtype(torch.double)
