@@ -195,7 +195,6 @@ S390X_BLOCKLIST = [
     "functorch/test_ops",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
-    "test_quantization",
     "inductor/test_torchinductor_opinfo",
     # sysctl -n hw.memsize is not available
     "test_mps",

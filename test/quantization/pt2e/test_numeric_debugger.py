@@ -21,7 +21,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, IS_S390X, skipIfCrossRef, TestCase
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -78,6 +78,7 @@ class TestNumericDebugger(TestCase):
         )
         return prev_decomp_op_to_debug_handle_map
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -157,6 +158,7 @@ class TestNumericDebugger(TestCase):
         self._assert_each_node_has_debug_handle(ep)
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
     # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_re_export_preserve_handle(self):
@@ -176,6 +178,7 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     def test_run_decompositions_same_handle_id(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -196,6 +199,7 @@ class TestNumericDebugger(TestCase):
             set(debug_handle_map.values()), set(debug_handle_map_ref.values())
         )
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     def test_run_decompositions_map_handle_to_new_nodes(self):
         test_models = [
             TestHelperModules.TwoLinearModule(),
