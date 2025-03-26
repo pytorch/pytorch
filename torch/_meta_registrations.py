@@ -6228,17 +6228,64 @@ def meta_scaled_mm(
         )
 
         # determine scaling type and check input dimensions (refer to Blas.cpp op)
-        torch._check(
-            scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-            lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
-        )
+
         m, _k = self.shape
         n = mat2.size(1)
+
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
-            pass
+            torch._check(
+                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
+                lambda: "For tensorwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+            )
+        elif (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        ):
+            # blockwise scaling
+            block_size_k = 32
+            block_size_mn = 128
+
+            def ceil_div(a, b):
+                return (a + b - 1) // b
+
+            num_k_blocks = ceil_div(_k, block_size_k)
+            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+
+            expected_a_size = (
+                block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
+            )
+            expected_b_size = (
+                block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
+            )
+
+            if (
+                scale_a.numel() == expected_a_size
+                and scale_b.numel() == expected_b_size
+            ):
+                torch._check(
+                    scale_a.is_contiguous(),
+                    lambda: "scale_a must be contiguous",
+                )
+                torch._check(
+                    scale_b.is_contiguous(),
+                    lambda: "scale_b must be contiguous",
+                )
+            else:
+                torch._check(
+                    False,
+                    lambda: (
+                        "Invalid blockwise scaling configuration. "
+                        f"For blockwise scaling, scale_a should have {expected_a_size} elements, got {scale_a.numel()}, "
+                        f"scale_b should have {expected_b_size} elements, got {scale_b.numel()}."
+                    ),
+                )
         else:
-            # for non-tensorwise scaling, enforce 2D input tensors
+            torch._check(
+                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
+                lambda: "For rowwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+            )
+            # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
                 lambda: f"For non-tensorwise scaling, scale tensors must be 2D, but got {scale_a.dim()=} and {scale_b.dim()=}",
