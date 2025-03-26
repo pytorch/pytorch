@@ -582,6 +582,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss = model(inp).sum()
             loss.backward()
 
+    @skip_if_lt_x_gpu(1)
     def test_autocast_with_checkpoint(self):
         class ForwardModel(nn.Module):
             def __init__(self):
