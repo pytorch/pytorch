@@ -4795,7 +4795,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
 
     def test_no_triton_on_import(self):
-        """Test that Triton is not imported on first GPU use"""
+        """Test that Trition is not imported on first GPU use"""
         script = "import sys; import torch; torch.rand(2, device='cuda'); print('triton' in sys.modules)"
 
         rc = (

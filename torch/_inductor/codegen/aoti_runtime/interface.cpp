@@ -229,16 +229,6 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           /*validate_full_update*/ true);
 }
 
-AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
-    AOTInductorModelContainerHandle container_handle) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE({
-    container->free_inactive_constant_buffer();
-  })
-}
-
 AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
     AOTInductorModelContainerHandle container_handle,
     bool use_inactive,

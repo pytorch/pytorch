@@ -432,7 +432,7 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta && !disable_meta_reference()) {{
+      if (compute_reference_meta) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
@@ -447,7 +447,7 @@ def emit_view_functionalization_body(
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      if (compute_reference_meta && !disable_meta_reference()) {{
+      if (compute_reference_meta) {{
         at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       }}
       return {view_tensor_name};
@@ -473,7 +473,7 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta && !disable_meta_reference()) {{
+      if (compute_reference_meta) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
@@ -506,7 +506,7 @@ def emit_view_functionalization_body(
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      if (compute_reference_meta && !disable_meta_reference()) {{
+      if (compute_reference_meta) {{
         at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       }}
       return out;
@@ -715,7 +715,7 @@ def emit_inplace_functionalization_body(
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()} && !disable_meta_reference()) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technically all support meta tensors).

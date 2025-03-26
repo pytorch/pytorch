@@ -4,7 +4,6 @@ import math
 import tempfile
 import unittest
 from copy import deepcopy
-from itertools import product
 from typing import Any
 from unittest.mock import patch
 
@@ -45,6 +44,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfS390X,
 )
 
 
@@ -315,20 +315,15 @@ class TestOptimRenewed(TestCase):
 
             self.assertLess(closure().item(), initial_value)
 
-    @parametrize("num_dim", [0, 1, 2])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_tensor_lr(self, device, dtype, optim_info, num_dim):
+    def test_tensor_lr(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-
-        lr_devices = [device]
-        if _get_device_type(device) != "cpu":
-            lr_devices.append("cpu")
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        for optim_input, lr_device in product(all_optim_inputs, lr_devices):
+        for optim_input in all_optim_inputs:
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
             weight_c = weight.detach().clone().requires_grad_(True)
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
@@ -343,9 +338,7 @@ class TestOptimRenewed(TestCase):
             optimizer_r = optim_cls([weight, bias], **kwargs)
 
             try:
-                kwargs["lr"] = (
-                    torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
-                )
+                kwargs["lr"] = torch.tensor(kwargs["lr"])
                 optimizer = optim_cls([weight_c, bias_c], **kwargs)
             except ValueError as e:
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
@@ -372,9 +365,7 @@ class TestOptimRenewed(TestCase):
                     )
                 else:
                     closure(optimizer_r, weight, bias, inpt)
-                    optimizer_r.step()
                     closure(optimizer, weight_c, bias_c, inpt)
-                    optimizer.step()
 
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
@@ -590,6 +581,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
     @skipMPS
+    @xfailIfS390X
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls

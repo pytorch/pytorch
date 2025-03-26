@@ -7,10 +7,10 @@ torch.manual_seed(1337)
 
 
 class Net(torch.nn.Module):
-    def __init__(self, device, size=4):
+    def __init__(self, device):
         super().__init__()
-        self.w_pre = torch.randn(size, size, device=device)
-        self.w_add = torch.randn(size, size, device=device)
+        self.w_pre = torch.randn(4, 4, device=device)
+        self.w_add = torch.randn(4, 4, device=device)
 
     def forward(self, x):
         w_transpose = torch.transpose(self.w_pre, 0, 1)
@@ -30,7 +30,6 @@ class NetWithTensorConstants(torch.nn.Module):
 
 
 data = {}
-large_data = {}
 data_with_tensor_constants = {}
 
 
@@ -58,17 +57,6 @@ def generate_basic_tests():
                         "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
                     },
                 )
-                # Also store a .pt2 file using the aoti_compile_and_package API
-                pt2_package_path = torch._inductor.aoti_compile_and_package(
-                    torch.export.export(
-                        model,
-                        (x,),
-                        dynamic_shapes=dynamic_shapes,
-                    ),
-                    inductor_configs={
-                        "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
-                    },
-                )
 
             suffix = f"{device}"
             if use_runtime_constant_folding:
@@ -76,46 +64,12 @@ def generate_basic_tests():
             data.update(
                 {
                     f"model_so_path_{suffix}": model_so_path,
-                    f"pt2_package_path_{suffix}": pt2_package_path,
                     f"inputs_{suffix}": [x],
                     f"outputs_{suffix}": [ref_output],
                     f"w_pre_{suffix}": model.w_pre,
                     f"w_add_{suffix}": model.w_add,
                 }
             )
-
-
-def generate_large_tests():
-    device = "cuda"
-    model = Net(device, size=4096).to(device=device)
-    x = torch.randn((4096, 4096), device=device)
-    with torch.no_grad():
-        ref_output = model(x)
-
-    torch._dynamo.reset()
-    with torch.no_grad():
-        model_so_path = aot_compile(
-            model,
-            (x,),
-        )
-        # Also store a .pt2 file using the aoti_compile_and_package API
-        pt2_package_path = torch._inductor.aoti_compile_and_package(
-            torch.export.export(
-                model,
-                (x,),
-            ),
-        )
-
-    large_data.update(
-        {  # noqa: F541
-            "model_so_path": model_so_path,
-            "pt2_package_path": pt2_package_path,
-            "inputs": [x],
-            "outputs": [ref_output],
-            "w_pre": model.w_pre,
-            "w_add": model.w_add,
-        }
-    )
 
 
 # AOTI model which will create additional tensors during autograd.
@@ -132,15 +86,10 @@ def generate_test_with_additional_tensors():
     torch._dynamo.reset()
     with torch.no_grad():
         model_so_path = aot_compile(model, (x, y))
-        # Also store a .pt2 file using the aoti_compile_and_package API
-        pt2_package_path = torch._inductor.aoti_compile_and_package(
-            torch.export.export(model, (x, y))
-        )
 
     data_with_tensor_constants.update(
         {
             "model_so_path": model_so_path,
-            "pt2_package_path": pt2_package_path,
             "inputs": [x, y],
             "outputs": [ref_output],
             "w": model.w,
@@ -149,7 +98,6 @@ def generate_test_with_additional_tensors():
 
 
 generate_basic_tests()
-generate_large_tests()
 generate_test_with_additional_tensors()
 
 
@@ -162,7 +110,6 @@ class Serializer(torch.nn.Module):
 
 
 torch.jit.script(Serializer(data)).save("data.pt")
-torch.jit.script(Serializer(large_data)).save("large_data.pt")
 torch.jit.script(Serializer(data_with_tensor_constants)).save(
     "data_with_tensor_constants.pt"
 )

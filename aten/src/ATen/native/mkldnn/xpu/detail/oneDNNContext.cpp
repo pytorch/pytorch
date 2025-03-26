@@ -29,7 +29,8 @@ static inline void dnnl_delete(
 }
 
 GpuEngineManager::GpuEngineManager() {
-  c10::DeviceIndex device_count = c10::xpu::device_count_ensure_non_zero();
+  c10::DeviceIndex device_count = c10::xpu::device_count();
+  TORCH_INTERNAL_ASSERT(device_count > 0);
   for (const auto i : c10::irange(device_count)) {
     static dnnl::graph::allocator alloc =
         dnnl::graph::sycl_interop::make_allocator(dnnl_alloc, dnnl_delete);

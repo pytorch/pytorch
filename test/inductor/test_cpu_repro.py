@@ -3590,24 +3590,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         self.common(fn, (x,))
 
-    def test_issue_148058(self):
-        # Fix issue https://github.com/pytorch/pytorch/issues/148058
-        def fn(x):
-            x = F.gumbel_softmax(x, tau=1.0, hard=True)
-            x = torch.where(x > 0.5, x, torch.zeros_like(x))
-            x = torch.scatter(
-                x,
-                dim=1,
-                index=torch.ones(1, 2, dtype=torch.long),
-                src=torch.ones_like(x),
-            )
-            return x
-
-        metrics.reset()
-        x = torch.randn(1, 2)
-        # Only test for functionality since the output of gumbel_softmax has randomness
-        torch.compile(fn, backend="inductor")(x)
-
     def test_non_contiguous_index_with_constant_stride(self):
         def fn(x):
             x1 = x[:, :, :, ::2]
@@ -4139,8 +4121,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
@@ -4168,8 +4150,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
                 # check that there is no outer loop fusion.
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
@@ -4177,29 +4159,6 @@ class CPUReproTests(TestCase):
                 )
                 # check for parallel reduction.
                 self.assertEqual(metrics.parallel_reduction_count, 1)
-
-    def test_group_norm_large_size(self):
-        # https://github.com/pytorch/pytorch/issues/141541
-        # We are using the chunk size of 4096 for cascade summation,
-        # the reduction size of this test case exceeded it.
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.gn = torch.nn.GroupNorm(32, 32)
-
-            def forward(self, x):
-                return self.gn(x)
-
-        for dynamic in [True, False]:
-            torch._dynamo.reset()
-            metrics.reset()
-            mod = M().eval()
-            x = torch.randn(1, 32, 128, 128, 128)
-            with torch.no_grad():
-                expected = mod(x)
-                compiled_m = torch.compile(mod, dynamic=dynamic)
-                actual = compiled_m(x)
-                self.assertEqual(expected, actual)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):

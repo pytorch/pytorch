@@ -33,7 +33,6 @@ file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
   hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
-  torch_compile_options(c10_hip)
 
   # Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
   target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})

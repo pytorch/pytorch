@@ -398,12 +398,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
-    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
-        return self.features.select_index_dtype()
-
     @property
     def index_dtype(self) -> str:
-        return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
+        return self.dtype_to_str(self.features.select_index_dtype())
 
     def want_no_x_dim(self) -> bool:
         return False
@@ -427,14 +424,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             }
 
         grid_dims = ["x", "y", "z"]
-        pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = pointwise_tensor_dims
+            tensor_dims = grid_dims
         else:
-            tensor_dims = pointwise_tensor_dims + reduction_dims
+            tensor_dims = grid_dims + reduction_dims
 
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
@@ -818,10 +814,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         return self.codegen_indexing(simp_index)
 
-    def active_range_trees(self) -> list[IterationRangesRoot]:
-        return [
+    def active_range_trees(self, reorder: bool = False) -> list[IterationRangesRoot]:
+        trees = [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
+        if reorder and len(trees) > 1:
+            count = sum(t.prefix in "xyz" for t in trees)
+            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
+                t.prefix for t in trees[:count]
+            ]
+            trees[:count] = reversed(trees[:count])
+        return trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -1553,10 +1556,13 @@ class SIMDScheduling(BaseScheduling):
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
+                assert kernel.meta is not None, "meta is None"
+                grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
                 )
 
             if only_gen_src_code:

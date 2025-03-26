@@ -34,7 +34,6 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # This tests basic MPS compile functionality
 
 
-@instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
@@ -83,35 +82,14 @@ class MPSBasicTests(TestCase):
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
-    pointwise_unary_ops = [
-        "i0",
-        "i0e",
-        "i1",
-        "i1e",
-        "erf",
-        "digamma",
-        "sinc",
-        "spherical_bessel_j0",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "entr",
-    ]
+    def test_pointwise_i0(self):
+        self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
 
-    @parametrize("op_name", pointwise_unary_ops)
-    def test_pointwise_unary_op(self, op_name):
-        self.common(
-            lambda x: getattr(torch.special, op_name)(x),
-            (torch.rand(128, 128),),
-            check_lowp=False,
-        )
+    def test_pointwise_i1(self):
+        self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_erf(self):
+        self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
 
     def test_pointwise_polygamma(self):
         self.common(
@@ -123,11 +101,22 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
+    def test_pointwise_digamma(self):
+        self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_sinc(self):
+        self.common(torch.special.sinc, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_zeta(self):
         self.common(
             torch.special.zeta,
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
+        )
+
+    def test_pointwise_spherical_bessel_j0(self):
+        self.common(
+            torch.special.spherical_bessel_j0, (torch.rand(128, 128),), check_lowp=False
         )
 
     def test_pointwise_xlog1py(self):
@@ -136,6 +125,9 @@ class MPSBasicTests(TestCase):
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
+
+    def test_pointwise_entr(self):
+        self.common(torch.special.entr, (torch.rand(128, 128),), check_lowp=False)
 
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
@@ -161,15 +153,12 @@ for test_name in [
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
-    "test_angle",
     "test_any",
     "test_arange5",
     "test_argmax_min_int32",
-    "test_argmax_argmin1",
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
-    "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
@@ -180,7 +169,6 @@ for test_name in [
     "test_cumsum_inf",
     "test_custom_op_2",
     "test_div1",
-    "test_div2",
     "test_div3",
     "test_erfinv",
     "test_floordiv",
@@ -195,15 +183,12 @@ for test_name in [
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
-    "test_low_memory_max_pool_dilation_1",
-    "test_low_memory_max_pool_dilation_2",
+    "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
-    "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
-    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",
@@ -222,7 +207,6 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
-    "test_vectorized_ops_masked",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",
@@ -231,6 +215,8 @@ for test_name in [
     "test_zero_dim_reductions",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
+
+instantiate_parametrized_tests(MPSBasicTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

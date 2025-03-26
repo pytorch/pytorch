@@ -200,10 +200,13 @@ def _gen_ops_cached(arch, version) -> list[Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "100":
-        if hasattr(cutlass_generator, "GenerateSM100"):
-            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
+        try:
+            from cutlass_generator import GenerateSM100  # type: ignore[import]
+
+            GenerateSM100(manifest, args.cuda_version)
+        except ImportError:
+            log.warning("Cannot find GenerateSM100. Only GenerateSM90 will be used. ")
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     elif arch == "90":
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
         cutlass_generator.GenerateSM80(manifest, args.cuda_version)

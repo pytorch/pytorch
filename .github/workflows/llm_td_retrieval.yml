@@ -27,7 +27,7 @@ jobs:
     needs: get-label-type
     steps:
       - name: Clone PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: pytorch/pytorch
           fetch-depth: 0
@@ -37,14 +37,14 @@ jobs:
         uses: ./pytorch/.github/actions/setup-linux
 
       - name: Clone CodeLlama
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/codellama
           ref: main
           path: codellama
 
       - name: Clone Target Determination Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.2

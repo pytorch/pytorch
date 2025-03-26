@@ -116,10 +116,7 @@ def broadcast_shapes(*shapes):
                     max_len = s
         result = [1] * max_len
 
-        from torch.fx.experimental.symbolic_shapes import (
-            guard_size_oblivious,
-            is_nested_int,
-        )
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
         for shape in shapes:
             if isinstance(shape, (int, torch.SymInt)):
@@ -130,23 +127,12 @@ def broadcast_shapes(*shapes):
                         raise RuntimeError(
                             f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})"
                         )
-
-                    # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
-                    if is_nested_int(shape[i]):
-                        # Broadcasting is allowed for (j0, 1) or (j0, j0);
-                        # not (j0, j1), (j0, 5), etc.
-                        if is_nested_int(result[i]) and guard_size_oblivious(
-                            shape[i] == result[i]
-                        ):
-                            continue
-                    else:
-                        # NB: result is initialized to 1 so this is effectively an
-                        # equals one test
-                        if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
-                            shape[i] == result[i]
-                        ):
-                            continue
-
+                    # NB: result is initialized to 1 so this is effectively an
+                    # equals one test
+                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
+                        shape[i] == result[i]
+                    ):
+                        continue
                     if result[i] != 1:
                         raise RuntimeError(
                             "Shape mismatch: objects cannot be broadcast to a single shape"

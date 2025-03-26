@@ -7,6 +7,7 @@ import functools
 import inspect
 import math
 import os
+import sys
 import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
@@ -842,12 +843,14 @@ class Tracer(TracerBase):
             self.submodule_paths = None
         except RuntimeError as e:
             if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
-                partial_fx_graph = self.graph.python_code(
-                    root_module="self",
-                    verbose=True,
-                ).src
-                e.partial_fx_graph = partial_fx_graph  # type: ignore[attr-defined]
-                raise
+                print(
+                    "\n"
+                    + self.graph.python_code(
+                        root_module="self",
+                        verbose=True,
+                    ).src,
+                    file=sys.stderr,
+                )
 
             raise
         finally:

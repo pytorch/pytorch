@@ -2,7 +2,7 @@
 
 set -ex
 
-NCCL_VERSION=v2.26.2-1
+NCCL_VERSION=v2.25.1-1
 CUDNN_VERSION=9.5.1.17
 
 function install_cusparselt_040 {
@@ -240,7 +240,7 @@ function prune_126 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.8.0.87
+  CUDNN_VERSION=9.7.1.26
   echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.3"
   rm -rf /usr/local/cuda-12.8 /usr/local/cuda
   # install CUDA 12.8.0 in the same container

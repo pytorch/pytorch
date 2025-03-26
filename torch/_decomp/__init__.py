@@ -332,6 +332,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.diagonal_copy,
             aten.dot,
             aten.vdot,
+            aten.elu,
             aten.elu_,
             aten.elu_backward,
             aten._embedding_bag,

@@ -12,7 +12,6 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.export import _draft_export
 from torch.utils import _pytree
 
 
@@ -63,13 +62,6 @@ class Result:
 
     @property
     def success(self) -> bool:
-        """Whether the capture was successful.
-
-        An exception can still be recorded even if the capture was successful. In
-        this case the exception is informational only. For example, draft_export
-        can record an exception if there are warnings during the export. The exceptions
-        will go into the onnx export report when report=True.
-        """
         return self.exported_program is not None
 
 
@@ -103,7 +95,6 @@ class CaptureStrategy(abc.ABC):
         self._timestamp = timestamp or datetime.datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S-%f"
         )
-        self._exception: Exception | None = None
 
     def __call__(
         self,
@@ -125,11 +116,7 @@ class CaptureStrategy(abc.ABC):
                 exception=e,
             )
         self._success(model)
-        return Result(
-            exported_program,
-            strategy=self.__class__.__name__,
-            exception=self._exception,
-        )
+        return Result(exported_program, strategy=self.__class__.__name__)
 
     @abc.abstractmethod
     def _capture(
@@ -236,39 +223,6 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         )
 
 
-class TorchExportDraftExportStrategy(CaptureStrategy):
-    def _capture(
-        self, model, args, kwargs, dynamic_shapes
-    ) -> torch.export.ExportedProgram:
-        ep = _draft_export.draft_export(
-            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
-        )
-        report = ep._report  # type: ignore[attr-defined]
-        if not report.successful():
-            self._exception = RuntimeError(str(report))
-            self._verbose_print(f"Draft Export report:\n{report}")
-        return ep
-
-    def _enter(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`..."
-        )
-
-    def _success(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ✅"
-        )
-
-    def _failure(self, model, e) -> None:
-        del e  # Unused
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ❌"
-        )
-
-
 class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
@@ -371,6 +325,5 @@ class JitTraceConvertStrategy(CaptureStrategy):
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrategy,
-    TorchExportDraftExportStrategy,
     JitTraceConvertStrategy,
 )

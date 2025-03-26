@@ -1,16 +1,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cpp_custom_type_hack.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/quantized/cpu/ACLUtils.h>
-#include <ATen/native/quantized/cpu/OnednnUtils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
-#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/Context.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/library.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -280,15 +279,12 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
     packed_bias.init(bias_desc, b.data_ptr());
     onednn_bias = std::optional<ideep::tensor>(packed_bias);
   }
-#if AT_MKLDNN_ACL_ENABLED()
-  if (qtype == c10::kPerTensorAffine) {
-    return c10::make_intrusive<PackedLinearWeightsACL>(PackedLinearWeightsACL{
-        std::move(weight_ptr), onednn_bias, weight, bias});
-  }
-#endif // #if AT_MKLDNN_ACL_ENABLED()
-  auto ret_ptr =
-      c10::make_intrusive<PackedLinearWeightsOnednn>(PackedLinearWeightsOnednn{
-          std::move(weight_ptr), onednn_bias, weight, bias});
+  auto ret_ptr = c10::make_intrusive<PackedLinearWeightsOnednn>(
+      PackedLinearWeightsOnednn{
+        std::move(weight_ptr),
+        onednn_bias,
+        weight,
+        bias});
   return ret_ptr;
 }
 

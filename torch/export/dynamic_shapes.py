@@ -40,7 +40,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 
-class _DimHintType(Enum):
+class _DimHint(Enum):
     """
     Enum for dynamic shape hints.
     - AUTO means automatic inference of shape (static or dynamic).
@@ -51,23 +51,6 @@ class _DimHintType(Enum):
     AUTO = auto()
     STATIC = auto()
     DYNAMIC = auto()
-
-
-@dataclasses.dataclass
-class _DimHint:
-    type: _DimHintType
-
-    @staticmethod
-    def AUTO():
-        return _DimHint(_DimHintType.AUTO)
-
-    @staticmethod
-    def DYNAMIC():
-        return _DimHint(_DimHintType.DYNAMIC)
-
-    @staticmethod
-    def STATIC():
-        return _DimHint(_DimHintType.STATIC)
 
 
 class _Dim(type):
@@ -223,7 +206,7 @@ class _DerivedDim(_Dim):
         )
 
 
-class Dim(type):
+def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     """
     :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
     It can be used to describe multiple possible values of a dynamic tensor dimension.
@@ -239,24 +222,22 @@ class Dim(type):
         A type that can be used in dynamic shape specifications for tensors.
     """
 
-    AUTO = _DimHint.AUTO()
-    DYNAMIC = _DimHint.DYNAMIC()
-    STATIC = _DimHint.STATIC()
+    from torch.utils._sympy.numbers import int_oo
 
-    def __new__(
-        metacls, name: str, *, min: Optional[int] = None, max: Optional[int] = None
-    ):
-        from torch.utils._sympy.numbers import int_oo
+    _min = 0 if min is None else min
+    _max = int_oo if max is None else max
+    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
+    dim = _Dim(name, (int,), {"min": _min, "max": _max})
+    dim.__module__ = getattr(
+        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
+    )
+    return dim
 
-        _min = 0 if min is None else min
-        _max = int_oo if max is None else max
-        assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-        assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
-        dim = _Dim(name, (int,), {"min": _min, "max": _max})
-        dim.__module__ = getattr(
-            inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
-        )
-        return dim
+
+Dim.AUTO = _DimHint.AUTO  # type: ignore[attr-defined]
+Dim.STATIC = _DimHint.STATIC  # type: ignore[attr-defined]
+Dim.DYNAMIC = _DimHint.DYNAMIC  # type: ignore[attr-defined]
 
 
 def dims(
@@ -268,7 +249,7 @@ def dims(
     Returns:
         A tuple of :func:`Dim` types.
     """
-    return tuple(Dim(name, min=min, max=max) for name in names)  # type: ignore[misc]
+    return tuple(Dim(name, min=min, max=max) for name in names)
 
 
 @dataclasses.dataclass
@@ -942,11 +923,11 @@ def _process_dynamic_shapes(
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
+                    if dim == _DimHint.AUTO:
                         torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
+                    elif dim == _DimHint.STATIC:
                         torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
+                    elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
@@ -959,11 +940,11 @@ def _process_dynamic_shapes(
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
+                    if dim == _DimHint.AUTO:
                         torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
+                    elif dim == _DimHint.STATIC:
                         torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
+                    elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
@@ -1082,7 +1063,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             expr = sympy.sympify(expr)
             if isinstance(expr, sympy.Number):
                 # static, integer
-                shape_fixes[name] = int(expr)  # type: ignore[assignment]
+                shape_fixes[name] = int(expr)
             else:
                 # relation or derived dim
                 shape_fixes[name] = expr
