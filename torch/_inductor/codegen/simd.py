@@ -1729,10 +1729,11 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 # score by number of elements
-                score = V.graph.sizevars.size_hint(
+                score = V.graph.sizevars.atomically_apply_size_hint(
                     sympy_product(
                         size for size, stride in zip(ranges, strides) if stride != 0
-                    )
+                    ),
+                    fallback=config.unbacked_symint_fallback,
                 )
                 if dep.name in write_names:
                     # ngimel said contiguous writes is more important than reads
@@ -1742,11 +1743,8 @@ class SIMDScheduling(BaseScheduling):
                 if CandidateTiling.is_good_size(tiled_groups[1]):
                     score *= 2
 
-                if (
-                    V.graph.sizevars.size_hint(
-                        score - sympy_product(itertools.chain(ranges, reduction_ranges))
-                    )
-                    >= 0
+                if V.graph.sizevars.statically_known_geq(
+                    score, sympy_product(itertools.chain(ranges, reduction_ranges))
                 ):
                     tilings.append(
                         CandidateTiling(
@@ -1769,7 +1767,6 @@ class SIMDScheduling(BaseScheduling):
             return []
 
         # Tile either pointwise or reduction dims.
-        pointwise_ranges, reduction_ranges = node.get_ranges()
         partial_tilings = tile_ranges(
             is_pointwise,
             pointwise_ranges if is_pointwise else reduction_ranges,
@@ -2014,13 +2011,13 @@ class SIMDScheduling(BaseScheduling):
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                if V.graph.sizevars.statically_known_equals(a1 - b1, 0):
                     return None
-                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                if V.graph.sizevars.statically_known_lt(a1 - b1, 0):
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                assert V.graph.sizevars.statically_known_gt(a1 - b1, 0)
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
@@ -2116,8 +2113,9 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s)
-        return s >= 32 and (s % 32 == 0)
+        return V.graph.sizevars.statically_known_geq(
+            s, 32
+        ) and V.graph.sizevars.statically_known_multiple_of(s, 32)
 
 
 class CantSplit(Exception):

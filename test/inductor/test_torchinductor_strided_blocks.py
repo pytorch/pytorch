@@ -928,6 +928,36 @@ class CommonTemplate:
         # Check for 3D tiling
         self.assertIn("ZBLOCK", code)
 
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_size_on_non_contig_dim(self):
+        def foo(x, lengths):
+            unbacked = lengths.item()
+            torch._check_is_size(unbacked)
+
+            tiled = x.tile(1, unbacked, 7)
+            # permute creates split in middle with unbacked symint in first range
+            # ranges: [30*u0, 7, 100]
+            permute120 = tiled.permute([1, 2, 0])
+            return permute120.cos()
+
+        inps = (
+            torch.rand((100, 30, 1), device=self.device, dtype=torch.float32),
+            torch.scalar_tensor(16, device=self.device, dtype=torch.int32),
+        )
+
+        with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
+            run_and_compare(
+                self,
+                foo,
+                *inps,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=0,
+                config_patches={
+                    "triton.max_tiles": 3,
+                    "triton.prefer_nd_tiling": True,
+                },
+            )
+
     # block_ptr advancements should also be deferrered conditional
     # on the associated buffer not being removed
     # in this case the bernoulli operation is fused with the following sum
