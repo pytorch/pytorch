@@ -510,6 +510,46 @@ def persistent_mm_options(mat1, mat2):
         TMA_SIZE=TMA_DESCRIPTOR_SIZE,
     )
 
+def scaled_mm_options(  # type: ignore[no-untyped-def]
+    config,  # triton.Config
+    sym_m: sympy.core.numbers.Integer,
+    sym_n: sympy.core.numbers.Integer,
+    sym_k: sympy.core.numbers.Integer,
+    layout: Layout,
+    scale_a,
+    scale_b,
+    use_fast_accum: bool,
+    device_tma: bool = False,
+) -> dict[str, Any]:
+    def are_compatible_scales(size_a: Sequence[int], size_b: Sequence[int]) -> bool:
+        # Same sized scales are compatable
+        if len(size_a) == len(size_b):
+            return True
+
+        # Both need to be scalars or len(1) tensors
+        if len(size_a) <= 1 and len(size_b) <= 1:
+            return True
+
+        return False
+
+    size_a, size_b = scale_a.get_size(), scale_b.get_size()
+    assert are_compatible_scales(size_a, size_b), (
+        "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+        f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+    )
+
+    mm_template_options = mm_options(config, sym_m, sym_n, sym_k, layout)
+
+    mm_template_options["ACC_TYPE"] = "tl.float32"
+    mm_template_options["USE_FAST_ACCUM"] = use_fast_accum
+    mm_template_options["SCALING_ROWWISE"] = len(size_a) == 2
+    
+    if device_tma:
+        mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
+        mm_template_options["NUM_SMS"] = get_num_sms()
+
+    return mm_template_options
+
 
 def mm_args(
     mat1,
@@ -563,6 +603,31 @@ def addmm_epilogue(dtype, alpha, beta):
 
     return epilogue
 
+def scale_mm_epilogue():
+    """
+    Create an epilogue function that applies scaling to matrix multiplication result
+    using the given scale factors.
+
+    Args:
+        dtype: The data type of the output
+        scale_a: Scale factor for matrix A
+        scale_b: Scale factor for matrix B
+
+    Returns:
+        Epilogue function that takes the accumulator and applies scaling
+    """
+    def epilogue(acc, inv_a_scale, inv_b_scale, bias=None):
+        # The epilogue function receives the accumulator (result of mat1 @ mat2)
+        # and applies the scaling factors
+        # In the original scaled_mm, we use inverse scales, so we multiply by them
+        mul_scales = V.ops.mul(inv_a_scale, inv_b_scale)
+        mul_acc = V.ops.mul(acc, mul_scales)
+        if bias is not None:
+            return V.ops.add(mul_acc, bias)
+        else:
+            return mul_acc
+
+    return epilogue
 
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """

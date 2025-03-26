@@ -3543,12 +3543,21 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):  # type: ignore[no-untyped-def]
-            assert len(index) == len(self.stride)
-            assert len(index) == len(self.size)
+            # assert len(index) == len(self.stride)
+            # assert len(index) == len(self.size)
+
+            # Calculate how many dimensions to pad
+            dim_diff = len(index) - len(self.size)
+            
+            # Create padded size and stride
+            padded_size = [1] * dim_diff + list(self.size)
+            padded_stride = [0] * dim_diff + list(self.stride)
             result = self.offset
-            for idx, stride, sz in zip(index, self.stride, self.size):
+
+            for idx, stride, sz in zip(index, padded_stride, padded_size):
                 if sz != 1:
                     result = result + idx * stride
+
             return result
 
         return indexer
@@ -3950,6 +3959,9 @@ class Buffer(IRNode):
     def is_zero_elements(self):  # type: ignore[no-untyped-def]
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
+    def is_scalar(self):  # type: ignore[no-untyped-def]
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 1))
+
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         # Loading from a zero-element buffer is a no-op
         if self.is_zero_elements():
@@ -3957,7 +3969,7 @@ class Buffer(IRNode):
 
         def loader(index):  # type: ignore[no-untyped-def]
             indexer = self.make_indexer()
-            return ops.load(self.name or "unnamed", indexer(index))
+            return ops.load(self.name or "unnamed", sympy.core.numbers.Zero() if self.is_scalar() else indexer(index))
 
         return loader
 

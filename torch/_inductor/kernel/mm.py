@@ -50,6 +50,10 @@ from .mm_common import (
     persistent_mm_configs,
     persistent_mm_grid,
     persistent_mm_options,
+    scaled_mm_configs,
+    scale_mm_epilogue,
+    scaled_mm_options,
+    scaled_persistent_mm_configs,
     should_fallback_to_aten,
     triton_config,
 )
@@ -124,7 +128,11 @@ mm_template = TritonTemplate(
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+
+        if USE_FAST_ACCUM:
+            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
+        else:
+            acc += tl.dot(a, b, out_dtype=ACC_TYPE)
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -310,6 +318,180 @@ persistent_tma_mm_template = TritonTemplate(
 """,
 )
 
+load_scales = r"""
+@triton.jit
+def load_scales(a_scale_ptr, b_scale_ptr, SCALING_ROWWISE: tl.constexpr):
+    if SCALING_ROWWISE:
+        # For row-wise scaling, we'll return the pointers
+        return a_scale_ptr, b_scale_ptr
+    else:
+        # For per-tensor scaling, we'll load the scalar values
+        a_scale = tl.load(a_scale_ptr)
+        b_scale = tl.load(b_scale_ptr)
+        return a_scale, b_scale
+"""
+
+
+apply_scaling = r"""
+@triton.jit
+def apply_scaling(
+    accumulator,
+    a_scale,
+    b_scale,
+    SCALING_ROWWISE: tl.constexpr,
+    offs_cm,
+    offs_cn,
+    M,
+    N,
+    stride_a_scale_m,
+    stride_b_scale_n,
+):
+    if SCALING_ROWWISE:
+        # For row-wise scaling, we need to load the scales for each row/column
+        a_scales = tl.load(
+            a_scale + (offs_cm * stride_a_scale_m),
+            mask=offs_cm < M,
+            other=0.0,
+        )
+        b_scales = tl.load(
+            b_scale + (offs_cn * stride_b_scale_n),
+            mask=offs_cn < N,
+            other=0.0,
+        )
+        acc_scale = a_scales[:, None] * b_scales[None, :]
+    else:
+        # For per-tensor scaling, we can directly use the loaded scalar values
+        acc_scale = a_scale * b_scale
+
+    return accumulator * acc_scale
+"""
+
+
+device_tma = r"""
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
+
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+
+    if SCALING_ROWWISE:
+        stride_a_scale_m = 1
+        stride_b_scale_n = 1
+    else:
+        stride_a_scale_m = 0
+        stride_b_scale_n = 0
+
+    start_pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    k_tiles = tl.cdiv(K, BLOCK_K)
+    num_tiles = num_pid_m * num_pid_n
+
+    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
+    a_desc_ptr = workspace_base
+    b_desc_ptr = workspace_base + TMA_SIZE
+
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
+        desc_ptr=a_desc_ptr,
+        global_address=A,
+        load_size=[BLOCK_M, BLOCK_K],
+        global_size=[M, K],
+        element_ty=A.dtype.element_ty,
+    )
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
+        desc_ptr=b_desc_ptr,
+        global_address=B,
+        load_size=[BLOCK_N, BLOCK_K],
+        global_size=[N, K],
+        element_ty=B.dtype.element_ty,
+    )
+
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+
+    tiles_per_SM = num_tiles // NUM_SMS
+    if start_pid < num_tiles % NUM_SMS:
+        tiles_per_SM += 1
+
+    tile_id = start_pid - NUM_SMS
+    ki = -1
+
+    pid_m = 0
+    pid_n = 0
+    offs_am = 0
+    offs_bn = 0
+
+    num_pid_in_group = GROUP_M * num_pid_n
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+    a_scale, b_scale = load_scales(A_inverse_scale, B_inverse_scale, SCALING_ROWWISE)
+
+    for _ in range(0, k_tiles * tiles_per_SM):
+        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
+        if ki == 0:
+            tile_id += NUM_SMS
+            group_id = tile_id // num_pid_in_group
+            first_pid_m = group_id * GROUP_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+            pid_m = first_pid_m + (tile_id % group_size_m)
+            pid_n = (tile_id % num_pid_in_group) // group_size_m
+
+            offs_am = pid_m * BLOCK_M
+            offs_bn = pid_n * BLOCK_N
+
+        offs_k = ki * BLOCK_K
+
+        a = tl._experimental_descriptor_load(
+            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
+        )
+        b = tl._experimental_descriptor_load(
+            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
+        )
+        if USE_FAST_ACCUM:
+            accumulator = tl.dot(a, b.T, accumulator)
+        else:
+            accumulator += tl.dot(a, b.T)
+
+        if ki == k_tiles - 1:
+            # Apply inverse scaling
+            offs_cm = offs_am + tl.arange(0, BLOCK_M)
+            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
+            # Apply scaling
+            accumulator = apply_scaling(
+                accumulator,
+                a_scale,
+                b_scale,
+                SCALING_ROWWISE,
+                offs_cm,
+                offs_cn,
+                M,
+                N,
+                stride_a_scale_m,
+                stride_b_scale_n,
+            )
+
+            idx_m = offs_cm[:, None]
+            idx_n = offs_cn[None, :]
+            mask = (idx_m < M) & (idx_n < N)
+            # inductor generates a suffix
+            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+"""
+
+
+scaled_mm_device_tma_template = TritonTemplate(
+    name="scaled_mm_device_tma",
+    grid=persistent_mm_grid,
+    source=device_tma + load_scales + apply_scaling,
+)
+
+
 
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
@@ -331,6 +513,10 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
     has_out_variant=False,
 )
 
+aten__fp8_mm = ExternKernelChoice(
+    torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
@@ -348,6 +534,15 @@ def mm_config_kwargs(device):
             "exclude": _is_large_block_for_cpu,
         }
     return {}
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -739,6 +934,110 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
     )
+
+
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
+def tuned_scaled_mm(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    bias=None,
+    scale_result=None,
+    out_dtype=None,
+    use_fast_accum=False,
+    layout=None,
+):
+    from torch._inductor.select_algorithm import realize_inputs
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._scaled_mm.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+
+    # check_supported_striding(mat_a, mat_b)
+    
+    scale_a, scale_b = realize_inputs(scale_a, scale_b)
+
+    # input_nodes: tuple[Any, ...]
+    # workaround for Inductor not supporting optional tensor input arguments
+    # if bias is None:
+
+    if not bias:
+        input_nodes = (mat_a, mat_b, scale_a, scale_b)
+        suffix_args = 2
+    else:
+        bias = realize_inputs(bias)
+        input_nodes = (mat_a, mat_b, scale_a, scale_b, bias)
+        suffix_args = 3
+
+    aten_choice = aten__fp8_mm.bind(
+        input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
+    )
+
+    choices= []
+    if use_aten_gemm_kernels():
+        choices.append(aten_choice)
+
+    _, is_nonzero = _is_static_problem(layout)
+
+    if is_nonzero and use_triton_template(layout, enable_float8=True):
+        if use_triton_tma_template(mat_a, mat_b) and bias is None:
+            for config in scaled_persistent_mm_configs(m, n, k):
+                kwargs = scaled_mm_options(
+                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum, device_tma=True
+                )
+                input_nodes = (mat_a, mat_b, scale_a, scale_b)
+                scaled_mm_device_tma_template.maybe_append_choice(
+                    choices,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    workspace_arg=get_tma_workspace_arg(
+                        num_tma_descriptors=2,
+                        device=mat_a.get_device(),
+                    ),
+                    **kwargs,
+                )
+        else:
+            for config in scaled_mm_configs(m, n, k):
+                if k == 16 and config.kwargs["BLOCK_M"] >= 64:
+                    continue  # Triton crashes in this case
+
+                # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+                # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+                if using_b200() and k < 32:
+                    continue
+
+                kwargs = scaled_mm_options(
+                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum
+                )
+                # possibly appends a TritonTemplateCaller to choices
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    **kwargs,
+                    suffix_args=suffix_args,
+                    epilogue_fn=scale_mm_epilogue(),
+                )
+
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
+
+    if should_fallback_to_aten(choices):
+        return aten_choice.output_node()
+
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+
 
 
 @functools.lru_cache(None)

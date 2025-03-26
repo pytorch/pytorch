@@ -820,10 +820,10 @@ class TritonTemplateKernel(TritonKernel):
                 output_index_str = (
                     f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
                 )
-
+            
             # Generate load code
             load_code = f"{output_name} = tl.load({input_name} + ({output_index_str})"
-
+        
             if mask:
                 load_code += f", mask={mask}, other={other})"
             else:
@@ -909,7 +909,6 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 epilogue_args.append(input_node.make_loader()(index_symbols))
-
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
