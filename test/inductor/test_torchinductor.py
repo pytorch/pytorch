@@ -10092,6 +10092,9 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    @skip_if_cpp_wrapper(
+        "cannot currently handle fallback ops with return types containing list[Tensor]"
+    )
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
