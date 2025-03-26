@@ -240,6 +240,7 @@ class TritonBundler:
         it can be written into a cache entry.
         This function also finalizes the current bundle.
         """
+        from torch._inductor import config
         if not TritonBundler.is_enabled():
             cls.end_compile()
             set_feature_use("triton_bundling", False)
@@ -296,7 +297,8 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                static_autotuners, static_kernel_names = cls.collect_static_autotuners()
+                if config.use_static_cuda_launcher:
+                    static_autotuners, static_kernel_names = cls.collect_static_autotuners()
                 cls.end_compile()
                 return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
                     kernel_names, static_kernel_names
@@ -317,6 +319,7 @@ class TritonBundler:
         Exclusive access means that no other process should be writing to
         or reading from the target directory.
         """
+        from torch._inductor import config
         if not TritonBundler.is_enabled():
             return None
 
@@ -370,7 +373,10 @@ class TritonBundler:
                     # Atomic on POSIX systems
                     os.replace(tmp_dir, directory)
 
-            static_kernel_names = TritonBundler.load_autotuners(
-                bundle.static_autotuners
-            )
+            if config.use_static_cuda_launcher:
+                static_kernel_names = TritonBundler.load_autotuners(
+                    bundle.static_autotuners
+                )
+            else:
+                static_kernel_names = []
             return TritonBundlerMetadata(kernel_names, static_kernel_names)
