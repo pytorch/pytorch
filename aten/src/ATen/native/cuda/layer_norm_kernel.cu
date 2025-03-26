@@ -508,6 +508,37 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 }
 
+template <typename T, typename T_ACC>
+__global__ void GammaBetaBackwardSimpleCUDAKernel(
+    int64_t M,
+    int64_t N,
+    const T* dY,
+    const T* X,
+    const T_ACC* mean,
+    const T_ACC* rstd,
+    T* dg,
+    T* db) {
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  if (j < N) {
+    T_ACC sum1 = 0;
+    T_ACC sum2 = 0;
+    for (int64_t i = 0; i < M; ++i) {
+      const int64_t index = i * N + j;
+      sum1 += dg == nullptr ? T_ACC(0)
+                            : static_cast<T_ACC>(dY[index]) *
+              (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
+              static_cast<T_ACC>(rstd[i]);
+      sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index]);
+    }
+    if (dg != nullptr) {
+      dg[j] = sum1;
+    }
+    if (db != nullptr) {
+      db[j] = sum2;
+    }
+  }
+}
+
 template <typename T, typename T_ACC,
 unsigned int block_dim_x,
 unsigned int block_dim_y,
@@ -1392,40 +1423,56 @@ void LayerNormBackwardKernelImplInternal(
     T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
 
 #if defined(USE_ROCM)
-    // For small batch size, do colwise reduce directly.
-    const int part_size = warp_size;
-    const dim3 threads2(warp_size, 4, 1);
-    const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
-    const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
-    const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
-    const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+    if (M < 128) {
+      // For small batch size, do colwise reduce directly.
+      const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
+      GammaBetaBackwardSimpleCUDAKernel<T, T_ACC>
+          <<<B, kCUDANumThreads, 0, cuda_stream>>>(
+              M,
+              N,
+              dY_data,
+              X_data,
+              mean_data,
+              rstd_data,
+              dgamma_data,
+              dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      // For small batch size, do colwise reduce directly.
+      const int part_size = warp_size;
+      const dim3 threads2(warp_size, 4, 1);
+      const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
+      const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+      const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+      const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
 
-    const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
-    Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
-    Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+      const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+      Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
+      Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
 
-    cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
-                    dY_data,
-                    X_data,
-                    M,N,
-                    mean_data,
-                    rstd_data,
-                    part_grad_gamma.template data_ptr<T_ACC>(),
-                    part_grad_beta.template data_ptr<T_ACC>());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+      cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
+                      dY_data,
+                      X_data,
+                      M,N,
+                      mean_data,
+                      rstd_data,
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
-    const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
-    const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
+      const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+      const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
+      const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
 
-    cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
-                    part_grad_gamma.template data_ptr<T_ACC>(),
-                    part_grad_beta.template data_ptr<T_ACC>(),
-                    part_size,
-                    M,N,
-                    dgamma_data,
-                    dbeta_data);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+      cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>(),
+                      part_size,
+                      M,N,
+                      dgamma_data,
+                      dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
 #else
     LaunchGammaBetaBackwardCUDAKernel(
       dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
