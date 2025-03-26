@@ -986,13 +986,13 @@ struct TORCH_API MPSPinnedAllocator : public MPSAllocator {
   DataPtr allocate(const size_t nbytes) override {
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
     void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
-    return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU, 0)};
+    return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU)};
   }
 
   DataPtr allocScalarBufferWithValue(void* value, size_t size) const override {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
-    return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU, 0)};
+    return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU)};
   }
 };
 
