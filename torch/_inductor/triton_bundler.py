@@ -302,6 +302,9 @@ class TritonBundler:
                     static_autotuners, static_kernel_names = (
                         cls.collect_static_autotuners()
                     )
+                else:
+                    static_autotuners = []
+                    static_kernel_names = []
                 cls.end_compile()
                 return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
                     kernel_names, static_kernel_names
