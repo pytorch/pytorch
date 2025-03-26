@@ -29,6 +29,9 @@ using is_infinity_op_fn = void (*)(TensorIteratorBase&);
 DECLARE_DISPATCH(is_infinity_op_fn, isposinf_stub)
 DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub)
 
+using is_close_fn = void (*)(TensorIteratorBase&, double, double, bool);
+DECLARE_DISPATCH(is_close_fn, isclose_stub);
+
 using mode_fn = void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
 DECLARE_DISPATCH(mode_fn, mode_stub)
 
