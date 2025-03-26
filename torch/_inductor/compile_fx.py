@@ -673,8 +673,8 @@ def _compile_fx_inner(
         f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
     )
 
-    if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
-        graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
+    if graph_kwargs.get("cudagraphs") is None:
+        graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -760,15 +760,6 @@ def _compile_fx_inner(
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
                 cache_key = key_info[0]
                 mb_compiled_graph._fx_graph_cache_key = cache_key
-                with dynamo_timed("save_compiled_kernels"):
-                    static_kernels = torch._inductor.async_compile.CompiledTritonKernels.get_statically_launchable_kernels()
-                    log.warning(
-                        "Saving %d compiled triton kernels", len(static_kernels)
-                    )
-                    if isinstance(mb_compiled_graph, CompiledFxGraph):
-                        mb_compiled_graph.static_compiled_triton_kernels = (
-                            static_kernels
-                        )
                 (
                     triton_bundle,
                     triton_bundler_meta,
@@ -849,15 +840,24 @@ def _compile_fx_inner(
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-        compiled_graph.post_compile(example_inputs, cudagraphs, constants)
+        compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
-    if log.isEnabledFor(logging.INFO):
+    if log.isEnabledFor(logging.INFO) and counters["aten_mm_info"]:
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
             name, m, n, k = key.split("_")
+            # example key 1: aten.mm_128_128_128
+            # example key 2: aten._scaled_mm.default_128_128_128
+            # below is a bit brittle, but should work
+            parts = key.split("_")
+            if len(parts) < 4:
+                log.info("Unable to parse key %s", key)
+                continue
+            name = "_".join(parts[:-3])
+            m, n, k = parts[-3:]
             mm_table_data.append([name, m, n, k, value])
         log.info("Overview info of inductor aten mms: ")
         log.info(
@@ -941,9 +941,6 @@ class _InProcessFxCompile(FxCompile):
         is_inference: bool = graph_kwargs.get("is_inference", False)
         extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]] = (
             graph_kwargs.get("extern_node_serializer", None)
-        )
-        boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
-            "boxed_forward_device_index", None
         )
 
         with (
@@ -1309,7 +1306,6 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         graph_kwargs,
                         inputs_to_check,
-                        boxed_forward_device_index,
                         recursively_apply_fns,
                     )
 
@@ -1826,12 +1822,22 @@ def compile_fx(
                                     "make sure torch.export() and torch.aot_compile() run on the same device."
                                 )
                     inputs_ = fake_inputs  # type: ignore[assignment]
-            return compile_fx(
-                model_,
-                inputs_,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
-                decompositions=decompositions,
-            )
+            from torch._export.non_strict_utils import _fakify_script_objects
+
+            fake_mode = detect_fake_mode(inputs_)
+            with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
+                patched_mod,
+                fake_args,
+                _,
+                _,
+                _,
+            ):
+                return compile_fx(
+                    patched_mod,
+                    fake_args,
+                    inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                    decompositions=decompositions,
+                )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
@@ -2154,6 +2160,7 @@ def compile_fx(
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
+                    boxed_forward_device_index=forward_device,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
