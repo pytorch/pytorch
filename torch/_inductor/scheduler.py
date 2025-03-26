@@ -57,6 +57,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    GraphPartitionMap,
     IndentedBuffer,
     is_collective,
     is_gpu,
@@ -1722,8 +1723,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         template_nodes = [x for x in filtered_nodes if x.is_template()]
         if template_nodes:
             log.debug(
-                "ComboKernels: %d template nodes are filtered",
-                OrderedSet([len(template_nodes)]),
+                "ComboKernels: %d template nodes are filtered: %s",
+                len(template_nodes),
+                template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
         return filtered_nodes
@@ -2771,9 +2773,6 @@ class Scheduler:
 
             return (fut, mod)
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
@@ -2784,10 +2783,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
-            choice_timings = multi_node.choice_timings
-            _, ms1 = multi_node.get_min_choice()
 
             # Eagerly compile and benchmark non-template nodes
+            choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -3061,7 +3059,7 @@ class Scheduler:
         fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
-        log.debug("ComboKernels: Generating with num_ck_nodes = %d...", num_ck_nodes)
+        log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
         ):
@@ -3095,7 +3093,7 @@ class Scheduler:
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
-            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodels",
+            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
             count,
             num_nodes_orig,
             len(self.nodes),
@@ -3964,6 +3962,9 @@ class Scheduler:
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+        if isinstance(node, FusedSchedulerNode):
+            return any(self.should_partition(snode) for snode in node.snodes)
+
         if not node.is_gpu():
             return True
 
@@ -3979,9 +3980,13 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if hasattr(node.node, "layout") and any(
-            isinstance(expr, sympy.Expr) and expr.free_symbols
-            for expr in node.node.layout.size
+        if (
+            hasattr(node.node, "layout")
+            and hasattr(node.node.layout, "size")
+            and any(
+                isinstance(expr, sympy.Expr) and expr.free_symbols
+                for expr in node.node.layout.size
+            )
         ):
             return True
 
@@ -4002,6 +4007,47 @@ class Scheduler:
                 name_to_node[name] = scheduler_buffer.node
 
         return name_to_node
+
+    def compute_graph_partition_maps(
+        self,
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        """
+        computes a mapping from partition input/output indices to graph input/output
+        indices for each partition.
+        """
+        name_to_graph_input_index = {
+            name: idx for idx, name in enumerate(V.graph.graph_inputs)
+        }
+        name_to_graph_output_index = {
+            name: idx for idx, name in enumerate(V.graph.get_output_names())
+        }
+
+        V.graph.partition_maps = []
+        for partition_id, signature in enumerate(signatures):
+            if signature.skip_cudagraph:
+                # Note: [Graph Partition Map for CUDAGraph]
+                # number of partition map should be the same as the number of generated
+                # partition functions. This assumption will be used when cudagraphify
+                # each partition function.
+                continue
+
+            input_mapping = []
+            for name in signature.input_nodes:
+                input_mapping.append(name_to_graph_input_index.get(name))
+
+            output_mapping = []
+            for node in signature.output_nodes:
+                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+
+            V.graph.partition_maps.append(
+                GraphPartitionMap(
+                    partition_id,
+                    input_mapping,
+                    output_mapping,
+                    signature.constant_names,
+                )
+            )
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4026,7 +4072,7 @@ class Scheduler:
             returned_output_names = output_names.intersection(unmet_output_names)
 
             # all reads/writes are partition inputs except those generated
-            # within the partition
+            # within the partition and tensor constants
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
@@ -4049,15 +4095,35 @@ class Scheduler:
                 for name in partition_input_names
                 if name in name_to_node
             }
+
+            # if an input tensor is not freed in the partition function, it should
+            # also be returned as an output. This brings benefits to cudagraph
+            # since the returned output tensor is a cudagraph managed tensor with
+            # a static tensor address.
+            extra_output_names = [
+                name
+                for name in partition_input_names
+                if name in name_to_node and name not in buffer_names_to_free
+            ]
+
+            returned_output_names.update(extra_output_names)
+
             output_nodes = [name_to_node[name] for name in returned_output_names]
-            signatures.append(
-                GraphPartitionSignature(
-                    input_nodes,
-                    output_nodes,
-                    input_deallocation,
-                    skip_cudagraph,
-                )
+
+            constant_names = [
+                name for name in partition_input_names if name in V.graph.constants
+            ]
+
+            partition_signature = GraphPartitionSignature(
+                input_nodes,
+                output_nodes,
+                input_deallocation,
+                skip_cudagraph,
+                constant_names,
             )
+
+            signatures.append(partition_signature)
+
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
@@ -4090,9 +4156,12 @@ class Scheduler:
             partitions.append(cur_partition)
             skip_cudagraphs.append(skip_cudagraph)
 
-        return partitions, self.get_graph_partition_signature(
+        signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
+        self.compute_graph_partition_maps(signatures)
+
+        return partitions, signatures
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -4148,6 +4217,13 @@ class Scheduler:
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
+
+        # See [Note: Graph Partition Map for CUDAGraph]
+        if num_partitions > 0:
+            assert V.graph.partition_maps is not None
+            assert num_partitions == len(V.graph.partition_maps), (
+                f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
+            )
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
