@@ -375,41 +375,15 @@ class BatchSampler(Sampler[list[int]]):
 
 class NewBatchSampler(BatchSampler):
     def __iter__(self) -> Iterator[list[int]]:
-        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         if isinstance(self.sampler, ArrayableSampler):
             indices = self.sampler.to_array()
 
             reminder_size = len(indices) % self.batch_size
-            if reminder_size > 0:
-                indices, last = indices[:-reminder_size], indices[-reminder_size:]
-            else:
-                last = None
-
-            indices_batched = indices.reshape(-1, self.batch_size)
-            for batch in indices_batched:
-                yield batch.tolist()
-
-            if not self.drop_last and last is not None:
-                yield last.tolist()
-
-
-class NewBatchSampler(BatchSampler):
-
-    def __iter__(self) -> Iterator[list[int]]:
-
-        if isinstance(self.sampler, ArrayableSampler):
-
-            indices = self.sampler.to_array()
-
-            reminder_size = len(indices) % self.batch_size
-
             last = None
-
             if reminder_size > 0:
                 indices, last = indices[:-reminder_size], indices[-reminder_size:]
 
             indices_batched = indices.reshape(-1, self.batch_size)
-
             yield from indices_batched
 
             if not self.drop_last and last is not None:
