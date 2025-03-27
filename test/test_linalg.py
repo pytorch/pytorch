@@ -4677,12 +4677,13 @@ class TestLinalg(TestCase):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
         # We set the TunableOp numerical check environment variable here because it is
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
-        import os
 
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
-            if dtype is torch.half:
-                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            # Numerical check adds significant overhead, unsure if this is needed
+            # or if there was a transiet problem at the time.
+            # if dtype is torch.half:
+            #     os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             ordinal = torch.cuda.current_device()
 
             # set these to single iterations to keep it short but still exercise the code
@@ -4690,8 +4691,9 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
             make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            # Using gen_sizes_matmul(2) to ensure we cover
+            # 'NN', 'TN', 'TT', and 'NN' cases.
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
                 x = make_arg(size_x, noncontiguous=nctg_x)
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
