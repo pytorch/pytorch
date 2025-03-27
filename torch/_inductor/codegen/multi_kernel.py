@@ -127,6 +127,11 @@ class MultiKernelState:
                 buf.writeline(f"{name},")
         buf.writeline("])")
 
+        if config.triton.autotune_at_compile_time:
+            V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
+                multi_kernel_name
+            )
+
         return multi_kernel_name
 
 

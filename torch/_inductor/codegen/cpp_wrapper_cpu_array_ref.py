@@ -88,6 +88,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
+    def generate_extern_kernel_alloc(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_alloc(*args, **kwargs)
+
+    def generate_extern_kernel_out(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_out(*args, **kwargs)
+
     def _generate_kernel_call_helper(
         self,
         code: IndentedBuffer,

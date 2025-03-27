@@ -1389,7 +1389,6 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-            self.src_to_kernel["\n".join(kernel_names)] = multi_kernel_name
         else:
             self.header.splice(kernel_defs)
 
