@@ -4062,25 +4062,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # in the unresolved condition (either directly or indirectly, e.g.,
         # inside a list or inside the shape of a tensor).
 
-        class M_v0(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                return r.view(items[0], items[2])
-
-        M = M_v0
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
         class M_v1(torch.nn.Module):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
@@ -4102,7 +4083,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(N(), (t,), strict=strict)
 
-        class M_v3(torch.nn.Module):
+        class M_v2(torch.nn.Module):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
@@ -4114,7 +4095,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 torch._check(items[2] == r.shape[1])
                 return r.view(items[0], items[2])
 
-        M = M_v3
+        M = M_v2
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
@@ -6846,22 +6827,17 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 2
             )
 
-    def test_check_is_size_error(self):
+    def test_no_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                # We cannot automatically infer a is a size here because view
-                # accepts -1
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        if is_non_strict_test(self._testMethodName):
-            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        else:
-            error = torch._dynamo.exc.UserError
-        error_msg = r"Could not guard on data-dependent expression"
-        with self.assertRaisesRegex(error, error_msg):
-            _ = export(f, (torch.tensor(6),))
+        ep = export(f, (torch.tensor(6),))
+        ep.module()(torch.tensor(6))
+        with self.assertRaisesRegex(RuntimeError, r"Runtime assertion failed for .* u0 .* 6"):
+            ep.module()(torch.tensor(5))
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
