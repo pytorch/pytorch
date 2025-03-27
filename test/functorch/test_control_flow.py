@@ -3720,16 +3720,25 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    # @parametrize("compile_mode", ["none"])
     @parametrize("combine_mode", ["pointwise", "generic"])
+    # @parametrize("combine_mode", ["pointwise"])
     @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("device", [torch.device("cuda")])
     @parametrize("autograd", [False, True])
+    # @parametrize("autograd", [True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
     # does not support lifted arguments
+    # @decorateIf(
+    #     unittest.skip,
+    #     lambda params: (params["combine_mode"] == "pointwise"),
+    # )
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (params["combine_mode"] == "pointwise" and (params["device"] == torch.device("cpu") or params["autograd"] == False)),
     )
     def test_associative_scan_freevars_simple1111(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -3749,6 +3758,7 @@ class AssociativeScanTests(TestCase):
             return x * H1 + y * H2
 
         inp = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        # inp = torch.randn(2, 2, 2, device=device, requires_grad=autograd)
 
         for fct, param in [
             (fct_freevars1, (H,)),
@@ -3780,9 +3790,13 @@ class AssociativeScanTests(TestCase):
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
     # does not support lifted arguments
+    # @decorateIf(
+    #     unittest.skip,
+    #     lambda params: (params["combine_mode"] == "pointwise"),
+    # )
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (params["combine_mode"] == "pointwise" and (params["device"] == torch.device("cpu") or params["autograd"] == False)),
     )
     def test_associative_scan_freevars_nested(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -3857,9 +3871,13 @@ class AssociativeScanTests(TestCase):
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
     # does not support lifted arguments
+    # @decorateIf(
+    #     unittest.skip,
+    #     lambda params: (params["combine_mode"] == "pointwise"),
+    # )
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (params["combine_mode"] == "pointwise" and (params["device"] == torch.device("cpu") or params["autograd"] == False)),
     )
     def test_associative_scan_freevars_fct(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -3938,9 +3956,13 @@ class AssociativeScanTests(TestCase):
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
     # does not support lifted arguments
+    # @decorateIf(
+    #     unittest.skip,
+    #     lambda params: (params["combine_mode"] == "pointwise"),
+    # )
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (params["combine_mode"] == "pointwise" and (params["device"] == torch.device("cpu") or params["autograd"] == False)),
     )
     def test_associative_scan_freevars_shape_check(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -3977,9 +3999,13 @@ class AssociativeScanTests(TestCase):
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
     # does not support lifted arguments
+    # @decorateIf(
+    #     unittest.skip,
+    #     lambda params: (params["combine_mode"] == "pointwise"),
+    # )
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (params["combine_mode"] == "pointwise" and (params["device"] == torch.device("cpu") or params["autograd"] == False)),
     )
     def test_associative_scan_freevars_pytree(
         self, compile_mode, combine_mode, reverse, device, autograd
