@@ -508,7 +508,6 @@ class UnflattenedModule(torch.nn.Module):
                 fqn_order[name] = len(fqn_order)
         _reorder_submodules(self, fqn_order)
         self.graph.lint()
-        self.finalize()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -601,17 +600,13 @@ class UnflattenedModule(torch.nn.Module):
                 return return_val[0]
             return return_val
 
-        if torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter:
-            tree_out = type(self.graph_module).forward(self, *flat_args)  # type: ignore[union-attr]
+        if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
+            tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
         else:
             tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
-
-    def finalize(self):
-        self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
-        self.graph.lint()
 
     def _dispatch_modules(self, redirected_call_indices, consts_targets):
         """For a module whose call signatures are preserved, replace

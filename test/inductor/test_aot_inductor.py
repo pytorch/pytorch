@@ -69,6 +69,7 @@ if HAS_GPU:
         add_kernel_with_tma_1d,
         add_kernel_with_tma_2d,
         mul2_inplace_kernel,
+        strange_config_matmul_kernel,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -4689,6 +4690,83 @@ class AOTInductorTestsTemplate:
                 atol=0.1,
                 rtol=1e-3,
             )
+
+    @skipIfRocm  # RoCM does not support the config block size in test suite.
+    def test_triton_autotuning(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, m):
+                _M, K = x.shape
+                K, N = y.shape
+                M = torch.abs(m)
+                out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
+                grid = lambda META: (  # noqa: E731
+                    triton.cdiv(
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                    ),
+                )
+                strange_config_matmul_kernel[grid](
+                    x,
+                    y,
+                    out,
+                    M,
+                    N,
+                    K,
+                )
+                return out
+
+        x = torch.randn(4096, 1024, device=self.device)
+        y = torch.randn(1024, 2048, device=self.device)
+        m = torch.tensor([4096], dtype=torch.int32, device=self.device)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
+
+    @skipIfRocm  # RoCM does not support the config block size in test suite.
+    def test_triton_mutated_autotuning(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        @triton.jit
+        def add_one_kernel(X, Y, N):
+            pid = tl.program_id(axis=0)
+            block_start = pid
+            offsets = block_start + tl.arange(0, 1)
+
+            x = tl.load(X + offsets, mask=offsets < N)
+            y = x + 1
+            tl.store(Y + offsets, y, mask=offsets < N)
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, m):
+                _M, K = x.shape
+                K, N = y.shape
+                M = torch.empty((1), device=x.device, dtype=torch.int32)
+                add_one_kernel[(1,)](m, M, 1)
+                out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
+                grid = lambda META: (  # noqa: E731
+                    triton.cdiv(
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                    ),
+                )
+                strange_config_matmul_kernel[grid](
+                    x,
+                    y,
+                    out,
+                    M,
+                    N,
+                    K,
+                )
+                return out
+
+        x = torch.randn(4096, 1024, device=self.device)
+        y = torch.randn(1024, 2048, device=self.device)
+        m = torch.tensor([4095], dtype=torch.int32, device=self.device)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
 
     def test_composed_dynamic_size(self):
         class Model(torch.nn.Module):

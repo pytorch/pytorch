@@ -55,7 +55,7 @@ def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
 def symbolic(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int
@@ -153,7 +153,7 @@ def symbolic(
 def symbolic_multi_out(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int
