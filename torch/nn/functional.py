@@ -3702,26 +3702,9 @@ def huber_loss(
 ) -> Tensor:
     r"""huber_loss(input, target, reduction='mean', delta=1.0, weight=None) -> Tensor
 
-    Computes the Huber loss, with optional weighting.
+    Computes the Huber loss.
 
-    Function uses a squared term if the absolute
-    element-wise error falls below delta and a delta-scaled L1 term otherwise.
-
-    When delta equals 1, this loss is equivalent to SmoothL1Loss.
-    In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
-
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-        delta (float, optional): The threshold at which to change between delta-scaled L1 and L2 loss. Default: 1.0.
-        weight (Tensor, optional): Weights for each sample. Default: None.
-
-    Returns:
-        Tensor: Huber loss (optionally weighted).
+    See :class:`~torch.nn.HuberLoss` for details.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -3844,19 +3827,7 @@ def mse_loss(
 
     Measures the element-wise mean squared error, with optional weighting.
 
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (use reduction).
-        reduce (bool, optional): Deprecated (use reduction).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-        weight (Tensor, optional): Weights for each sample. Default: None.
-
-    Returns:
-        Tensor: Mean Squared Error loss (optionally weighted).
+    See :class:`~torch.nn.MSELoss` for details.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(

@@ -596,6 +596,7 @@ class MSELoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        weight (Tensor, optional): Weights for each sample. Default: None.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -611,11 +612,18 @@ class MSELoss(_Loss):
     """
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction: str = "mean",
+        weight: Optional[Tensor] = None,
+    ) -> None:
         super().__init__(size_average, reduce, reduction)
+        self.weight = weight
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.mse_loss(input, target, reduction=self.reduction)
+        return F.mse_loss(input, target, reduction=self.reduction, weight=self.weight)
 
 
 class BCELoss(_WeightedLoss):
@@ -1094,6 +1102,7 @@ class HuberLoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
         delta (float, optional): Specifies the threshold at which to change between delta-scaled L1 and L2 loss.
             The value must be positive.  Default: 1.0
+        weight (Tensor, optional): Weights for each sample. Default: None.
 
     Shape:
         - Input: :math:`(*)` where :math:`*` means any number of dimensions.
@@ -1102,12 +1111,24 @@ class HuberLoss(_Loss):
     """
     __constants__ = ["reduction", "delta"]
 
-    def __init__(self, reduction: str = "mean", delta: float = 1.0) -> None:
+    def __init__(
+        self,
+        reduction: str = "mean",
+        delta: float = 1.0,
+        weight: Optional[Tensor] = None,
+    ) -> None:
         super().__init__(reduction=reduction)
         self.delta = delta
+        self.weight = weight
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
+        return F.huber_loss(
+            input,
+            target,
+            reduction=self.reduction,
+            delta=self.delta,
+            weight=self.weight,
+        )
 
 
 class SoftMarginLoss(_Loss):

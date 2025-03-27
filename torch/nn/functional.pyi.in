@@ -403,6 +403,7 @@ def huber_loss(
     target: Tensor,
     reduction: str = ...,
     delta: float = ...,
+    weight: Optional[Tensor] = ...,
 ) -> Tensor: ...
 def l1_loss(
     input: Tensor,
@@ -418,6 +419,7 @@ def mse_loss(
     size_average: Optional[bool] = ...,
     reduce: Optional[bool] = ...,
     reduction: str = ...,
+    weight: Optional[Tensor] = ...,
 ) -> Tensor: ...
 def margin_ranking_loss(
     input1: Tensor,
