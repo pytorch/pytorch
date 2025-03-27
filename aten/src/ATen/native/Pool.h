@@ -323,6 +323,7 @@ max_pool3d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-3, otime);
   check_dim_size(indices, ndim, ndim-2, oheight);
   check_dim_size(indices, ndim, ndim-1, owidth);
+
 }
 
 inline void
