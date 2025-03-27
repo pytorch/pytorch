@@ -2039,6 +2039,10 @@ class SubgraphTracer(fx.Tracer):
         # Stores the versions of the input tensors at the time they are inserted
         # as placeholders in the graph. This is used to track input mutation.
         self._input_versions_at_beginning: list[int] = []
+        if torch.is_inference_mode_enabled():
+            raise RuntimeError(
+                "Inference mode is supposed to be disabled during compilation. Please open an issue."
+            )
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(self, tx, node):
@@ -2758,6 +2762,7 @@ class SubgraphTracer(fx.Tracer):
         for out_node in out_nodes.args[0]:
             if out_node:
                 example_value = out_node.meta["example_value"]
+                assert not isinstance(example_value, list)
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in output_storages:
