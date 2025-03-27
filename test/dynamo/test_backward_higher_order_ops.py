@@ -245,7 +245,7 @@ class GraphModule(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(2)", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s45)"):
+    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(2)", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s7)"):
         l_inputs_ = L_inputs_
         l_sizes_0_ = L_sizes_0_
         l_hooks_1_keywords_fn_keywords_obj_counter = L_hooks_1_keywords_fn_keywords_obj_counter
@@ -264,7 +264,7 @@ class GraphModule(torch.nn.Module):
 
         copy_: "f32[2]" = new_grad_strided.copy_(aot0_tangents_1);  copy_ = None
 
-        add: "Sym(s45 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
+        add: "Sym(s7 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
         result: "f32[2]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
 
