@@ -139,6 +139,7 @@ class TritonBundler:
             return
         log.debug("TritonBundler.begin_compile is called")
         assert cls._entries is None
+        assert cls._static_autotuners is None
         cls._entries = []
         cls._static_autotuners = []
 
@@ -310,6 +311,7 @@ class TritonBundler:
                     static_autotuners = []
                     static_kernel_names = []
                 cls.end_compile()
+                assert(len(static_kernel_names) == 0)
                 return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
                     kernel_names, static_kernel_names
                 )
@@ -390,4 +392,5 @@ class TritonBundler:
                 )
             else:
                 static_kernel_names = []
+            assert(len(static_kernel_names) == 0)
             return TritonBundlerMetadata(kernel_names, static_kernel_names)
