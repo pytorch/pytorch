@@ -1060,19 +1060,18 @@ class CompileResult(Generic[_T]):
     def make_launcher(self) -> LauncherType: ...
 
     def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
-        if not hasattr(self, "launcher_code"):
-            grid = GridExpr.from_meta(self.inductor_meta, self.config)
-            # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
-            lines = [
-                f"def launcher({', '.join(def_args)}, stream):",
-                *[f"    {line}" for line in grid.prefix],
-                f"    grid_0 = {grid.x_grid}",
-                f"    grid_1 = {grid.y_grid}",
-                f"    grid_2 = {grid.z_grid}",
-                f"    runner({', '.join(runner_args)})",
-            ]
-            self.launcher_code = "\n".join(lines)
-        exec(self.launcher_code, scope)
+        grid = GridExpr.from_meta(self.inductor_meta, self.config)
+        # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
+        lines = [
+            f"def launcher({', '.join(def_args)}, stream):",
+            *[f"    {line}" for line in grid.prefix],
+            f"    grid_0 = {grid.x_grid}",
+            f"    grid_1 = {grid.y_grid}",
+            f"    grid_2 = {grid.z_grid}",
+            f"    runner({', '.join(runner_args)})",
+        ]
+        launcher_code = "\n".join(lines)
+        exec(launcher_code, scope)
         return scope["launcher"]
 
     def _get_arg_lists(

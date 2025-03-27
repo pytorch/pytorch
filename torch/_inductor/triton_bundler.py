@@ -165,6 +165,9 @@ class TritonBundler:
 
     @classmethod
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
+        from torch._inductor import config
+
+        assert config.use_static_cuda_launcher
         if (entries := cls._static_autotuners) is not None:
             # Clear a bunch of unpicklable values and make a copy to save
             # for FXGraphCache
