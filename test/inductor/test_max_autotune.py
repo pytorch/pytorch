@@ -1269,7 +1269,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to crash.
         bmreq = _TestBenchmarkRequest(0, crash=True)
@@ -1293,7 +1292,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_timeout(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to timeout.
         bmreq = _TestBenchmarkRequest(0, sleep=120)
@@ -1332,7 +1330,6 @@ class TestTuningProcessPool(TestCase):
             os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
         ):
             tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
 
         choice1 = _TestTritonTemplateCaller(_TestBenchmarkRequest(3.14))
         choice2 = _TestTritonTemplateCaller(_TestBenchmarkRequest(2.718))
