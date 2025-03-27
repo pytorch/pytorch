@@ -122,3 +122,80 @@ class Block:
     def __lt__(self, o: Self) -> bool:
         assert isinstance(o, Block) and o.tokens is self.tokens
         return o.index < self.index
+
+
+def make_blocks(tokens: Sequence[TokenInfo]) -> tuple[list[Block], dict[str, str]]:
+    blocks: list[Block] = []
+    errors: dict[str, str] = {}
+
+    for i in range(len(tokens)):
+        try:
+            if (b := _make_block(tokens, i)) is not None:
+                blocks.append(b)
+        except ParseError as e:
+            self.errors[e.token.line] = " ".join(e.args)
+
+    for i, parent in enumerate(blocks):
+        for j in range(i + 1, len(blocks)):
+            if parent.contains(child := blocks[j]):
+                child.parent = i
+                parent.children.append(j)
+            else:
+                break
+
+    for i, b in enumerate(blocks):
+        b.index = i
+
+        parents = [b]
+        while (p := parents[-1].parent) is not None:
+            parents.append(blocks[p])
+        parents = parents[1:]
+
+        b.is_local = not all(p.is_class for p in parents)
+        b.is_method = not b.is_class and bool(parents) and parents[0].is_class
+
+    def add_full_names(children: Sequence[Block], prefix: str = "") -> None:
+        dupes: dict[str, list[Block]] = {}
+        for b in children:
+            dupes.setdefault(b.name, []).append(b)
+
+        for dl in dupes.values():
+            for i, b in enumerate(dl):
+                suffix = f"[{i + 1}]" if len(dl) > 1 else ""
+                b.full_name = prefix + b.name + suffix
+
+        for b in children:
+            if kids := [blocks[i] for i in b.children]:
+                add_full_names(kids, b.full_name + ".")
+
+    add_full_names([b for b in blocks if b.parent is None])
+    return blocks
+
+
+def _make_block(tokens: Sequence[TokenInfo], begin: int) -> Block | None:
+    t = tokens[begin]
+    if not (t.type == token.NAME and t.string in ("class", "def")):
+        return None
+
+    category = Block.Category[t.string.upper()]
+    try:
+        ni = self.next_token(begin + 1, token.NAME, "Definition but no name")
+        name = self.tokens[ni].string
+        indent = self.next_token(ni + 1, token.INDENT, "Definition but no indent")
+        dedent = self.indent_to_dedent[indent]
+        docstring = self.docstring(indent)
+    except ParseError:
+        name = "(ParseError)"
+        indent = -1
+        dedent = -1
+        docstring = ""
+
+    return Block(
+        begin=begin,
+        category=category,
+        dedent=dedent,
+        docstring=docstring,
+        indent=indent,
+        name=name,
+        tokens=self.tokens,
+    )
