@@ -1033,14 +1033,14 @@ class PostProcess {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
-      #ifdef USE_KINETO
-        kineto::DeviceAndResource info = {libkineto::processId(), libkineto::systemThreadId()};
-      #else
+#ifdef USE_KINETO
+        kineto::DeviceAndResource info = {
+            libkineto::processId(), libkineto::systemThreadId()};
+#else
         kineto::DeviceAndResource info = kineto::DeviceAndResource();
-      #endif // USE_KINETO
+#endif // USE_KINETO
         const auto& tid_info =
-            tid_map.insert({python_tid, {NoTID, info}})
-                .first->second;
+            tid_map.insert({python_tid, {NoTID, info}}).first->second;
         (*it)->start_tid_ = tid_info.first;
         (*it)->kineto_info_ = tid_info.second;
       }
