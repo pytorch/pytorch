@@ -6,8 +6,10 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.experimental._attention import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _cp_options,
@@ -17,8 +19,8 @@ from torch.distributed._tensor.experimental._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
+from torch.distributed.tensor.placement_types import Replicate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
@@ -34,7 +36,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     with_comms,
 )
-
 
 c10d_functional = torch.ops.c10d_functional
 backends = []
@@ -425,5 +426,76 @@ class RingAttentionTest(DTensorTestBase):
             )
 
 
-if __name__ == "__main__":
-    run_tests()
+class RingFlexAttentionTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        # return torch.cuda.device_count()
+        return 2
+
+    @with_comms
+    def test_ring_flex_attention(self) -> None:
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        # Compile the flex_attention function
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        torch.manual_seed(10)
+        dtype = torch.float32
+        bs = 8
+        query_tokens = 64 * self.world_size
+        context_tokens = 64 * self.world_size
+        dim = 32
+        nheads = 8
+
+        q = torch.rand(
+            (bs, nheads, query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=bs,
+            H=nheads,
+            Q_LEN=query_tokens,
+            KV_LEN=context_tokens,
+            device=self.device_type,
+        )
+
+        out = flex_attention(q, k, v, block_mask=block_mask)
+
+        expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+
+        # test flex attention on DTensor
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+
+        # q_dist = distribute_tensor(q, device_mesh, [Shard(-2)])
+        # k_dist = distribute_tensor(k, device_mesh, [Shard(-2)])
+        # v_dist = distribute_tensor(v, device_mesh, [Shard(-2)])
+        q_dist = distribute_tensor(q, device_mesh, [Replicate()])
+        k_dist = distribute_tensor(k, device_mesh, [Replicate()])
+        v_dist = distribute_tensor(v, device_mesh, [Replicate()])
+        assert isinstance(q_dist, DTensor)
+        out_dt = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
