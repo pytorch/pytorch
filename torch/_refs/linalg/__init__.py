@@ -98,6 +98,36 @@ def diagonal(
     return torch.diagonal(input, offset=offset, dim1=dim1, dim2=dim2)
 
 
+def _check_vector_norm_args(
+    x: TensorLikeType,
+    ord: Union[float, int] = 2,
+    dim: Optional[DimsType] = None):
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+    
+    if not(ord < 0.0 or ord == float("inf")):
+        return 
+
+    # No need to do the checks below if we can identify at compile time that
+    # x.numel() != 0.
+    # x.numel() != 0 is repeated in the checks on purpose to handle the situation
+    # where x.numel() == 0 is data dependent. In such case it will be checked at runtime.
+    if guard_or_true(x.numel() == 0):
+        torch._check(
+            sym_or(x.numel() != 0, not isinstance(dim, int) and dim is not None and len(dim) != 0),
+            "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+            "because the operation does not have an identity",
+        )
+        shape = x.shape
+        if dim is not None and not isinstance(dim, int):
+            for d in dim:
+                torch._check(
+                    sym_or(x.numel() != 0, shape[d] != 0),
+                    "linalg.vector_norm cannot compute the {ord} norm on the "
+                    f"dimension {d} because this dimension is empty and the "
+                    "operation does not have an identity",
+                )
+        
+
 @register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
 @out_wrapper(exact_dtype=True)
 def vector_norm(
@@ -108,36 +138,14 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-    # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if ord < 0.0 or ord == float("inf"):
-        # No need to do the checks bellow if we can identify at compile time that
-        # x.numel() != 0.
-        # x.numel() != 0 is repeated in the checks on purpose to handle the situation
-        # where x.numel() == 0 is data dependent. In such case it will be checked at runtime.
-        if guard_or_true(x.numel() == 0):
-            torch._check(
-                sym_or(x.numel() != 0, dim is not None and len(dim) != 0),
-                lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-                "because the operation does not have an identity",
-            )
-            shape = x.shape
-            assert (
-                dim is not None
-            )  # mypy does not seem to be able to see through check?
-            for d in dim:
-                torch._check(
-                    sym_or(x.numel() != 0, shape[d] != 0),
-                    lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
-                    f"dimension {d} because this dimension is empty and the "
-                    "operation does not have an identity",
-                )
+    _check_vector_norm_args(x, order, dim)
+    
     _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = utils.reduction_dtypes(

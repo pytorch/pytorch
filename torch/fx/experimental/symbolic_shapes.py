@@ -1189,29 +1189,25 @@ def compute_unbacked_bindings(
 # Some reasons you might be ok with returning true/false instead could be:
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
-#      benefit of not failing (See the doc above for more details).
+#      benefit of not failing.
 def guard_or_false(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return false.
+    Try to guard a, if data dependent error encountered just return false.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return False
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return true.
+    Try to guard a, if data dependent error encountered just return true.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return True
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
