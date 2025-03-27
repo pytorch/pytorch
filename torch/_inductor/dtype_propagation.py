@@ -19,8 +19,7 @@ T = TypeVar("T")
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
@@ -182,7 +181,7 @@ class DtypePropagationOpsHandler:
         ):
             return upcast_compute_type(dtype)
 
-        return torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        return V.kernel.get_index_dtype_as_torch_dtype()
 
     @staticmethod
     def to_dtype(

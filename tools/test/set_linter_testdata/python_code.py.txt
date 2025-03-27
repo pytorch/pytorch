@@ -1,4 +1,7 @@
 # Basic tests
+import tempfile
+
+print(f"{tempfile.gettempdir()}/memory_snapshot.pickle")
 
 ignored = set()  # noqa: set_linter
 a = set()

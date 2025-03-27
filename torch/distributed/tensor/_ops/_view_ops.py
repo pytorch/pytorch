@@ -6,7 +6,6 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -583,9 +582,11 @@ def register_op_strategy_map(
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
-    def reshape_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    def reshape_strategy(op_schema: OpSchema) -> StrategyType:
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+        mesh = op_schema.get_mesh_from_args(validate=False)
+
         global_in_shape = input_strategy.shape
         assert global_in_shape is not None, "Shape required."
 
@@ -606,7 +607,7 @@ def register_op_strategy_map(
             #        [Shard(0), Shard(0)]
             input_tgt_spec = DTensorSpec(
                 placements=tuple(input_tgt_placements),
-                mesh=input_src_spec.mesh,
+                mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
             )
             redistribute_costs = [
@@ -658,7 +659,7 @@ register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
 
 
 @register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
-def as_strided_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
     assert (
         len(op_schema.args_schema) > 2
     ), f"as_strided should have at least 3 args but got {len(op_schema.args_schema)}"
@@ -667,6 +668,8 @@ def as_strided_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(inp_strategy, OpStrategy)
     size = op_schema.args_schema[1]
     stride = op_schema.args_schema[2]
+
+    mesh = inp_strategy.get_mesh_from_args(validate=False)
 
     assert isinstance(
         inp_strategy, OpStrategy
