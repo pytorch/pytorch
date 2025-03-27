@@ -1933,6 +1933,9 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         _warn_complex_not_supported()
         return True
 
+    if t.is_meta:
+        return True
+
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
             return True
