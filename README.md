@@ -206,7 +206,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
-# if you are updating an existing checkout
+# If you are updating an existing checkout
 git submodule sync
 git submodule update --init --recursive
 ```
@@ -214,7 +214,6 @@ git submodule update --init --recursive
 #### Install Dependencies
 
 **Common**
-# TODO update this
 ```bash
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below.
 pip install -r requirements.txt
@@ -265,8 +264,8 @@ python tools/amd_build/build_amd.py
 ```
 
 Install PyTorch
-# TODO: Update this.
 ```bash
+# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
@@ -382,7 +381,9 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 #### Building the image yourself
 
 **NOTE:** Must be built with a Docker version > 18.06
+<!---
 # TODO: Update this.
+-->
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.

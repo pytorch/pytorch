@@ -111,8 +111,9 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
-# TODO: update
-  ```bash
+<!---
+ TODO: update this
+-->  ```bash
   conda uninstall pytorch -y
   yes | pip uninstall torch
   ```
@@ -658,7 +659,9 @@ tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
 details.
 
 ## Managing multiple build trees
-# TODO: update this. should it all be deleted?
+<!---
+TODO: update this. should it all be deleted?
+-->
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
@@ -748,7 +751,9 @@ situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
 Before building pytorch, install ccache from your package manager of choice:
-# TODO: needs updated example
+<!---
+TODO: needs updated example
+-->
 ```bash
 conda install ccache -c conda-forge
 sudo apt install ccache
