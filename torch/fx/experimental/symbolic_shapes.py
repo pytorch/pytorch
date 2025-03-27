@@ -14,6 +14,7 @@ import atexit
 import collections
 import dis
 import functools
+import hashlib
 import inspect
 import itertools
 import logging
@@ -121,6 +122,8 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
+    "guard_or_false",
+    "guard_or_true",
     "has_symbolic_sizes_strides",
     "create_contiguous",
     "ShapeEnv",
@@ -1178,6 +1181,38 @@ def compute_unbacked_bindings(
                     shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
 
     return symbol_to_path
+
+
+# The following two functions are common utilities used while defining unbacked semantics
+# of various framework code. Those would be used in situations you prefer to guard and know
+# the result of the expression over not guarding, but in case you hit a data dependent error
+# you are ok with just returning true or false.
+# Some reasons you might be ok with returning true/false instead could be:
+#  (1) It's an optimization/additional check I do not want to fail for not performing it.
+#  (2) I am willing to deviate from the normal semantics when I have unbacked for the
+#      benefit of not failing.
+def guard_or_false(a: BoolLikeType) -> bool:
+    """
+    Try to gaurd a, if data dependent error encountered just return false.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return False
+    return bool(a)
+
+
+def guard_or_true(a: BoolLikeType) -> bool:
+    """
+    Try to gaurd a, if data dependent error encountered just return true.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return True
+    return bool(a)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -3259,6 +3294,11 @@ class ShapeEnv:
 
         self.guards: list[ShapeGuard] = []
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
+
+        # A set of ids that have already been allocated. This is used
+        # for when we allocate symbol ids using the hash of the source
+        # names to ensure we don't have collisions via linear probing
+        self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
@@ -4510,13 +4550,14 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
+            symbol_id = self._generate_unique_id(source.name())
             if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(
-                    SymT.SIZE, len(self.var_to_val), positive=positive, integer=True
+                    SymT.SIZE, symbol_id, positive=positive, integer=True
                 )
             else:
                 sympy_expr = make_symbol(
-                    SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
+                    SymT.FLOAT, symbol_id, positive=positive, real=True
                 )
             self.source_to_var[source_name] = sympy_expr
             # We always associate vars to vals
@@ -6527,6 +6568,13 @@ class ShapeEnv:
     def _get_sloc(self, framework_loc: Optional[str] = None) -> SLoc:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
+
+    def _generate_unique_id(self, source_name: str) -> int:
+        attempt = int(hashlib.sha256(source_name.encode()).hexdigest(), 16) % 100
+        while attempt in self.unique_ids:
+            attempt += 1
+        self.unique_ids.add(attempt)
+        return attempt
 
     def _find_frame_locals(self) -> _FrameLocalResult:
         """

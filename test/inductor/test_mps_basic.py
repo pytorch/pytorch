@@ -123,16 +123,20 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
-    def test_pointwise_zeta(self):
+    @parametrize(
+        "op_name",
+        [
+            "zeta",
+            "xlog1py",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+        ],
+    )
+    def test_pointwise_binary_op(self, op_name):
         self.common(
-            torch.special.zeta,
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
-    def test_pointwise_xlog1py(self):
-        self.common(
-            torch.special.xlog1py,
+            lambda x, y: getattr(torch.special, op_name)(x, y),
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
