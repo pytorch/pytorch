@@ -93,16 +93,12 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    @config.patch({"compile_threads": 1})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
     @parametrize("grad", (False, True))
-    def test_cache_load_function(
-        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher, grad
-    ):
+    def test_cache_load_function(self, device, dtype, dynamic, bundle_triton, grad):
         """
         Verify that we can populate and load functions from the cache.
         """
@@ -110,10 +106,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
-            raise unittest.SkipTest(
-                "Static cuda launcher requires cuda and triton bundling"
-            )
 
         grad_multiplier = 2 if grad else 1
 
@@ -124,10 +116,7 @@ class TestFxGraphCache(TestCase):
         a_orig = torch.rand(25, dtype=dtype, device=device)
         b_orig = torch.rand(5, 5, dtype=dtype, device=device)
 
-        with config.patch(
-            bundle_triton_into_fx_graph_cache=bundle_triton,
-            use_static_cuda_launcher=use_static_cuda_launcher,
-        ):
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             a1 = a_orig.clone().requires_grad_(grad)
@@ -160,14 +149,6 @@ class TestFxGraphCache(TestCase):
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
                 )
-                if use_static_cuda_launcher:
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
-                    )
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_load_static_autotuner"], 0
-                    )
 
             # A second call should hit. (First reset so in-memory guards
             # don't prevent compilation).
@@ -208,15 +189,6 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * read_and_emit_kernel_count,
                 )
-                if use_static_cuda_launcher:
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
-                    )
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
-                    )
 
             self.reset()
 
@@ -256,15 +228,6 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * read_and_emit_kernel_count,
                 )
-                if use_static_cuda_launcher:
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier * 2 if device == "cuda" else 0,
-                    )
-                    self.assertEqual(
-                        counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
-                    )
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
@@ -272,23 +235,13 @@ class TestFxGraphCache(TestCase):
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
-    @config.patch(
-        {"compile_threads": 1}
-    )  # Can't check globalStats if there are workers
-    def test_remote_cache_load_function(
-        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher
-    ):
+    def test_remote_cache_load_function(self, device, dtype, dynamic, bundle_triton):
         from unittest.mock import patch
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
-            raise unittest.SkipTest(
-                "Static cuda launcher requires cuda and triton bundling"
-            )
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -300,7 +253,6 @@ class TestFxGraphCache(TestCase):
             {
                 "fx_graph_remote_cache": True,
                 "bundle_triton_into_fx_graph_cache": bundle_triton,
-                "use_static_cuda_launcher": use_static_cuda_launcher,
             }
         ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
@@ -816,9 +768,7 @@ class TestFxGraphCache(TestCase):
 
             return torch.cond(x.shape[0], true_fn, false_fn, (x,))
 
-        with config.patch(
-            bundle_triton_into_fx_graph_cache=bundle_triton,
-        ):
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
 
             x = torch.randn(4, 4, device=GPU_TYPE)
@@ -983,10 +933,8 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    @config.patch({"compile_threads": 1})
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
-    def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
+    def test_triton_op(self, bundle_triton):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
@@ -1004,12 +952,7 @@ class TestFxGraphCache(TestCase):
         def f(x, y):
             return add(x, y)
 
-        compile_threads = 1 if use_static_cuda_launcher else config.compile_threads
-        with config.patch(
-            bundle_triton_into_fx_graph_cache=bundle_triton,
-            use_static_cuda_launcher=use_static_cuda_launcher,
-            compile_threads=compile_threads,
-        ):
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(f, fullgraph=True)
 
             x = torch.randn(4, device=GPU_TYPE)
