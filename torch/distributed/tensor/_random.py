@@ -170,14 +170,14 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         super().__init__(_resolve_device(device_mesh=device_mesh))
         assert self._device_handle is not None
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
-        if self._device.type != "cuda" and (
+        if (
             self._device.type == "cpu"
             or not hasattr(self._device_handle, "set_rng_state")
             or not hasattr(self._device_handle, "get_rng_state")
         ):
             raise RuntimeError(
                 f"{self.__class__.__name__} instantiation requires the presence of "
-                f"CUDA/CUDA-like device. Got {self._device.type} instead."
+                f"CUDA/CUDA-like device with RNG state support. Got {self._device.type} instead."
             )
 
         rng_state = self._device_handle.get_rng_state().to(self._device)
