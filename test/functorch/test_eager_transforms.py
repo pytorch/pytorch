@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     subtest,
+    TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -2897,6 +2898,9 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK, "Leaking memory, see #150059 for example"
+    )
     def test_linearize_composition_grad(self, device, dtype):
         x_p = make_tensor((3,), device=device, dtype=dtype)
         x_t = make_tensor((3,), device=device, dtype=dtype)

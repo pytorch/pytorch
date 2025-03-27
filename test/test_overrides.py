@@ -1,5 +1,6 @@
 # Owner(s): ["module: __torch_function__"]
 
+import sys
 import torch
 import numpy as np
 import inspect
@@ -9,6 +10,7 @@ import pickle
 import collections
 import unittest
 import contextlib
+import os
 
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
 from torch.overrides import (
@@ -28,6 +30,11 @@ from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
+
+if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
+    # This test is not supported on ARM
+    print("Skipping due to failing when cuda build runs on non cuda machine, see #150059 for example")
+    sys.exit()
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
