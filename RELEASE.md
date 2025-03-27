@@ -83,11 +83,11 @@ Following is the release cadence. All future dates below are tentative. For late
 
 Releasing a new version of PyTorch generally entails 3 major steps:
 
-0. Cutting a release branch preparations
-1. Cutting a release branch and making release branch specific changes
-2. Drafting RCs (Release Candidates), and merging cherry-picks
-3. Preparing and creating final Release Candidate
-4. Promoting final RC to stable and performing release day tasks
+0. Cutting a release branch preparations.
+1. Cutting a release branch and making release branch-specific changes.
+2. Drafting RCs (Release Candidates), and merging cherry-picks.
+3. Preparing and creating final Release Candidate.
+4. Promoting final RC to stable and performing release day tasks.
 
 ### Frequently Asked Questions
 
@@ -101,7 +101,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 Following requirements need to be met prior to cutting a release branch:
 
-* Resolve all outstanding issues in the milestones (for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28)) before first RC cut is completed. After RC cut is completed, the following script should be executed from teh `test-infra` repo in order to validate the presence of the fixes in the release branch:
+* Resolve all outstanding issues in the milestones (for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28)) before first RC cut is completed. After RC cut is completed, the following script should be executed from the `test-infra` repo in order to validate the presence of the fixes in the release branch:
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, MacOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (ROCm, XPU).
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
@@ -133,9 +133,9 @@ This script should create 2 branches:
 
 *Note*:  Release branches for individual ecosystem libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Ecosystem Library POC.
 
-Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains.
+Test-Infra branch cut should be performed at the same time as PyTorch core branch cut. Convenience script can also be used domains.
 
-> NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
+> NOTE: RELEASE_VERSION only needs to be specified if `version.txt` is not available in root directory
 
 ```bash
 DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
@@ -146,22 +146,22 @@ DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/releas
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
 
-* Update backwards compatibility tests to use RC binaries instead of nightlies
-  * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
-* A release branch should also be created in both [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/test-infra`](https://github.com/pytorch/test-infra) repos and pinned in `pytorch/pytorch`
-  * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
-* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`
-  * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304
+* Update backwards compatibility tests to use RC binaries instead of nightlies.
+  * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986.
+* A release branch should also be created in both [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/test-infra`](https://github.com/pytorch/test-infra) repos and pinned in `pytorch/pytorch`.
+  * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506.
+* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`.
+  * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304.
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
 * Nightly versions should be updated in all version files to the next MINOR release (i.e. 0.9.0 -> 0.10.0) in the default branch:
-  * Example: https://github.com/pytorch/pytorch/pull/77984
+  * Example: https://github.com/pytorch/pytorch/pull/77984.
 
 ### Making release branch specific changes for ecosystem libraries
 
 Ecosystem libraries branch cut is done a few days after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Ecosystem Library POC.
-After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before drafting RC for this domain library.
+After the branch cut is performed, the PyTorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : https://github.com/pytorch/vision/pull/5400
@@ -170,9 +170,9 @@ Follow these examples of PR that updates the version and sets RC Candidate uploa
 ## Running Launch Execution team Core XFN sync
 
 The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
-1. Establish release POCs from each of the workstreams
-2. Cover the tactical phase of releasing minor releases to the market
-3. Discuss possible release blockers
+1. Establish release POCs from each of the workstreams.
+2. Cover the tactical phase of releasing minor releases to the market.
+3. Discuss possible release blockers.
 
 Following POCs should be assigned from each of the workstreams:
 * Core/Marketing
@@ -185,7 +185,7 @@ Following POCs should be assigned from each of the workstreams:
 
 ## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
-To draft RCs, a user with the necessary permissions can push a Git tag to the main `pytorch/pytorch` git repository. Please note: exactly same process is used for each of the domain library
+To draft RCs, a user with the necessary permissions can push a Git tag to the main `pytorch/pytorch` git repository. Please note: exactly the same process is used for each of the domain libraries.
 
 The Git tag for a release candidate must follow the following format:
 ```
@@ -197,12 +197,12 @@ An example of this would look like:
 v1.12.0-rc1
 ```
 You can use following commands to perform tag from PyTorch core repo (not fork):
-* Checkout and validate the repo history before tagging
+* Checkout and validate the repo history before tagging.
 ```
 git checkout release/1.12
 git log --oneline
 ```
-* Perform tag and push it to GitHub (this will trigger the binary release build)
+* Perform tag and push it to GitHub (this will trigger the binary release build):
 ```
 git tag -f  v1.12.0-rc2
 git push origin  v1.12.0-rc2
@@ -212,7 +212,7 @@ Pushing a release candidate should trigger the `binary_builds` workflow within C
 
 This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
 
-To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). And make sure all binary builds are successful.
+To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). Make sure all binary builds are successful.
 ### Release Candidate Storage
 
 Release candidates are currently stored in the following places:
@@ -255,11 +255,11 @@ this will allow the bot to find it and post comments).
 usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
                                {regression,critical,fixnewfeature,docs,release}
 
-Cherry-Pick a pull request onto a release branch for inclusion in a release
+Cherry-Pick a pull request onto a release branch for inclusion in a release.
 
 optional arguments:
-  --onto ONTO           Branch you would like to cherry-pick onto (Example: release/2.2)
-  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666)
+  --onto ONTO           Branch you would like to cherry-pick onto (Example: release/2.2).
+  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666).
   -c {regression,critical,fixnewfeature,docs,release}
                         A machine-friendly classification of the cherry-pick reason.
 ```
@@ -287,7 +287,7 @@ The following requirements need to be met prior to creating the final Release Ca
 * Validate that all closed milestone PRs are present in the release branch. Confirm this by running:
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/2.2 --milestone-id 40 --missing-in-branch ```
 
-* No outstanding cherry-picks that need to be reviewed in the issue tracker: https://github.com/pytorch/pytorch/issues/115300
+* No outstanding cherry-picks that need to be reviewed in the issue tracker: https://github.com/pytorch/pytorch/issues/115300.
 
 * Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
 
@@ -297,14 +297,14 @@ After the final RC is created, the following tasks should be performed:
 
 * Run and inspect the output [Validate Binaries](https://github.com/pytorch/test-infra/actions/workflows/validate-binaries.yml) workflow.
 
-* All the closed issues from [milestone](https://github.com/pytorch/pytorch/milestone/39) need to be validated. Confirm the validation by commenting on the issue: https://github.com/pytorch/pytorch/issues/113568#issuecomment-1851031064
+* All the closed issues from [milestone](https://github.com/pytorch/pytorch/milestone/39) need to be validated. Confirm the validation by commenting on the issue: https://github.com/pytorch/pytorch/issues/113568#issuecomment-1851031064.
 
 * Create validation issue for the release, see for example [Validations for 2.1.2 release](https://github.com/pytorch/pytorch/issues/114904) and perform required validations.
 
 * Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no performance regressions.
 
 * Prepare and stage PyPI binaries for promotion. This is done with this script:
-[`pytorch/test-infra:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/test-infra/blob/main/release/pypi/promote_pypi_to_staging.sh)
+[`pytorch/test-infra:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/test-infra/blob/main/release/pypi/promote_pypi_to_staging.sh).
 
 * Validate staged PyPI binaries. Make sure generated packages are correct and package size does not exceeds maximum allowed PyPI package size.
 
@@ -319,7 +319,7 @@ Promotion should occur in two steps:
 * Promote S3 artifacts (wheels, libtorch)
 * Promote S3 wheels to PyPI
 
-**NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+**NOTE**: The promotion of wheels to PyPI can only be done once, so take caution when attempting to promote wheels to PyPI. (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
 ## Additional Steps to prepare for release day
 
@@ -329,7 +329,7 @@ The following should be prepared for the release day:
 
 Modify the release matrix for the get started page. See the following [PR](https://github.com/pytorch/test-infra/pull/4611) as reference.
 
-The PR to update published_versions.json and quick-start-module.js is auto generated. See the following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
+The PR to update `published_versions.json` and `quick-start-module.js` is auto generated. See the following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
 
 Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR pointing to the Release Candidate location as described in the [Release Candidate Storage](#release-candidate-storage) section.
 
@@ -354,7 +354,7 @@ Patch releases should be considered if a regression meets the following criteria
 3. Is there not a viable workaround?
     * Can the regression be solved simply or is it not overcomable?
 
-> *NOTE*: Patch releases should only be considered when functionality is broken, documentation does not typically fall within this category
+> *NOTE*: Patch releases should only be considered when functionality is broken, documentation does not typically fall within this category.
 
 ## Patch Release Process
 
@@ -368,7 +368,7 @@ The patch release process takes around 4-5 weeks to complete.
 1. Triage is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2 weeks after the release completion.
 2. Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
   * Should the new patch release be created?
-  * Timeline execution for the patch release
+  * Timeline execution for the patch release.
 3. Cherry-Picking phase starts after the decision is made to create a patch release. At this point, a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry-picks. This process normally takes 2 weeks.
 4. Building Binaries, Promotion to Stable and testing. After all cherry-picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
 5. General Availability
@@ -377,10 +377,10 @@ The patch release process takes around 4-5 weeks to complete.
 
 > Main POC: Triage Reviewers
 
-1. Tag issues/pull requests that are candidates for a potential patch release with `triage review`
+1. Tag issues/pull requests that are candidates for a potential patch release with `triage review`:
     * ![adding triage review label](https://user-images.githubusercontent.com/1700823/132589089-a9210a14-6159-409d-95e5-f79067f6fa38.png)
-2. Triage reviewers will then check if the regression/fix identified fits within the above mentioned [Patch Release Criteria](#patch-release-criteria)
-3. Triage reviewers will then add the issue/pull request to the related milestone (i.e. `1.9.1`) if the regression is found to be within the [Patch Release Criteria](#patch-release-criteria)
+2. Triage reviewers will then check if the regression/fix identified fits within the above mentioned [Patch Release Criteria](#patch-release-criteria).
+3. Triage reviewers will then add the issue/pull request to the related milestone (i.e. `1.9.1`) if the regression is found to be within the [Patch Release Criteria](#patch-release-criteria).
     * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 
 ### Issue Tracker for Patch releases
@@ -389,19 +389,19 @@ For patch releases, an issue tracker needs to be created. For a patch release, w
 * https://github.com/pytorch/pytorch/issues/128436
 
 Only following issues are accepted:
-1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
-2. Low risk critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
-3. Fixes to new features being introduced in this release
-4. Documentation improvements
-5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
+1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1).
+2. Low risk critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks.
+3. Fixes to new features being introduced in this release.
+4. Documentation improvements.
+5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers).
 
 ### Building a release schedule / cherry-picking
 
 > Main POC: Patch Release Managers
 
-1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
-    * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
-2. Patch Release Managers will work with the authors of the regressions / fixes to cherry-pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
+1. After regressions / fixes have been triaged, Patch Release Managers will work together and build/announce a schedule for the patch release
+    * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified.
+2. Patch Release Managers will work with the authors of the regressions / fixes to cherry-pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`).
     * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry-picks for their changes. It is up to authors of the regressions to post a cherry-pick. If cherry-pick is not posted the issue will not be included in the release.
 3. If cherry-picking deadline is missed by cherry-pick author, patch release managers will not accept any requests after the fact.
 
@@ -409,16 +409,16 @@ Only following issues are accepted:
 
 > Main POC: Patch Release managers
 
-1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
-2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
+1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries).
+2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable).
 
 # Hardware / Software Support in Binary Build Matrix
 
-PyTorch has a support matrix across a couple of different axis. This section should be used as a decision making framework to drive hardware / software support decisions
+PyTorch has a support matrix across a couple of different axis. This section should be used as a decision making framework to drive hardware / software support decisions.
 
 ## Python
 
-PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/
+PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/.
 
 For each minor release independently, we only support patch releases as follows:
 - If the latest patch release is a bugfix release, we only support this one.
@@ -429,11 +429,11 @@ See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for 
 ## Accelerator Software
 
 For accelerator software like CUDA and ROCm we will typically use the following criteria:
-* Support latest 2 minor versions
+* Support latest 2 minor versions.
 
 ### Special support cases
 
-In some instances support for a particular version of software will continue if a need is found. For example, our CUDA 11 binaries do not currently meet
+In some instances, support for a particular version of software will continue if a need is found. For example, our CUDA 11 binaries do not currently meet
 the size restrictions for publishing on PyPI so the default version that is published to PyPI is CUDA 10.2.
 
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
@@ -457,8 +457,8 @@ Tutorials in support of a release feature must be submitted to the [pytorch/tuto
 
 In the event a submodule cannot be fast forwarded, and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository under the PyTorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
-* Get the dependencies maintainers to support a release branch for us
+* (preferred) Fork the repository under the PyTorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* Get the dependencies maintainers to support a release branch for us.
 
 Editing submodule remotes can be easily done with: (running from the root of the Git repository)
 ```
@@ -474,11 +474,11 @@ An example of this process can be found here:
 In nightly builds for wheels, PyTorch depends on the Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of Triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
 
 In nightly builds we have following configuration:
-* Wheel builds, depend on: https://download.pytorch.org/whl/nightly/pytorch-triton/
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+* Wheel builds, depend on: https://download.pytorch.org/whl/nightly/pytorch-triton/.
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/.
 
 However for release we have following :
-* Wheel builds, depend only Triton pypi package: https://pypi.org/project/triton/ for both test and release
-* Rocm wheel builds, depend on: https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+* Wheel builds, depend only Triton pypi package: https://pypi.org/project/triton/ for both test and release.
+* Rocm wheel builds, depend on: https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release.
 
 Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .
