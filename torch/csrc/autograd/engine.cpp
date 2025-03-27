@@ -868,7 +868,7 @@ void set_device(int device) {
 
 // Given an Edge or optional<InputMetdata>, return the InputMetadata
 template <typename T>
-const InputMetadata& get_input_metadata(const T& thing);
+const static InputMetadata& get_input_metadata(const T& thing);
 
 template <>
 const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
@@ -884,7 +884,7 @@ const InputMetadata& get_input_metadata<Edge>(const Edge& thing) {
 
 // Given an Edge or optional<InputMetdata>, return if there is an InputMetadata.
 template <typename T>
-bool has_input_metadata(const T& thing);
+static bool has_input_metadata(const T& thing);
 
 template <>
 bool has_input_metadata<std::optional<InputMetadata>>(
@@ -914,7 +914,7 @@ std::vector<std::optional<InputMetadata>> collect_input_metadata(
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
 template <typename T>
-void validate_outputs_impl(
+static void validate_outputs_impl(
     const std::vector<T>& input_metadata_container,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
@@ -1334,6 +1334,7 @@ auto Engine::execute(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
     GraphTaskGuard guard(graph_task);
+    CheckpointValidGuard cpvguard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
@@ -1462,7 +1463,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
+static std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);

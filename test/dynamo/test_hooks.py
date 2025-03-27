@@ -512,7 +512,9 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         x2 = torch.ones(4, requires_grad=True)
         with compiled_autograd._enable(compiler_fn):
             dynamo_out = torch.compile(mod, backend="inductor", fullgraph=True)(x2, obj)
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: str"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "Failed to trace builtin operator"
+            ):
                 dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(obj.count, 2)
@@ -856,6 +858,28 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(wrap_top_frame=True)
+    def test_wrap_top_frame_with_hooks(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net1 = torch.nn.Linear(18, 18, bias=False)
+
+            def forward(self, x):
+                return self.net1(x)
+
+        mod = ToyModel()
+        mod.register_forward_pre_hook(lambda mod, input: input[0] + 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_mod = torch.compile(mod, backend=cnts)
+
+        x = torch.rand(18, 18)
+        ref = mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":
