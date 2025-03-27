@@ -90,6 +90,10 @@ specialize_int = False
 # support codegen on float (this is to be fixed).
 specialize_float = False
 
+# Whether or not to use hash of source names to allocate symbolic indexes. This
+# produces more normalizes graphs and results in higher cache hit rates.
+source_hash_symbol_allocation = False
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 

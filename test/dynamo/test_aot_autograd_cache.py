@@ -196,6 +196,49 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+    @dynamo_config.patch("source_hash_symbol_allocation", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_symbol_specialization(self):
+        """
+        Verify the symbol specializations don't cause cache miss.
+        """
+
+        def fn(x, y, z):
+            return (torch.randn(5) + x + y, z * torch.randn(1))
+
+        a = torch.rand(5)
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        b = torch.rand(5)
+        c = torch.randn(6)
+        torch._dynamo.maybe_mark_dynamic(c, 0)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        compiled_fn(a, b, c)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # A second call should hit even if a new dimension is marked as dynamic
+        # that is later specialized as part of tracing. In particular previously
+        # we would get a graph where z:s0 and now z: s2, whereas with source based
+        # symbol hashing both graphs would end up with something like z:77.
+        a = torch.rand(5)
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        b = torch.rand(5)
+        torch._dynamo.maybe_mark_dynamic(b, 0)
+        c = torch.randn(6)
+        torch._dynamo.maybe_mark_dynamic(c, 0)
+        self._clear_dynamo_and_codecache()
+
+        compiled_fn(a, b, c)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_aot_runtime_trace_joint(self):
         @torch.compile(backend="inductor")
