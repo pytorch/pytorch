@@ -14,6 +14,7 @@ from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -3682,6 +3683,95 @@ class GraphModule(torch.nn.Module):
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
+    @supported_platform
+    def test_selective_ac(self):
+        class FlexAttentionModule(nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+
+                # In-projections (query, key, value)
+                self.q_proj = nn.Linear(hidden_size, hidden_size)
+                self.k_proj = nn.Linear(hidden_size, hidden_size)
+                self.v_proj = nn.Linear(hidden_size, hidden_size)
+
+                # Out-projection
+                self.out_proj = nn.Linear(hidden_size, hidden_size)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.size()
+
+                # Project queries, keys, and values
+                q = (
+                    self.q_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+
+                # Apply flex attention
+                attn_output = flex_attention(
+                    q,
+                    k,
+                    v,
+                )
+
+                # Reshape output
+                attn_output = (
+                    attn_output.transpose(1, 2)
+                    .contiguous()
+                    .view(batch_size, seq_len, self.hidden_size)
+                )
+
+                # Out projection
+                output = self.out_proj(attn_output)
+
+                return output
+
+        # Create a FlexAttention module
+        flex_module = FlexAttentionModule(
+            hidden_size=512, num_heads=8  # Head dim * num_heads
+        ).to("cuda", dtype=torch.bfloat16)
+
+        # Create input for the module
+        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+
+        # Run without compilation
+        output_module = flex_module(x)
+        compiled_module = torch.compile(flex_module)
+        output_compiled = compiled_module(x)
+
+        torch.testing.assert_close(output_module, output_compiled, rtol=1e-2, atol=1e-2)
+
+        # Calculate gradients and compare them
+        x.requires_grad_(True)
+        output_module = flex_module(x)
+        output_compiled = compiled_module(x)
+        grad_output = torch.ones_like(output_module)
+
+        # Compute gradients using torch.autograd.grad
+        grad_module = torch.autograd.grad(
+            outputs=output_module, inputs=x, grad_outputs=grad_output, retain_graph=True
+        )[0]
+
+        grad_compiled = torch.autograd.grad(
+            outputs=output_compiled, inputs=x, grad_outputs=grad_output
+        )[0]
+
+        # Verify gradients are similar
+        torch.testing.assert_close(grad_module, grad_compiled, rtol=1e-2, atol=1e-2)
 
     @supported_platform
     def test_validate_small_embedding_size_error_message(self):
