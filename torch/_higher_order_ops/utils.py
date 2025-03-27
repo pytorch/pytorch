@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
@@ -86,7 +86,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 def _maybe_compile_and_run_fn(fn, *args):
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_dynamo_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
@@ -280,18 +280,20 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
     tracing_mode = "real"
     if fake_mode is None:
+        fake_mode = nullcontext()
         tracing_mode = "fake"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
-    with disable_proxy_modes_tracing():
-        return make_fx(
+    with fake_mode, disable_proxy_modes_tracing():
+        gm = make_fx(
             fn,
             tracing_mode=tracing_mode,
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
+        return gm
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
@@ -420,6 +422,26 @@ def prepare_fw_with_masks(fn):
             True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
             for ret in fw_out
         ]
+
+    return fw_with_masks
+
+
+def prepare_fw_with_masks_all_requires_grad(fn):
+    def fw_with_masks(*args):
+        fw_out = fn(*args)
+        # Note [force all outputs to be require grad]
+        # Instead of using the original fn, we set the output of original
+        # fn to all require grad. This is consistent with the behavior
+        # of autograd.Function, where if any one of the inputs requires grad
+        # all output will be require grad. This also makes the downstream
+        # require_gradness reasoning much easier.
+        if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
+            fw_out = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+            )
+        return fw_out, pytree.tree_map_only(
+            torch.Tensor, lambda x: x.requires_grad, fw_out
+        )
 
     return fw_with_masks
 
@@ -739,3 +761,59 @@ def check_input_alias_and_mutation(
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
         return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+
+
+registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
+
+
+def register_fake(hop, fn=None):
+    """
+    Register a fake function for a HOP. This is conceptually equivalent of the
+    register_fake utility for the custom ops. The registered function is called
+    inside the fake_tensor _dispatch_impl.
+    """
+    assert hop not in registered_hop_fake_fns
+
+    def register(func):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # Redirect the hop to the fake tensor mode implementation.
+        @hop.py_impl(FakeTensorMode)
+        def _(mode, *args, **kwargs):
+            return mode.__torch_dispatch__(hop, [], args, kwargs)
+
+        registered_hop_fake_fns[hop] = func
+        return func
+
+    if fn is None:
+        return register
+    return register(fn)
+
+
+class FunctionalizeCtxWrapper:
+    """
+    This is a dummy wrapper to facilitate fake tensor caching.
+
+    For AOT Dispatcher metadata collection pass, HOPs go from functionalization
+    key to fake tensor key. The functionalization key wraps the subgraphs in a
+    function, which changes from call to call even though the subgraph might
+    still be same.
+
+    To enable fake tensor caching, we just wrap the ctx and subgraph in this
+    class and then use the subgraph as the hash.
+    """
+
+    # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
+    @torch._disable_dynamo
+    def __init__(self, ctx, subgraph):
+        self.ctx = ctx
+        self.subgraph = subgraph
+
+    def __hash__(self):
+        return id(self.subgraph)
+
+    def __repr__(self):
+        return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
+
+    def __call__(self, *args, **kwargs):
+        return self.ctx.functionalize(self.subgraph)(*args, **kwargs)

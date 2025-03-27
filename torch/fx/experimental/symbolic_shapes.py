@@ -14,6 +14,7 @@ import atexit
 import collections
 import dis
 import functools
+import hashlib
 import inspect
 import itertools
 import logging
@@ -3259,6 +3260,11 @@ class ShapeEnv:
 
         self.guards: list[ShapeGuard] = []
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
+
+        # A set of ids that have already been allocated. This is used
+        # for when we allocate symbol ids using the hash of the source
+        # names to ensure we don't have collisions via linear probing
+        self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
@@ -4510,13 +4516,14 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
+            symbol_id = self._generate_unique_id(source.name())
             if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(
-                    SymT.SIZE, len(self.var_to_val), positive=positive, integer=True
+                    SymT.SIZE, symbol_id, positive=positive, integer=True
                 )
             else:
                 sympy_expr = make_symbol(
-                    SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
+                    SymT.FLOAT, symbol_id, positive=positive, real=True
                 )
             self.source_to_var[source_name] = sympy_expr
             # We always associate vars to vals
@@ -6528,6 +6535,13 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
+    def _generate_unique_id(self, source_name: str) -> int:
+        attempt = int(hashlib.sha256(source_name.encode()).hexdigest(), 16) % 100
+        while attempt in self.unique_ids:
+            attempt += 1
+        self.unique_ids.add(attempt)
+        return attempt
+
     def _find_frame_locals(self) -> _FrameLocalResult:
         """
         Given the current user code frame, finds the relevant lines of code,
@@ -7105,7 +7119,7 @@ class ShapeEnv:
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
-                log.warning("runtime_asserts_frozen but then got %s", expr)
+                log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):

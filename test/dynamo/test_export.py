@@ -1901,7 +1901,7 @@ def forward(self, x):
     le = sym_size_int <= 2;  sym_size_int = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (l_x_,));  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_3 = cond[0]
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
@@ -2703,7 +2703,7 @@ def forward(self, x):
                 for node in ebar.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+            ["torch.Size([s17, s27, s27])", "torch.Size([s17, s27, s27])"],
         )
 
     @torch._dynamo.config.patch(
@@ -3480,23 +3480,23 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg1: "f32[s77, s27]";
 
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
+        sin: "f32[s77, s27]" = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg1: "f32[s77, s27]";
 
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
+        cos: "f32[s77, s27]" = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = [
@@ -3848,7 +3848,7 @@ def forward(self, pred, x):
     d = torch.ones(6, 4)
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (a, b, l_x_, d, c));  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
     getitem = cond[0];  cond = None
     return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )

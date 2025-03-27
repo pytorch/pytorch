@@ -285,7 +285,8 @@ class LazyLinear(LazyModuleMixin, Linear):
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         if self.has_uninitialized_params():
             with torch.no_grad():
-                self.weight.materialize((self.out_features, input.shape[-1]))
+                self.in_features = input.shape[-1]
+                self.weight.materialize((self.out_features, self.in_features))
                 if self.bias is not None:
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()

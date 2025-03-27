@@ -539,8 +539,12 @@ def forward(self, x):
         ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
 
         serialized = ExportedProgramSerializer().serialize(ep)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+        self.assertEqual(
+            serialized.exported_program.range_constraints["s77"].min_val, 2
+        )
+        self.assertEqual(
+            serialized.exported_program.range_constraints["s77"].max_val, 3
+        )
 
     def test_kwargs_default(self) -> None:
         """
@@ -971,7 +975,6 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
-    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):

@@ -4768,7 +4768,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(graph.code).strip(),
             """\
-def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
+def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
@@ -5443,14 +5443,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
+        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # and should be codegen-ed.
         def fn(x, y):
-            x._grad = y
-            return x.grad.data
+            x._grad = y + 1
+            y.grad = x + 2
+            return x.grad.data, y._grad.data
 
-        x = torch.randn(4, requires_grad=True)
-        y = torch.randn(4)
+        x0 = torch.randn(4, requires_grad=True)
+        y0 = torch.randn(4, requires_grad=True)
+        x1 = x0.clone()
+        y1 = y0.clone()
         opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(x, y), opt_fn(x, y))
+        self.assertEqual(fn(x0, y0), opt_fn(x1, y1))
+        self.assertEqual(x0.grad, x1.grad)
+        self.assertEqual(y0.grad, y1.grad)
 
     def test_nn_module_stack_bc(self):
         from torch._dynamo.mutation_guard import GenerationTracker
