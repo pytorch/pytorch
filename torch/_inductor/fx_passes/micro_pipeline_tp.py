@@ -386,12 +386,104 @@ class _ScaledMatmul(_Matmul):
                 return default
             return node.args[idx]
 
+        def insert_reshape_op(node: torch.fx.Node):
+            """
+            Given a reciprocal node with a parent reshape node,
+            insert a reshape node after the reciprocal node which reshapes
+            the reciprocal output back to the original shape before the first reshape.
+
+            Before:
+                reshape (a,bc,) to (a*b,c) -> reciprocal
+
+            After:
+                reshape (a,bc,) to (a*b,c) -> reciprocal -> reshape (a*b,c) to (a,b,c)
+
+            Returns the new reshape node.
+            """
+            # ensure the given node matches the pattern described in the docstring
+            assert node.target == aten.reciprocal.default, (
+                "Node must be a aten.reciprocal.default op"
+            )
+            assert len(node.all_input_nodes) == 1, "Node must have exactly one parent"
+
+            parent_node = node.all_input_nodes[0]
+            assert parent_node.target == aten.reshape.default, (
+                "Parent node must be a aten.reshape.default op"
+            )
+            assert len(parent_node.all_input_nodes) == 1, (
+                "Parent node must have exactly one input node"
+            )
+
+            parent_input_node = parent_node.all_input_nodes[0]
+            parent_input_shape = list(_get_tensor(parent_input_node).shape)
+
+            # insert reshape back to shape from before the parent reshape op
+            graph = node.graph
+            with graph.inserting_after(node):
+                reshape_node = graph.call_function(
+                    aten.reshape.default, (node, parent_input_shape)
+                )
+
+            # ensure all users of original node (except the reshape node) now use the reshaped node instead
+            node_users = list(node.users)
+            for user in node_users:
+                if user != reshape_node:
+                    user.replace_input_with(node, reshape_node)
+
+            return reshape_node
+
+        is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
+        mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
+
+        # `A_node` is pulled directly from match rather than `mm_node` because it needs to handle
+        # both of the following cases:
+        #
+        # Case 1: single node match (mm):
+        # - match[0].args[0] will be the "A tensor" node of scaled_mm
+        # - Has 2D shape
+        #
+        # Case 2: 3 node match (reshape -> mm -> reshape)
+        # - match[0].args[0] will be the "A tensor" input to the reshape op
+        # - Has 3D+ shape
+        A_node = cast(torch.fx.Node, match[0].args[0])
+        B_node = cast(torch.fx.Node, mm_node.args[1])
+        A_scale_node = cast(torch.fx.Node, mm_node.args[2])
+        B_scale_node = cast(torch.fx.Node, mm_node.args[3])
+
+        A_ndim = _get_tensor(A_node).ndim
+        A_scale_ndim = _get_tensor(A_scale_node).ndim
+        is_reciprocal_with_reshape_parent = (
+            A_scale_node.target == aten.reciprocal.default
+            and len(A_scale_node.all_input_nodes) == 1
+            and A_scale_node.all_input_nodes[0].target == aten.reshape.default
+        )
+        is_tensorwise_scaling = A_scale_ndim <= 1
+
+        # This is a temporary workaround to handle the reshape -> scaled_mm -> reshape
+        # pattern when scales are row-wise, and have been reshaped along with the target
+        # tensor. See https://github.com/pytorch/pytorch/pull/148001 for details.
+        #
+        # If tensor dim does not match scale dim, check if the scale node follows
+        # the "reshape -> reciprocal" pattern. If so, we can insert a reshape op after
+        # the reciprocal, to reshape the reciprocal back to the original shape before
+        # the first reshape op.
+        #
+        # TODO: remove this workaround once torch._scaled_matmul exists and can be used
+        # to implement a more robust long-term support for 3D+ scaled matmuls.
+        if (
+            is_reshape_mm_reshape_pattern
+            and A_ndim != A_scale_ndim
+            and not is_tensorwise_scaling
+            and is_reciprocal_with_reshape_parent
+        ):
+            A_scale_node = insert_reshape_op(A_scale_node)
+
         return _ScaledMatmul(
             nodes=match,
-            A_node=cast(torch.fx.Node, match[0].args[0]),
-            B_node=cast(torch.fx.Node, mm_node.args[1]),
-            A_scale_node=cast(torch.fx.Node, mm_node.args[2]),
-            B_scale_node=cast(torch.fx.Node, mm_node.args[3]),
+            A_node=A_node,
+            B_node=B_node,
+            A_scale_node=A_scale_node,
+            B_scale_node=B_scale_node,
             bias_node=get_arg(mm_node, 4, None),
             result_scale_node=get_arg(mm_node, 5, None),
             out_dtype=get_arg(mm_node, 6, None),
@@ -763,9 +855,7 @@ def _get_node_to_ancestors(
     """
     Compute the ancestors for all nodes in a graph.
     """
-    node_to_ancestors = defaultdict(
-        OrderedSet[torch.fx.Node]
-    )  # type: ignore[var-annotated]
+    node_to_ancestors = defaultdict(OrderedSet[torch.fx.Node])  # type: ignore[var-annotated]
     for node in graph.nodes:
         node_to_ancestors[node] = OrderedSet(node.all_input_nodes)
         for dep in node.all_input_nodes:
