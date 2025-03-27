@@ -59,6 +59,7 @@ class MetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
+        self._traced_parameters: WeakSet[nn.Parameter] = WeakSet()
 
     def __enter__(self) -> "MetricsContext":
         """
@@ -131,6 +132,17 @@ class MetricsContext:
         if metric not in self._metrics:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
+
+    def track(self, param:nn.Parameter) -> bool:
+        """
+        Indicates if we've already seen a tracked paramater
+        """
+        if self._level == 0:
+            raise RuntimeError(f"Cannot track params outside of a MetricsContext")
+        tracked = param in self._traced_parameters
+        self._traced_parameters.add(param)
+        return tracked
+
 
     def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """

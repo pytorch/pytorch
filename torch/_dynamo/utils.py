@@ -1234,12 +1234,12 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
-    # The number of elements within paramaters. This is classically what people think of when they think of paramaters
+    # The number of elements within parameters. This is classically what people think of when they think of parameters
     # in a ML model.
     param_numel: Optional[int] = None
     # The number of elements counted by bytes - i.e. a float32 is 4 bytes, per element.
     param_bytes: Optional[int] = None
-    # The number of paramaters count by fields. This mostly is a proxy for number of distinct type of params
+    # The number of parameters count by fields. This mostly is a proxy for number of distinct type of params
     param_count: Optional[int] = None
 
     @classmethod
@@ -1324,6 +1324,8 @@ class CompilationMetrics:
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
+        # We are using this dictionary to de duplicate weights which show up in
+        # multiple nn modules
         all_metrics["param_numel"] = sum(
             all_metrics.get("param_numel_addr", {}).values()
         )

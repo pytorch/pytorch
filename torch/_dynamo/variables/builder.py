@@ -1533,10 +1533,12 @@ class VariableBuilder:
                 )
                 metrics_context = get_metrics_context()
                 for p in params:
-                    # This is somewhat clever. Weights may be saved between models. This code is designed to correctly de deuplicate them when duplicated.
-                    metrics_context.set_key_value("param_numel_addr", id(p), p.numel())
-                    metrics_context.set_key_value("param_bytes_addr", id(p), p.nbytes)
-                    metrics_context.set_key_value("param_count_addr", id(p), 1)
+                    # This is somewhat clever. Weights may be saved between models. This code is designed to
+                    # correctly de deuplicate them when duplicated.
+                    if not metrics_context.track(p):
+                        metrics_context.increment("param_numel", p.numel())
+                        metrics_context.increment("param_bytes", p.nbytes)
+                        metrics_context.increment("param_count", 1)
             except (AttributeError, TypeError, RuntimeError):
                 pass
                 # Fails for weird things without params, and cpp_frontend_extension.cpp.Net, which doesn't support remove_duplicate
