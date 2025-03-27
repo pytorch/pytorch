@@ -1192,26 +1192,22 @@ def compute_unbacked_bindings(
 #      benefit of not failing.
 def guard_or_false(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return false.
+    Try to guard a, if data dependent error encountered just return false.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return False
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return true.
+    Try to guard a, if data dependent error encountered just return true.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return True
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
