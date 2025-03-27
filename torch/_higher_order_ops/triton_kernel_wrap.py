@@ -1473,7 +1473,7 @@ class TritonHOPifier:
             new_var = type(variable)(new_kernel, None, variable.grid)
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
-        SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas", "num_consumer_groups", "num_buffers_warp_spec"}
+        SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
         # move special config names to configs out of kwargs
         special_kwargs = {}

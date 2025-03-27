@@ -357,8 +357,6 @@ class TestSelectAlgorithm(TestCase):
             extra_args=None,
             num_stages=None,
             num_warps=None,
-            num_consumer_groups=None,
-            num_buffers_warp_spec=None,
             input_tensor_meta=None,
             output_tensor_meta=None,
         )

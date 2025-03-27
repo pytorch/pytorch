@@ -2,13 +2,11 @@
 
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.utils import clone_preserve_strides
-from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfXpu
+from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -36,7 +34,6 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
-    template,
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -187,30 +184,6 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
-
-
-    @unittest.skipIf(not IS_FBCODE, "FBCODE Triton is required for this test")
-    def test_template_function_ws(self):
-        triton_meta = {"device": MagicMock()}
-        num_stages = 2
-        num_warps = 4
-        num_consumer_groups = 3
-        num_buffers_warp_spec = 5
-
-        with patch(
-            "torch._inductor.runtime.triton_heuristics.cached_autotune"
-        ) as mock_cached_autotune:
-            template(
-                num_stages=num_stages,
-                num_warps=num_warps,
-                triton_meta=triton_meta,
-                num_consumer_groups=num_consumer_groups,
-                num_buffers_warp_spec=num_buffers_warp_spec,
-            )
-            mock_cached_autotune.assert_called_once()
-            configs = mock_cached_autotune.call_args[0][1]
-            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
-            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
 
 class TestArgumentCloneAndRestore(TestCase):
