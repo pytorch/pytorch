@@ -102,7 +102,6 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     return False
 
-
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
