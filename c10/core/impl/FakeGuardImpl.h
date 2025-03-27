@@ -59,16 +59,20 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
 
   // Event-related functions
   void record(
-      void** event,
-      const Stream& stream,
-      const DeviceIndex device_index,
-      const EventFlag flag) const override {}
-  void block(void* event, const Stream& stream) const override {}
-  bool queryEvent(void* event) const override {
+      void** event [[maybe_unused]],
+      const Stream& stream [[maybe_unused]],
+      const DeviceIndex device_index [[maybe_unused]],
+      const EventFlag flag [[maybe_unused]]) const override {}
+  void block(
+      void* event [[maybe_unused]],
+      const Stream& stream [[maybe_unused]]) const override {}
+  bool queryEvent(void* event [[maybe_unused]]) const override {
     return true;
   }
-  void destroyEvent(void* event, const DeviceIndex device_index)
-      const noexcept override {}
+  void destroyEvent(
+      void* event [[maybe_unused]],
+      const DeviceIndex device_index [[maybe_unused]]) const noexcept override {
+  }
 
   // Convenience methods for testing
   static DeviceIndex getDeviceIndex() {
