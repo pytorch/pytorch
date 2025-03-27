@@ -1385,6 +1385,14 @@ class PythonWrapperCodegen(CodeGen):
         else:
             return 1
 
+    def _write_multi_kernel_defs(self) -> None:
+        kernel_defs = self.multi_kernel_state.kernel_defs
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_defs.splice(kernel_defs)
+            self.src_to_kernel["\n".join(kernel_names)] = multi_kernel_name
+        else:
+            self.header.splice(kernel_defs)
+
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
@@ -1410,6 +1418,8 @@ class PythonWrapperCodegen(CodeGen):
                     line.codegen(self.wrapper_call)
                 else:
                     self.wrapper_call.writeline(line)
+
+            self._write_multi_kernel_defs()
 
             output_refs = self.get_output_refs()
             self.mark_output_type()
