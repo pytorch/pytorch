@@ -1,7 +1,17 @@
 # mypy: allow-untyped-defs
 import os
 import time
+import psutil
 
+def has_handle(path):
+    for p in psutil.process_iter():
+        try:
+            for f in p.open_files():
+                if path == f.path:
+                    return True
+        except Exception:
+            pass
+    return False
 
 class FileBaton:
     """A primitive, file-based synchronization utility."""
@@ -18,9 +28,6 @@ class FileBaton:
         self.lock_file_path = lock_file_path
         self.wait_seconds = wait_seconds
         self.fd = None
-        self.lock_existing = False
-        if os.path.exists(self.lock_file_path):
-            self.lock_existing = True
 
     def try_acquire(self):
         """
@@ -46,10 +53,10 @@ class FileBaton:
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
-            # If lock file exists in the beginning and waited too long,
+            # If lock file has no handle and waited too long,
             # then warn user of existing lock file and print path.
-            if self.lock_existing:
-                if time.time() - tik > 200:
+            if time.time() - tik > 200:
+                if not has_handle(self.lock_file_path):
                     print(f"WARN: You may want to delete existing lock file: {self.lock_file_path}")
 
     def release(self):
