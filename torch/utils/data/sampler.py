@@ -386,20 +386,34 @@ class NewBatchSampler(BatchSampler):
                 last = None
 
             indices_batched = indices.reshape(-1, self.batch_size)
+            for batch in indices_batched:
+                yield batch.tolist()
+
+            if not self.drop_last and last is not None:
+                yield last.tolist()
+
+
+class NewBatchSampler(BatchSampler):
+
+    def __iter__(self) -> Iterator[list[int]]:
+
+        if isinstance(self.sampler, ArrayableSampler):
+
+            indices = self.sampler.to_array()
+
+            reminder_size = len(indices) % self.batch_size
+
+            last = None
+
+            if reminder_size > 0:
+                indices, last = indices[:-reminder_size], indices[-reminder_size:]
+
+            indices_batched = indices.reshape(-1, self.batch_size)
+
             yield from indices_batched
 
             if not self.drop_last and last is not None:
                 yield last
 
         else:
-            sampler_iter = iter(self.sampler)
-            if self.drop_last:
-                # Create multiple references to the same iterator
-                args = [sampler_iter] * self.batch_size
-                for batch_droplast in zip(*args):
-                    yield [*batch_droplast]
-            else:
-                batch = [*itertools.islice(sampler_iter, self.batch_size)]
-                while batch:
-                    yield batch
-                    batch = [*itertools.islice(sampler_iter, self.batch_size)]
+            yield from super().__iter__()
