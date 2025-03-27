@@ -102,8 +102,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
+        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -140,7 +141,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "cpp",
         )
         with debug_printer_manager:
-            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            code.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -896,7 +897,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import dataclasses
 import operator
 import random
 import textwrap
@@ -26,7 +25,7 @@ from torch._inductor.virtualized import V
 
 from .. import config, ir
 from ..utils import convert_to_symint, LineContext
-from .common import IndentedBuffer, WorkspaceArg, WorkspaceZeroMode
+from .common import WorkspaceArg, WorkspaceZeroMode
 from .wrapper import (
     AllocateLine,
     BufferLike,
@@ -42,9 +41,9 @@ from .wrapper import (
     ExternKernelOutLine,
     FreeIfNotReusedLine,
     FreeLine,
+    KernelCallLine,
+    KernelDefinitionLine,
     Line,
-    MemoryPlanningLine,
-    MemoryPlanningState,
     MultiOutputLine,
     NullLine,
     OutputLine,
@@ -64,33 +63,6 @@ def delete(x: torch.Tensor) -> None:
 """
 Extra wrapper IR nodes for FX codegen.
 """
-
-
-class WrapperIRLine(MemoryPlanningLine):
-    """
-    Base class for Wrapper IR nodes that do not participate in memory planning.
-    Records the call args of the underlying codegen function.
-    """
-
-    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        return self
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        raise NotImplementedError("Python codegen not supported")
-
-
-@dataclasses.dataclass
-class KernelCallLine(WrapperIRLine):
-    kernel_name: str
-    call_args: tuple[Any, ...]
-    triton: bool
-
-
-@dataclasses.dataclass
-class KernelDefinitionLine(WrapperIRLine):
-    kernel_name: str
-    kernel_body: str
-    metadata: Optional[str] = None
 
 
 class TritonKernel:
@@ -142,19 +114,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         module_code = self.imports.getvalue() + self.header.getvalue() + code
         mod = PyCodeCache.load(module_code)
         return mod
-
-    def define_kernel(
-        self,
-        kernel_name: str,
-        kernel_body: str,
-        metadata: Optional[str] = None,
-        gpu=True,
-        cpp_definition: Optional[str] = None,
-    ):
-        """
-        Generates Wrapper IR for a kernel definition.
-        """
-        self.writeline(KernelDefinitionLine(self, kernel_name, kernel_body, metadata))
 
     def _fake_tensor(self, size, stride, **kwargs) -> torch.Tensor:
         with V.fake_mode:
@@ -551,29 +510,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         out_node = node.output_view if node.output_view else node
         self._generate_extern_kernel_common(node, out_node)
 
-    def generate_kernel_call(
-        self,
-        kernel_name: str,
-        call_args,
-        *,
-        device=None,
-        triton=True,
-        arg_types=None,
-        raw_args=None,
-        triton_meta=None,
-    ) -> None:
-        """
-        Generates Wrapper IR for a kernel call.
-        """
-        self.writeline(
-            KernelCallLine(
-                self,
-                kernel_name=kernel_name,
-                call_args=call_args,
-                triton=triton,
-            )
-        )
-
     def _generate_extern_kernel_common(
         self, kernel: ir.ExternKernel, out_ir_node: ir.IRNode
     ) -> None:
@@ -633,7 +569,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         # Generate code for the kernel.
         kernel_code = super()._format_kernel_definition(
-            line.kernel_name, line.kernel_body, line.metadata
+            line.kernel_name, line.kernel_body, metadata=line.metadata
         )
 
         # Import the module and store the JIT kernel.

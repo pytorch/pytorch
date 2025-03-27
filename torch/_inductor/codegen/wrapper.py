@@ -524,6 +524,49 @@ class FreeLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class KernelCallLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    kernel_name: str
+    call_args: tuple[Any, ...]
+    raw_args: tuple[Any, ...]
+    arg_types: list[str]
+    triton: bool
+    triton_meta: dict
+    device: torch.device
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._generate_kernel_call_helper(
+            code,
+            self.kernel_name,
+            self.call_args,
+            triton=self.triton,
+            arg_types=self.arg_types,
+            raw_args=self.raw_args,
+            triton_meta=self.triton_meta,
+            device=self.device,
+        )
+
+
+@dataclasses.dataclass
+class KernelDefinitionLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    kernel_name: str
+    kernel_body: str
+    metadata: Optional[str] = None
+    gpu: bool = (True,)
+    cpp_definition: Optional[str] = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._define_kernel_helper(
+            self.kernel_name,
+            self.kernel_body,
+            metadata=self.metadata,
+            gpu=self.gpu,
+            cpp_definition=self.cpp_definition,
+        )
+
+
+@dataclasses.dataclass
 class MemoryPlanningLine(WrapperLine):
     wrapper: PythonWrapperCodegen
 
@@ -1118,7 +1161,9 @@ class PythonWrapperCodegen(CodeGen):
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
-    def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
+    def write_get_raw_stream(
+        self, code: IndentedBuffer, device_idx: int, graph=None
+    ) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         if config.triton.autotune_at_compile_time:
@@ -1128,7 +1173,7 @@ class PythonWrapperCodegen(CodeGen):
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        code.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -1343,17 +1388,6 @@ class PythonWrapperCodegen(CodeGen):
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
-        result = IndentedBuffer()
-        result.splice(self.imports)
-        result.writeline("")
-        result.splice(self.header)
-        # We do not want the cpp header for intermediate const graph. Headers would be
-        # rendered by the main module instead.
-        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
-            result = IndentedBuffer()
-
-        # Add subgraph definitions to the result
-        result.splice(self.subgraph_definitions)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -1398,6 +1432,18 @@ class PythonWrapperCodegen(CodeGen):
                 )
             self.generate_return(output_refs)
 
+        # Assemble the final code from sections.
+        result = IndentedBuffer()
+        result.splice(self.imports)
+        result.writeline("")
+        result.splice(self.header)
+        # We do not want the cpp header for intermediate const graph. Headers would be
+        # rendered by the main module instead.
+        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+            result = IndentedBuffer()
+
+        # Add subgraph definitions to the result
+        result.splice(self.subgraph_definitions)
         self.finalize_prefix()
         result.splice(self.prefix)
 
@@ -1767,24 +1813,6 @@ class PythonWrapperCodegen(CodeGen):
                 ]
             )
 
-    def _format_kernel_definition(
-        self,
-        kernel_name: str,
-        kernel_body: str,
-        metadata: Optional[str] = None,
-    ):
-        if config.triton.autotune_at_compile_time:
-            # Skip inserting comments for the autotune block as they may contain cpp style comments
-            code = f"\n\n{kernel_name} = {kernel_body}"
-            self.kernel_autotune_defs.splice(code)
-            if V.graph.cpp_wrapper:
-                # For cpp wrapper, no need to continue codegen for the main body
-                return code
-
-        metadata_comment = f"{metadata}\n" if metadata else ""
-        code = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
-        return code
-
     def define_kernel(
         self,
         kernel_name: str,
@@ -1793,8 +1821,46 @@ class PythonWrapperCodegen(CodeGen):
         gpu: bool = True,
         cpp_definition: Optional[str] = None,
     ):
-        code = self._format_kernel_definition(kernel_name, kernel_body, metadata)
-        self.header.splice(code)
+        self.writeline(
+            KernelDefinitionLine(
+                self,
+                kernel_name,
+                kernel_body,
+                metadata=metadata,
+                gpu=gpu,
+                cpp_definition=cpp_definition,
+            )
+        )
+
+    def _format_kernel_definition(
+        self, kernel_name: str, kernel_body: str, metadata: Optional[str] = None
+    ):
+        metadata_comment = f"{metadata}\n" if metadata else ""
+        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
+        return body
+
+    def _define_kernel_helper(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu: bool = True,
+        cpp_definition: Optional[str] = None,
+    ):
+        if config.triton.autotune_at_compile_time:
+            # Skip inserting comments for the autotune block as they may contain cpp style comments
+            body = self._format_kernel_definition(
+                kernel_name, kernel_body, metadata=None
+            )
+            self.kernel_autotune_defs.splice(body)
+            if V.graph.cpp_wrapper:
+                # For cpp wrapper, no need to continue codegen for the main body
+                return
+
+        body = self._format_kernel_definition(
+            kernel_name, kernel_body, metadata=metadata
+        )
+        self.header.splice(body)
 
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
@@ -2292,18 +2358,44 @@ class PythonWrapperCodegen(CodeGen):
                 and C++ when gpu=False.
         """
         device = device or V.graph.get_current_device_or_throw()
+        self.writeline(
+            KernelCallLine(
+                self,
+                kernel_name=kernel_name,
+                call_args=call_args,
+                raw_args=raw_args,
+                arg_types=arg_types,
+                triton=triton,
+                triton_meta=triton_meta,
+                device=device,
+            )
+        )
+
+    def _generate_kernel_call_helper(
+        self,
+        code: IndentedBuffer,
+        kernel_name: str,
+        call_args,
+        *,
+        device=None,
+        triton=True,
+        arg_types=None,
+        raw_args=None,
+        triton_meta=None,
+    ):
+        device = device or V.graph.get_current_device_or_throw()
         if not (triton or device.type != "cpu"):
-            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            code.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
         stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, device.index, V.graph
+            self, code, device.index, V.graph
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
-            self.writeline(
+            code.writeline(
                 f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
             )
             return
@@ -2369,7 +2461,8 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
-            self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+            code.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+        self.write_triton_header_once()
 
     def writeline(self, line):
         self.lines.append(line)
