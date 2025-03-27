@@ -4,12 +4,6 @@ import time
 import psutil
 
 def has_handle(path):
-    if os.path.exists(path):
-        try:
-            os.rename(path, path)
-        except OSError:
-            return True
-
     for p in psutil.process_iter():
         try:
             for f in p.open_files():
