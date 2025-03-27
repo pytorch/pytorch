@@ -3740,10 +3740,40 @@ class GraphModule(torch.nn.Module):
 
                 return output
 
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        ops_to_save = [torch.ops.aten.mm.default]
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, ops_to_save
+        )
+
+        # Define a model that uses FlexAttention with selective activation checkpointing
+        class SacModule(nn.Module):
+            def __init__(self, hidden_size, num_heads, context_fn):
+                super().__init__()
+                self.flex_attn = FlexAttentionModule(hidden_size, num_heads)
+                self.context_fn = context_fn
+
+            def forward(self, x):
+                def flex_attn_fn(x):
+                    return self.flex_attn(x)
+
+                output = checkpoint(
+                    flex_attn_fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=self.context_fn,
+                )
+
+                return output
+
         # Create a FlexAttention module
-        flex_module = FlexAttentionModule(
-            hidden_size=512, num_heads=8  # Head dim * num_heads
-        ).to("cuda", dtype=torch.bfloat16)
+        flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+            "cuda", dtype=torch.bfloat16
+        )
 
         # Create input for the module
         x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
