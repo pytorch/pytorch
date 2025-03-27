@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import linecache
 import os
 import sys
 import time
@@ -15,9 +14,15 @@ if TYPE_CHECKING:
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 
-def _reload_python_module(
-    key: str, path: str, set_sys_modules: bool = True
-) -> ModuleType:
+def _reload_python_module_in_subproc(key: str, path: str) -> ModuleType:
+    codecache = sys.modules.get("torch._inductor.codecache")
+    if codecache:
+        return codecache.PyCodeCache.load_by_key_path(key, path)
+    else:
+        return _reload_python_module(key, path)
+
+
+def _reload_python_module(key: str, path: str) -> ModuleType:
     with open(path) as f:
         try:
             code = compile(f.read(), path, "exec", dont_inherit=True)
@@ -29,8 +34,7 @@ def _reload_python_module(
         mod.__file__ = path
         mod.key = key  # type: ignore[attr-defined]
         exec(code, mod.__dict__, mod.__dict__)
-        if set_sys_modules:
-            sys.modules[mod.__name__] = mod
+        sys.modules[mod.__name__] = mod
         return mod
 
 
@@ -57,6 +61,4 @@ def _worker_compile_triton(
     kernel.precompile(warm_cache_only=True)
     elapsed_ns = time.time_ns() - start_ns
     kernel.prepare_for_pickle()
-    # We can release this memory in the compile subprocesses:
-    linecache.clearcache()
     return kernel, elapsed_ns // 1000

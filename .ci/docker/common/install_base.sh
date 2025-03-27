@@ -37,7 +37,7 @@ install_ubuntu() {
   if [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "11.8"* ]]; then
     maybe_libnccl_dev="libnccl2=2.15.5-1+cuda11.8 libnccl-dev=2.15.5-1+cuda11.8 --allow-downgrades --allow-change-held-packages"
   elif [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "12.4"* ]]; then
-    maybe_libnccl_dev="libnccl2=2.26.2-1+cuda12.4 libnccl-dev=2.26.2-1+cuda12.4 --allow-downgrades --allow-change-held-packages"
+    maybe_libnccl_dev="libnccl2=2.25.1-1+cuda12.4 libnccl-dev=2.25.1-1+cuda12.4 --allow-downgrades --allow-change-held-packages"
   else
     maybe_libnccl_dev=""
   fi

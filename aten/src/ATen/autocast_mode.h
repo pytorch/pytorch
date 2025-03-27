@@ -123,14 +123,12 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   _(privateuseone, at::kPrivateUse1)
 
 // deprecated other backend specific autocast APIs
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 AT_FORALL_DEPRECATED_AUTOCAST_BACKENDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
-const std::array<at::DeviceType, 10> _AUTOCAST_SUPPORTED_DEVICES{
+const std::array<at::DeviceType, 9> _AUTOCAST_SUPPORTED_DEVICES{
     at::kCPU,
     at::kCUDA,
     at::kMTIA,
-    at::kMAIA,
     at::kXPU,
     at::kIPU,
     at::kHPU,
@@ -151,8 +149,6 @@ inline bool is_autocast_eligible(
           tensor.is_floating_point();
     case c10::DeviceType::MTIA:
       return tensor.is_mtia() && tensor.is_floating_point();
-    case c10::DeviceType::MAIA:
-      return tensor.is_maia() && tensor.is_floating_point();
     case c10::DeviceType::XPU:
       return tensor.is_xpu() && tensor.is_floating_point();
     case c10::DeviceType::IPU:
@@ -180,8 +176,6 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::AutocastCPU;
     case c10::DeviceType::MTIA:
       return DispatchKey::AutocastMTIA;
-    case c10::DeviceType::MAIA:
-      return DispatchKey::AutocastMAIA;
     case c10::DeviceType::XPU:
       return DispatchKey::AutocastXPU;
     case c10::DeviceType::IPU:
@@ -747,24 +741,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
     POLICY)                                         \
   KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(            \
       c10::DeviceType::MTIA,                        \
-      REDISPATCH_FUNC,                              \
-      REGISTER_NAME,                                \
-      REGISTER_SIGNATURE,                           \
-      REDISPATCH_SIGNATURE,                         \
-      POLICY)
-
-// KERNEL_MAIA/KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA
-// registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastMAIA
-#define KERNEL_MAIA(...) KERNEL(c10::DeviceType::MAIA, __VA_ARGS__)
-
-#define KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA( \
-    REDISPATCH_FUNC,                                \
-    REGISTER_NAME,                                  \
-    REGISTER_SIGNATURE,                             \
-    REDISPATCH_SIGNATURE,                           \
-    POLICY)                                         \
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(            \
-      c10::DeviceType::MAIA,                        \
       REDISPATCH_FUNC,                              \
       REGISTER_NAME,                                \
       REGISTER_SIGNATURE,                           \

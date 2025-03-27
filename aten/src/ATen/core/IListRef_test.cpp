@@ -42,7 +42,7 @@ static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
 }
 
 template <typename T>
-static void check_elements_same(at::ITensorListRef list, const T& thing, int use_count) {
+void check_elements_same(at::ITensorListRef list, const T& thing, int use_count) {
   EXPECT_EQ(thing.size(), list.size());
   size_t i = 0;
   for (const auto& t : list) {

@@ -49,20 +49,14 @@ remove_reshape_pass = PatternMatcherPass(
 )
 
 # based on predispatch aten IR
-normalization_pass_aten = PatternMatcherPass(pass_name="normalization_pass_aten")
-merge_splits_pass_aten = PatternMatcherPass(pass_name="merge_splits_pass_aten")
-split_cat_pass_aten = PatternMatcherPass(pass_name="split_cat_pass_aten")
-unbind_stack_pass_aten = PatternMatcherPass(pass_name="unbind_stack_pass_aten")
-merge_getitem_cat_pass_aten = PatternMatcherPass(
-    pass_name="merge_getitem_cat_pass_aten"
-)
-merge_stack_tahn_unbind_pass_aten = PatternMatcherPass(
-    pass_name="merge_stack_tahn_unbind_pass_aten"
-)
-mutate_cat_pass_aten = PatternMatcherPass(pass_name="mutate_cat_pass_aten")
-remove_split_with_size_one_pass_aten = PatternMatcherPass(
-    pass_name="remove_split_with_size_one_pass_aten"
-)
+normalization_pass_aten = PatternMatcherPass()
+merge_splits_pass_aten = PatternMatcherPass()
+split_cat_pass_aten = PatternMatcherPass()
+unbind_stack_pass_aten = PatternMatcherPass()
+merge_getitem_cat_pass_aten = PatternMatcherPass()
+merge_stack_tahn_unbind_pass_aten = PatternMatcherPass()
+mutate_cat_pass_aten = PatternMatcherPass()
+remove_split_with_size_one_pass_aten = PatternMatcherPass()
 
 
 def save_inductor_dict(pass_to_compare=None):
@@ -128,26 +122,6 @@ def fuse_split_getitem_squeeze_cat(graph):
     return None
 
 
-def use_triton_dot_compress(graph):
-    return None
-
-
-def use_triton_lce_replace_simple_LCE_helper(gm, shape_prop):
-    return None
-
-
-def use_triton_lce_replace_simple_LCE(graph):
-    return use_triton_lce_replace_simple_LCE_helper(graph.owning_module, shape_prop)
-
-
-def use_triton_lce_replace_normal_LCE_helper(gm, shape_prop):
-    return None
-
-
-def use_triton_lce_replace_normal_LCE(graph):
-    return use_triton_lce_replace_simple_LCE_helper(graph.owning_module, shape_prop)
-
-
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -198,9 +172,6 @@ def _run_pre_dispatch_passes(
 
     full_pass_list = default_pass_list + [
         fuse_split_getitem_squeeze_cat,
-        use_triton_dot_compress,
-        use_triton_lce_replace_simple_LCE,
-        use_triton_lce_replace_normal_LCE,
     ]
 
     log.info(

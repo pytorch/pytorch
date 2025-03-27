@@ -151,13 +151,17 @@ compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 class BaseTorchFunction(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
         return super().__torch_function__(func, types, args, kwargs)
 
 
 class MockSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        return super().__torch_function__(func, types, args, kwargs)
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
 
 
 class AttrSubclass(torch.Tensor):
@@ -166,12 +170,18 @@ class AttrSubclass(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        return super().__torch_function__(func, types, args, kwargs)
+        if kwargs is None:
+            kwargs = {}
+
+        return func(*args, **kwargs)
 
 
 class DummyNDim(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         if func == torch.Tensor.ndim.__get__:
             return 10
 
@@ -196,6 +206,9 @@ class WrapperSubclass:
 class SigmoidToExpSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         if func == torch.Tensor.sigmoid:
             return super().__torch_function__(torch.Tensor.exp, types, args, kwargs)
 
@@ -509,57 +522,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res, _ = fn(input)
         self.assertFalse(res)
 
-    def test_disable_all_torch_function(self):
-        @torch.compile(backend="eager")
-        def fn(x):
-            with torch._C.DisableTorchFunction():
-                torch._dynamo.graph_break()
-                return (
-                    torch._C._is_torch_function_enabled(),
-                    torch._C._is_torch_function_all_disabled(),
-                    torch.add(x, 1.0),
-                )
-
-        input = torch.ones(2, 2)
-        res1, res2, _ = fn(input)
-        self.assertFalse(res1)
-        self.assertTrue(res2)
-
-    def test_disable_all_torch_function_restore_values(self):
-        @torch.compile(backend="eager")
-        def fn(x):
-            with torch._C.DisableTorchFunction():
-                x = torch._C._is_torch_function_all_disabled()
-
-            return (
-                x,
-                torch._C._is_torch_function_all_disabled(),
-                torch.add(x, 1.0),
-            )
-
-        input = torch.ones(2, 2)
-        res1, res2, _ = fn(input)
-        self.assertTrue(res1)
-        self.assertFalse(res2)
-
-    def test_disable_all_torch_function_restore_values_graph_break(self):
-        @torch.compile(backend="eager")
-        def fn(x):
-            with torch._C.DisableTorchFunction():
-                torch._dynamo.graph_break()
-                x = torch._C._is_torch_function_all_disabled()
-
-            return (
-                x,
-                torch._C._is_torch_function_all_disabled(),
-                torch.add(x, 1.0),
-            )
-
-        input = torch.ones(2, 2)
-        res1, res2, _ = fn(input)
-        self.assertTrue(res1)
-        self.assertFalse(res2)
-
     def test_torch_function_state_nested(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -602,7 +564,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_return_subclass(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            return MockSubclass(torch.add(x, 1.0)) * 2
+            return MockSubclass(torch.add(x, 1.0))
 
         input = torch.ones(2, 2)
 
@@ -612,7 +574,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_return_as_subclass(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            return torch.add(x, 1.0).as_subclass(MockSubclass) * 2
+            return torch.add(x, 1.0).as_subclass(MockSubclass)
 
         input = torch.ones(2, 2)
 
@@ -623,13 +585,15 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
-                return super().__torch_function__(func, types, args, kwargs)
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
 
         with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
 
             @torch.compile(backend="eager", fullgraph=True)
             def fn(x):
-                return LocalSubclass(torch.add(x, 1.0)) * 2
+                return LocalSubclass(torch.add(x, 1.0))
 
             input = torch.ones(2, 2)
 

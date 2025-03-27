@@ -95,6 +95,12 @@ python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
 
+if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
+    export _GLIBCXX_USE_CXX11_ABI=1
+else
+    export _GLIBCXX_USE_CXX11_ABI=0
+fi
+
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
     python tools/amd_build/build_amd.py
@@ -162,6 +168,12 @@ fi
     echo "$(pushd $PYTORCH_ROOT && git rev-parse HEAD)" > libtorch/build-hash
 
 )
+
+if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
+    LIBTORCH_ABI="cxx11-abi-"
+else
+    LIBTORCH_ABI=
+fi
 
 (
     set -x

@@ -14,7 +14,6 @@
 
 #include <torch/csrc/monitor/counters.h>
 #include <torch/csrc/monitor/events.h>
-#include <torch/csrc/monitor/python_init.h>
 
 namespace pybind11::detail {
 template <>

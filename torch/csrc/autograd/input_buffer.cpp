@@ -144,25 +144,25 @@ void InputBuffer::add(
   //       (2a) Uses the consumer's stream as the accumulation stream
   //       (2b) Syncs the accumulation stream with the producer's stream (if
   //       different) (2c) Accumulates.
-  //  (3) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the consumer but not the producer:
+  //  (3) var is a CUDA/privateuse1 variable and it shares a device with the
+  //  consumer but not the producer:
   //       (3a) Uses the consumer's stream as the accumulation stream
   //       (3b) Syncs the accumulation stream with the consumer device's default
   //       stream (3c) Accumulates.
-  //  (4) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the producer but not the consumer:
+  //  (4) var is a CUDA/privateuse1 variable and it shares a device with the
+  //  producer but not the consumer:
   //       (4a) Uses the producer device's default stream as the accumulation
   //       stream (4b) Syncs the accumulation stream with the producer's
   //       stream (4c) Accumulates.
-  //  (5) var is a CUDA/MTIA/privateuse1 variable and it does not share a device
-  //  with the consumer or producer.
+  //  (5) var is a CUDA/privateuse1 variable and it does not share a device with
+  //  the consumer or producer.
   //      Accumulation happens on the var device's default stream.
 
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
   const auto device_type = device->type();
-  if (device->is_cuda() || device->is_mtia() || device->is_privateuseone()) {
+  if (device->is_cuda() || device->is_privateuseone()) {
     const auto on_producer =
         opt_producer_stream && device == opt_producer_stream->device();
     const auto on_consumer =

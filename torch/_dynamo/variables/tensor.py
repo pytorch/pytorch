@@ -43,11 +43,10 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, graph_break_hints, variables
+from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     unimplemented,
-    unimplemented_v2,
     UnknownPropertiesDuringBackwardTrace,
     UserError,
     UserErrorType,
@@ -709,16 +708,6 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.dtype.is_floating_point)
 
     def method_is_inference(self):
-        if config.fake_tensor_disable_inference_mode:
-            unimplemented_v2(
-                gb_type="Encountered tensor.is_inference() during tracing",
-                context="",
-                explanation="tensor.is_inference() is not supported",
-                hints=[
-                    *graph_break_hints.FUNDAMENTAL,
-                    *graph_break_hints.INFERENCE_MODE,
-                ],
-            )
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             return ConstantVariable.create(fake.is_inference())
 
@@ -787,9 +776,20 @@ class TensorVariable(VariableTracker):
             from .torch_function import TensorWithTFOverrideVariable
 
             tx = InstructionTranslator.current_tx()
+
+            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
+            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
+            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
+            # It is up to the user whether this is correct behavior or not.
             py_cls = cls.as_python_constant()
+            torch_fn = VariableTracker.build(
+                tx,
+                py_cls.__torch_function__.__func__,
+                AttrSource(AttrSource(cls.source, "__torch_function__"), "__func__"),
+            )
+
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, self, py_cls, cls.source
+                tx, self, py_cls, torch_fn
             )
 
     def method_get_device(self):
@@ -1445,8 +1445,11 @@ class TensorSubclassVariable(VariableTracker):
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
 
+            source = AttrSource(self.source, "__torch_function__")
+            torch_fn = VariableTracker.build(tx, self.value.__torch_function__, source)
+
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, self.source
+                tx, args[0], self.value, torch_fn
             )
 
         return super().call_function(tx, args, kwargs)

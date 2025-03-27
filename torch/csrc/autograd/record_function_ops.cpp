@@ -75,7 +75,7 @@ static void record_function_exit_new(
 }
 
 template <typename Func>
-static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
+c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
     Func get_record,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Profiling callback that ends the associated record_function

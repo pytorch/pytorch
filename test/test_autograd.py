@@ -8626,26 +8626,6 @@ for shape in [(1,), ()]:
                     self.assertTrue(out_dual is x_dual)
                     self.assertTrue(out_tangent is x_tangent)
 
-    def test_custom_function_mark_output_view_of_intermediate(self):
-        class Func(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, inp):
-                out = inp.clone().view_as(inp)
-                ctx.mark_dirty(out)
-                return out
-
-            @staticmethod
-            def backward(ctx, gO):
-                pass
-
-        a = torch.tensor([1.0], requires_grad=True)
-        a_clone = a.clone()
-
-        with self.assertRaisesRegex(
-            RuntimeError, "received a tensor that was not an input."
-        ):
-            Func.apply(a_clone)
-
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((2, 1, 2, 2), requires_grad=True)
@@ -12667,9 +12647,6 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(func_out.requires_grad)
         self.assertTrue(func_out.is_leaf)
 
-    @skipIfTorchDynamo(
-        "exception from ill-formed graph module is not propagated with eager_noexcept"
-    )
     def test_inference_mode_inf_tensor_in_normal_mode_inplace_op(self):
         def run_test(fn):
             for requires_grad in (False, True):

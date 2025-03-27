@@ -444,7 +444,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     dtype_dict = {
         "float": torch.float32,
-        "tf32": torch.float32,
         "double": torch.float64,
         "BFloat16": torch.bfloat16,
         "Half": torch.half,
@@ -471,18 +470,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         transA = layout[0] == "T"
         transB = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
-        if data_type == "tf32":
-            # User must still set HIPBLASLT_ALLOW_TF32=1
-            torch.backends.cuda.matmul.allow_tf32 = True
-        else:
-            torch.backends.cuda.matmul.allow_tf32 = False
-
     else:  # ScaledGEMM
-        count = untuned_gemm[0].count("_")
-        assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
         # of the the number of underscores
+        count = untuned_gemm_temp.count("_")
         op_sig = untuned_gemm_temp[0]
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
@@ -498,23 +490,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
-    if op_sig == "GemmStridedBatchedTunableOp":
-        assert untuned_gemm_temp[6] == "ld"
-        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
-    else:
-        assert untuned_gemm_temp[4] == "ld"
-        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
-
-    # We cannot handle submatrices in offline tuning
-    if all(item in [n, m, k] for item in [lda, ldb, ldc]):
-        pass
-    else:
-        warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
-        )
-        return
-
     if op_sig == "GemmTunableOp":
         matA = (
             torch.rand(k, m, dtype=dtype, device=deviceid).t()
@@ -543,10 +518,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
-        # Only combination supported by PyTorch
-        assert transA is True
-        assert transB is False
-
         fillA = 0.25
         fillB = 0.75
         matA = (
@@ -555,48 +526,23 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
         )
         matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid)
             if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid).t()
         )
-
         assert untuned_gemm_temp[8] == "rw"
         if untuned_gemm_temp[9] == "1":
             rowwise = True
         else:
             rowwise = False
         if rowwise:
-            scaleA = (
-                torch.ones((1, m), device=deviceid)
-                if transB
-                else torch.ones((m, 1), device=deviceid)
-            )
-            scaleB = (
-                torch.ones((1, n), device=deviceid)
-                if transA
-                else torch.ones((n, 1), device=deviceid)
-            )
+            scaleA = torch.ones((matA.shape[0], 1), device=deviceid)
+            scaleB = torch.ones((1, matB.shape[0]), device=deviceid)
         else:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
 
-        assert untuned_gemm_temp[10] == "bias"
-        if untuned_gemm_temp[11] == "None":  # no bias vector
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
-            )
-        else:  # bias vector present
-            fillbias = 0.10
-            bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
-            bias = (
-                torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if transA
-                else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
-            )
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
-            )
-
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
         assert transA != transB
