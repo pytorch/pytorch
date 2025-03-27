@@ -655,7 +655,6 @@ class BuildExtension(build_ext):
                     if val is not None and not IS_WINDOWS:
                         self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
-            self._add_gnu_cpp_abi_flag(extension)
 
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
@@ -1112,10 +1111,6 @@ class BuildExtension(build_ext):
         name = names[-1]
         define = f'-DTORCH_EXTENSION_NAME={name}'
         self._add_compile_flag(extension, define)
-
-    def _add_gnu_cpp_abi_flag(self, extension):
-        # use the same CXX ABI as what PyTorch was compiled with
-        self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1688,10 +1683,6 @@ def _get_pybind11_abi_build_flags():
             abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
     return abi_cflags
 
-def _get_glibcxx_abi_build_flags():
-    glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    return glibcxx_abi_cflags
-
 def check_compiler_is_gcc(compiler):
     if not IS_LINUX:
         return False
@@ -1822,7 +1813,6 @@ def _check_and_build_extension_h_precompiler_headers(
 
     common_cflags += ['-std=c++17', '-fPIC']
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
@@ -1865,7 +1855,8 @@ def load_inline(name,
                 is_python_module=True,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True,
-                use_pch=False):
+                use_pch=False,
+                no_implicit_headers=False):
     r'''
     Load a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -1882,7 +1873,7 @@ def load_inline(name,
     the necessary header includes, as well as the (pybind11) binding code. More
     precisely, strings passed to ``cpp_sources`` are first concatenated into a
     single ``.cpp`` file. This file is then prepended with ``#include
-    <torch/extension.h>``.
+    <torch/extension.h>``
 
     Furthermore, if the ``functions`` argument is supplied, bindings will be
     automatically generated for each function specified. ``functions`` can
@@ -1907,6 +1898,8 @@ def load_inline(name,
     create a C++ function that calls it, and either declare or define this
     C++ function in one of the ``cpp_sources`` (and include its name
     in ``functions``).
+
+
 
     See :func:`load` for a description of arguments omitted below.
 
@@ -1933,6 +1926,10 @@ def load_inline(name,
             function. This redirection might cause issues in obscure cases
             of cpp. This flag should be set to ``False`` when this redirect
             causes issues.
+        no_implicit_headers: If ``True``, skips automatically adding headers, most notably
+            ``#include <torch/extension.h>`` and ``#include <torch/types.h>`` lines.
+            Use this option to improve cold start times when you
+            already include the necessary headers in your source code. Default: ``False``.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
@@ -1970,7 +1967,8 @@ def load_inline(name,
     if isinstance(sycl_sources, str):
         sycl_sources = [sycl_sources]
 
-    cpp_sources.insert(0, '#include <torch/extension.h>')
+    if not no_implicit_headers:
+        cpp_sources.insert(0, '#include <torch/extension.h>')
 
     if use_pch is True:
         # Using PreCompile Header('torch/extension.h') to reduce compile time.
@@ -2005,9 +2003,10 @@ def load_inline(name,
     sources = [cpp_source_path]
 
     if cuda_sources:
-        cuda_sources.insert(0, '#include <torch/types.h>')
-        cuda_sources.insert(1, '#include <cuda.h>')
-        cuda_sources.insert(2, '#include <cuda_runtime.h>')
+        if not no_implicit_headers:
+            cuda_sources.insert(0, '#include <torch/types.h>')
+            cuda_sources.insert(1, '#include <cuda.h>')
+            cuda_sources.insert(2, '#include <cuda_runtime.h>')
 
         cuda_source_path = os.path.join(build_directory, 'cuda.cu')
         _maybe_write(cuda_source_path, "\n".join(cuda_sources))
@@ -2015,8 +2014,9 @@ def load_inline(name,
         sources.append(cuda_source_path)
 
     if sycl_sources:
-        sycl_sources.insert(0, '#include <torch/types.h>')
-        sycl_sources.insert(1, '#include <sycl/sycl.hpp>')
+        if not no_implicit_headers:
+            sycl_sources.insert(0, '#include <torch/types.h>')
+            sycl_sources.insert(1, '#include <sycl/sycl.hpp>')
 
         sycl_source_path = os.path.join(build_directory, 'sycl.sycl')
         _maybe_write(sycl_source_path, "\n".join(sycl_sources))
@@ -2633,8 +2633,6 @@ def _write_ninja_file_to_build_library(path,
     else:
         common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
         common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
-
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 
     if IS_WINDOWS:
         cflags = common_cflags + ['/std:c++17'] + extra_cflags

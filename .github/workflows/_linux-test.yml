@@ -99,7 +99,7 @@ jobs:
 
       - name: configure aws credentials
         if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-test
@@ -445,8 +445,6 @@ jobs:
       - name: Check NVIDIA driver installation step
         if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
         shell: bash
-        env:
-          RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
           set +e
           set -x
