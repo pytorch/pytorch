@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+from torch.onnx import _constants
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
     _constants,
@@ -160,7 +161,7 @@ def export_compat(
                 export_params=export_params,
                 input_names=input_names,
                 output_names=output_names,
-                opset_version=17,  # TODO(justinchuby): Hard coded to 17 for now
+                opset_version=_constants.ONNX_DEFAULT_OPSET,
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
