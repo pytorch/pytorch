@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -39,23 +40,14 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
   if (!result.is_contiguous()) {
     result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
   }
+  auto A_sizes = A.sizes();
+  int ndim = A.dim();
 
-  @autoreleasepool {
-    string key = "inv_out_mps" + getTensorsStringKey({A});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, A);
-      MPSGraphTensor* outputTensor = [mpsGraph inverseOfTensor:inputTensor name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, A);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  Tensor LU = empty_like(A);
+  Tensor identity = zeros_like(A);
+  Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
+  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
 }
 
 } // namespace at::native
