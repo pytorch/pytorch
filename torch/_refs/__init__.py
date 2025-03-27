@@ -3717,7 +3717,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3726,7 +3726,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Special-cases tensors with no elements
-    if guard_size_oblivious(a.numel() == 0):
+    if guard_or_false(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3794,7 +3794,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if guard_size_oblivious(length == a_.shape[idx]):
+        if guard_or_false(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
@@ -3803,7 +3803,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while guard_size_oblivious(accum % length != 0):
+        while not guard_or_false(accum % length == 0):
+            if end == a_.ndim - 1:
+                msg = f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
+                raise ValueError(msg)
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
@@ -3823,7 +3826,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             a_ = flatten(a_, idx, end)
 
         # Splits the (possibly flattened) dimension to create the desired dim length
-        if guard_size_oblivious(accum != length):
+        if not guard_or_false(accum == length):
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
