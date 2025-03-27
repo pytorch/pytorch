@@ -15,7 +15,7 @@ from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlan, LoadPlanner
 from .storage import StorageReader
-from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
+from .utils import _api_bc_check, _DistWrapper, _profile
 
 
 __all__ = ["load_state_dict", "load"]
@@ -57,12 +57,18 @@ def load(
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> None:
     """
-    Load a distributed ``state_dict`` in SPMD style.
+    Load a checkpoint into a distributed state dict in SPMD style.
+
+    Each rank must have the same keys in their ``state_dict`` provided to this
+    API. Mismatched keys may result in hangs or errors. If unsure, you can use
+    the ``utils._assert_same_keys`` API to check (but may incur communication
+    costs).
 
     Each rank will try to read the least amount of data necessary
-    to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
+    to fulfill the requested `state_dict`. When loading :class:`ShardedTensor`
     or :class:`DTensor` instances, each rank only reads data for their local shards.
 
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
@@ -92,7 +98,7 @@ def load(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        state_dict (Dict[str, Any]): The state_dict to save.
+        state_dict (Dict[str, Any]): The state_dict to load the checkpoint into.
         checkpoint_id (Union[str, os.PathLike, None]):
             The ID of this checkpoint instance. The meaning of the checkpoint_id
             depends on the storage. It can be a path to a folder or to a file.
@@ -109,7 +115,8 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-
+        no_dist (bool): If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization. (Default: ``False``)
     Returns:
         None.
 
@@ -118,7 +125,9 @@ def load(
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()
-        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader("/checkpoint/1")
+        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader(
+        ...     "/checkpoint/1"
+        ... )
 
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
@@ -139,10 +148,10 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
         )
 
     with _profile():
@@ -150,15 +159,11 @@ def load(
             StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
         )
 
-        if no_dist:
-            keys = list(state_dict.keys())
-        else:
-            keys = _all_gather_keys(state_dict, process_group)
-            if keys != sorted(state_dict.keys()):
-                warnings.warn(
-                    "Detected mismatched keys in state dict after all gather!"
-                    " This behavior is unsupported and may cause errors may cause errors."
-                )
+        # All ranks must have the same keys in their `state_dict` provided to
+        # this API.  See documentation for more details.
+        # Here we simply sort the keys to ensure that all ranks load values in
+        # the same order.
+        keys = sorted(state_dict.keys())
 
         statetful_sd = {}
         for key in keys:
@@ -274,7 +279,7 @@ def _load_state_dict_from_keys(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        keys (Optional[Union[Set[str], str]]):
+        keys (Optional[Union[set[str], str]]):
             Loads any key specified in this set. If no keys are specified, the entire checkpoint
             is loaded.
         checkpoint_id (Union[str, os.PathLike, None]):

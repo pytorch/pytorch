@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Callable, Union
 
 import torch
@@ -10,7 +11,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
-    diff_tensor_meta,
+    check_meta_consistency,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -22,7 +23,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -37,13 +37,13 @@ class WhileLoopOp(HigherOrderOperator):
         additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
-        if not isinstance(carried_inputs, tuple):
+        if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
-                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
+                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
             )
-        if not isinstance(additional_inputs, tuple):
+        if not isinstance(additional_inputs, (tuple, list)):
             raise RuntimeError(
-                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
             )
 
         validate_subgraph_args_types(carried_inputs)
@@ -197,9 +197,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
             )
 
-    if not isinstance(carried_inputs, tuple):
+    if not isinstance(carried_inputs, (tuple, list)):
         raise RuntimeError(
-            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
+            f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
@@ -230,11 +230,18 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
     return fake_mode
 
 
-def _create_unbacked_symint(fake_mode: FakeTensorMode) -> torch.SymInt:
+def _create_unbacked_symint(
+    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+) -> torch.SymInt:
     assert (
         fake_mode is not None and fake_mode.shape_env is not None
     ), "Must provide a fake_mode with shape_env."
-    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+    ctx = (
+        contextlib.nullcontext()
+        if not ignore_fresh_unbacked_symbols
+        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
+    with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -283,7 +290,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(fake_mode),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda _: _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -327,69 +337,6 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     return _trace_while_loop(
         mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     )
-
-
-def check_meta_consistency(
-    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-    lhs_name: str,
-    rhs_name: str,
-) -> None:
-    def diff_meta_pairs(
-        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-    ) -> list[str]:
-        def diff_meta(
-            lhs: Union[torch.Tensor, torch.SymInt, int],
-            rhs: Union[torch.Tensor, torch.SymInt, int],
-        ) -> str:
-            if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-                return ", ".join(
-                    diff_tensor_meta(
-                        # We set include contiguity=False because we have vmap x cond tests, where if
-                        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
-                        # "querying is_contiguous inside of vmap for memory_format other than
-                        # torch.contiguous_format is not yet implemented". This is good for because stride
-                        # is still checked.
-                        _extract_tensor_metadata(lhs, include_contiguity=False),
-                        _extract_tensor_metadata(rhs, include_contiguity=False),
-                        check_grad=False,
-                    )
-                )
-            else:
-
-                def _both_int_types(lhs, rhs):
-                    return isinstance(lhs, (int, torch.SymInt)) and isinstance(
-                        rhs, (int, torch.SymInt)
-                    )
-
-                def _both_tensor(lhs, rhs):
-                    return isinstance(lhs, torch.Tensor) and isinstance(
-                        rhs, torch.Tensor
-                    )
-
-                if not _both_int_types(lhs, rhs) and not _both_tensor(lhs, rhs):
-                    return f"type: {lhs} vs {rhs}"
-
-            return ""
-
-        if len(lhs_list) != len(rhs_list):
-            raise torch._dynamo.exc.UncapturedHigherOrderOpError(
-                f"Expected {lhs_name} and {rhs_name} to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
-            )
-        all_diffs = []
-        for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
-            if diff := diff_meta(lhs, rhs):
-                all_diffs.append(
-                    f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
-                )
-        return all_diffs
-
-    if all_diffs := diff_meta_pairs(lhs_list, rhs_list):
-        diff_str = "\n".join(all_diffs)
-        raise torch._dynamo.exc.UncapturedHigherOrderOpError(
-            f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
-        )
 
 
 @while_loop_op.py_impl(FakeTensorMode)
@@ -437,7 +384,13 @@ def while_loop_fake_tensor_mode(
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
+            (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
+            lambda _: _create_unbacked_symint(
+                mode, ignore_fresh_unbacked_symbols=False
+            ),
+            body_outs,
         )
 
 

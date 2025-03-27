@@ -13,6 +13,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
+import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
 from unittest.mock import patch
@@ -22,9 +23,11 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._logging import getArtifactLogger
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -41,6 +44,8 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
+ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -235,7 +240,7 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: dict[str, str]
+    node_name_to_buf_name: dict[str, str],
 ) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
@@ -309,8 +314,17 @@ def enable_aot_logging() -> Iterator[None]:
         stack.close()
 
 
+# Used for provenance tracking
+# They are not stored in DebugContext because they are not set in
+# _inductor_triton_kernel_to_post_grad_node_info's Debug Context
+_inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_pre_grad_graph_id: Optional[int] = None
+
+
 class DebugContext:
     _counter = itertools.count()
+
+    # Used for provenance tracking
     _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 
     @staticmethod
@@ -512,21 +526,20 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
-        self._write_ir("ir_pre_fusion.txt", nodes)
+        with self.fopen("ir_pre_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
     def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
-        self._write_ir("ir_post_fusion.txt", nodes)
+        with self.fopen("ir_post_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
-    def _write_ir(
-        self,
-        filename: str,
-        nodes: SchedulerNodeList,
-    ) -> None:
-        with self.fopen(filename) as fd:
-            log.info("Writing debug ir to  %s", fd.name)
-            for node in nodes:
-                fd.write(node.debug_str())
-                fd.write("\n\n\n")
+    @staticmethod
+    def _write_ir(nodes: SchedulerNodeList) -> str:
+        buf = io.StringIO()
+        for node in nodes:
+            buf.write(node.debug_str())
+            buf.write("\n\n\n")
+        return buf.getvalue()
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
@@ -551,10 +564,22 @@ class DebugFormatter:
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
         self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
-    ) -> None:
+    ) -> tuple[dict[str, list[str]], dict[str, Any]]:
+        debug_info = {}
         with self.fopen(filename, "w") as fd:
             log.info("Writing provenance tracing debugging info to %s", fd.name)
-            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
+            json.dump(debug_info, fd)
+        node_mapping = {}
+        if _pre_grad_graph_id:
+            with self.fopen(
+                "inductor_provenance_tracking_node_mappings.json", "w"
+            ) as fd:
+                node_mapping = create_node_mapping(
+                    _pre_grad_graph_id, _inductor_post_to_pre_grad_nodes, debug_info
+                )
+                json.dump(node_mapping, fd)
+        return debug_info, node_mapping
 
     def log_autotuning_results(
         self,
@@ -645,6 +670,20 @@ class DebugFormatter:
                 fd.write("\n")
 
 
+def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_pre_fusion_log.isEnabledFor(logging.INFO):
+        ir_pre_fusion_log.info("BEFORE FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_pre_fusion(nodes)
+
+
+def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_post_fusion_log.isEnabledFor(logging.INFO):
+        ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_post_fusion(nodes)
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -652,6 +691,124 @@ class TensorMetadataHolder:
 
 
 save_args_cnt = itertools.count()
+
+
+def create_node_mapping(
+    pre_grad_graph_id: int,
+    post_to_pre_grad_nodes_json: dict[str, Any],
+    triton_kernel_to_post_grad_json: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Create bidirectional mappings between:
+
+    - pre_grad graph nodes and post_grad graph code nodes, and vice versa
+    - triton kernel name and post_grad graph code nodes, and vice versa
+    """
+
+    # return a dummy dict if there's any error
+    empty_return: dict[str, dict[str, Any]] = {
+        "preToPost": {},
+        "postToPre": {},
+        "cppCodeToPost": {},
+        "postToCppCode": {},
+    }
+
+    log.info("Creating node mappings for provenance tracking")
+
+    if not isinstance(post_to_pre_grad_nodes_json, dict):
+        log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
+        return empty_return
+
+    if not isinstance(triton_kernel_to_post_grad_json, dict):
+        log.error(
+            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+        )
+        return empty_return
+
+    if not isinstance(pre_grad_graph_id, int):
+        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        return empty_return
+
+    pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)
+    post_to_pre: dict[str, Any] = collections.defaultdict(OrderedSet)
+
+    post_to_cpp_code: dict[str, Any] = collections.defaultdict(OrderedSet)
+
+    try:
+        for outer_key, node_array in triton_kernel_to_post_grad_json.items():
+            if not isinstance(node_array, list):
+                log.error(
+                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                )
+                return empty_return
+            for curr_node in node_array:
+                post_to_cpp_code[curr_node].add(outer_key)
+
+        def check_format(node: dict[str, Any]) -> bool:
+            if not isinstance(node, dict):
+                log.error(
+                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
+                )
+                return False
+            if "graph_id" not in node or "name" not in node or "from_node" not in node:
+                log.error(
+                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
+                )
+                return False
+            return True
+
+        for outer_key, node_array in post_to_pre_grad_nodes_json.items():
+            if not isinstance(node_array, list):
+                log.error(
+                    "Provenance tacking error: post_to_pre_grad_nodes_json value is not a list"
+                )
+                return empty_return
+            for node in node_array:
+                if not check_format(node):
+                    return empty_return
+                # Check the current node first
+                if node.get("graph_id") == pre_grad_graph_id:
+                    pre_to_post[node["name"]].add(outer_key)
+                    post_to_pre[outer_key].add(node["name"])
+
+                # Check nested from_node array recursively, add node with the right graph_id to the map
+                stack = [(n, outer_key) for n in node.get("from_node", [])]
+                while stack:
+                    current_node, parent_key = stack.pop()
+                    if not check_format(current_node):
+                        return empty_return
+                    if current_node.get("graph_id") == pre_grad_graph_id:
+                        pre_to_post[current_node["name"]].add(parent_key)
+                        post_to_pre[parent_key].add(current_node["name"])
+                    stack.extend(
+                        (n, parent_key) for n in current_node.get("from_node", [])
+                    )
+
+        def convert_sets_to_lists(d: dict[str, Any]) -> None:
+            for key in d:
+                d[key] = list(d[key])
+            d = dict(d)
+
+        # convert to list because set is not JSON serializable
+        convert_sets_to_lists(pre_to_post)
+        convert_sets_to_lists(post_to_pre)
+        convert_sets_to_lists(post_to_cpp_code)
+        return {
+            "preToPost": pre_to_post,
+            "postToPre": post_to_pre,
+            "cppCodeToPost": triton_kernel_to_post_grad_json,
+            "postToCppCode": post_to_cpp_code,
+        }
+    except Exception as e:
+        # Since this is just logging code, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        log.error("Unexpected error in create_node_mapping: %s", e)
+        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
+        log.error(
+            "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
+        )
+        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
+        log.error(traceback.format_exc())
+        return empty_return
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
@@ -728,7 +885,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: dict[str, Any],
-    package_path: Optional[Union[str, io.BytesIO]] = None,
+    package_path: Optional[FileLike] = None,
 ) -> str:
     from torch._dynamo.debug_utils import AccuracyError
     from torch._dynamo.repro.aoti import dump_to_minify

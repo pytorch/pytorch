@@ -11,6 +11,8 @@ import pickle
 import unittest
 import weakref
 from unittest.mock import patch
+import io
+import gc
 
 import numpy as np
 import torch
@@ -71,6 +73,7 @@ from torch.testing._internal.custom_op_db import custom_op_db
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1597,24 +1600,76 @@ class FakeTensorPropTest(TestCase):
         self.assertIsNot(u0, u1)
         self.assertTrue(statically_known_true(u0 == u1))
 
+    def test_nonzero_stride(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            value = torch.ones(5)
+            fake_r = value.nonzero()
+
+        r = torch.ones(5).nonzero()
+
+        self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_torch_load_with_fake_mode(self):
-        class TheModelClass(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = torch.nn.Linear(5, 10)
+        model = torch.nn.Linear(5, 10)
+        sd = model.state_dict()
+        sd['tt'] = TwoTensor(torch.randn(2), torch.randn(2))
 
-            def forward(self, x):
-                return self.fc1(x)
+        def _read_tensor_and_check(key, sd_loaded, all_bytes, device):
+            dtype = torch.float32
+            t = sd_loaded[key]
+            self.assertEqual(t.device.type, device)
+            if isinstance(t, TwoTensor):
+                untyped_storage_a, untyped_storage_b = t.a.untyped_storage(), t.b.untyped_storage()
+                offset_a, offset_b = untyped_storage_a._checkpoint_offset, untyped_storage_b._checkpoint_offset
+                nbytes_a, nbytes_b = untyped_storage_a.nbytes() // 4, untyped_storage_b.nbytes() // 4
+                result_a = torch.frombuffer(all_bytes, dtype=dtype, count=nbytes_a, offset=offset_a).resize_(t.a.size())
+                result_b = torch.frombuffer(all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b).resize_(t.b.size())
+                self.assertEqual(TwoTensor(result_a, result_b), sd[key])
+            else:
+                untyped_storage = t.untyped_storage()
+                offset = untyped_storage._checkpoint_offset
+                nbytes = untyped_storage.nbytes() // 4
+                result = torch.frombuffer(all_bytes, dtype=dtype, count=nbytes, offset=offset).resize_(t.size())
+                self.assertEqual(result, sd[key])
 
-        with TemporaryFileName() as state_dict_file:
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
             # Create state_dict to be loaded later
-            model = TheModelClass()
-            torch.save(model.state_dict(), state_dict_file)
+            torch.save(sd, f)
+            with open(f, 'rb') as g:
+                all_bytes = g.read()
 
             fake_mode = FakeTensorMode()
             with fake_mode:
-                torch.load(state_dict_file)  # scenario 1
-                torch.load(state_dict_file, map_location="cpu")  # scenario 2
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, all_bytes, 'cpu')
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cuda")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, all_bytes, 'cuda')
+
+
+        for k in sd.keys():
+            sd[k] = sd[k].to('cuda')
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
+            torch.save(sd, f)
+            with open(f, 'rb') as g:
+                all_bytes = g.read()
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, all_bytes, 'cuda')
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cpu")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, all_bytes, 'cpu')
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)
@@ -2054,6 +2109,24 @@ class FakeTensorDispatchCache(TestCase):
             out.sum().backward()
             self.assertEqual(x.shape, x.grad.shape)
 
+    def test_from_buffer(self):
+        with FakeTensorMode():
+            obj = [1, 2]
+            f = io.BytesIO()
+            pickle.Pickler(f).dump(obj)
+            storage = torch.UntypedStorage.from_buffer(f.getvalue(), dtype=torch.uint8)
+
+            t = torch.ByteTensor(storage)
+            self.assertTrue(isinstance(t, FakeTensor))
+            self.assertEqual(t.device, torch.device('cpu'))
+
+    def test_meta_tensor_to_fake_cpu(self):
+        x = torch.randn(4, 4, device='meta')
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            x_cpu = x.to(device='cpu')
+        self.assertTrue(isinstance(x_cpu, FakeTensor))
+        self.assertEqual(x_cpu.device, torch.device('cpu'))
+
     def test_cache_tuple_outputs(self):
         """
         Test to check that ops with tuple outputs work.
@@ -2076,6 +2149,167 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(a),
                     extract_tensor_metadata(b),
                 )
+
+    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
+    def test_invoke_subgraph(self):
+        """
+        Tests invoke subgraph
+        """
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+        def run():
+            def fn(x, y):
+                return (x + y * 2,)
+
+            # Ensure there is no caching for non-Fx graph module inputs
+            with FakeTensorMode():
+                x = torch.randn(6, 4)
+                y = torch.randn(6, 4)
+
+                FakeTensorMode.cache_clear()
+                self.assertHitsMisses(0, 0)
+
+                ref = invoke_subgraph(fn, "subgraph", (x, y))
+                self.assertHitsMisses(0, 2)
+                self.assertBypasses("function argument", 1)
+
+                res = invoke_subgraph(fn, "subgraph", (x, y))
+                # The hits are from the ops inside fn
+                self.assertHitsMisses(2, 2)
+                self.assertBypasses("function argument", 2)
+
+                res = invoke_subgraph(fn, "subgraph", (x, y))
+                # The hits are from the ops inside fn
+                self.assertHitsMisses(4, 2)
+                self.assertBypasses("function argument", 3)
+
+            # Get the mod as if its going through torch.compile
+            backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+            x = torch.randn(6, 4)
+            y = torch.randn(6, 4)
+            torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+            self.assertEqual(len(backend.fw_graphs), 1)
+            mod = backend.fw_graphs[0]
+
+            # Ensure that we see hits everytime
+            with FakeTensorMode():
+                x = torch.randn(6, 4)
+                y = torch.randn(6, 4)
+
+                FakeTensorMode.cache_clear()
+                self.assertHitsMisses(0, 0)
+
+                ref = invoke_subgraph(mod, "subgraph", (x, y))
+                self.assertHitsMisses(0, 3)
+
+                res = invoke_subgraph(mod, "subgraph", (x, y))
+                # The hits are from re-running the subgraph
+                self.assertHitsMisses(1, 3)
+
+                res = invoke_subgraph(mod, "subgraph", (x, y))
+                # The hits are from re-running the subgraph
+                self.assertHitsMisses(2, 3)
+
+                self.assertEqual(len(ref), len(res))
+                self.assertEqual(len(ref), len(res))
+                for a, b in zip(ref, res):
+                    self.assertEqual(
+                        extract_tensor_metadata(a),
+                        extract_tensor_metadata(b),
+                    )
+            self.assertTrue(count_invoke_subgraph_keys() > 0)
+
+        def count_invoke_subgraph_keys():
+            invoke_subgraph_keys = 0
+            for cache_key in FakeTensorMode.cache.keys():
+                if isinstance(cache_key.key[0], torch._ops.HigherOrderOperator):
+                    invoke_subgraph_keys += 1
+            return invoke_subgraph_keys
+
+        # Check that the graph gc clears the cache
+        run()
+        torch.compiler.reset()
+        gc.collect()
+        self.assertTrue(count_invoke_subgraph_keys() == 0)
+
+
+
+    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
+    def test_invoke_subgraph_non_cacheable(self):
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+
+        def fn(x, y):
+            # aten ops are used so that eager backend graph is suitable for fake
+            # tensor testing
+            cos = torch.ops.aten.cos.default(x)
+            # inplace-view - this should cause the whole invoke_subgraph to not
+            # being able to cache
+            t = torch.ops.aten.t_.default(cos)
+            mul = torch.ops.aten.mul.Tensor(t, y)
+            return (mul,)
+
+        # Ensure there is no caching for non-Fx graph module inputs
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(fn, "subgraph", (x, y))
+            self.assertHitsMisses(0, 2)
+            self.assertBypasses("inplace view", 1)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(2, 2)
+            self.assertBypasses("inplace view", 2)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(4, 2)
+            self.assertBypasses("inplace view", 3)
+
+        # Get the mod as if its going through torch.compile
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+        self.assertEqual(len(backend.graphs), 1)
+        mod = backend.graphs[0]
+
+        # Ensure that invoke_subgraph result is not cached
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(mod, "subgraph", (x, y))
+            self.assertHitsMisses(0, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 1)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from the ops inside fn and not the subgraph
+            self.assertHitsMisses(2, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 2)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from the ops inside fn and not the subgraph
+            self.assertHitsMisses(4, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 3)
+
+            self.assertEqual(len(ref), len(res))
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                self.assertEqual(
+                    extract_tensor_metadata(a),
+                    extract_tensor_metadata(b),
+                )
+
+
 
 
 if __name__ == "__main__":

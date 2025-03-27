@@ -1,12 +1,10 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Exponential"]
@@ -26,6 +24,7 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
+
     arg_constraints = {"rate": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
@@ -49,7 +48,7 @@ class Exponential(ExponentialFamily):
 
     def __init__(self, rate, validate_args=None):
         (self.rate,) = broadcast_all(rate)
-        batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
+        batch_shape = torch.Size() if isinstance(rate, _Number) else self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

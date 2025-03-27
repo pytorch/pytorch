@@ -16,6 +16,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
+    IS_WINDOWS,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -30,7 +31,7 @@ from torch.utils._sympy.functions import (
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
-LONG_SUFFIX = "LL" if IS_MACOS else "L"
+LONG_SUFFIX = "LL" if IS_MACOS or IS_WINDOWS else "L"
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
@@ -318,6 +319,18 @@ class ExprPrinterTests(InductorTestCase):
         self.assertExpectedInline(
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
+
+    def test_print_integer(self):
+        expr = sympy.S((-1) << 63)
+        self.assertExpectedInline(cexpr(expr), f"""(-1{LONG_SUFFIX} << 63)""")
+
+        expr = sympy.S(((-1) << 63) - 1)
+        with self.assertRaises(OverflowError):
+            cexpr(expr)
+
+        expr = sympy.S(1 << 63)
+        with self.assertRaises(OverflowError):
+            cexpr(expr)
 
     def test_print_mod(self):
         x = sympy.Symbol("x", integer=True)

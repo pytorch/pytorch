@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/Parallel.h>
+#include <ATen/autocast_mode.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
@@ -61,6 +62,14 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
 
   callers.reserve(config.num_calling_threads);
 
+  static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DEVICES;
+  std::array<bool, DEVICES.size()> autocast_enabled;
+  std::array<at::ScalarType, DEVICES.size()> autocast_dtype;
+  for (size_t i = 0; i < DEVICES.size(); i++) {
+    autocast_enabled[i] = at::autocast::is_autocast_enabled(DEVICES[i]);
+    autocast_dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
+  }
+  bool autocast_cache_enabled = at::autocast::is_autocast_cache_enabled();
   bool tls_grad_enabled = c10::GradMode::is_enabled();
   c10::impl::LocalDispatchKeySet tls_key_set =
       c10::impl::tls_local_dispatch_key_set();
@@ -71,6 +80,11 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
       // performs required warmeup iterations before we start measuring
       c10::GradMode::set_enabled(tls_grad_enabled);
       c10::impl::_force_tls_local_dispatch_key_set(tls_key_set);
+      for (size_t i = 0; i < DEVICES.size(); i++) {
+        at::autocast::set_autocast_enabled(DEVICES[i], autocast_enabled[i]);
+        at::autocast::set_autocast_dtype(DEVICES[i], autocast_dtype[i]);
+      }
+      at::autocast::set_autocast_cache_enabled(autocast_cache_enabled);
 
       for (const auto j : c10::irange(config.num_warmup_iters)) {
         (void)j;

@@ -45,13 +45,13 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  libtorch-linux-focal-cuda12_4-py3_10-gcc9-debug-build:
-    name: libtorch-linux-focal-cuda12.4-py3.10-gcc9-debug
+  libtorch-linux-focal-cuda12_6-py3_10-gcc11-debug-build:
+    name: libtorch-linux-focal-cuda12.6-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: libtorch-linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: libtorch-linux-focal-cuda12.6-py3.10-gcc11
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.4xlarge"
@@ -62,14 +62,14 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-focal-cuda12_4-py3_10-gcc9-no-ops-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9-no-ops
+  linux-focal-cuda12_6-py3_10-gcc11-no-ops-build:
+    name: linux-focal-cuda12.6-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-no-ops
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -109,6 +109,7 @@ jobs:
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
     secrets: inherit
 
@@ -125,12 +126,12 @@ jobs:
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
@@ -142,25 +143,25 @@ jobs:
         ]}
     secrets: inherit
 
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-test:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-test.yml
     needs:
-      - win-vs2019-cpu-py3-build
+      - win-vs2022-cpu-py3-build
       - target-determination
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
+  win-vs2022-cuda12_6-py3-build:
+    name: win-vs2022-cuda12.6-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cuda12.1-py3
-      cuda-version: "12.1"
+      build-environment: win-vs2022-cuda12.6-py3
+      cuda-version: "12.6"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
@@ -199,50 +200,39 @@ jobs:
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build:
-    if: false # See https://github.com/pytorch/pytorch/issues/138750
-    name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
+  # NB: Keep this in sync with inductor-perf-test-nightly.yml
+  linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
+    name: cuda12.4-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.0'
+    secrets: inherit
+
+  verify-cachebench-cpu-build:
+    name: verify-cachebench-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      use_split_build: true
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
         { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build-test
+  verify-cachebench-cpu-test:
+    name: verify-cachebench-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build
+      - verify-cachebench-cpu-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
-    secrets: inherit
-
-  # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm80
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.0'
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit
