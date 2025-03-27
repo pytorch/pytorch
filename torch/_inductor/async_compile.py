@@ -286,6 +286,7 @@ class AsyncCompile:
             counters["inductor"]["async_compile_cache_hit"] += 1
             return future
 
+
         counters["inductor"]["async_compile_cache_miss"] += 1
 
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
