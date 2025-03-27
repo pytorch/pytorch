@@ -410,6 +410,7 @@ def l1_loss(
     size_average: Optional[bool] = ...,
     reduce: Optional[bool] = ...,
     reduction: str = ...,
+    weight: Optional[Tensor] = ...,
 ) -> Tensor: ...
 def mse_loss(
     input: Tensor,
