@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
       - name: update-xla-commit-hash
         continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.7
         with:
           repo-name: xla
           branch: master
