@@ -2,16 +2,17 @@
 import logging
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
-    ceildiv as cdiv,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -23,8 +24,9 @@ from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
     mm_args,
-    mm_config_kwargs,
+    mm_configs,
     mm_options,
+    should_fallback_to_aten,
 )
 
 
@@ -32,7 +34,8 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-def bmm_grid(b, m, n, meta):
+@SymbolicGridFn
+def bmm_grid(b, m, n, meta, *, cdiv):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
 
 
@@ -41,6 +44,12 @@ def _is_large_block_for_cpu(m, n, k):
     if m > 128 or n > 128 or k > 128:
         return True
     return m * n > 2**12
+
+
+def bmm_configs(m, n, k, *, device_type):
+    if device_type == "cpu":
+        return mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
+    return mm_configs(m, n, k)
 
 
 bmm_template = TritonTemplate(
@@ -161,16 +170,22 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.bmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     # options to tune from
     choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
-
-    device_type = ir.get_device_type(mat1)
-    bmm_configs = V.choices.get_base_mm_configs(device_type)
-
     if use_triton_template(layout):
-        for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
-        ):
+        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -195,8 +210,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
@@ -206,20 +220,27 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.baddbmm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.baddbmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        inp.get_dtype(),
+        layout,
+    )
+
     # options to tune from
     choices = (
         [aten_baddbmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
         if use_aten_gemm_kernels()
         else []
     )
-
-    device_type = ir.get_device_type(mat1)
-    bmm_configs = V.choices.get_base_mm_configs(device_type)
-
     if use_triton_template(layout):
-        for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
-        ):
+        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp, mat1, mat2),

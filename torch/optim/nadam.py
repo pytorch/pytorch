@@ -17,6 +17,7 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     _stack_if_compiling,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -296,6 +297,9 @@ def _single_tensor_nadam(
     differentiable: bool,
     has_complex: bool,
 ):
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -366,9 +370,7 @@ def _single_tensor_nadam(
                 grad, denom, value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product)))
             )
             param.addcdiv_(
-                exp_avg,
-                denom,
-                value=cast(float, (-lr * mu_next) / (1.0 - mu_product_next)),
+                exp_avg, denom, value=(-lr * mu_next) / (1.0 - mu_product_next)
             )
 
 
@@ -407,6 +409,8 @@ def _multi_tensor_nadam(
             and p.device.type in capturable_supported_devices
             for p, mp, step in zip(params, mu_products, state_steps)
         ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]  # type: ignore[list-item]
