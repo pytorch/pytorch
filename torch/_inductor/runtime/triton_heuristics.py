@@ -1242,7 +1242,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        self.kernel.load_kernel()
+        self.kernel.load_kernel(self.compile_meta.get("device", 0))
         scope = {
             "runner": self.kernel.run,
         }
