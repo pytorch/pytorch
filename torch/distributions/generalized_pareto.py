@@ -143,8 +143,8 @@ class GeneralizedPareto(Distribution):
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        upper = torch.where(
-            self.concentration < 0, self.loc - self.scale / self.concentration, inf
-        )
         lower = self.loc
+        upper = torch.where(
+            self.concentration < 0, lower - self.scale / self.concentration, inf
+        )
         return constraints.interval(lower, upper)
