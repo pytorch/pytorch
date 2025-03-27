@@ -1912,7 +1912,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
             # r"The tree structure of the inits and the carries are not identical.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"scan must be captured completely with.*",
+            "Expected init and carry to have same number of outputs but got lhs.*",
         ):
             scan(fct_wrong_pytree, init, inp, dim=0)
 
@@ -2343,7 +2343,7 @@ def forward(self, pred_1, x_1):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"scan must be captured completely.*",
+            "Expected init and carry to have same number of outputs but got lhs.*",
         ):
             scan_fct(init_longer_carry, init, x, dim=dim)
 
@@ -2366,7 +2366,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # The tree structure of the inits and the carries are not identical!
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"scan must be captured completely.*",
+            "Expected init and carry to have same number of outputs but got lhs.*",
         ):
             scan_fct(init_shorter_carry, init, x, dim=dim)
 

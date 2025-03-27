@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from torch._library.fake_class_registry import FakeScriptObject
 
     from .compile_fx import _CompileFxKwargs
-    from .triton_bundler import TritonKernelArtifacts
+    from .triton_bundler import TritonBundle
 
 log = logging.getLogger(__name__)
 
@@ -420,7 +420,7 @@ class CompiledFxGraph(OutputCode):
     inputs_to_check: Sequence[int]
 
     _boxed_call: Optional[bool] = None
-    _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
+    _triton_bundle: Optional[TritonBundle] = None
 
     def __init__(
         self,
