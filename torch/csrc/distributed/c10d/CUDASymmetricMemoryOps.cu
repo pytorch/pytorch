@@ -409,7 +409,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   if (input_ptr) {
     for (size_t i = offset; i < numel; i += stride) {
       Vec<alignment> vec_st = ld_vec<alignment>(input_ptr + i);
-      st_vec<alignment>(input_ptrs[rank] + i, vec_st);
+      st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
   }
   // TODO make it sync with one block for no-copy case
@@ -438,13 +438,20 @@ at::Tensor one_shot_all_reduce_out_impl(
       out.is_contiguous(), "one_shot_all_reduce: output must be contiguous.");
   TORCH_CHECK(
       out.sizes() == input.sizes(),
-      "one_shot_all_reduce: input/output size mismatch.");
+      "one_shot_all_reduce: input/output size mismatch, input.sizes(): ",
+      input.sizes(),
+      ", output.sizes(): ",
+      out.sizes());
   TORCH_CHECK(
       reduce_op == "sum",
       "one_shot_all_reduce: only sum is supported for now.");
   if (local_input.has_value()) {
-    TORCH_CHECK(local_input->is_contiguous(),  "one_shot_all_reduce: local input must be contiguous." );
-    TORCH_CHECK(local_input->numel() <= input.numel(), "one_shot_all_reduce: local input size must be smaller than symm buffer size.");
+    TORCH_CHECK(
+        local_input->is_contiguous(),
+        "one_shot_all_reduce: local input must be contiguous.");
+    TORCH_CHECK(
+        local_input->numel() <= input.numel(),
+        "one_shot_all_reduce: local input size must be smaller than symm buffer size.");
   }
   auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
@@ -454,8 +461,11 @@ at::Tensor one_shot_all_reduce_out_impl(
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
   if (local_input.has_value()) {
-    const size_t local_alignment = get_and_verify_alignment(*local_input, "one_shot_all_reduce");
-    TORCH_CHECK(alignment == local_alignment, "one_shot_all_reduce: local input and symm buffer must have the same alignment.");
+    const size_t local_alignment =
+        get_and_verify_alignment(*local_input, "one_shot_all_reduce");
+    TORCH_CHECK(
+        alignment == local_alignment,
+        "one_shot_all_reduce: local input and symm buffer must have the same alignment.");
   }
 
   int num_blocks = 0, num_threads = 0;

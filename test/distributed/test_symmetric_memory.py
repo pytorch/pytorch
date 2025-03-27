@@ -865,22 +865,28 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        for dtype, size_bytes, align_bytes, copy in itertools.product(
-            [torch.float, torch.bfloat16], [4, 8192, 8196], [4, 8, 16], [True, False]
+        for dtype, size_bytes, align_bytes, copy, offset in itertools.product(
+            [torch.float, torch.bfloat16],
+            [4, 8192, 8196],
+            [4, 8, 16],
+            [True, False],
+            [0, 16],
         ):
             inp = symm_mem.empty(
-                size_bytes // dtype.itemsize, dtype=dtype, device=self.device
+                size_bytes // dtype.itemsize + offset, dtype=dtype, device=self.device
             )
             symm_mem.rendezvous(inp, group=group_name)
             if not copy:
                 inp.normal_()
-                res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
-            if copy:
-                local_inp = torch.randn_like(inp)
-                res = torch.ops.symm_mem.one_shot_all_reduce_copy(
-                    inp, local_inp, "sum", group_name
+                res = torch.ops.symm_mem.one_shot_all_reduce(
+                    inp[offset:], "sum", group_name
                 )
-            self._verify_all_reduce_result(local_inp if copy else inp, res)
+            if copy:
+                local_inp = torch.randn_like(inp[offset:])
+                res = torch.ops.symm_mem.one_shot_all_reduce_copy(
+                    inp[offset:], local_inp, "sum", group_name
+                )
+            self._verify_all_reduce_result(local_inp if copy else inp[offset:], res)
 
         dist.destroy_process_group()
 
