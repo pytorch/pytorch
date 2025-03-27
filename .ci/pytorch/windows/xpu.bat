@@ -28,6 +28,8 @@ call "%XPU_BUNDLE_ROOT%\compiler\latest\env\vars.bat"
 call "%XPU_BUNDLE_ROOT%\ocloc\latest\env\vars.bat"
 IF ERRORLEVEL 1 goto :eof
 
+set TORCH_XPU_ARCH_LIST=lnl-m,bmg-g21,arl-h,mtl-h,mtl-u,arl-u,ats-m150
+
 if exist "%NIGHTLIES_PYTORCH_ROOT%" cd %NIGHTLIES_PYTORCH_ROOT%\..
 call %~dp0\internal\copy_cpu.bat
 IF ERRORLEVEL 1 goto :eof
