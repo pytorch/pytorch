@@ -139,7 +139,8 @@ APIUsageLoggerType* GetAPIUsageLogger() {
 APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
   static APIUsageMetadataLoggerType func =
       [](const std::string&,
-         const std::map<std::string, std::string>& metadata_map) {};
+         const std::map<std::string, std::string>& metadata_map
+         [[maybe_unused]]) {};
   return &func;
 }
 
@@ -386,7 +387,7 @@ void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
 
-bool InitCaffeLogging(int* argc, char** argv) {
+bool InitCaffeLogging(int* argc, char** argv [[maybe_unused]]) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
