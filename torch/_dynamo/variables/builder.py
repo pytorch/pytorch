@@ -1533,6 +1533,7 @@ class VariableBuilder:
                 )
                 metrics_context = get_metrics_context()
                 for p in params:
+                    # This is somewhat clever. Weights may be saved between models. This code is designed to correctly de deuplicate them when duplicated.
                     metrics_context.set_key_value("param_numel_addr", id(p), p.numel())
                     metrics_context.set_key_value("param_bytes_addr", id(p), p.nbytes)
                     metrics_context.set_key_value("param_count_addr", id(p), 1)
