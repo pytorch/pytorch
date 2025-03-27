@@ -102,7 +102,7 @@ def get_ignored_functions() -> set[Callable]:
 
     Returns
     -------
-    Set[Callable]
+    set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -1805,9 +1805,9 @@ has_torch_function_variadic = _add_docstr(
 
 
 @functools.lru_cache(None)
-def _get_overridable_functions() -> (
-    tuple[dict[Any, list[Callable]], dict[Callable, str]]
-):
+def _get_overridable_functions() -> tuple[
+    dict[Any, list[Callable]], dict[Callable, str]
+]:
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [

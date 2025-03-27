@@ -38,8 +38,7 @@ class ParallelStyle(ABC):
     src_data_rank: Optional[int] = 0
 
     @abstractmethod
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        ...
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module: ...
 
 
 class ColwiseParallel(ParallelStyle):
@@ -166,6 +165,14 @@ class ColwiseParallel(ParallelStyle):
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
             ),
         )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class RowwiseParallel(ParallelStyle):
@@ -304,6 +311,14 @@ class RowwiseParallel(ParallelStyle):
             ),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class SequenceParallel(ParallelStyle):
     """
@@ -399,6 +414,14 @@ class SequenceParallel(ParallelStyle):
             partial(self._prepare_output_fn, self.use_local_output),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        if len(self.sequence_sharding) == 1:
+            tmpstr += f"sequence_dim={self.sequence_sharding[0].dim}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class PrepareModuleInput(ParallelStyle):
     """
@@ -467,19 +490,21 @@ class PrepareModuleInput(ParallelStyle):
         )
         self.use_local_output = use_local_output
         if self.input_layouts is not None:
-            assert (
-                self.desired_input_layouts is not None
-            ), "desired module inputs should not be None!"
-            assert len(self.input_layouts) == len(
-                self.desired_input_layouts
-            ), "input_layouts and desired_input_layouts should have same length!"
+            assert self.desired_input_layouts is not None, (
+                "desired module inputs should not be None!"
+            )
+            assert len(self.input_layouts) == len(self.desired_input_layouts), (
+                "input_layouts and desired_input_layouts should have same length!"
+            )
         self.with_kwargs = input_kwarg_layouts is not None
         self.input_kwarg_layouts = input_kwarg_layouts or {}
         self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
         if self.with_kwargs:
             assert len(self.input_kwarg_layouts) == len(
                 self.desired_input_kwarg_layouts
-            ), "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+            ), (
+                "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+            )
 
     def _prepare_input_arg(
         self,
@@ -494,9 +519,9 @@ class PrepareModuleInput(ParallelStyle):
                 # assert inp.placements[0] == input_layout
                 dt_inp = input
             else:
-                assert isinstance(
-                    input, torch.Tensor
-                ), "expecting input to be a torch.Tensor!"
+                assert isinstance(input, torch.Tensor), (
+                    "expecting input to be a torch.Tensor!"
+                )
                 dt_inp = DTensor.from_local(
                     input, mesh, (input_layout,), run_check=False
                 )
@@ -517,9 +542,9 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
-        assert (
-            self.desired_input_layouts is not None
-        ), "desired module inputs should not be None!"
+        assert self.desired_input_layouts is not None, (
+            "desired module inputs should not be None!"
+        )
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
         ):
@@ -551,8 +576,20 @@ class PrepareModuleInput(ParallelStyle):
                 with_kwargs=True,
             )  # type: ignore[misc]
         else:
-            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: self._prepare_input_fn(inputs, device_mesh)
+            )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"desired_input_layouts={self.desired_input_layouts}, "
+        tmpstr += f"input_kwarg_layouts={self.input_kwarg_layouts}, "
+        tmpstr += f"desired_input_kwarg_layouts={self.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class PrepareModuleOutput(ParallelStyle):
@@ -611,9 +648,9 @@ class PrepareModuleOutput(ParallelStyle):
             else desired_output_layouts
         )
         self.use_local_output = use_local_output
-        assert len(self.output_layouts) == len(
-            self.desired_output_layouts
-        ), "output_layouts and desired_output_layouts should have same length!"
+        assert len(self.output_layouts) == len(self.desired_output_layouts), (
+            "output_layouts and desired_output_layouts should have same length!"
+        )
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
@@ -649,5 +686,15 @@ class PrepareModuleOutput(ParallelStyle):
             return tuple(prepared_outputs)
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
+        module.register_forward_hook(
+            lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
+        )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr

@@ -76,10 +76,13 @@ def read_release_matrix():
 
 
 def test_numpy():
-    import numpy as np
+    try:
+        import numpy as np
 
-    x = np.arange(5)
-    torch.tensor(x)
+        x = np.arange(5)
+        torch.tensor(x)
+    except ImportError:
+        print("Numpy check skipped. Numpy is not installed.")
 
 
 def check_version(package: str) -> None:
@@ -165,6 +168,10 @@ def test_cuda_runtime_errors_captured() -> None:
 def test_cuda_gds_errors_captured() -> None:
     major_version = int(torch.version.cuda.split(".")[0])
     minor_version = int(torch.version.cuda.split(".")[1])
+
+    if target_os == "windows":
+        print(f"{target_os} is not supported for GDS smoke test")
+        return
 
     if major_version < 12 or (major_version == 12 and minor_version < 6):
         print("CUDA version is not supported for GDS smoke test")
@@ -406,6 +413,7 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
