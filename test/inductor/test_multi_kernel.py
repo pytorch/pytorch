@@ -15,9 +15,9 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_S390X,
     parametrize,
     skipIfXpu,
-    IS_S390X,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 

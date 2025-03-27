@@ -43,7 +43,7 @@ from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack, IS_S390X
+from torch.testing._internal.common_utils import IS_S390X, skipIfNoLapack
 
 
 def _init_test_generalized_rcnn_transform():
