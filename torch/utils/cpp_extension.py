@@ -458,7 +458,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     if not CUDA_HOME:
         raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
-    nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
+    nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc.exe' if IS_WINDOWS else 'nvcc')
+    if not os.path.exists(nvcc):
+        raise FileNotFoundError(f"nvcc not found at '{nvcc}'. Ensure CUDA path '{CUDA_HOME}' is correct.")
+
     cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode(*SUBPROCESS_DECODE_ARGS)
     cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
     if cuda_version is None:
