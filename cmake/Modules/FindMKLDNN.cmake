@@ -42,11 +42,6 @@ IF(NOT MKLDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
-    if(XPU_DEVICE_CXX_FLAGS)
-      set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=${XPU_DEVICE_CXX_FLAGS}")
-    else()
-      set(DNNL_CXX_FLAGS "")
-    endif()
     ExternalProject_Add(xpu_mkldnn_proj
       GIT_REPOSITORY https://github.com/oneapi-src/oneDNN
       GIT_TAG v3.7.1
@@ -54,7 +49,6 @@ IF(NOT MKLDNN_FOUND)
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      ${DNNL_CXX_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
