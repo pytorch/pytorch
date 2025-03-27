@@ -22,6 +22,7 @@ from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
+    MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
 )
@@ -745,6 +746,96 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 check_sharded_parity(
                     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
                 )
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_with_mp_policy(self):
+        """
+        Tests train parity against DDP when composing with activation
+        checkpointing, mp_policy and float input.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "checkpoint_impl": ["utils"],  # "composable" could pass the test
+            },
+            self._test_train_parity_with_mp_policy,
+        )
+
+    def _test_train_parity_with_mp_policy(
+        self,
+        reshard_after_forward: Union[bool, int],
+        checkpoint_impl: str,
+    ):
+        assert checkpoint_impl in ("composable", "utils")
+        torch.manual_seed(42)
+        with torch.device(torch.device("cuda")):
+            model = MLP(8)
+        ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+        if checkpoint_impl == "composable":
+            checkpoint(model)
+
+        # Apply FSDP with mp_policy
+        param_dtype = torch.bfloat16
+        reduce_dtype = torch.bfloat16
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "mp_policy": mp_policy,
+        }
+        ref_model_compute = replicate(copy.deepcopy(model), device_ids=[self.rank]).to(
+            param_dtype
+        )
+        fully_shard(model, **fsdp_kwargs)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        # Use float input here
+        inp = torch.randn((2, 8), device="cuda")
+
+        for iter_idx in range(10):
+            torch.manual_seed(iter_idx + 1)
+            # under utils, with float input and mp_policy set, there's failure.
+            if checkpoint_impl == "utils":
+                out = torch.utils.checkpoint.checkpoint(model, inp, use_reentrant=False)
+            else:
+                out = model(inp)
+            loss = out.sum()
+            loss.backward()
+
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            ref_loss = ref_model_compute(inp.to(param_dtype)).sum()
+            ref_loss.backward()
+
+            self.assertEqual(ref_loss, loss)
+
+            for ref_param, ref_param_compute in zip(
+                ref_model.parameters(), ref_model_compute.parameters()
+            ):
+                self.assertTrue(ref_param_compute.grad is not None)
+                self.assertEqual(ref_param.dtype, torch.float32)
+                if ref_param.grad is not None:
+                    ref_param.grad += ref_param_compute.grad
+                else:
+                    ref_param.grad = ref_param_compute.grad.to(ref_param.dtype)
+                ref_param_compute.grad = None
+            for ref_param in ref_model.parameters():
+                self.assertTrue(ref_param.grad is not None)
+                dist.all_reduce(ref_param.grad)
+                ref_param.grad /= self.world_size
+
+            check_sharded_parity(self, ref_model, model)
+            optim.step()
+            ref_optim.step()
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            for ref_param, ref_param_compute in zip(
+                ref_model.parameters(), ref_model_compute.parameters()
+            ):
+                ref_param_compute.detach().copy_(ref_param)
 
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
