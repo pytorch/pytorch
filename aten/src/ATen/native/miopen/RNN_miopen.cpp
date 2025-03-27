@@ -70,7 +70,7 @@ namespace at::native {
 #include <stdint.h>
 #include <unordered_map>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Workspace copied from Conv_miopen.cpp but is put here inside anonymous namespace
 // to avoid duplicate symbols and to avoid the need to expose as a public struct.
@@ -976,6 +976,6 @@ REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
-}} // namespace native
+}} // namespace at::native
 
 #endif
