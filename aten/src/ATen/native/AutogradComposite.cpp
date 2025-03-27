@@ -130,6 +130,13 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
   tensor->set_sizes_and_strides(self.sym_sizes(),
                                 self.sym_strides(),
                                 self.sym_storage_offset());
+  // If the devices differ, need to synchronize the source device before this
+  // function returns the lazy cloned tensor. The device may have pending write
+  // operations on the source tensor's data, and we must force them to finish
+  // before trying to read it from the destination device.
+  if (device_opt.has_value() && device_opt.value() != self.device()) {
+    at::globalContext().getAcceleratorHooksInterface(self.device().type());
+  }
   return Tensor(std::move(tensor));
 }
 
