@@ -24,6 +24,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -476,6 +477,16 @@ def flex_attention_fake_tensor_mode(
     with mode:
         out, logsumexp = flex_attention_fake_impl(query, value)
         return out, logsumexp
+
+
+@flex_attention.py_impl(_CachingTorchDispatchMode)
+def _(mode, *args, **kwargs):
+    return flex_attention(*args, **kwargs)
+
+
+@flex_attention.py_impl(_CachedTorchDispatchMode)
+def _(mode, *args, **kwargs):
+    return flex_attention(*args, **kwargs)
 
 
 # ---------------------------- Autograd Implementation ----------------------------
