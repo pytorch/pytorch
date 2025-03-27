@@ -57,18 +57,18 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s0,))
+FakeTensor(..., size=(s77,))
 2
-[FakeTensor(..., size=(s0,)), 2]
-(FakeTensor(..., size=(s0,)), 2)
-{'foo': FakeTensor(..., size=(s0,))}
+[FakeTensor(..., size=(s77,)), 2]
+(FakeTensor(..., size=(s77,)), 2)
+{'foo': FakeTensor(..., size=(s77,))}
 range(1, 3, 1)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
 defaultdict(NestedUserFunctionVariable(), {})
 set()
 {'a','b'}
-s0""",
+s77""",
         )
 
     def test_print_graph(self):
