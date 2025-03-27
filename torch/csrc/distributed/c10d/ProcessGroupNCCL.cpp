@@ -497,7 +497,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   futureWorkResult_ =
       c10::make_intrusive<at::ivalue::Future>(c10::AnyEnumType::get());
   // other functions expect an initialized ptr
-  stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+  stashed_for_allocator_safety_ = std::make_shared<TensorShelf>();
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -2348,7 +2348,20 @@ void ProcessGroupNCCL::watchdogHandler() {
         // watchdog would unstage the stashed tensors when detecting completion
         // of the collective, to prevent ProcessGroupNCCL from holding reference
         // to those tensors forever.
-        work.unstashTensors();
+        // work.unstashTensors();
+        // Update: it seems directly unstashing from watchdog thread would cause
+        // some rare problems. We thus move the unstashing to main thread,
+        // triggered by a next user call, see `workEnqueue`. But `work` is going
+        // to be destructed, so we transfer the work's shelf to a shelves
+        // structure owned by the PG.
+        if (!work.stashed_for_allocator_safety_->empty()) {
+          {
+            std::lock_guard<std::mutex> lock(shelvesMutex_);
+            // We are just pushing back a shared_ptr here, so the cost should be
+            // minimal
+            shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+          }
+        }
 
         // Work status logging for desync debug
         desyncDebugger_.logWorkEnd(work);
@@ -3136,6 +3149,17 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+  // We clean up the TensorShelf's in case user hasn't called `work.wait()`.
+  // This has nothing to do with new work enqueue. We are just using a place
+  // that would be triggered by a next user call.
+  {
+    std::lock_guard<std::mutex> lock(shelvesMutex_);
+    for (auto& shelf : shelvesToUnstash_) {
+      shelf->clear();
+    }
+    shelvesToUnstash_.clear();
+  }
+
   // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue
   // the work
   if (!terminateProcessGroup_.load() && !blockingWait_) {

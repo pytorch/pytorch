@@ -39,6 +39,9 @@
 
 namespace c10d {
 
+// A type for stashing tensors between op call and `work.wait()`
+typedef std::vector<at::Tensor> TensorShelf;
+
 // Control broadcasting of NCCL uniqueId
 static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
     "TORCH_NCCL_BCAST_UNIQUEID"};
@@ -453,7 +456,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // caching allocator safety without any recordStream calls.
     // For in-place collectives, some refs stashed here may alias outputs_,
     // but that doesn't do any harm.
-    std::shared_ptr<std::vector<at::Tensor>> stashed_for_allocator_safety_;
+    std::shared_ptr<TensorShelf> stashed_for_allocator_safety_;
     // Need a mutex to protect stashed_for_allocator_safety_ because it can be
     // accessed from both main thread and watchdog thread.
     std::mutex stashMutex_;
@@ -1235,6 +1238,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // keeps track of input and output tensors when coalescing is in flight.  Will
   // hand over these tensors to WorkNCCL's stash when coalescing is ended.
   std::vector<at::Tensor> coalescedTensors_;
+
+  // Some ops may have completed, but user still hasn't called `work.wait()`.
+  // When watchdog detects this, it transfers the TensorShelf from `work` to
+  // this `shelves` structure. Next time we execute ProcessGroupNCCL's methods
+  // on main thread, we clear the `shelves` in one shot. This is mainly because
+  // watchdog (a side thread) unstashing the shelf directly seems to cause some
+  // problem.
+  std::vector<std::shared_ptr<TensorShelf>> shelvesToUnstash_;
+  std::mutex shelvesMutex_;
 
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
