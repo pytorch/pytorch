@@ -3280,7 +3280,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams,
-    bool nanCheck) {
+    bool nanCheck,
+    bool asyncOp) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   nanCheck &= enableNanCheck_;
@@ -3325,11 +3326,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     }
   }
 
-  // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream = ncclStreams_.at(key);
-
-  // First let NCCL streams wait for input tensors allocation streams
-  syncStream(device, ncclEvents_[key], ncclStream);
+  // in asyncOp=false [default] mode, we use currentStream as ncclStream
+  // otherwise, we use separate ncclStream and let it sync on currentStream
+  auto ncclStream = at::cuda::getCurrentCUDAStream(device.index());
+  if (asyncOp) {
+    // Used many times below, so we stash the unordered_map lookup
+    ncclStream = ncclStreams_.at(key);
+    // First let NCCL streams wait for input tensors allocation streams
+    syncStream(device, ncclEvents_[key], ncclStream);
+  }
 
   bool enqueue =
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
@@ -3903,7 +3908,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams,
-    bool nanCheck) {
+    bool nanCheck,
+    bool asyncOp) {
   auto inputs = std::vector<at::Tensor>{input};
   auto outputs = std::vector<at::Tensor>{output};
   return collective(
@@ -3915,7 +3921,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       opType,
       profilingTitle,
       avoidRecordStreams,
-      nanCheck);
+      nanCheck,
+      asyncOp);
 }
 
 template <typename Fn>
@@ -3926,7 +3933,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams,
-    bool nanCheck) {
+    bool nanCheck,
+    bool asyncOp) {
   auto inputs = std::vector<at::Tensor>{input};
   auto outputs = std::vector<at::Tensor>{output};
   return collective(
@@ -3940,7 +3948,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       opType,
       profilingTitle,
       avoidRecordStreams,
-      nanCheck);
+      nanCheck,
+      asyncOp);
 }
 
 template <typename Fn>
