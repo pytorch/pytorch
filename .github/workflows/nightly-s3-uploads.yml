@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: pip

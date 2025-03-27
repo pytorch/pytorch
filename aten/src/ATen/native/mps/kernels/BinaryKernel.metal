@@ -1,4 +1,3 @@
-#include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
@@ -47,13 +46,6 @@ struct xlog1py_functor {
   }
 };
 
-struct chebyshev_polynomial_t_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return static_cast<T>(c10::metal::chebyshev_polynomial_t_forward(a, b));
-  }
-};
-
 struct nextafter_functor {
 #if __METAL_VERSION__ < 310
   template <typename U>
@@ -90,7 +82,6 @@ struct nextafter_functor {
   }
 };
 
-// Complex binary functors
 struct polar_functor {
   template <typename U>
   using ret_type = c10::metal::vec2type_t<U>;
@@ -100,58 +91,121 @@ struct polar_functor {
   }
 };
 
-// Constructs complex tensor from real and imaginary planes
-struct make_complex_functor {
-  template <typename U>
-  using ret_type = c10::metal::vec2type_t<U>;
-  template <typename T>
-  inline ret_type<T> operator()(const T a, const T b) {
-    return ret_type<T>(a, b);
-  }
-};
+// Future BinaryTensorIterator
+template <typename T, typename F>
+using result_of = decltype(::metal::declval<F>()(
+    ::metal::declval<T>(),
+    ::metal::declval<T>()));
 
-struct complex_mul_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return T(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-  }
-};
+template <typename T, typename F>
+kernel void binary_indexing(
+    constant void* input_ [[buffer(0)]],
+    constant void* other_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto out = (device result_of<T, F>*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  F f;
+  *out = f(*input, *other);
+}
 
-REGISTER_BINARY_OP(copysign, long, float);
-REGISTER_BINARY_OP(copysign, int, float);
-REGISTER_BINARY_OP(copysign, float, float);
-REGISTER_BINARY_OP(copysign, half, half);
-REGISTER_BINARY_OP(copysign, short, float);
-REGISTER_BINARY_OP(copysign, uchar, float);
-REGISTER_BINARY_OP(copysign, char, float);
-REGISTER_BINARY_OP(copysign, bool, float);
-REGISTER_BINARY_OP(fmax, float, float);
-REGISTER_BINARY_OP(fmax, half, half);
-REGISTER_BINARY_OP(fmin, float, float);
-REGISTER_BINARY_OP(fmin, half, half);
-REGISTER_BINARY_OP(nextafter, float, float);
-REGISTER_BINARY_OP(nextafter, half, half);
-REGISTER_BINARY_OP(zeta, float, float);
-REGISTER_BINARY_OP(zeta, half, half);
-REGISTER_BINARY_OP(xlog1py, float, float);
-REGISTER_BINARY_OP(xlog1py, half, half);
-REGISTER_BINARY_OP(chebyshev_polynomial_t, float, float);
-REGISTER_BINARY_OP(chebyshev_polynomial_t, half, half);
+template <typename T, typename F>
+kernel void binary_dense(
+    constant T* input [[buffer(0)]],
+    constant T* other [[buffer(1)]],
+    device result_of<T, F>* out [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], other[tid]);
+}
+
+#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)             \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void       \
+  binary_indexing<DTYPE, NAME##_functor>(                    \
+      constant void* input_,                                 \
+      constant void* other_,                                 \
+      device void* out_,                                     \
+      constant uint3* offsets,                               \
+      uint tid);                                             \
+  template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void \
+  binary_dense<DTYPE, NAME##_functor>(                       \
+      constant DTYPE * input_,                               \
+      constant DTYPE * other_,                               \
+      device result_of<DTYPE, NAME##_functor> * out_,        \
+      uint tid)
+
+#define REGISTER_BINARY_OP(NAME, DTYPE)                             \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
+      constant void* input_,                                        \
+      constant void* other_,                                        \
+      device void* out_,                                            \
+      constant uint3* offsets,                                      \
+      uint tid)
+
+REGISTER_BINARY_INDEXING_OP(copysign, long);
+REGISTER_BINARY_INDEXING_OP(copysign, int);
+REGISTER_BINARY_INDEXING_OP(copysign, float);
+REGISTER_BINARY_INDEXING_OP(copysign, half);
+REGISTER_BINARY_INDEXING_OP(copysign, short);
+REGISTER_BINARY_INDEXING_OP(copysign, uchar);
+REGISTER_BINARY_INDEXING_OP(copysign, char);
+REGISTER_BINARY_INDEXING_OP(copysign, bool);
+REGISTER_BINARY_INDEXING_OP(fmax, float);
+REGISTER_BINARY_INDEXING_OP(fmax, half);
+REGISTER_BINARY_INDEXING_OP(fmin, float);
+REGISTER_BINARY_INDEXING_OP(fmin, half);
+REGISTER_BINARY_INDEXING_OP(nextafter, float);
+REGISTER_BINARY_INDEXING_OP(nextafter, half);
+REGISTER_BINARY_INDEXING_OP(zeta, float);
+REGISTER_BINARY_INDEXING_OP(zeta, half);
+REGISTER_BINARY_INDEXING_OP(xlog1py, float);
+REGISTER_BINARY_INDEXING_OP(xlog1py, half);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_OP(copysign, bfloat, bfloat);
-REGISTER_BINARY_OP(fmax, bfloat, bfloat);
-REGISTER_BINARY_OP(fmin, bfloat, bfloat);
-REGISTER_BINARY_OP(nextafter, bfloat, bfloat);
-REGISTER_BINARY_OP(zeta, bfloat, bfloat);
-REGISTER_BINARY_OP(xlog1py, bfloat, bfloat);
-REGISTER_BINARY_OP(chebyshev_polynomial_t, bfloat, bfloat);
+REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
+REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
+REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
+REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
+REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
+REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
 #endif
 
 // Complex binary functions
-REGISTER_BINARY_OP(polar, float, float2);
-REGISTER_BINARY_OP(polar, half, half2);
-REGISTER_BINARY_OP(make_complex, float, float2);
-REGISTER_BINARY_OP(make_complex, half, half2);
-REGISTER_BINARY_OP(complex_mul, float2, float2);
-REGISTER_BINARY_OP(complex_mul, half2, half2);
+REGISTER_BINARY_INDEXING_OP(polar, float);
+REGISTER_BINARY_INDEXING_OP(polar, half);
+
+template <typename T>
+kernel void complex_mul(
+    constant void* input_ [[buffer(0)]],
+    constant void* other_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  out[0] = input[0] * other[0] - input[1] * other[1];
+  out[1] = input[0] * other[1] + input[1] * other[0];
+}
+
+REGISTER_BINARY_OP(complex_mul, float);
+REGISTER_BINARY_OP(complex_mul, half);
+
+template <typename T>
+kernel void complex_kernel(
+    constant void* real_ [[buffer(0)]],
+    constant void* imag_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* real = (constant T*)((constant uint8_t*)real_ + offsets[tid].y);
+  constant T* imag = (constant T*)((constant uint8_t*)imag_ + offsets[tid].z);
+  out[0] = real[0];
+  out[1] = imag[0];
+}
+
+REGISTER_BINARY_OP(complex_kernel, float);
+REGISTER_BINARY_OP(complex_kernel, half);

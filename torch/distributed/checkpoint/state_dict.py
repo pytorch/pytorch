@@ -154,6 +154,7 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
+@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -595,7 +596,8 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        state_dict.update(local_state_dict)
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
 
     with info.fsdp_context():
         return cast(
@@ -1287,10 +1289,6 @@ def set_optimizer_state_dict(
     The counterpart of ``get_optimizer_state_dict`` to set the state_dict to the
     optimizers. See ``set_state_dict`` for the detail usage.
 
-    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or after
-        ``step()`` is called on the optimizers. Otherwise, the optimizer states won't be
-        initialized correctly.
-
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
@@ -1335,10 +1333,6 @@ def set_state_dict(
     2) if a tensor is sharded, it must be either a ShardedTensor or DTensor,
     3) optimizer state_dict cannot contain the parameter IDs; the keys should be
     the canonical FQNs.
-
-    WARN: ``set_state_dict`` can only be called before ``backward()`` or after ``step()``
-        is called on the optimizers. Otherwise, the optimizer states won't be initialized
-        correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.

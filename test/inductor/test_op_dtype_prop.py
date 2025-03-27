@@ -67,7 +67,6 @@ class TestCase(InductorTestCase):
     )
     # @config.patch("triton.codegen_upcast_to_fp32", False) # TODO enable
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @disable_cache_limit()
     def test_op_dtype_propagation(self, op, dtype):
         def run(op, args, kwargs):
@@ -242,21 +241,6 @@ class TestCase(InductorTestCase):
         # There should be no downcast, since the input is promoted to float32.
         self.assertNotIn(".to(tl.float16)", code)
 
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("triton.codegen_upcast_to_fp32", False)
-    def test_downcast_div_mod(self):
-        def fn(x, y):
-            return x % y, x / y
-
-        x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
-
-        out, code = run_and_get_code(torch.compile(fn), x, y)
-
-        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
-        self.assertEqual(fn(x, y), out)
-
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):
         def fn():
@@ -267,7 +251,6 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("triton.persistent_reductions", False)
     def test_any(self):
         def fn(x):
@@ -278,7 +261,6 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(x), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 

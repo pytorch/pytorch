@@ -187,21 +187,21 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
     cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*> itr(
         self_.const_data_ptr<scalar_t>() + idx * chunk_size,
         NonZeroOp<scalar_t>());
-    AT_CUDA_CHECK(cub::DeviceReduce::Sum(
+    cub::DeviceReduce::Sum(
         nullptr,
         temp_storage_bytes,
         itr,
         ((int*)num_nonzeros.get()) + idx,
         remaining,
-        stream));
+        stream);
     auto temp_storage = allocator.allocate(temp_storage_bytes);
-    AT_CUDA_CHECK(cub::DeviceReduce::Sum(
+    cub::DeviceReduce::Sum(
         temp_storage.get(),
         temp_storage_bytes,
         itr,
         ((int*)num_nonzeros.get()) + idx,
         remaining,
-        stream));
+        stream);
   }
   auto pinned_num_nonzeros_h = at::detail::empty_cpu(
       {num_chunks}, /* size */
@@ -248,7 +248,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           itr(self_.const_data_ptr<scalar_t>() + idx * chunk_size,
               NonZeroOp<scalar_t>());
       temp_storage_bytes = 0;
-      AT_CUDA_CHECK(cub::DeviceSelect::Flagged(
+      cub::DeviceSelect::Flagged(
           nullptr,
           temp_storage_bytes,
           counting_itr,
@@ -256,9 +256,9 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           out_temp.mutable_data_ptr<int64_t>(),
           ((int*)num_nonzeros.get()) + idx,
           remaining,
-          stream));
+          stream);
       auto temp_storage = allocator.allocate(temp_storage_bytes);
-      AT_CUDA_CHECK(cub::DeviceSelect::Flagged(
+      cub::DeviceSelect::Flagged(
           temp_storage.get(),
           temp_storage_bytes,
           counting_itr,
@@ -266,7 +266,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           out_temp.mutable_data_ptr<int64_t>() + curr_nonzeros,
           ((int*)num_nonzeros.get()) + idx,
           remaining,
-          stream));
+          stream);
       curr_nonzeros +=
           (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
     }

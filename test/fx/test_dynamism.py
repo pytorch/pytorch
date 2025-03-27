@@ -110,42 +110,6 @@ class TestDynamism(TestCase):
         }
         self.assertEqual(result, expected)
 
-    def test_property_not_implemented(self):
-        class ModuleWithNotImplementedProperty(torch.nn.Module):
-            def __init__(self, x, y):
-                super().__init__()
-                self.linear = torch.nn.Linear(x, y)
-
-            @property
-            def not_implemented_property(self):
-                raise NotImplementedError("This property is not implemented")
-
-        module1 = ModuleWithNotImplementedProperty(10, 10)
-        module2 = ModuleWithNotImplementedProperty(10, 10)
-
-        result = track_dynamism_across_examples(
-            [
-                {"self": module1},
-                {"self": module2},
-            ]
-        )
-
-        expected = {
-            "self": {
-                "L['self']['_modules']['linear']['_parameters']['weight']": (
-                    False,
-                    False,
-                ),
-                "L['self']['_modules']['linear']['_parameters']['bias']": (False,),
-                "L['self']['_modules']['linear']['bias']": (False,),
-                "L['self']['_modules']['linear']['in_features']": (False,),
-                "L['self']['_modules']['linear']['out_features']": (False,),
-                "L['self']['_modules']['linear']['weight']": (False, False),
-            }
-        }
-
-        self.assertEqual(result, expected)
-
 
 if __name__ == "__main__":
     run_tests()

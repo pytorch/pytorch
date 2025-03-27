@@ -821,15 +821,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   c10::intrusive_ptr<Backend> getDefaultBackend() const {
-    auto backend_iter = backendTypeToBackend_.find(backendType_);
     TORCH_CHECK(
-        backend_iter != backendTypeToBackend_.end(),
+        backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
         uint16_t(backendType_),
         " for Process Group with name ",
         getBackendName(),
         ".");
-    return backend_iter->second;
+    return backendTypeToBackend_.at(backendType_);
   }
 
   void setDefaultBackend(const BackendType& backendType) {
@@ -888,18 +887,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   bool hasHooks() const {
-    auto backend_iter = backendTypeToBackend_.find(backendType_);
-    if (backend_iter == backendTypeToBackend_.end()) {
+    // `getDefaultBackend` will throw today if the backend is set to `undefined`
+    // (in case of `init_process_group(nothing)`)
+    try {
+      return getDefaultBackend()->hasHooks();
+    } catch (const std::exception& e) {
       TORCH_WARN(
-          "No backend of type ",
-          uint16_t(backendType_),
-          " found for Process Group with name ",
-          getBackendName(),
+          "Failed to check if ProcessGroup has hooks: ",
+          e.what(),
           ". Assuming no hooks are registered.");
       return false;
     }
-
-    return backend_iter->second->hasHooks();
   }
 
   virtual const std::string& getGroupName() const;

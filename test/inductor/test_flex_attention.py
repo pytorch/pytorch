@@ -38,15 +38,16 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    torch.cuda.is_available()
+    and has_triton()
+    and torch.cuda.get_device_capability() == (8, 0),
+    "Requires A100 and Triton",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -1679,6 +1680,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_mask_calls(self):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         # Create inputs
         query = torch.randn(
             (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
@@ -2537,6 +2542,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -2586,6 +2595,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_backward_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -3081,6 +3094,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
     def test_lse_masked_output(self, backend):
         if backend == "flex_decode":
+            if TEST_WITH_ROCM:
+                self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
             N_CTX = 96
@@ -4716,10 +4731,13 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
     return params
 
 
+# ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
 supports_learnable_bias = unittest.skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+    and not TEST_WITH_ROCM,
+    "Requires CUDA and Triton, and is not supported on ROCm",
 )
 
 
@@ -5286,40 +5304,6 @@ class TestLearnableBiases(InductorTestCase):
         # For gradient checking, we only pass the bias tensor since it's the only one requiring gradients
         self._check_outputs_and_grads(
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
-        )
-
-    def test_flex_attention_with_dynamic_max_autotune(self):
-        query = torch.randn(2, 16, 512, 64, device="cuda")
-        key = torch.randn(2, 16, 512, 64, device="cuda")
-        value = torch.randn(2, 16, 512, 64, device="cuda")
-
-        shape = (2, 16, 512, 16, 512, 64)
-        B, Hq, M, Hkv, N, D = shape
-
-        score_mod = _generate_alibi_bias(8)
-
-        def causal(b, h, m, n):
-            return m >= n
-
-        mask_shape = (1, 1, M, N)
-        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
-
-        compiled_sdpa = torch.compile(
-            flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
-        )
-
-        out = compiled_sdpa(
-            query=query,
-            key=key,
-            value=value,
-            score_mod=score_mod,
-            block_mask=block_mask,
-            enable_gqa=True,
-            kernel_options=None,
-        )
-
-        self.assertEqual(
-            out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
 
 

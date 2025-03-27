@@ -36,10 +36,7 @@ struct TORCH_API MPSGuardImpl final
   // constructor
   MPSGuardImpl() {}
   explicit MPSGuardImpl(c10::DeviceType t) {
-    TORCH_CHECK(
-        t == DeviceType::MPS,
-        "MPSGuardImpl initialized with non-MPS DeviceType: ",
-        t);
+    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::MPS);
   }
 
   // returns the type
@@ -60,7 +57,7 @@ struct TORCH_API MPSGuardImpl final
   }
 
   void setDevice(Device d) const override {
-    TORCH_CHECK(d.is_mps(), "Expected a MPS device, but got ", d);
+    TORCH_INTERNAL_ASSERT(d.is_mps());
   }
 
   void uncheckedSetDevice(Device d) const noexcept override {

@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     import inspect
     from collections.abc import Mapping, Sequence
 
+# TODO(bowbao): Add diagnostics for IO adapters.
+
 
 @runtime_checkable
 class InputAdaptStep(Protocol):
@@ -174,6 +176,7 @@ def _assert_identical_pytree_spec(
     Raises:
         ValueError: If the two `TreeSpec` objects are not identical.
     """
+    # TODO(bowbao): Turn this check into diagnostic. Consider warning instead of error.
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.

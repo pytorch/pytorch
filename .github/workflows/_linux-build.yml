@@ -125,7 +125,7 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v3
         if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}

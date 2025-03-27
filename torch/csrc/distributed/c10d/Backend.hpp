@@ -73,10 +73,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
-  virtual bool supportsTimeEstimation() const {
-    return false;
-  }
-
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,

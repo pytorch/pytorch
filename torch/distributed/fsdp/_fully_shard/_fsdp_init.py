@@ -1,20 +1,15 @@
 import itertools
-import logging
 from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch._logging import warning_once
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
-
-
-logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 
 def _get_post_forward_mesh_info(
@@ -40,11 +35,6 @@ def _get_post_forward_mesh_info(
                 f"factor of {shard_mesh_size}, not {reshard_after_forward}"
             )
         elif reshard_after_forward == 1:
-            msg = (
-                "reshard_after_forward=1 (int) means resharding parameters to world size 1, "
-                "instead of reshard_after_forward=True (bool)"
-            )
-            warning_once(logger, msg, stacklevel=2)
             reshard_after_forward = False
         elif reshard_after_forward == shard_mesh_size:
             reshard_after_forward = True

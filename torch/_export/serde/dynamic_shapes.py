@@ -137,7 +137,7 @@ def _dump_dynamic_shapes(
         if not isinstance(tensor, torch.Tensor):
             return None
         if shape is None:
-            return [Dim.STATIC] * len(tensor.shape)
+            return [Dim.STATIC] * len(tensor.shape)  # type: ignore[attr-defined]
 
         out = []
         if isinstance(shape, dict):
@@ -158,7 +158,7 @@ def _dump_dynamic_shapes(
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
         if isinstance(val, _DimHint):  # store enum as string
-            return val.__class__.__name__ + "." + val.type.name
+            return val.__class__.__name__ + "." + val.name
 
         assert isinstance(val, _Dim)
 
@@ -290,9 +290,9 @@ def _load_dynamic_shapes(
             modulus, remainder = sympy.polys.polytools.div(expr, symbol)
             ddim = dim_cache[name]
             if modulus != 1:
-                ddim = int(modulus) * ddim  # type: ignore[assignment, operator]
+                ddim = int(modulus) * ddim
             if remainder != 0:
-                ddim = ddim + int(remainder)  # type: ignore[assignment, operator]
+                ddim = ddim + int(remainder)
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
@@ -301,11 +301,9 @@ def _load_dynamic_shapes(
         if val is None or isinstance(val, int):
             return val
         elif val == "_DimHint.AUTO":
-            return _DimHint.AUTO()
-        elif val == "_DimHint.DYNAMIC":
-            return _DimHint.DYNAMIC()
+            return _DimHint.AUTO
         elif val == "_DimHint.STATIC":
-            return _DimHint.STATIC()
+            return _DimHint.STATIC
         if not isinstance(val, str):
             raise UserError(
                 UserErrorType.INVALID_INPUT,
@@ -318,6 +316,6 @@ def _load_dynamic_shapes(
                 "Expected dims in `spec['dynamic_shapes']` to be tracked in `spec['dims']`, "
                 f"got {val} which is not in {dims.keys()}",
             )
-        return dim_cache[val]  # type: ignore[return-value]
+        return dim_cache[val]
 
     return tree_map(deserialize_shape, dynamic_shapes)

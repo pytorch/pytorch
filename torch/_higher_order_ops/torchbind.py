@@ -33,26 +33,6 @@ class CallTorchBind(HigherOrderOperator):
     def __call__(self, obj, method, *args, **kwargs):
         return super().__call__(obj, method, *args, **kwargs)
 
-    @staticmethod
-    def schema(obj, method) -> torch.FunctionSchema:
-        """
-        Returns the schema of ``CallTorchbind.__call__``.
-        """
-        assert isinstance(obj, torch._inductor.ir.TorchBindObject)
-        val = obj.get_real_obj()
-        schema = val._get_method(method).schema
-        schema_str = str(schema)
-        new_schema_str = (
-            "call_torchbind(" + str(schema.arguments[0].real_type) + " obj,"
-        )
-        first_comma_index = schema_str.find(",")
-        if first_comma_index == -1:
-            # If no comma is found, find the last closing parenthesis
-            first_comma_index = schema_str.rfind(") ->")
-        new_schema_str = new_schema_str + " str method" + schema_str[first_comma_index:]
-        new_schema = torch._C.parse_schema(new_schema_str)
-        return new_schema
-
 
 call_torchbind = CallTorchBind()
 

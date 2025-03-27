@@ -2696,6 +2696,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 
+    @unittest.expectedFailure
     def test_contextmanager_plain(self):
         state = []
 
@@ -2899,7 +2900,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2))
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
     def test_contextmanager_except(self):
         state = []
 
@@ -2976,6 +2977,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             with woohoo():
                 raise StopIteration
 
+    @unittest.expectedFailure
     def test_keywords(self):
         # Ensure no keyword arguments are inhibited
         @contextmanager
@@ -2989,6 +2991,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(2, 3))
 
+    @unittest.expectedFailure
     def test_recursive(self):
         depth = 0
         ncols = 0

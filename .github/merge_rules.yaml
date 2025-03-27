@@ -501,9 +501,7 @@
 - name: XPU
   patterns:
   - '**xpu**'
-  - '**XPU**'
   - '**sycl**'
-  - '**SYCL**'
   approved_by:
   - EikanWang
   - jgong5

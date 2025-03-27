@@ -102,7 +102,6 @@ static void handler_SIGTERM(int sig, siginfo_t* info, void* ctx) {
   }
 }
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 __attribute__((weak)) void setDataLoaderSignalHandlers() {}
 
 static PyObject* THPModule_setWorkerSignalHandlers(

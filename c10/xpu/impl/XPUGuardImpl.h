@@ -17,8 +17,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   XPUGuardImpl() = default;
 
   explicit XPUGuardImpl(DeviceType t) {
-    TORCH_CHECK(
-        t == kXPU, "XPUGuardImpl initialized with non-XPU DeviceType: ", t);
+    TORCH_INTERNAL_ASSERT(t == kXPU);
   }
 
   DeviceType type() const override {
@@ -26,7 +25,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   Device exchangeDevice(Device d) const override {
-    TORCH_CHECK(d.is_xpu(), "Expected a XPU device, but got ", d);
+    TORCH_INTERNAL_ASSERT(d.is_xpu());
     const auto old_device_index = c10::xpu::exchange_device(d.index());
     return Device(kXPU, old_device_index);
   }
@@ -37,7 +36,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void setDevice(Device d) const override {
-    TORCH_CHECK(d.is_xpu(), "Expected a XPU device, but got ", d);
+    TORCH_INTERNAL_ASSERT(d.is_xpu());
     c10::xpu::set_device(d.index());
   }
 

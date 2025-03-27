@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import get_nonrecursive_disable_wrapper, is_compiling
+from .external_utils import is_compiling
 from .utils import is_function
 
 
@@ -82,23 +82,7 @@ def disable(fn=None, recursive=True):
             return DisableContext()(fn)
         return DisableContext()
     else:
-
-        def wrap(fn):
-            fn = innermost_fn(fn)
-            assert callable(fn)
-
-            nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
-            nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
-            nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-            return nonrecursive_disable_wrapper
-
-        if fn is None:
-            return wrap
-        return wrap(fn)
-
-
-_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
-skip_code(_nonrecursive_disable_wrapper_code)
+        return skip(fn)
 
 
 def skip(fn=None):

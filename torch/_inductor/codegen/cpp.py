@@ -43,7 +43,6 @@ from ..utils import (
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_product,
@@ -72,7 +71,6 @@ from .cpp_utils import (
     codegen_rand,
     CppCSEVariable,
     DTYPE_TO_CPP,
-    get_promote_dtype,
     INDEX_TYPE,
     LocalBufferContext,
     may_unify_binary_op_mask_type,
@@ -648,31 +646,20 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
-    assert not any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args), (
-        "Promotion of vector types is not supported"
-    )
-
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
-
-
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return f"decltype({a})({a} + {b})"
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return f"decltype({a})({a} - {b})"
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return f"decltype({a})({a} * {b})"
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1894,10 +1881,9 @@ class CppKernel(Kernel):
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
-        self.non_parallel_reduction_suffix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
-        self.welford_helper_cse = CSE(
-            self.newvar_prefix, self.suffix, name_prefix="welford_helper"
+        self.weight_recps_cse = CSE(
+            self.newvar_prefix, self.suffix, name_prefix="wrecps"
         )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -2059,7 +2045,7 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr_index(index)}]"
-        csevar = self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
+        csevar = self.cse.generate(self.loads, line)
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
@@ -2229,8 +2215,6 @@ class CppKernel(Kernel):
                     suffix = kernel.reduction_suffix
                     if parallel:
                         suffix = kernel.parallel_reduction_suffix + suffix
-                    else:
-                        suffix = kernel.non_parallel_reduction_suffix + suffix
                     return suffix
                 else:
                     prefix = kernel.reduction_prefix
@@ -2672,7 +2656,7 @@ class CppVecKernel(CppKernel):
             buffer.splice(code)
             return None
         else:
-            csevar = self.cse.generate(buffer, code, dtype=dtype)
+            csevar = self.cse.generate(buffer, code)
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
@@ -2689,7 +2673,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -2817,7 +2801,12 @@ class CppVecKernel(CppKernel):
                 self.reduction_init_vec,
             )
         )
+        reduction_size = functools.reduce(
+            lambda x, y: x * y, self.ranges[self.reduction_depth :]
+        )
         if reduction_type == "welford_reduce":
+            # save the reciprocal of weights for welford reduce
+            assert self.reduction_depth is not None
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -2828,52 +2817,40 @@ class CppVecKernel(CppKernel):
                     self.reduction_init_vec,
                 )
             )
-
-            # use welford_helper for vec kernel
-            assert self.reduction_depth is not None
             reduction_size = functools.reduce(
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
             )
-            welford_helper_val = self.welford_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
+            reduction_factor = (
+                self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
-            masked_welford_helper_val = f"masked_{welford_helper_val}"
-            welford_helper_vec_range = (
-                (
-                    FloorDiv(reduction_size, self.ranges[self.tiling_idx])
-                    * FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
-                    if self.tiling_idx >= self.reduction_depth
-                    else reduction_size
+            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
+            if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
+                self.weight_recps_val = self.weight_recps_cse.generate(
+                    self.compute, f"reduction {self.weight_recp_vec_range}", write=False
                 )
-                if FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
-                else sympy.Integer(0)
-            )
-            masked_welford_helper_vec_range = (
-                (
-                    FloorDiv(reduction_size, self.ranges[self.tiling_idx])
-                    if self.tiling_idx >= self.reduction_depth
-                    else reduction_size
+                self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range] = (
+                    self.weight_recps_val
                 )
-                if self.ranges[self.tiling_idx] % self.tiling_factor
-                else sympy.Integer(0)
-            )
-            self._use_welford_helper(
-                acc_vec, welford_helper_val, welford_helper_vec_range, dtype
-            )
-            self._use_welford_helper(
-                masked_acc_vec,
-                masked_welford_helper_val,
-                masked_welford_helper_vec_range,
-                dtype,
-            )
-
+                self.non_parallel_reduction_prefix.writeline(
+                    self.welford_weight_reciprocal_vec(dtype)
+                )
+                # generate weight_recps for parallel reduction
+                num_threads = (
+                    "max_threads"
+                    if config.cpp.dynamic_threads
+                    else parallel_num_threads()
+                )
+                self.local_reduction_init.writeline(
+                    self.welford_weight_reciprocal_vec(dtype, num_threads)
+                )
+            else:
+                self.weight_recps_val = self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ]
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
-            welford_helper_val_ = (
-                masked_welford_helper_val if self.tail_size else welford_helper_val
-            )
             self.stores.writeline(
-                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
             )
         else:
             assert self.reduction_depth is not None
@@ -3088,51 +3065,18 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}"
         return vec_type
 
-    def _welford_helper_init(
-        self, welford_helper_val, welford_helper_vec_range, dtype, num_threads=None
-    ):
+    def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
         vec_num_range_thread = (
-            CeilDiv(welford_helper_vec_range, num_threads)
+            CeilDiv(self.weight_recp_vec_range, num_threads)
             if num_threads
-            else welford_helper_vec_range
+            else self.weight_recp_vec_range
         )
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        chunk_size = 4096
-        num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
-        welford_helper_init_line = (
-            f"WelfordHelper<{self._get_vec_type(dtype)}, {chunk_size}> {welford_helper_val}"
+        return (
+            f"static WeightRecp<{self._get_vec_type(dtype)}> {self.weight_recps_val}"
             f"("
             f"{vec_num_range_thread_expr}"
             f");"
-        )
-        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
-            # When the number of chunks <= 1, there is no need to use cascade summation to improve
-            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
-            return f"static {welford_helper_init_line}"
-        else:
-            return welford_helper_init_line
-
-    def _use_welford_helper(
-        self, acc_vec, welford_helper_val, welford_helper_vec_range, dtype
-    ):
-        num_threads = (
-            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-        )
-        self.non_parallel_reduction_prefix.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype
-            )
-        )
-        self.local_reduction_init.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype, num_threads
-            )
-        )
-        self.non_parallel_reduction_suffix.writeline(
-            f"{acc_vec} = welford_combine({acc_vec}, &{welford_helper_val});"
-        )
-        self.local_reduction_stores.writeline(
-            f"{acc_vec}_local = welford_combine({acc_vec}_local, &{welford_helper_val});"
         )
 
     def reduction_combine_vec(
@@ -3140,7 +3084,7 @@ class CppVecKernel(CppKernel):
         reduction_type,
         var,
         next_value,
-        welford_helper_val=None,
+        use_weight_recps=False,
         index: Optional[sympy.Symbol] = None,
         horizontal_reduction: Optional[bool] = None,
         src_dtype: Optional[torch.dtype] = torch.float32,
@@ -3181,13 +3125,11 @@ class CppVecKernel(CppKernel):
             else:
                 return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            if welford_helper_val:
+            if use_weight_recps:
                 if self.tail_size:
-                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{welford_helper_val})"
+                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{self.weight_recps_val})"
                 else:
-                    return (
-                        f"welford_combine({var}, {next_value}, &{welford_helper_val})"
-                    )
+                    return f"welford_combine({var}, {next_value}, &{self.weight_recps_val})"
             else:
                 if self.tail_size:
                     return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -3435,7 +3377,7 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)
+            csevar = self.cse.generate(self.loads, line)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
@@ -4380,9 +4322,6 @@ class CppKernelProxy(CppKernel):
         self.non_parallel_reduction_prefix.splice(
             main_kernel.non_parallel_reduction_prefix
         )
-        self.non_parallel_reduction_suffix.splice(
-            main_kernel.non_parallel_reduction_suffix
-        )
 
 
 class OuterLoopFusedKernel(CppKernel):
@@ -4765,8 +4704,6 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
-                if not isinstance(expr, sympy.Expr):
-                    continue
                 for div_expr in expr.find(FloorDiv):
                     if (
                         any(div_expr.has(var) for var in original_body.iter_vars)
@@ -5163,10 +5100,6 @@ class CppScheduling(BaseScheduling):
             else ""
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        # below add provenance tracing info for cpu CppKernel types
-        if config.trace.enabled:
-            set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
-
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
         src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
@@ -5274,7 +5207,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, triton=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
 
 

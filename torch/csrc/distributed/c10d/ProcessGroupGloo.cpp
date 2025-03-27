@@ -178,7 +178,6 @@ template <typename T, std::enable_if_t<!std::is_integral_v<T>, int> = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
-    case ReduceOp::AVG:
       return ReduceFunc(&::gloo::sum<T>);
     case ReduceOp::PRODUCT:
       return ReduceFunc(&::gloo::product<T>);
@@ -194,6 +193,9 @@ ReduceFunc toFunction(const ReduceOp& r) {
       break;
     case ReduceOp::BXOR:
       TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with non-integral dtype");
+      break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
       break;
     case ReduceOp::PREMUL_SUM:
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
@@ -243,7 +245,6 @@ template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
-    case ReduceOp::AVG:
       return ReduceFunc(&::gloo::sum<T>);
     case ReduceOp::PRODUCT:
       return ReduceFunc(&::gloo::product<T>);
@@ -257,6 +258,9 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::PREMUL_SUM:
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
@@ -1054,11 +1058,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     opts.setTag(tag);
     GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors);
     gloo::allreduce(opts);
-
-    // Gloo doesn't support AVG so we use SUM + division.
-    if (reduceOp == ReduceOp::AVG) {
-      tensors[0] /= context->size;
-    }
   }
 
   void run() override {
@@ -1667,11 +1666,6 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
     gloo::reduce(opts);
-
-    // Gloo doesn't support AVG so we use SUM + division.
-    if (reduceOp == ReduceOp::AVG) {
-      tensors[0] /= context->size;
-    }
   }
 
   void run() override {
@@ -2621,44 +2615,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
-  const auto rank = getRank();
-  const auto worldSize = getSize();
-
-  TORCH_CHECK(outputs.size() == 1, "reduce_scatter only supports 1 output");
-  TORCH_CHECK(
-      outputs.size() == inputs.size(),
-      "requires input/output tensor lists to have the same length");
-  TORCH_CHECK(
-      static_cast<int>(inputs[0].size()) == worldSize,
-      "invalid input tensor list size, must be world size");
-
-  std::vector<at::Tensor> buffers;
-  for (const auto i : c10::irange(worldSize)) {
-    if (i == rank) {
-      TORCH_CHECK_EQ(outputs[0].dtype(), inputs[0][i].dtype());
-      TORCH_CHECK_EQ(outputs[0].sizes().vec(), inputs[0][i].sizes().vec());
-
-      // for our own input, we can just use the output tensor instead of
-      // allocating a new tensor
-      outputs[0].copy_(inputs[0][i]);
-      buffers.push_back(outputs[0]);
-    } else {
-      buffers.push_back(inputs[0][i].clone());
-    }
-  }
-  std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto i : c10::irange(buffers.size())) {
-    std::vector<at::Tensor> inp = {buffers[i]};
-    AllreduceOptions arOpts;
-    arOpts.reduceOp = opts.reduceOp;
-    works.push_back(allreduce(inp));
-  }
-  return c10::make_intrusive<LambdaWork>(
-      [worldSize, works = std::move(works)]() {
-        for (const auto i : c10::irange(worldSize)) {
-          works[i]->wait();
-        }
-      });
+  TORCH_CHECK(false, "ProcessGroupGloo does not support reduce_scatter");
 }
 
 namespace {
