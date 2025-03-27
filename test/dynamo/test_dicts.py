@@ -936,6 +936,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d1.calls, d2.calls)
 
+    def test_items_type(self):
+        def fn():
+            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})
+            return d.items()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn()
+        res = opt_fn()
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

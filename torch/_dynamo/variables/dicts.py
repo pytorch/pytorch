@@ -32,7 +32,13 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
+from ..utils import (
+    cmp_name_to_op_mapping,
+    dict_items,
+    dict_keys,
+    dict_values,
+    specialize_symnode,
+)
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
@@ -376,7 +382,7 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import BuiltinVariable, ConstantVariable, TupleVariable
+        from . import BuiltinVariable, ConstantVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -398,9 +404,7 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-            return TupleVariable(
-                [TupleVariable([k.vt, v]) for k, v in self.items.items()]
-            )
+            return DictItemsVariable(self)
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
@@ -858,7 +862,7 @@ class DictViewVariable(VariableTracker):
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert self.kv in ("keys", "values")
+        assert self.kv in ("keys", "values", "items")
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
 
@@ -938,3 +942,15 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
+
+
+class DictItemsVariable(DictViewVariable):
+    kv = "items"
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        return tuple([k.vt, v] for k, v in self.view_items)
+
+    def python_type(self):
+        return dict_items
