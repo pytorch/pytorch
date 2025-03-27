@@ -111,6 +111,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
+# TODO: update
   ```bash
   conda uninstall pytorch -y
   yes | pip uninstall torch
@@ -178,14 +179,6 @@ You can use this script to check out a new nightly branch with the following:
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-```
-
-Or if you would like to re-use an existing conda environment, you can pass in
-the prefix argument (`--prefix`):
-
-```bash
-./tools/nightly.py checkout -b my-nightly-branch -p my-env
-source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
@@ -291,7 +284,7 @@ dependencies as well as the nightly binaries into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-The following packages should be installed with either `conda` or `pip`:
+The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
@@ -665,11 +658,12 @@ tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
 details.
 
 ## Managing multiple build trees
-
+# TODO: update this. should it all be deleted?
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
+
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
@@ -754,7 +748,7 @@ situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
 Before building pytorch, install ccache from your package manager of choice:
-
+# TODO: needs updated example
 ```bash
 conda install ccache -c conda-forge
 sudo apt install ccache
