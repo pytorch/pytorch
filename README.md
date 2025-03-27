@@ -65,15 +65,15 @@ Usually, PyTorch is used either as:
 - A replacement for NumPy to use the power of GPUs.
 - A deep learning research platform that provides maximum flexibility and speed.
 
-Elaborating Further:
+Elaborating further:
 
 ### A GPU-Ready Tensor Library
 
-If you use NumPy, then you have used Tensors (a.k.a. ndarray).
+If you use NumPy, then you have used Tensors (e.g. ndarray).
 
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
+PyTorch provides Tensors that can live either on the CPU or the GPU and accelerate the
 computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
@@ -96,7 +96,7 @@ from several research papers on this topic, as well as current and past work suc
 [Chainer](https://chainer.org), etc.
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+You get the best of speed and flexibility for your research.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/dynamic_graph.gif)
 
@@ -105,7 +105,7 @@ You get the best of speed and flexibility for your crazy research.
 PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
-You can write your new neural network layers in Python itself, using your favorite libraries
+You can write your new neural network layers in Python itself, using your favorite libraries.
 and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
@@ -214,9 +214,9 @@ git submodule update --init --recursive
 #### Install Dependencies
 
 **Common**
-
+# TODO update this
 ```bash
-# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
+# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below.
 pip install -r requirements.txt
 ```
 
@@ -224,10 +224,10 @@ pip install -r requirements.txt
 
 ```bash
 pip install mkl-static mkl-include
-# CUDA only: Add LAPACK support for the GPU if needed
+# CUDA only: Add LAPACK support for the GPU if needed.
 
-# (optional) If using torch.compile with inductor/triton, install the matching version of triton
-# Run from the pytorch directory after cloning
+# (optional) If using torch.compile with inductor/Triton, install the matching version of Triton.
+# Run from the PyTorch directory after cloning.
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
 ```
@@ -235,9 +235,9 @@ make triton
 **On MacOS**
 
 ```bash
-# Add this package on intel x86 processor machines only
+# Add this package on Intel x86 processor machines only.
 pip install mkl-static mkl-include
-# Add these packages if torch.distributed is needed
+# Add these packages if torch.distributed is needed.
 ```
 
 **On Windows**
@@ -279,7 +279,7 @@ python3 setup.py develop
 
 **On Windows**
 
-If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
+If you want to build legacy Python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 **CPU-only builds**
 
@@ -289,14 +289,14 @@ In this mode PyTorch computations will run on your CPU, not your GPU.
 python setup.py develop
 ```
 
-Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instructions [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) are an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
 **CUDA based build**
 
-In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
+In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching.
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
-NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
+NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA, run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
@@ -305,16 +305,16 @@ Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If
 Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
-You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
+You can refer to the [`build_pytorch.bat`](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations.
 
 
 ```cmd
 cmd
 
 :: Set the environment variables after you have downloaded and unzipped the mkl package,
-:: else CMake would throw an error as `Could NOT find OpenMP`.
+:: else CMake will throw an error as `Could NOT find OpenMP`.
 set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
-set LIB={Your directory}\mkl\lib;%LIB%
+set LIB={your directory}\mkl\lib;%LIB%
 
 :: Read the content in the previous section carefully before you proceed.
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
@@ -324,7 +324,7 @@ set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [Optional] If you want to override the CUDA host compiler
+:: [Optional] If you want to override the CUDA host compiler,
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
 python setup.py develop
@@ -369,19 +369,19 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built Docker image from Docker Hub and run with Docker v19.03+.
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
-for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
+for multithreaded data loaders), the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
 #### Building the image yourself
 
-**NOTE:** Must be built with a docker version > 18.06
+**NOTE:** Must be built with a Docker version > 18.06
 # TODO: Update this.
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
@@ -431,8 +431,8 @@ on [our website](https://pytorch.org/previous-versions).
 
 ## Getting Started
 
-Three-pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
+Three pointers to get you started:
+- [Tutorials: get started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 - [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
@@ -451,29 +451,30 @@ Three-pointers to get you started:
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
-* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
+* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org.
 * GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
-* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1.
+* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv.
+* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch.
+* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/).
 
 ## Releases and Contributing
 
 Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+We appreciate all contributions. If you are planning to contribute back bug fixes, please do so without any further discussion.
 
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
+PyTorch is a community-driven project with many skillful engineers and researchers contributing to it.
 
 PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
+
 A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jamesb93), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito).
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
