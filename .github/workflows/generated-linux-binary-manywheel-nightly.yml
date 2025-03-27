@@ -38,7 +38,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -77,7 +77,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -100,7 +100,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -120,7 +120,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -142,7 +142,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -165,7 +165,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -186,7 +186,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -210,7 +210,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -234,7 +234,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -255,7 +255,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -279,7 +279,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -303,7 +303,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -324,7 +324,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -348,7 +348,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -372,7 +372,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -393,7 +393,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -418,7 +418,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -433,7 +433,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -446,9 +445,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -467,7 +466,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -488,7 +487,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -513,7 +512,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -528,7 +527,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -541,9 +539,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -562,7 +560,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -582,7 +580,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -607,7 +605,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -634,7 +632,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -644,9 +641,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -664,7 +661,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -684,7 +681,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -706,7 +703,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -729,7 +726,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -749,7 +746,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -771,7 +768,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -794,7 +791,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -815,7 +812,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -839,7 +836,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -863,7 +860,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -884,7 +881,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -908,7 +905,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -932,7 +929,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -953,7 +950,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -977,7 +974,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1001,7 +998,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1022,7 +1019,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1047,7 +1044,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1062,7 +1059,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1075,9 +1071,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1096,7 +1092,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1117,7 +1113,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1142,7 +1138,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1157,7 +1153,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1170,9 +1165,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1191,7 +1186,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1211,7 +1206,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1236,7 +1231,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1263,7 +1258,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1273,9 +1267,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -1293,7 +1287,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1313,7 +1307,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1335,7 +1329,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1358,7 +1352,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1378,7 +1372,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1400,7 +1394,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1423,7 +1417,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1444,7 +1438,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1468,7 +1462,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1492,7 +1486,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1513,7 +1507,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1537,7 +1531,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1561,7 +1555,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1582,7 +1576,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1604,7 +1598,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6-full
@@ -1627,7 +1621,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6-full
@@ -1647,7 +1641,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1671,7 +1665,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1695,7 +1689,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1716,7 +1710,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1741,7 +1735,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1756,7 +1750,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1769,9 +1762,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1790,7 +1783,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1811,7 +1804,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1836,7 +1829,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1851,7 +1844,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1864,9 +1856,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1885,7 +1877,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1905,7 +1897,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1930,7 +1922,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1957,7 +1949,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1967,9 +1958,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -1987,7 +1978,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -2007,7 +1998,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2029,7 +2020,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2052,7 +2043,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2072,7 +2063,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2094,7 +2085,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2117,7 +2108,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2138,7 +2129,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2162,7 +2153,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2186,7 +2177,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2207,7 +2198,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2231,7 +2222,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2255,7 +2246,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2276,7 +2267,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2300,7 +2291,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2324,7 +2315,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2345,7 +2336,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2370,7 +2361,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2385,7 +2376,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2398,9 +2388,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2419,7 +2409,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2440,7 +2430,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2465,7 +2455,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2480,7 +2470,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2493,9 +2482,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2514,7 +2503,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2534,7 +2523,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2559,7 +2548,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2586,7 +2575,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2596,9 +2584,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -2616,7 +2604,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2636,7 +2624,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2658,7 +2646,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2681,7 +2669,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2701,7 +2689,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2723,7 +2711,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2746,7 +2734,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2767,7 +2755,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2791,7 +2779,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2815,7 +2803,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2836,7 +2824,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2860,7 +2848,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2884,7 +2872,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2905,7 +2893,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2929,7 +2917,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2953,7 +2941,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2974,7 +2962,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2999,7 +2987,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3014,7 +3002,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3027,9 +3014,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3048,7 +3035,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3069,7 +3056,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3094,7 +3081,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3109,7 +3096,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3122,9 +3108,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3143,7 +3129,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3163,7 +3149,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3188,7 +3174,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3215,7 +3201,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3225,9 +3210,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -3245,7 +3230,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3265,7 +3250,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3287,7 +3272,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3310,7 +3295,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3330,7 +3315,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3352,7 +3337,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3375,7 +3360,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3396,7 +3381,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3420,7 +3405,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3444,7 +3429,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3465,7 +3450,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3489,7 +3474,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3513,7 +3498,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3534,7 +3519,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3558,7 +3543,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3582,7 +3567,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3603,7 +3588,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3628,7 +3613,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3643,7 +3628,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3656,9 +3640,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3677,7 +3661,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3698,7 +3682,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3723,7 +3707,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3738,7 +3722,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3751,9 +3734,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3772,7 +3755,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3792,7 +3775,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3817,7 +3800,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3844,7 +3827,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3854,9 +3836,9 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-main
+          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -3874,7 +3856,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
