@@ -38,9 +38,8 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, IS_FBCODE
 from torch.utils._triton import has_triton
-
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
@@ -3683,6 +3682,7 @@ class GraphModule(torch.nn.Module):
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
+    
     @supported_platform
     def test_validate_small_embedding_size_error_message(self):
         # eager support for small embedding size
@@ -3707,6 +3707,45 @@ class GraphModule(torch.nn.Module):
         # compiled gpu kernel supports large embedding size
         q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
+
+    @unittest.skipIf(not has_triton() and not IS_FBCODE, reason="FBCODE Triton is required for this test")
+    def test_triton_template_warp_specialization(self):
+
+        make_tensor = lambda: torch.rand(4, 16, 4096, 64, device="cuda", dtype=torch.bfloat16)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+
+
+        positional_args = (q, k, v)
+        keyword_args = {
+            "kernel_options": {
+                "num_warps": 4,
+                "num_consumer_groups": 0,
+                "num_buffers_warp_spec": 0,
+            }
+        }
+
+        # Check if kernel code contains warp specialization parameters
+        _, kernel_code = run_and_get_code(
+            flex_compiled,
+            *positional_args,
+            **keyword_args,
+        )
+        assert kernel_code is not None, "Failed to retrieve compiled kernel code"
+        assert (
+            "num_consumer_groups" in kernel_code[0]
+        ), "num_consumer_groups missing in kernel definition"
+        assert (
+            "num_buffers_warp_spec" in kernel_code[0]
+        ), "num_buffers_warp_spec missing in kernel definition"
+
+        # Validate correctness
+        C1 = flex_compiled(q, k, v)
+        C2 = flex_attention(q, k, v)
+
+        assert torch.allclose(
+            C1, C2, atol=1e-2, rtol=1e-2
+        ), "Warp specialized kernel result differs from reference"
 
 
 class TestBlockMask(InductorTestCase):

@@ -76,6 +76,7 @@ from .triton_compat import (
     PTXASError,
     triton,
 )
+from .. import config as inductor_config
 
 
 class NoTritonConfigsError(RuntimeError):
@@ -169,6 +170,9 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
+    if inductor_config.is_fbcode():
+        call_kwargs["num_consumer_groups"] = getattr(launcher.config, 'num_consumer_groups', 0)
+        call_kwargs["num_buffers_warp_spec"] = getattr(launcher.config, 'num_buffers_warp_spec', 0)
     args_str = [*call_args]
     args_str.extend(f"{k}={v}" for k, v in call_kwargs.items())
     args_str = ", ".join(args_str)
@@ -509,6 +513,9 @@ class CachingAutotuner(KernelInterface):
                 compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        if inductor_config.is_fbcode():
+            compile_meta["num_consumer_groups"] = getattr(cfg, 'num_consumer_groups', 0)
+            compile_meta["num_buffers_warp_spec"] = getattr(cfg, 'num_buffers_warp_spec', 0)
         compile_meta["debug"] = self.inductor_meta.get(
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
@@ -555,6 +562,11 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        if inductor_config.is_fbcode():
+            options.update({
+            "num_consumer_groups": compile_meta["num_consumer_groups"],
+            "num_buffers_warp_spec": compile_meta["num_buffers_warp_spec"],
+            })
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -2326,13 +2338,28 @@ def split_scan(
     )
 
 
-def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
+def template(num_stages, num_warps, 
+    triton_meta, 
+    num_consumer_groups = 0,
+    num_buffers_warp_spec = 0, filename=None, inductor_meta=None):
     """
     Compile a triton template
     """
+    # Prepare the base configuration
+    config_args = {
+        "num_stages": num_stages,
+        "num_warps": num_warps,
+    }
+
+    # Conditionally add arguments based on inductor_config.is_fbcode()
+    if inductor_config.is_fbcode():
+        config_args.update({
+            "num_consumer_groups": num_consumer_groups,
+            "num_buffers_warp_spec": num_buffers_warp_spec,
+        })
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        [triton.Config({}, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -2343,7 +2370,7 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
 def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     """Extract triton.Config options that should become kwargs"""
     popped = {}
-    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):
+    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg", "num_consumer_groups", "num_buffers_warp_spec"):
         val = config.pop(key, None)
         if val is not None:
             popped[key] = val
@@ -2351,11 +2378,18 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def config_to_dict(config: Config) -> dict[str, Any]:
-    return {
+    config_dict = {
         **config.kwargs,
         "num_warps": config.num_warps,
         "num_stages": config.num_stages,
+       
     }
+    if inductor_config.is_fbcode():
+        config_dict.update({
+            "num_consumer_groups": getattr(config, 'num_consumer_groups', 0),
+            "num_buffers_warp_spec": getattr(config, 'num_buffers_warp_spec', 0),
+        })
+    return config_dict
 
 
 def config_from_dict(config: dict[str, Any]) -> Config:
