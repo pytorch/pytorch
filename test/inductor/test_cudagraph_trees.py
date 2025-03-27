@@ -2791,6 +2791,46 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
         @config.patch(implicit_fallbacks=True)
+        @config.patch("graph_partition", False)
+        def test_skip_cudagraph_unsafe_ops(self):
+            @torch.library.custom_op(
+                "mylib::mysin",
+                mutates_args=["out_list"],
+                schema="(Tensor x, Tensor(a!)[]? out_list) -> Tensor",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def mysin(x, out_list) -> torch.Tensor:
+                r = x.sin()
+                if out_list is not None:
+                    out_list[0].copy_(r)
+                return r
+
+            @mysin.register_fake
+            def _(x, out_list) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            def fn(x):
+                x = x * 3
+                s = [torch.empty_like(x)]
+                x = mysin(x, s)
+                x = x / 3
+                return x, s[0]
+
+            x = torch.randn(3, requires_grad=False, device="cuda")
+            expected = fn(x)
+            compiled_f = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    result = compiled_f(x)
+                    self.assertEqual(result, expected)
+
+            FileCheck().check("incompatible op mylib.mysin.default").run(
+                captured_output[0]
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+        @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_custom_op(self):
             @torch.library.custom_op(
