@@ -4440,7 +4440,19 @@ class TemplateBuffer(OperationBuffer):
         )
 
         for inp in self.inputs:
-            indexer = inp.layout.make_indexer()
+            layout = inp.layout
+
+            # we dont know what the iteration order is of the template,
+            # so we just want to make a single, contiguous dependency
+            if not layout.is_contiguous():
+                layout = FixedLayout(
+                    device=layout.device,
+                    dtype=layout.dtype,
+                    size=layout.size,
+                    stride=FlexibleLayout.contiguous_strides(layout.size),
+                    offset=layout.offset,
+                )
+            indexer = layout.make_indexer()
 
             def dummy(index, rindex):  # type: ignore[no-untyped-def]
                 assert len(rindex) == 0

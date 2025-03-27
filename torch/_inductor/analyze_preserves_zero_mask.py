@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -89,7 +89,6 @@ class RecordLowPrecisionOps(DefaultHandler):
             "to_dtype",
             "constant",
             "where",
-            "masked",
         )
 
     def load(self, name: str, index: sympy.Expr) -> DTypeContainer:
@@ -109,6 +108,14 @@ class RecordLowPrecisionOps(DefaultHandler):
     @staticmethod
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
+
+    def masked(
+        self,
+        mask: DTypeContainer,
+        body: Callable[[], DTypeContainer],
+        other: DTypeContainer,
+    ) -> DTypeContainer:
+        return self.where(mask, other, body())
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
