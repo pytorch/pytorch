@@ -492,6 +492,14 @@ def reorder_for_locality(graph: torch.fx.Graph):
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
         ):
+            if node.target == torch.ops._c10d_functional.wait_tensor.default:
+                # This is a wait node, it's producer is some collective node. When
+                # called, it blocks the current thread until that collective is done.
+                # We should not be moving the collective down to the wait node:
+                #   1. If we aren't in SPMD mode, this move can cause hangs/collective mismatches
+                #   2. Even if we are in SPMD mode, this move gives less compute for comms to overlap with
+                return
+
             # move node's producers right before it
             node.prepend(other_node)
 
