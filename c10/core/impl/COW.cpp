@@ -181,6 +181,10 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
 
       new_data_ptr_opt =
           c10::DataPtr(ptr_value, ctx, c10::impl::cow::cow_deleter, dst_device);
+      std::cout << "[lazy_clone_storage] dst_device: " << dst_device.type()
+                << ", dst ptr_value: " << new_data_ptr_opt.value().get()
+                << std::endl;
+      ;
     }
   }
 
@@ -207,6 +211,10 @@ static c10::DataPtr clone_between_devices(
   check_clone_between_devices(src_type, dst_type);
 
   if (src_type == dst_type) {
+    return dst_allocator->clone(data, n, /*sync=*/true);
+  } else if (
+      (src_type == c10::kCPU && dst_type == c10::kMPS) ||
+      (src_type == c10::kMPS && dst_type == c10::kCPU)) {
     return dst_allocator->clone(data, n, /*sync=*/true);
   } else if (src_type == c10::kCPU) {
     return dst_allocator->clone_from_cpu(data, n);
@@ -250,6 +258,12 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
           storage.allocator()->clone(data_ptr.get(), storage.nbytes());
     } else {
       new_data_ptr = clone_between_devices(
+          // KURT: This is potentially a point of confusion. For MPS-to-CPU,
+          // `data_ptr.get()` gives an address in CPU space even though
+          // `src_device` is MPS. Likewise, for CPU-to-MPS, `data_ptr.get()`
+          // gives an address in MPS space even though the `src_device` is CPU.
+          // So both the src and dest pointers are in the address space of the
+          // dest device!
           data_ptr.get(),
           storage.nbytes(),
           src_device,

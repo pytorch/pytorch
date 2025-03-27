@@ -895,6 +895,15 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
+    std::cout << "[MPSAllocator::copy_data] dest: " << dest << ", src: " << src << ", count: " << count << std::endl;
+    if (isSharedBuffer(dest)) {
+      std::cout << "[MPSAllocator::copy_data] dest ptr is in MPS space" << std::endl;
+      TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
+    } else if (isSharedBufferCPUPtr(dest)) {
+      std::cout << "[MPSAllocator::copy_data] dest ptr is in CPU space" << std::endl;
+      TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
+    }
+
     if (sync) {
       at::detail::getMPSHooks().deviceSynchronize();
     }
@@ -908,13 +917,11 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     std::cout << "[MPSAllocator::clone_from_cpu] data: " << data << ", n: " << n << std::endl;
     TORCH_INTERNAL_ASSERT(m_has_unified_memory);
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
-    // KURT: For some reason, the following assert always seems to fail. Need to
-    // figure out why. But for now, disable it to see if everything else works.
-    // TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(data));
+    TORCH_INTERNAL_ASSERT(isSharedBuffer(data));
 
     DataPtr new_data = allocate_mps(n);
 
-    const void* src_mps_ptr = get_device_ptr_from_cpu_ptr(data);
+    const void* src_mps_ptr = data;
     std::cout << "[MPSAllocator::clone_from_cpu] src_mps_ptr: " << src_mps_ptr << std::endl;
     TORCH_INTERNAL_ASSERT(src_mps_ptr);
     void* dest_mps_ptr = new_data.mutable_get();
@@ -928,19 +935,26 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     std::cout << "[MPSAllocator::clone_to_cpu] data: " << data << ", n: " << n << std::endl;
     TORCH_INTERNAL_ASSERT(m_has_unified_memory);
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
-    // KURT: For some reason, the following assert always seems to fail. Need to
-    // figure out why. But for now, disable it to see if everything else works.
-    // TORCH_INTERNAL_ASSERT(isSharedBuffer(data));
+    TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(data));
 
     DataPtr new_data = allocate_cpu(n);
 
-    const void* src_mps_ptr = data;
-    std::cout << "[MPSAllocator::clone_to_cpu] src_mps_ptr: " << src_mps_ptr << std::endl;
-    void* dest_mps_ptr = get_device_ptr_from_cpu_ptr(new_data.mutable_get());
-    std::cout << "[MPSAllocator::clone_to_cpu] dest_mps_ptr: " << src_mps_ptr << std::endl;
-    TORCH_INTERNAL_ASSERT(dest_mps_ptr);
+    // const void* src_mps_ptr = get_device_ptr_from_cpu_ptr(data);
+    // std::cout << "[MPSAllocator::clone_to_cpu] src_mps_ptr: " << src_mps_ptr << std::endl;
+    // void* dest_mps_ptr = get_device_ptr_from_cpu_ptr(new_data.mutable_get());
+    // std::cout << "[MPSAllocator::clone_to_cpu] dest_mps_ptr: " << src_mps_ptr << std::endl;
+    // TORCH_INTERNAL_ASSERT(dest_mps_ptr);
 
-    copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
+    // copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
+
+    const void* src_cpu_ptr = data;
+    std::cout << "[MPSAllocator::clone_to_cpu] src_cpu_ptr: " << src_cpu_ptr << std::endl;
+    void* dest_cpu_ptr = new_data.mutable_get();
+    std::cout << "[MPSAllocator::clone_to_cpu] dest_cpu_ptr: " << src_cpu_ptr << std::endl;
+    TORCH_INTERNAL_ASSERT(dest_cpu_ptr);
+
+    copy_data(dest_cpu_ptr, src_cpu_ptr, n, /*sync=*/true);
+
     return new_data;
   }
 
