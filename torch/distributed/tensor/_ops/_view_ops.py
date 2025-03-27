@@ -6,7 +6,7 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
@@ -253,9 +253,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    assert len(sizes) >= ndim, (
-        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
-    )
+    assert (
+        len(sizes) >= ndim
+    ), f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -274,9 +274,9 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        assert total_size % size == 0, (
-            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-        )
+        assert (
+            total_size % size == 0
+        ), f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
         return tuple(s if s != -1 else missing_size for s in sizes)
     assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
@@ -537,9 +537,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                assert out_size % submesh_size == 0, (
-                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
-                )
+                assert (
+                    out_size % submesh_size == 0
+                ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -656,3 +656,45 @@ register_op_strategy_map(
 )
 register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
+
+
+@register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
+    assert (
+        len(op_schema.args_schema) > 2
+    ), f"as_strided should have at least 3 args but got {len(op_schema.args_schema)}"
+
+    inp_strategy = op_schema.args_schema[0]
+    assert isinstance(inp_strategy, OpStrategy)
+    size = op_schema.args_schema[1]
+    stride = op_schema.args_schema[2]
+
+    mesh = inp_strategy.get_mesh_from_args(validate=False)
+
+    assert isinstance(
+        inp_strategy, OpStrategy
+    ), f"OpStrategy expected but got {inp_strategy}"
+    assert inp_strategy.shape == torch.Size(size), "size should match input shape"
+
+    output_strategy = OpStrategy([])
+    for inp_placement_strategy in inp_strategy.strategies:
+        spec_to_follow = inp_placement_strategy.output_spec
+        output_spec = DTensorSpec(
+            mesh=spec_to_follow.mesh,
+            placements=tuple(spec_to_follow.placements),
+            tensor_meta=TensorMeta(
+                torch.Size(size),
+                stride,
+                dtype=spec_to_follow.tensor_meta.dtype,
+            ),
+        )
+
+        output_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=output_spec,
+                input_specs=(spec_to_follow,),
+                redistribute_cost=[[0.0 for _ in inp_strategy.strategies]],
+            )
+        )
+
+    return output_strategy
