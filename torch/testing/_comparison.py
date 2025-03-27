@@ -135,15 +135,15 @@ def _make_bitwise_mismatch_msg(
     extra: Optional[str] = None,
     first_mismatch_idx: Optional[int] = None,
 ):
-    """makes a mismatch error message for bitwise values.
+    """Makes a mismatch error message for bitwise values.
 
-    args:
-        default_identifier (str): default description of the compared values, e.g. "tensor-likes".
-        identifier (optional[union[str, callable[[str], str]]]): optional identifier that overrides
-            ``default_identifier``. can be passed as callable in which case it will be called with
+    Args:
+        default_identifier (str): Default description of the compared values, e.g. "Tensor-likes".
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional identifier that overrides
+            ``default_identifier``. Can be passed as callable in which case it will be called with
             ``default_identifier`` to create the description at runtime.
-        extra (optional[str]): extra information to be placed after the message header and the mismatch statistics.
-        first_mismatch_idx (optional[int]): the index of the first mismatch.
+        extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
+        first_mismatch_idx (Optional[int]): the index of the first mismatch.
     """
     if identifier is None:
         identifier = default_identifier
