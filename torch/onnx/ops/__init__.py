@@ -55,7 +55,7 @@ def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
 def symbolic(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int
@@ -82,8 +82,13 @@ def symbolic(
     Example::
 
         class CustomOp(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
-                return torch.onnx.ops.symbolic(
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Normal torch operators can interleave with the symbolic ops during ONNX export
+                x = x + 1
+
+                # Create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
+                # The output tensor will have the specified dtype and shape
+                val = torch.onnx.ops.symbolic(
                     "custom_domain::CustomOp",
                     (x,),
                     dict(attr_key="attr_value"),
@@ -91,11 +96,12 @@ def symbolic(
                     shape=x.shape,
                     version=1,
                 )
-                # This will create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
-                # The output tensor will have the specified dtype and shape.
+
+                # The result of the symbolic op can be used in normal torch operations during ONNX export
+                return torch.nn.functional.relu(val)
 
 
-        # You may then export this model to ONNX using torch.onnx.export.
+        # You may then export this model to ONNX using torch.onnx.export(..., dynamo=True).
 
     Args:
         domain_op: The domain and operator name, separated by "::". For example,
@@ -147,7 +153,7 @@ def symbolic(
 def symbolic_multi_out(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int
@@ -171,8 +177,13 @@ def symbolic_multi_out(
     Example::
 
         class CustomOp(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
-                return torch.onnx.ops.symbolic(
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Normal torch operators can interleave with the symbolic ops during ONNX export
+                x = x + 1
+
+                # Create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
+                # The output tensors will have the specified dtypes and shapes
+                (out1, out2) = torch.onnx.ops.symbolic(
                     "custom_domain::CustomOp",
                     (x,),
                     dict(attr_key="attr_value"),
@@ -180,11 +191,12 @@ def symbolic_multi_out(
                     shapes=(x.shape, [1, 2, 3]),
                     version=1,
                 )
-                # This will create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
-                # The output tensor will have the specified dtype and shape.
+
+                # The result of the symbolic op can be used in normal torch operations during ONNX export
+                return torch.nn.functional.relu(out1 + out2)
 
 
-        # You may then export this model to ONNX using torch.onnx.export.
+        # You may then export this model to ONNX using torch.onnx.export(..., dynamo=True).
 
     Args:
         domain_op: The domain and operator name, separated by "::". For example,
