@@ -2820,3 +2820,6 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+# 在文件结尾处添加cosmic模块导出
+from . import cosmic
