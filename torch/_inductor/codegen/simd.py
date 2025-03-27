@@ -1015,11 +1015,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     source_list = [
                         "GraphInput"
                         if name in V.graph.graph_inputs
-                        else (
-                            "IntermediateBuffer"
-                            if name in V.graph.name_to_buffer
-                            else None
-                        )
+                        else "IntermediateBuffer"
+                        if name in V.graph.name_to_buffer
+                        else None
                         for name in call_args
                     ]
 
