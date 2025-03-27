@@ -1352,7 +1352,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in additional_inputs.items
             ]
             lifted_fake = [
-                leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], torch.Tensor) else leaf.node.meta["example_value"]
+                leaf.node.meta["example_value"].clone()
+                if isinstance(leaf.node.meta["example_value"], torch.Tensor)
+                else leaf.node.meta["example_value"]
                 for leaf in combine_freevars_proxy
             ]
             sub_args_fake = xs_fake + additional_fake + lifted_fake
