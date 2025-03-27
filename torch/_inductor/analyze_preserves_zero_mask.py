@@ -131,7 +131,10 @@ class RecordLowPrecisionOps(DefaultHandler):
         }
 
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-        is_scalar = all(not isinstance(v, DTypeContainer) or v.is_scalar for v in itertools.chain(args, kwargs.values()))
+        is_scalar = all(
+            not isinstance(v, DTypeContainer) or v.is_scalar
+            for v in itertools.chain(args, kwargs.values())
+        )
         out = DTypeContainer(out_dtype, is_scalar=is_scalar)
 
         uses_low_prec = any(
