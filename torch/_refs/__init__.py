@@ -2886,6 +2886,8 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 def constant_pad_nd(
     input: TensorLikeType, pad: list[int], value: NumberType = 0
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     torch._check(
         len(pad) % 2 == 0,
         lambda: f"Length of pad must be even but instead it equals {len(pad)}",
@@ -2907,10 +2909,10 @@ def constant_pad_nd(
     c_input = input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] < 0:
+        if guard_or_false(pad[pad_idx] < 0):
             c_input = c_input.narrow(i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
 
-        if pad[pad_idx + 1] < 0:
+        if guard_or_false(pad[pad_idx + 1] < 0):
             c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
     # If all the pads are negative we can return the result.
@@ -2922,7 +2924,7 @@ def constant_pad_nd(
     # Avoiding the early exit when all pads = 0 ensures we can export
     # constant_pad_nd for cases when all pads >= 0.
     # Note: if any pads are negative, this code specializes due to the if statements above.
-    if builtins.all(p < 0 for p in pad):
+    if builtins.all(guard_or_false(p < 0) for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
@@ -2955,11 +2957,11 @@ def constant_pad_nd(
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] >= 0:
+        if guard_or_true(pad[pad_idx] >= 0):
             c_output = c_output.narrow(
                 i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
-        if pad[pad_idx + 1] >= 0:
+        if guard_or_true(pad[pad_idx + 1] >= 0):
             c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)

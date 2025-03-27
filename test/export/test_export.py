@@ -891,6 +891,19 @@ graph():
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
 
+    def test_unbacked_pad(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                u0, u1, u2, u3 = y.tolist()
+                return torch.nn.functional.pad(x, (u0, u1, u2, u3))
+
+        inps = (
+            torch.randn(32, 64, 128),
+            torch.tensor([4, 5, 8, 5]),
+        )
+        ep = export(Foo(), inps)
+        ep.module()(*inps)
+
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:

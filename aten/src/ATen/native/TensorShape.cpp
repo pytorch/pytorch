@@ -1706,7 +1706,7 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
-  if (start < 0) {
+  if (TORCH_GUARD_OR_FALSE(start.sym_lt(0))) {
     start = start + cur_size;
   }
   TORCH_SYM_CHECK(
