@@ -724,6 +724,17 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether or not to enable statically launching CUDA kernels
+# compiled by triton (instead of using triton's own launcher)
+use_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
+# Raise error if we bypass the launcher
+strict_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: Optional[str]
 if is_fbcode():
@@ -1056,6 +1067,11 @@ class triton:
     # Tune the generated Triton kernels at compile time instead of first time they run
     # Setting to None means uninitialized
     autotune_at_compile_time: Optional[bool] = None
+
+    # We use random tensors for autotune by default. Setting this as true will let us
+    # use inputs from sample inputs to autotune user defined triton kernels.
+    # Side effect for this option is increased memory footprint during first pass compilation.
+    autotune_with_sample_inputs: bool = False
 
     # Allows tiling reductions into multiple dimensions.
     # For best results, this should be used with prefer_nd_tiling.
@@ -1539,6 +1555,7 @@ class test_configs:
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+    static_cpp_dtype_assert = False
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
