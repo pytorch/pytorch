@@ -361,8 +361,13 @@ Tensor& scaled_mm_out_xpu(
     std::optional<c10::ScalarType> out_dtype,
     bool use_fast_accum,
     Tensor& out) {
-  checkBackend(
-      "scaled_mm_out", {out, scale_a, scale_b, mat1, mat2}, Backend::XPU);
+  TensorArg out_arg{out, "out", 0};
+  TensorArg mat1_arg{mat1, "mat1", 1};
+  TensorArg mat2_arg{mat2, "mat2", 2};
+  TensorArg scale_a_arg{scale_a, "scale_a", 3};
+  TensorArg scale_b_arg{scale_b, "scale_b", 4};
+  checkAllSameXPU(
+      "scaled_mm_out", {out_arg, scale_a_arg, scale_b_arg, mat1_arg, mat2_arg});
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
