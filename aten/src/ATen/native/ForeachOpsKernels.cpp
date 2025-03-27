@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/ops/empty_like.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,6 +28,7 @@
 #include <ATen/ops/_foreach_erfc_native.h>
 #include <ATen/ops/_foreach_exp_native.h>
 #include <ATen/ops/_foreach_expm1_native.h>
+#include <ATen/ops/_foreach_fill_native.h>
 #include <ATen/ops/_foreach_floor_native.h>
 #include <ATen/ops/_foreach_frac_native.h>
 #include <ATen/ops/_foreach_lerp_native.h>
@@ -56,6 +58,7 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
+#include <ATen/ops/fill.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
@@ -494,6 +497,27 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
     result.emplace_back(at::pow(self, t));
   }
   return result;
+}
+
+std::vector<Tensor> foreach_tensor_fill_scalar_kernel(
+    TensorList self,
+    const Scalar& value) {
+  check_foreach_api_restrictions(self);
+  std::vector<at::Tensor> result;
+  result.reserve(self.size());
+  for (auto& t : self) {
+    result.push_back(at::empty_like(t).fill_(value));
+  }
+  return result;
+}
+
+void foreach_tensor_fill_scalar_kernel_slow_(
+    TensorList self,
+    const Scalar& value) {
+  check_foreach_api_restrictions(self);
+  for (auto& t : self) {
+    t.fill_(value);
+  }
 }
 
 } // namespace at::native

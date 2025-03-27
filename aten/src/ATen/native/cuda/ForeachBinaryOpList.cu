@@ -15,6 +15,7 @@
 #include <ATen/ops/_foreach_clamp_min_native.h>
 #include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_div_native.h>
+#include <ATen/ops/_foreach_fill_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
 #include <ATen/ops/_foreach_sub_native.h>
@@ -470,6 +471,50 @@ void foreach_tensor_copy_list_kernel_cuda_(
                 Copy<scalar_t, src_t>());
           }
         });
+      });
+  increment_version(self);
+}
+
+namespace {
+
+template <typename scalar_t>
+struct Fill {
+  Fill(scalar_t v) : value(v) {}
+  __device__ __forceinline__ scalar_t operator()(scalar_t v) const {
+    return value;
+  }
+
+ private:
+  scalar_t value;
+};
+
+} // namespace
+
+void foreach_tensor_fill_scalar_kernel_cuda_(
+    TensorList self,
+    const Scalar& value) {
+  check_foreach_api_restrictions(self);
+  if (!(_check_tensors_share_device_and_dtype(
+          self, /* skip_dtype_check */ true))) {
+    return at::native::foreach_tensor_fill_scalar_kernel_slow_(self, value);
+  }
+  std::vector<std::vector<at::Tensor>> tensor_lists{self.vec()};
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      ScalarType::Bool,
+      self[0].scalar_type(),
+      "foreach_tensor_fill",
+      [&]() {
+        multi_tensor_apply<1>(
+            tensor_lists,
+            UnaryOpFunctor<
+                scalar_t,
+                /* depth */ 1,
+                /* r_args_depth */ 1,
+                /* res_arg_index */ 0>(),
+            Fill<scalar_t>(value.to<scalar_t>()));
       });
   increment_version(self);
 }
