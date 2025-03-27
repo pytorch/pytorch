@@ -39,7 +39,7 @@
 
 namespace c10d {
 
-// A type for stashing tensors between op call and `work.wait()`
+// A shelf type for stashing tensors between op call and `work.wait()`
 typedef std::vector<at::Tensor> TensorShelf;
 
 // Control broadcasting of NCCL uniqueId

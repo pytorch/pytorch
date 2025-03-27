@@ -2355,12 +2355,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         // to be destructed, so we transfer the work's shelf to a shelves
         // structure owned by the PG.
         if (!work.stashed_for_allocator_safety_->empty()) {
-          {
-            std::lock_guard<std::mutex> lock(shelvesMutex_);
-            // We are just pushing back a shared_ptr here, so the cost should be
-            // minimal
-            shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
-          }
+          std::lock_guard<std::mutex> lock(shelvesMutex_);
+          // We are just pushing back a shared_ptr here, so the cost should be
+          // minimal
+          shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
         }
 
         // Work status logging for desync debug
