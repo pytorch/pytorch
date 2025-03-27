@@ -155,7 +155,7 @@ class PythonFile:
 
         for i in range(len(self.tokens)):
             try:
-                if (b := self.block(i)) is not None:
+                if (b := self._block(i)) is not None:
                     blocks.append(b)
             except ParseError as e:
                 self.errors[e.token.line] = " ".join(e.args)
@@ -196,7 +196,7 @@ class PythonFile:
         add_full_names([b for b in blocks if b.parent is None])
         return blocks
 
-    def block(self, begin: int) -> Block | None:
+    def _block(self, begin: int) -> Block | None:
         t = self.tokens[begin]
         if not (t.type == token.NAME and t.string in ("class", "def")):
             return None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-import token
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
@@ -18,7 +17,6 @@ else:
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from tokenize import TokenInfo
 
 
 GRANDFATHER_LIST = _FILE.parent / "docstring_linter-grandfather.json"
