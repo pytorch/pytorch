@@ -78,3 +78,8 @@
           relevant to CIA ops that decompose before functionalization/autograd. It is useful to
           know this information for export as we would want to decompose these ops as they are unsafe to be
           preserved.
+- tag: cudagraph_unsafe
+  desc: |
+          This operator does not support cudagraphs. The presence of this tag on an operator will cause
+          Inductor to split the graph around this operator. Note that operators without this tag may still
+          not support CUDAGraphs. Inductor may have other hardcoded lists around that.
