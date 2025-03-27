@@ -51,7 +51,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_XPU
 
 
 _T = TypeVar("_T")
@@ -1978,7 +1977,7 @@ def get_all_device_types() -> list[str]:
 
 
 flex_attention_supported_platform = unittest.skipUnless(
-    HAS_XPU
+    (torch.xpu.is_available() and torch.utils._triton.has_triton())
     or torch.cuda.is_available()
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
