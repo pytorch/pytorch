@@ -18,7 +18,8 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -34,14 +35,8 @@ def scale_for_fp8(
     else:
         t = t.unflatten(0, (scale_shape[0], -1)).unflatten(-1, (scale_shape[1], -1))
 
-    if TEST_WITH_ROCM:
-        scale = (
-            t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fnuz).max
-        )
-        t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fnuz)
-    else:
-        scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fn).max
-        t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fn)
+    scale = t.abs().amax(dim=[1, -1]).float() / E4M3_MAX_POS
+    t_fp8 = (t / scale[:, None, :, None]).to(e4m3_type)
 
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 

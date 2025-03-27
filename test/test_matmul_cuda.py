@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM
+    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -32,6 +32,10 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     tol as xtol,
     toleranceOverride,
+    e4m3_type,
+    e5m2_type,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
 )
 
 from torch.testing._internal.common_utils import (
@@ -256,17 +260,6 @@ class TestMatmulCuda(TestCase):
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-
-if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
-    e4m3_type = torch.float8_e4m3fnuz
-    e5m2_type = torch.float8_e5m2fnuz
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
-else:
-    e4m3_type = torch.float8_e4m3fn
-    e5m2_type = torch.float8_e5m2
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
