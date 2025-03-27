@@ -231,9 +231,9 @@ def redistribute_local_tensor(
                     local_tensor, device_mesh, i, my_coordinate[i]
                 )
             else:
-                assert current.is_shard(), (
-                    f"Current placement should be shard but found {current}"
-                )
+                assert (
+                    current.is_shard()
+                ), f"Current placement should be shard but found {current}"
                 shard_spec = cast(Shard, current)
                 if shard_spec.dim != target_placement.dim:
                     new_local_tensor = shard_spec._to_new_shard_dim(
