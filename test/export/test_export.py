@@ -12997,12 +12997,24 @@ def forward(self, q, k, v):
         else:
             error_type = torch._dynamo.exc.TorchRuntimeError
 
-        xs = torch.tensor([4, 6, 8, 3])
+        xs = torch.tensor([4, 6, 4, 6])
         with self.assertRaisesRegex(
             error_type,
             "Could not reshape a tensor with shape .*u0, u1.* as a tensor with shape .*u2, u3.*",
         ):
             export(Foo(), (xs,))
+
+        class Foov2(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                a, b, c, d = xsl
+                torch._check(a == c)
+                torch._check(b == d)
+                x = torch.zeros(a, b)
+                return x.reshape(c, d)
+
+        ep = export(Foov2(), (xs,))
+        ep.module()(xs)
 
     def test_none_input_output(self):
         class Z(torch.nn.Module):
