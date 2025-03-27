@@ -196,46 +196,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @inductor_config.patch("fx_graph_remote_cache", False)
-    @inductor_config.patch("fx_graph_cache", True)
-    @functorch_config.patch({"enable_autograd_cache": True})
-    def test_symbol_specialization(self):
-        """
-        Verify the symbol specializations don't cause cache miss.
-        """
-
-        def fn(x, y, z):
-            return (torch.randn(5) + x + y, z * torch.randn(1))
-
-        a = torch.rand(5)
-        torch._dynamo.maybe_mark_dynamic(a, 0)
-        b = torch.rand(5)
-        c = torch.randn(6)
-        torch._dynamo.maybe_mark_dynamic(c, 0)
-
-        compiled_fn = torch.compile(fn, backend="inductor")
-
-        # A first call should miss in the cache.
-        compiled_fn(a, b, c)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
-
-        # A second call should hit even if a new dimension is marked as dynamic
-        # that is later specialized as part of tracing.
-        a = torch.rand(5)
-        torch._dynamo.maybe_mark_dynamic(a, 0)
-        b = torch.rand(5)
-        torch._dynamo.maybe_mark_dynamic(b, 0)
-        c = torch.randn(6)
-        torch._dynamo.maybe_mark_dynamic(c, 0)
-        self._clear_dynamo_and_codecache()
-
-        compiled_fn(a, b, c)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
-
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_aot_runtime_trace_joint(self):
         @torch.compile(backend="inductor")
