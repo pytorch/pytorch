@@ -2837,6 +2837,11 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: list[ModuleType] = []
+
+    # Modules loaded without extra attributes are stored here, those do not
+    # need to be re-loaded.
+    modules_no_attr: dict[str, ModuleType] = {}
+
     linemaps: dict[str, list[tuple[Any, ...]]] = {}
 
     @classmethod
@@ -2844,15 +2849,9 @@ class PyCodeCache:
         return write(source_code, "py", extra=extra)
 
     @classmethod
-    def load(
-        cls,
-        source_code: str,
-        extra: str = "",
-        linemap: Optional[list[tuple[int, str]]] = None,
-        attrs: Optional[dict[str, Any]] = None,
-    ) -> ModuleType:
+    def load(cls, source_code: str, extra: str = "") -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path, linemap, attrs)
+        return cls.load_by_key_path(key, path)
 
     @classmethod
     def load_by_key_path(
@@ -2864,6 +2863,10 @@ class PyCodeCache:
     ) -> ModuleType:
         if linemap is None:
             linemap = []
+
+        # we only cache when attrs is None
+        if attrs is None and path in cls.modules_no_attr:
+            return cls.modules_no_attr[path]
 
         in_toplevel = in_toplevel_process()
         mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
@@ -2877,6 +2880,10 @@ class PyCodeCache:
                 setattr(mod, k, v)
 
         if in_toplevel:
+            # we only cache when attrs is None
+            if attrs is None:
+                cls.modules_no_attr[path] = mod
+
             cls.modules.append(mod)
         return mod
 
@@ -2894,6 +2901,7 @@ class PyCodeCache:
                 except FileNotFoundError:
                     pass
         cls.modules.clear()
+        cls.modules_no_attr.clear()
 
     @classmethod
     @functools.lru_cache(None)
@@ -3343,3 +3351,28 @@ class LambdaFuture(CodeCacheFuture):
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()
+
+
+class StaticAutotunerFuture(CodeCacheFuture):
+    """
+    A statically launchable CachingAutotuner, loaded from TritonBundler
+    """
+
+    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+        # Pickled version of CachingAutotuner
+        self.static_autotuner = static_autotuner
+        # This needs to be set in AsyncCompile.triton, in case
+        # we need to reload the CachingAutotuner from its source code
+        # We don't store the source code on the CachingAutotuner itself
+        # since it can be very large.
+        self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
+
+    def result(self) -> CachingAutotuner:
+        assert self.reload_kernel_from_src is not None
+        with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            self.static_autotuner.precompile(  # type: ignore[union-attr]
+                warm_cache_only=False,
+                reload_kernel=self.reload_kernel_from_src,
+                static_triton_bundle_key=None,  # no need to save again
+            )
+            return self.static_autotuner
