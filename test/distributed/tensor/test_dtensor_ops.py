@@ -372,7 +372,6 @@ dtensor_fails = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("select"),
     xfail("select_scatter"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
