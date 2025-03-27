@@ -2756,14 +2756,15 @@ class SubgraphTracer(fx.Tracer):
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
         for out_node in out_nodes.args[0]:
-            example_value = out_node.meta["example_value"]
-            if isinstance(example_value, torch.Tensor):
-                storage = StorageWeakRef(example_value._typed_storage())
-                if storage in output_storages:
-                    # output-output aliasing
-                    msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
-                    return AliasingInfo(True, msg)
-                output_storages[storage] = out_node
+            if out_node:
+                example_value = out_node.meta["example_value"]
+                if isinstance(example_value, torch.Tensor):
+                    storage = StorageWeakRef(example_value._typed_storage())
+                    if storage in output_storages:
+                        # output-output aliasing
+                        msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                        return AliasingInfo(True, msg)
+                    output_storages[storage] = out_node
 
         intersected_storages = input_storages.keys() & output_storages.keys()
         if len(intersected_storages) > 0:
