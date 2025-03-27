@@ -6,7 +6,6 @@ if(TARGET torch::xpurt)
 endif()
 
 set(XPU_HOST_CXX_FLAGS)
-set(XPU_DEVICE_CXX_FLAGS)
 
 # Find SYCL library.
 find_package(SYCLToolkit REQUIRED)
