@@ -159,10 +159,15 @@ class GraphModule(torch.nn.Module):
         def f(inner, x, y):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing for HOP"
+        ):
             f(inner, x, y)
 
-        with self.assertRaisesRegex(RuntimeError, "inputs are mutated"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
             f(inner2, x, y)
 
     def test_eager_call(self):
