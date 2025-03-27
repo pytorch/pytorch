@@ -1262,7 +1262,7 @@ class StorageOverlapChecker {
    */
   std::vector<Tensor> _tensors_from(
       const std::vector<PyObject*>& objects,
-      int64_t size) {
+      size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
     std::transform(

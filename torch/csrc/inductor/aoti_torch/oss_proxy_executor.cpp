@@ -398,9 +398,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   // If an argument is not filled and has a default value, we should
   // also prefill the default value.
   for (size_t index = 0; index < schema_args.size(); index++) {
-    if (!filled[index] && schema_args[index].default_value()) {
-      auto default_value = *schema_args[index].default_value();
-      op_kernel.stack_.at(index) = default_value;
+    auto default_value = schema_args[index].default_value();
+    if (!filled[index] && default_value.has_value()) {
+      op_kernel.stack_.at(index) = std::move(default_value.value());
     }
   }
 }
@@ -481,8 +481,6 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
     int device_idx = -1;
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
   }
-
-  std::string extern_kernel_nodes_serialized;
 
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open(), "Unable to open file ", json_path);

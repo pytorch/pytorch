@@ -487,27 +487,27 @@ static PyMethodDef NodeBase_methods[] = {
      METH_FASTCALL,
      "Internal method: do not call directly."},
     {"_remove_from_list",
-     (PyCFunction)(void*)(NodeBase__remove_from_list),
+     NodeBase__remove_from_list,
      METH_NOARGS,
      "Internal method: do not call directly."},
     {"_prepend",
-     (PyCFunction)(void*)(NodeBase__prepend),
+     (NodeBase__prepend),
      METH_O,
      "Internal method: do not call directly."},
     {"__lt__",
-     (PyCFunction)(void*)NodeBase___lt__,
+     NodeBase___lt__,
      METH_O,
      "Return True if self.sort_key < other.sort_key"},
     {"__gt__",
-     (PyCFunction)(void*)NodeBase___gt__,
+     NodeBase___gt__,
      METH_O,
      "Return True if self.sort_key > other.sort_key"},
     {"__ge__",
-     (PyCFunction)(void*)NodeBase___ge__,
+     NodeBase___ge__,
      METH_O,
      "Return True if self.sort_key >= other.sort_key"},
     {"__le__",
-     (PyCFunction)(void*)NodeBase___le__,
+     NodeBase___le__,
      METH_O,
      "Return True if self.sort_key <= other.sort_key"},
     {nullptr, nullptr, 0, nullptr} // Sentinel
@@ -518,7 +518,7 @@ static PyGetSetDef NodeBase_getset[] = {
     {"_sort_key", // attribute name in Python
      (getter)NodeBase_get_sort_key, // C getter function
      (setter)NodeBase_set_sort_key, // C setter function
-     (char*)"The sort key as a tuple of ints", // docstring
+     "The sort key as a tuple of ints", // docstring
      nullptr},
     {nullptr, nullptr, nullptr, nullptr, nullptr} // Sentinel
 };
@@ -528,7 +528,7 @@ PyTypeObject NodeBaseType = {
     "torch._C._NodeBase", /* tp_name */
     sizeof(NodeBase), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)NodeBase_dealloc, /* tp_dealloc */
+    NodeBase_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
