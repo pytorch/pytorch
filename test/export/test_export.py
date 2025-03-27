@@ -4054,9 +4054,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 r = torch.randn([items[0], items[1]])
                 return r.view(items[0], items[2])
 
+        if is_non_strict_test(self._testMethodName):
+            error_type = ValueError
+        else:
+            error_type = torch._dynamo.exc.TorchRuntimeError
+
         M = M_v0
         with self.assertRaisesRegex(
-            ValueError,
+            error_type,
             r"Could not reshape a tensor .*u0, u1.* as a tensor .*u0, u2.*",
         ):
             export(N(), (t,))
@@ -6810,7 +6815,7 @@ def forward(self, b_a_buffer, x):
         ep = export(f, (torch.tensor(6),))
         ep.module()(torch.tensor(6))
         with self.assertRaisesRegex(
-            RuntimeError, r"Runtime assertion failed for .* u0 .* 6"
+            RuntimeError, r"Runtime assertion failed for .* u.* 6"
         ):
             ep.module()(torch.tensor(5))
 
