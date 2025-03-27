@@ -25,9 +25,6 @@
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
 {%- if config["package_type"] == "manywheel" %}
-  {%- if config["devtoolset"] %}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-  {%- endif %}
   {%- if config.use_split_build is defined %}
       use_split_build: !{{ config["use_split_build"] }}
   {%- endif %}
@@ -37,9 +34,6 @@
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
   {%- endif %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-  {%- if config["devtoolset"] %}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-  {%- endif %}
   {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason

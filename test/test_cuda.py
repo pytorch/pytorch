@@ -99,7 +99,9 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
-TEST_PYNVML = not torch.cuda._HAS_PYNVML
+TEST_PYNVML = (
+    torch.cuda._HAS_PYNVML and not IS_JETSON
+)  # nvml not fully supported on jetson
 if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -473,6 +475,9 @@ class TestCuda(TestCase):
         finally:
             torch.cuda.set_per_process_memory_fraction(orig, 0)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @serialTest()
     def test_get_per_process_memory_fraction(self):
         # get the initial memory fraction
@@ -3597,8 +3602,9 @@ def fork_and_check_is_pinned():
     def worker(conn):
         try:
             x = torch.randn(10)
-            x.is_pinned(device="cuda")
-            x = torch.ones(10, device="cuda")[0].item()
+            x.is_pinned()
+            dev = torch.accelerator.current_accelerator()
+            x = torch.ones(10, device=dev)[0].item()
             conn.send(x)
         except Exception as e:
             conn.send(str(e))
@@ -3618,7 +3624,7 @@ def fork_and_check_is_pinned():
 
 x = torch.randn(10)
 # check that is_pinned won't poison future fork
-x.is_pinned(device="cuda")
+x.is_pinned()
 ret = fork_and_check_is_pinned()
 print(ret)
 
@@ -4142,6 +4148,9 @@ class TestCudaMallocAsync(TestCase):
             cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
             self.assertEqual(cuda_alloc_size, raw_alloc_size)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @parametrize("max_split_size_mb_setting", [False, True])
     def test_raises_oom(self, max_split_size_mb_setting):
         if max_split_size_mb_setting:
@@ -4258,19 +4267,19 @@ class TestCudaMallocAsync(TestCase):
         finally:
             random.setstate(state)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
             self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
         Verify used device memory in bytes
@@ -4288,15 +4297,15 @@ class TestCudaMallocAsync(TestCase):
         # test the order of magnitude
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
         """
@@ -4311,7 +4320,7 @@ class TestCudaMallocAsync(TestCase):
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
         """
@@ -4330,7 +4339,7 @@ class TestCudaMallocAsync(TestCase):
                 matching = False
         self.assertEqual(True, matching)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
         """
@@ -4794,7 +4803,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
 
     def test_no_triton_on_import(self):
-        """Test that Trition is not imported on first GPU use"""
+        """Test that Triton is not imported on first GPU use"""
         script = "import sys; import torch; torch.rand(2, device='cuda'); print('triton' in sys.modules)"
 
         rc = (

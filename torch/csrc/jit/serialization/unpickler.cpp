@@ -623,7 +623,8 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
+          device.is_mtia() || device.is_hpu() || device.is_mps() ||
+          device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         TORCH_CHECK(

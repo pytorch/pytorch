@@ -108,7 +108,7 @@ static PyObject* THPVariable_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-PyTypeObject THPLegacyVariableType = {
+static PyTypeObject THPLegacyVariableType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._LegacyVariableBase", /* tp_name */
     0, /* tp_basicsize */

@@ -126,9 +126,6 @@ ALLOW_LIST = [
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
-    # These ops are defined in torch/csrc/distributed/c10d/Ops.cpp
-    # TODO: add back restriction when c10d ops can be exported
-    ("c10d::.*", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

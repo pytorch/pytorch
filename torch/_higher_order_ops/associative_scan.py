@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
@@ -371,12 +372,13 @@ def trace_associative_scan(
         xs
     ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
 
-    for i, o in zip(xs, outputs):
-        o_meta = o.meta["tensor_meta"]
-        assert o_meta.dtype == i.dtype, (
-            f"combine_fn output type mismatch, expected {i.dtype} "
-            + f"but got {o_meta.dtype}"
-        )
+    xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        first_slice_copy(x) for x in xs
+    ]
+    output_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        c.meta["val"] for c in outputs
+    ]
+    check_meta_consistency(xs_fake_tensors, output_fake_tensors, "init", "carry")
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 

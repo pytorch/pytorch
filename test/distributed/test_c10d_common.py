@@ -3,10 +3,12 @@
 import copy
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+import unittest
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
@@ -34,6 +36,8 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
     load_tests,
     parametrize,
     retry_on_connect_failures,
@@ -1906,6 +1910,36 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             self.assertEqual(pg.name(), str(excepted_backend))
 
             dist.destroy_process_group()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    def test_default_process_group(self):
+        script = """
+# Hide all GPUs
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+import torch
+from torch import distributed as dist
+
+# This should initialize on CPU even though this is a CUDA-enabled build
+dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                # It is ok to have an extra long timeout here as a timeout means the test failed
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail(
+                msg="Example code timed out! See the code sample in the test for details."
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(f"""Subprocess failed with {e.output.decode("utf-8")}""")
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are

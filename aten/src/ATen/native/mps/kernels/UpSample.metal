@@ -268,12 +268,31 @@ kernel void upsample_bilinear2d(
   }
 }
 
-inline float bilinear_functor(float x) {
-  return abs(x) < 1.0 ? 1.0 - abs(x) : abs(x);
-}
+struct BilinearFunctor {
+  inline float operator()(float x) {
+    x = abs(x);
+    return x < 1.0 ? 1.0 - x : x;
+  }
+  static constant constexpr float area_factor = 1.0;
+};
 
-template <typename T>
-kernel void upsample_bilinear2d_aa(
+struct BicubicFunctor {
+  inline float operator()(float x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+    x = abs(x);
+    if (x < 1.0) {
+      return 1.0 + (1.5 * x - 2.5) * x * x;
+    }
+    if (x < 2.0) {
+      return 2.0 - 0.5 * ((x - 5.0) * x + 8.0) * x;
+    }
+    return 0;
+  }
+  static constant constexpr float area_factor = 2.0;
+};
+
+template <typename T, typename F>
+kernel void upsample_2d_aa(
     constant T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant ulong4& input_strides [[buffer(2)]],
@@ -286,15 +305,26 @@ kernel void upsample_bilinear2d_aa(
   auto output_x = thread_index % static_cast<uint>(output_sizes.w);
   auto output_y = thread_index / static_cast<uint>(output_sizes.w);
   (void)align_corners; // Align corners is unused for AA algorithm
+  F f;
   auto x_center = area_pixel_compute_source_index(
-      scales.x, output_x, /*align_corners=*/false, /*cubic=*/false);
+      scales.x,
+      output_x,
+      /*align_corners=*/false,
+      /*cubic=*/F::area_factor == 2.0);
   auto y_center = area_pixel_compute_source_index(
-      scales.y, output_y, /*align_corners=*/false, /*cubic=*/false);
+      scales.y,
+      output_y,
+      /*align_corners=*/false,
+      /*cubic=*/F::area_factor == 2.0);
   auto clamped_scales = max(1.0, scales);
-  auto x_min = max(0L, long(floor(x_center - clamped_scales.x + 1)));
-  auto x_max = min(input_sizes.w, long(ceil(x_center + clamped_scales.x)));
-  auto y_min = max(0L, long(floor(y_center - clamped_scales.y + 1)));
-  auto y_max = min(input_sizes.z, long(ceil(y_center + clamped_scales.y)));
+  auto x_min =
+      max(0L, long(floor(x_center - f.area_factor * clamped_scales.x + 1)));
+  auto x_max = min(
+      input_sizes.w, long(ceil(x_center + f.area_factor * clamped_scales.x)));
+  auto y_min =
+      max(0L, long(floor(y_center - f.area_factor * clamped_scales.y + 1)));
+  auto y_max = min(
+      input_sizes.z, long(ceil(y_center + f.area_factor * clamped_scales.y)));
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
       float res = 0.0;
@@ -302,9 +332,9 @@ kernel void upsample_bilinear2d_aa(
       constant auto* input =
           inputData + n * input_strides.x + c * input_strides.y;
       for (auto y = y_min; y < y_max; ++y) {
-        auto dy = bilinear_functor((y - y_center) / clamped_scales.y);
+        auto dy = f((y - y_center) / clamped_scales.y);
         for (auto x = x_min; x < x_max; ++x) {
-          auto dx = bilinear_functor((x - x_center) / clamped_scales.x);
+          auto dx = f((x - x_center) / clamped_scales.x);
           auto val = input[x * input_strides.w + y * input_strides.z];
           res += val * dx * dy;
           ws += dx * dy;
@@ -456,6 +486,19 @@ kernel void upsample_bicubic2d_backward(
           constant bool& align_corners [[buffer(7)]],              \
           uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_2D_AA(NAME, FUNCTOR, DTYPE)           \
+  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
+  upsample_2d_aa<DTYPE, FUNCTOR>(                                  \
+      constant DTYPE * inputData [[buffer(0)]],                    \
+      device DTYPE * outputData [[buffer(1)]],                     \
+      constant ulong4 & input_strides [[buffer(2)]],               \
+      constant ulong4 & output_strides [[buffer(3)]],              \
+      constant long4 & input_sizes [[buffer(4)]],                  \
+      constant long4 & output_sizes [[buffer(5)]],                 \
+      constant float2 & scales [[buffer(6)]],                      \
+      constant bool& align_corners [[buffer(7)]],                  \
+      uint thread_index [[thread_position_in_grid]])
+
 #define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
       upsample_##NAME##_backward<DTYPE>(                                    \
@@ -482,11 +525,12 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)               \
-  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);          \
-  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE); \
-  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);         \
-  INSTANTIATE_UPSAMPLE_2D(bilinear2d_aa, DTYPE);      \
+#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                              \
+  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                         \
+  INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);   \
+  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                        \
+  INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
   INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);

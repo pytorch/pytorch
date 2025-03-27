@@ -7,7 +7,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -1239,7 +1239,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_with_finally(self):
         z = 0
 
@@ -1295,24 +1294,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
         self.assertEqual(z, 101)
-
-    def test_throw_three_arguments(self):
-        def whoo(t):
-            try:
-                yield t.sin()
-            except ValueError:
-                yield t.cos()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = whoo(t)
-            a = next(gen)
-            b = gen.throw(ValueError, "Error", None)
-            return a + b
-
-        t = torch.randn(2)
-        with self.assertRaises(InternalTorchDynamoError):
-            fn(t)
 
     def test_throw_no_yield_after_throw(self):
         z = 0
@@ -1420,7 +1401,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_try_except_finally(self):
         z = 0
 
@@ -1617,7 +1597,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
     # changed the tests a little bit to run them inside dynamo
     # + replaced all self.assert* calls to plain assert statements
 
-    @unittest.expectedFailure
     def test_exception_context_with_yield(self):
         def f():
             try:
@@ -1639,7 +1618,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-    @unittest.expectedFailure
     def test_exception_context_with_yield_inside_generator(self):
         # Check that the context is also available from inside the generator
         # with yield, as opposed to outside.
@@ -1669,7 +1647,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-    @unittest.expectedFailure
     def test_exception_context_with_yield_from(self):
         def f():
             yield
