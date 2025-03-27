@@ -1125,7 +1125,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
         if not is_inplace:
-            self.writeline(f"AtenTensorHandle {output_handle_name};")
+            code.writeline(f"AtenTensorHandle {output_handle_name};")
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
@@ -1134,7 +1134,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
         if not is_inplace:
-            self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+            code.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def _generate_extern_kernel_alloc_helper(
         self, code: IndentedBuffer, extern_kernel, args

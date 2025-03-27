@@ -2588,7 +2588,7 @@ class PythonWrapperCodegen(CodeGen):
         code.writeline(
             DeferredLine(
                 name,
-                f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
+                f"{self.declare}{name} = {view.codegen_reference(writer=code)}{self.ending}  {self.comment} alias",
             )
         )
 
