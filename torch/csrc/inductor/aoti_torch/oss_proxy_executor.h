@@ -17,6 +17,7 @@ enum class DynamicArgType : int {
   ListOptionalTensorType = 2,
   IntType = 3,
   ListIntType = 4,
+  NoneType = 5,
 };
 
 inline std::ostream& operator<<(std::ostream& os, DynamicArgType arg_type) {
