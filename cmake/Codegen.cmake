@@ -76,19 +76,51 @@ if(INTERN_BUILD_ATEN_OPS)
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
-  # RowwiseScaled.cu requires sm90a flags
+  # Handle files that may need sm89/sm90a/sm100a flags (stable/nightly
+  # builds are not built for these archs).
   if(USE_CUDA)
-    set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu")
+    # The stable/nightly builds do not enable some SM architectures,
+    # like 89/90a/100a.  Still, some files need to be built for these
+    # architecturs specifically.  This function makes it possible to
+    # enable building given file for a specific such architecture, in
+    # case if PyTorch is built for corresponding other architecture;
+    # for example, it will enable building for SM 90a in case PyTorch
+    # built for SM 90, etc.  For examples of how to use the function,
+    # see below the function itself.
+    function(_BUILD_FOR_ADDITIONAL_ARCHS file archs)
+      torch_cuda_get_nvcc_gencode_flag(_existing_arch_flags)
 
-    # Get existing arch flags
-    torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
+      set(_file_compile_flags "")
+      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+        foreach(_arch ${archs})
+          if("${_arch}" STREQUAL "89")
+            if(_existing_arch_flags MATCHES ".*compute_86.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_89,code=sm_89")
+            endif()
+          endif()
+          if("${_arch}" STREQUAL "90a")
+            if(_existing_arch_flags MATCHES ".*compute_90.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_90a,code=sm_90a")
+            endif()
+          endif()
+          if("${_arch}" STREQUAL "100a")
+            if(_existing_arch_flags MATCHES ".*compute_100.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
+            endif()
+          endif()
+        endforeach()
+      endif()
+      list(JOIN _file_compile_flags " " _file_compile_flags)
 
-    # Check NVCC version and existing arch flags
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
-      EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-      set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
-        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
-    endif()
+      set_source_files_properties(${file} PROPERTIES COMPILE_FLAGS "${_file_compile_flags}")
+    endfunction()
+
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
+      "89;90a;100a")
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
+      "89;90a")
   endif()
 
   set(GEN_ROCM_FLAG)
@@ -359,9 +391,9 @@ if(INTERN_BUILD_ATEN_OPS)
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
       list(APPEND CPU_CAPABILITY_NAMES "SVE256")
       if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
       else()
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
       endif()
     endif(CXX_SVE256_FOUND)
   endif(CXX_SVE_FOUND)
@@ -383,6 +415,15 @@ if(INTERN_BUILD_ATEN_OPS)
       else(MSVC)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
+
+      # Only parallelize the SortingKernel for now to avoid side effects
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OPENMP)
+        set(EXTRA_FLAGS "${EXTRA_FLAGS} -D_GLIBCXX_PARALLEL")
+        if(USE_PRECOMPILED_HEADERS)
+          set_source_files_properties(${NEW_IMPL} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+        endif()
+      endif()
+
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))

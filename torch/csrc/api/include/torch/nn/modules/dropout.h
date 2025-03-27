@@ -17,8 +17,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
   _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)) {}
 
   explicit _DropoutNd(const DropoutOptions& options_ = {}) : options(options_) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-    reset();
+    _DropoutNd::reset();
   }
 
   void reset() override {

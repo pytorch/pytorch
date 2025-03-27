@@ -29,41 +29,76 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& cubin_dir,
+    const bool run_single_threaded) {
+  if (run_single_threaded) {
+    if (num_models != 1) {
+      throw std::runtime_error(
+          "num_models must be 1 when run_single_threaded is true");
+    }
+  } else {
+    if (num_models < 1) {
+      throw std::runtime_error(
+          "num_models must be >=1 when run_single_threaded is false");
+    }
+  }
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
-  create_func_ = reinterpret_cast<decltype(create_func_)>(
-      model_so_->sym("AOTInductorModelContainerCreateWithDevice"));
-  delete_func_ = reinterpret_cast<decltype(delete_func_)>(
-      model_so_->sym("AOTInductorModelContainerDelete"));
-  get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
-  run_func_ = reinterpret_cast<decltype(run_func_)>(
-      model_so_->sym("AOTInductorModelContainerRun"));
-  get_num_constants_func_ = reinterpret_cast<decltype(get_num_constants_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetNumConstants"));
-  get_constant_name_func_ = reinterpret_cast<decltype(get_constant_name_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetConstantName"));
-  get_constant_original_fqn_func_ =
-      reinterpret_cast<decltype(get_constant_original_fqn_func_)>(
-          model_so_->sym("AOTInductorModelContainerGetConstantOriginalFQN"));
-  get_constant_dtype_func_ =
-      reinterpret_cast<decltype(get_constant_dtype_func_)>(
-          model_so_->sym("AOTInductorModelContainerGetConstantDtype"));
-  update_constant_buffer_func_ =
-      reinterpret_cast<decltype(update_constant_buffer_func_)>(
-          model_so_->sym("AOTInductorModelContainerUpdateConstantBuffer"));
-  update_inactive_constant_buffer_func_ =
-      reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
-          model_so_->sym(
-              "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
-  run_const_fold_func_ = reinterpret_cast<decltype(run_const_fold_func_)>(
-      model_so_->sym("AOTInductorModelContainerRunConstantFolding"));
-  swap_constant_buffer_func_ =
-      reinterpret_cast<decltype(swap_constant_buffer_func_)>(
-          model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
-  get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetCallSpec"));
+
+#define LOAD_SYMBOL(var, name_str) \
+  var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));
+  LOAD_SYMBOL(create_func_, "AOTInductorModelContainerCreateWithDevice")
+  LOAD_SYMBOL(delete_func_, "AOTInductorModelContainerDelete")
+  LOAD_SYMBOL(get_num_outputs_func_, "AOTInductorModelContainerGetNumOutputs")
+  LOAD_SYMBOL(
+      get_num_constants_func_, "AOTInductorModelContainerGetNumConstants")
+  LOAD_SYMBOL(
+      get_constant_name_func_, "AOTInductorModelContainerGetConstantName")
+  LOAD_SYMBOL(
+      get_constant_original_fqn_func_,
+      "AOTInductorModelContainerGetConstantOriginalFQN")
+  LOAD_SYMBOL(
+      get_constant_dtype_func_, "AOTInductorModelContainerGetConstantDtype")
+  LOAD_SYMBOL(
+      update_constant_buffer_func_,
+      "AOTInductorModelContainerUpdateConstantBuffer")
+  LOAD_SYMBOL(
+      update_inactive_constant_buffer_func_,
+      "AOTInductorModelContainerUpdateInactiveConstantBuffer")
+  LOAD_SYMBOL(
+      run_const_fold_func_, "AOTInductorModelContainerRunConstantFolding")
+  LOAD_SYMBOL(
+      swap_constant_buffer_func_, "AOTInductorModelContainerSwapConstantBuffer")
+  LOAD_SYMBOL(get_call_spec_func_, "AOTInductorModelContainerGetCallSpec")
+#undef LOAD_SYMBOL
+
+// NOLINTBEGIN(performance-avoid-endl)
+#define TRY_LOAD_SYMBOL(var, name_str)                                               \
+  try {                                                                              \
+    var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));                 \
+  } catch (const at::DynamicLibraryError& e) {                                       \
+    std::cerr                                                                        \
+        << "[WARNING] Could not dlsym " << name_str                                  \
+        << ". This is okay if you don't need functionality from " << name_str        \
+        << ". Otherwise consider rebuilding your model with the latest AOTInductor." \
+        << std::endl;                                                                \
+  }
+  // NOLINTEND(performance-avoid-endl)
+
+  const char* run_func_name = run_single_threaded
+      ? "AOTInductorModelContainerRunSingleThreaded"
+      : "AOTInductorModelContainerRun";
+  TRY_LOAD_SYMBOL(run_func_, run_func_name)
+  if (run_func_ == nullptr && run_single_threaded) {
+    throw std::runtime_error(
+        "No AOTInductorModelContainerRunSingleThreaded function in .so! To use AOTInductor-compiled model in the single-threaded mode,\
+consider rebuild your model with the latest AOTInductor.");
+  }
+
+  TRY_LOAD_SYMBOL(
+      free_inactive_constant_buffer_func_,
+      "AOTInductorModelContainerFreeInactiveConstantBuffer")
+#undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
   size_t lastindex = model_so_path.find_last_of('.');
@@ -211,6 +246,15 @@ void AOTIModelContainerRunner::run_const_fold(
 
 void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
+}
+
+void AOTIModelContainerRunner::free_inactive_constant_buffer() {
+  if (!free_inactive_constant_buffer_func_) {
+    throw std::runtime_error(
+        "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      free_inactive_constant_buffer_func_(container_handle_));
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {

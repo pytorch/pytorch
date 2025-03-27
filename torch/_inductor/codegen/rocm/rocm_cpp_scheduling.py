@@ -5,7 +5,7 @@ from typing import cast
 
 from ... import config
 from ...codecache import code_hash, get_path
-from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
+from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
@@ -23,10 +23,6 @@ class ROCmCPPScheduling(BaseScheduling):
 
     It handles fusion decisions and ROCm C++ specific template code generation.
     """
-
-    def __init__(self, scheduler: Scheduler) -> None:
-        super().__init__()
-        self.scheduler = scheduler
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -83,9 +79,9 @@ class ROCmCPPScheduling(BaseScheduling):
         """
         Codegen a ROCm template, possibly with fused epilogues
         """
-        assert self.is_rocm_cpp_template(
-            template_node
-        ), "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
+        assert self.is_rocm_cpp_template(template_node), (
+            "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
+        )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
@@ -100,4 +96,4 @@ class ROCmCPPScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, node_schedule)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()

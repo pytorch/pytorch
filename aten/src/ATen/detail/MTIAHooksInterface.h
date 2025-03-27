@@ -82,6 +82,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
+  virtual int64_t getCurrentRawStream(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
   virtual c10::Stream getDefaultStream(DeviceIndex device) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
@@ -130,6 +135,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual DeviceIndex getDeviceCount() const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return 0;
+  }
+
+  virtual void resetPeakMemoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
 };

@@ -57,3 +57,17 @@ jobs:
       - name: Build Docker Image
         run: |
           .ci/docker/manywheel/build.sh manylinuxs390x-builder:cpu-s390x
+
+      - name: Cleanup docker
+        if: cancelled()
+        shell: bash
+        run: |
+          # If podman build command is interrupted,
+          # it can leave a couple of processes still running.
+          # Order them to stop for clean shutdown.
+          # It looks like sometimes some processes remain
+          # after first cleanup.
+          # Wait a bit and do cleanup again. It looks like it helps.
+          docker system prune --build -f || true
+          sleep 60
+          docker system prune --build -f || true

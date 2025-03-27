@@ -8,7 +8,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import collections
 import typing
 from collections.abc import Iterable
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -46,16 +46,16 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-suggest_memory_format = torch._prims_common.suggest_memory_format
+from .schemas import MemoryFormatMeta
 
 
 def maybe_suggest_memory_format(
     t, with_memory_format: bool
-) -> Optional[torch.memory_format]:
+) -> Optional[MemoryFormatMeta]:
     if not with_memory_format:
         return None
 
-    return suggest_memory_format(t)
+    return MemoryFormatMeta.from_tensor(t)
 
 
 def get_subclass_typing_container(
@@ -326,6 +326,7 @@ def wrap_tensor_subclasses(
     num_fw_outs_saved_for_bw: Optional[int] = None,
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
+    make_subclass_override: Optional[Callable] = None,
 ) -> tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
@@ -336,9 +337,15 @@ def wrap_tensor_subclasses(
         else:
             assert isinstance(subclass_meta, SubclassCreationMeta)
             assert subclass_meta.included_subclass_symints == included_subclass_symints
-            wrapped_args.append(
-                subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
-            )
+
+            if make_subclass_override:
+                wrapped_args.append(
+                    make_subclass_override(subclass_meta, is_runtime, unwrapped_args)
+                )
+            else:
+                wrapped_args.append(
+                    subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+                )
             num_args_tallied += subclass_meta.arg_count
 
     # Note: [Partitioner handling for Subclasses, Part 2]

@@ -1,15 +1,20 @@
 import itertools
+import logging
 from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch._logging import warning_once
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
+
+
+logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 
 def _get_post_forward_mesh_info(
@@ -35,6 +40,11 @@ def _get_post_forward_mesh_info(
                 f"factor of {shard_mesh_size}, not {reshard_after_forward}"
             )
         elif reshard_after_forward == 1:
+            msg = (
+                "reshard_after_forward=1 (int) means resharding parameters to world size 1, "
+                "instead of reshard_after_forward=True (bool)"
+            )
+            warning_once(logger, msg, stacklevel=2)
             reshard_after_forward = False
         elif reshard_after_forward == shard_mesh_size:
             reshard_after_forward = True
@@ -70,7 +80,60 @@ def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
     return torch.device(mesh.device_type, device_handle.current_device())
 
 
-def _get_managed_modules(root_modules: tuple[nn.Module, ...]) -> list[nn.Module]:
+def _ignore_module(
+    module: nn.Module,
+    ignored_params: set[nn.Parameter],
+    ignore_decision: dict[nn.Module, bool],
+) -> bool:
+    """
+    Decide if it is safe to ignore a module for applying fully_shard.
+    """
+    if module in ignore_decision:
+        return ignore_decision[module]
+
+    if len(list(module.buffers(recurse=False))) > 0:
+        # Cannot ignore a module with any buffer
+        ignore_decision[module] = False
+        return False
+
+    for _, param in module.named_parameters(recurse=False):
+        if param not in ignored_params:
+            # at least one param is not ignored. So this module shouldn't be.
+            ignore_decision[module] = False
+            return False
+
+    # Need to consider descendants of module
+    for child in list(module.children()):
+        ignore_child = _ignore_module(child, ignored_params, ignore_decision)
+        if not ignore_child:
+            # Cannot ignore module if one of its children is not ignored
+            ignore_decision[module] = False
+            return False
+
+    # Safe to ignore module
+    ignore_decision[module] = True
+    return True
+
+
+def _adjust_managed_modules(
+    modules: list[nn.Module], ignored_params: set[nn.Parameter]
+) -> list[nn.Module]:
+    """
+    Adjust the given list of managed modules by removing those with all parameters ignored.
+    """
+    ignore_decision: dict[nn.Module, bool] = {}
+    new_modules = []
+    for module in modules:
+        ignored = _ignore_module(module, ignored_params, ignore_decision)
+        if not ignored:
+            new_modules.append(module)
+    return new_modules
+
+
+def _get_managed_modules(
+    root_modules: tuple[nn.Module, ...],
+    ignored_params: Optional[set[nn.Parameter]] = None,
+) -> list[nn.Module]:
     modules: list[nn.Module] = []
     root_modules_set = set(root_modules)
     # Track visisted modules to avoid visiting shared modules multiple times
@@ -96,7 +159,12 @@ def _get_managed_modules(root_modules: tuple[nn.Module, ...]) -> list[nn.Module]
 
     for root_module in root_modules:
         dfs(root_module)
-    return modules
+
+    if ignored_params is None:
+        return modules
+
+    adjusted_modules = _adjust_managed_modules(modules, ignored_params)
+    return adjusted_modules
 
 
 def _verify_managed_param(name: str, param: nn.Parameter) -> None:
@@ -107,13 +175,13 @@ def _verify_managed_param(name: str, param: nn.Parameter) -> None:
     """
     if len(param.shape) == 0:
         raise ValueError(
-            "fully_shard doesn't support salar parameters. "
+            "fully_shard doesn't support scalar parameters. "
             f"Change {name} to a 1D tensor with numel equal to 1."
         )
 
 
 def _get_managed_states(
-    modules: list[nn.Module],
+    modules: list[nn.Module], ignored_params: Optional[set[nn.Parameter]] = None
 ) -> tuple[list[nn.Parameter], list[torch.Tensor]]:
     params: list[nn.Parameter] = []
     buffers: list[torch.Tensor] = []
@@ -121,8 +189,14 @@ def _get_managed_states(
     # buffers multiple times
     visited_params: set[nn.Parameter] = set()
     visited_buffers: set[torch.Tensor] = set()
+    if ignored_params is None:
+        ignored_params = set()
+
     for module in modules:
         for name, param in module.named_parameters(recurse=False):
+            if param in ignored_params:
+                # do not include an ignored parameters
+                continue
             if param not in visited_params:
                 _verify_managed_param(name, param)
                 params.append(param)

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
-from numbers import Number
 from typing import Any, Callable, Generic, overload, Union
 from typing_extensions import TypeVar
 
@@ -8,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.overrides import is_tensor_like
+from torch.types import _Number
 
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
@@ -28,20 +28,20 @@ def broadcast_all(*values):
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
       - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
-      - numbers.Number instances (scalars) are upcast to tensors having
+      - Number instances (scalars) are upcast to tensors having
         the same size and type as the first tensor passed to `values`.  If all the
         values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
+        values (list of `Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` instance,
+        ValueError: if any of the values is not a `Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(is_tensor_like(v) or isinstance(v, Number) for v in values):
+    if not all(is_tensor_like(v) or isinstance(v, _Number) for v in values):
         raise ValueError(
-            "Input arguments must all be instances of numbers.Number, "
+            "Input arguments must all be instances of Number, "
             "torch.Tensor or objects implementing __torch_function__."
         )
     if not all(is_tensor_like(v) for v in values):
@@ -151,12 +151,10 @@ class lazy_property(Generic[T, R]):
     @overload
     def __get__(
         self, instance: None, obj_type: Any = None
-    ) -> "_lazy_property_and_property[T, R]":
-        ...
+    ) -> "_lazy_property_and_property[T, R]": ...
 
     @overload
-    def __get__(self, instance: T, obj_type: Any = None) -> R:
-        ...
+    def __get__(self, instance: T, obj_type: Any = None) -> R: ...
 
     def __get__(
         self, instance: Union[T, None], obj_type: Any = None

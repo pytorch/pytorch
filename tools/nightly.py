@@ -354,7 +354,7 @@ class Venv:
                         f"""
                         # Add NVIDIA PyPI packages to LD_LIBRARY_PATH
                         export LD_LIBRARY_PATH="$(
-                            {shlex.quote(self.executable.name)} - <<EOS
+                            {self.executable.name} - <<EOS
                         import glob
                         import itertools
                         import os

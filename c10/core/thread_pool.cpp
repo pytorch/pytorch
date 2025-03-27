@@ -170,5 +170,5 @@ C10_DEFINE_SHARED_REGISTRY(
     TaskThreadPoolBase,
     int,
     int,
-    bool);
+    bool)
 } // namespace c10

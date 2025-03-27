@@ -399,15 +399,21 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
     return;
   }
 
-  const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-  const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
-
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+  constexpr int double_threads = 768;
+#else
+  constexpr int double_threads = 1024;
+#endif
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "avg_pool2d_backward_out_cuda_frame",
     [&] {
+      const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, std::is_same<scalar_t, double>::value ? double_threads : 1024);
+      const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
+
       using accscalar_t = acc_type<scalar_t, true>;
 
       const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
