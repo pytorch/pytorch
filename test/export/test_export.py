@@ -4035,10 +4035,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
     def test_suggested_fixes_for_data_dependent_errors_basic(self):
-        # suggested fixes for data-dependent errors only work in non-strict mode
-        strict = False
-        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-
         # Just to introduce some indirection: N is a top-level module N that calls
         # module M, defined next.
         class N(torch.nn.Module):
@@ -4052,51 +4048,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # example input
         t = torch.tensor([1, 4, 4], dtype=torch.int32)
 
-        # We define a series of versions of M() below. Each version has
-        # raises a data-dependent error that the next version fixes, by
-        # copy-pasting a suggested fix in the error message. The fix is
-        # always a torch.check() on an unresolved condition (or its negation)
-        # on unbacked symints mentioned in the error message.
-        # Note that the suggested fixes are in terms of local variables
-        # near the location of error that "contain" the unbacked symints
-        # in the unresolved condition (either directly or indirectly, e.g.,
-        # inside a list or inside the shape of a tensor).
+        class M_v0(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                return r.view(items[0], items[2])
+
+        M = M_v0
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Could not reshape a tensor .*u0, u1.* as a tensor .*u0, u2.*",
+        ):
+            export(N(), (t,))
 
         class M_v1(torch.nn.Module):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                return r.view(items[0], items[2])
-
-        M = M_v1
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v2(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
                 torch._check(items[2] == r.shape[1])
                 return r.view(items[0], items[2])
 
-        M = M_v2
-        export(N(), (t,), strict=strict)
+        M = M_v1
+        export(N(), (t,))
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -6836,7 +6810,9 @@ def forward(self, b_a_buffer, x):
         f = Module()
         ep = export(f, (torch.tensor(6),))
         ep.module()(torch.tensor(6))
-        with self.assertRaisesRegex(RuntimeError, r"Runtime assertion failed for .* u0 .* 6"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for .* u0 .* 6"
+        ):
             ep.module()(torch.tensor(5))
 
     def test_train_eval_on_exported_preautograd_module(self):
@@ -13013,8 +12989,6 @@ def forward(self, q, k, v):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 xsl = xs.tolist()
-                for x in xsl:
-                    torch._check_is_size(x)
                 a, b, c, d = xsl
                 x = torch.zeros(a, b)
                 return x.reshape(c, d)

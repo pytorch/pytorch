@@ -3762,6 +3762,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+    torch._check(
+        a.numel() == reduce(operator.mul, shape, 1),
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
+    )
 
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
