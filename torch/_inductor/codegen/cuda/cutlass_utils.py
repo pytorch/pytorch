@@ -10,6 +10,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
 from ...ir import Layout
@@ -55,9 +56,9 @@ def try_import_cutlass() -> bool:
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
         )
         cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(
-            cutlass_library_dir
-        ), f"{cutlass_library_dir} is not a directory"
+        assert os.path.isdir(cutlass_library_dir), (
+            f"{cutlass_library_dir} is not a directory"
+        )
         config.cuda.cutlass_dir = os.path.abspath(
             os.path.join(
                 cutlass_library_dir,
@@ -85,9 +86,9 @@ def try_import_cutlass() -> bool:
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
             if os.path.exists(dst_link):
-                assert os.path.islink(
-                    dst_link
-                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.islink(dst_link), (
+                    f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                )
                 assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
                     cutlass_py_full_path
                 ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
@@ -170,6 +171,7 @@ class CUTLASSArgs:
         self.architectures = _normalize_cuda_arch(self.architectures)
 
 
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
 def _gen_ops_cached(arch, version) -> list[Any]:
     # Note: Cache needs to be specific for cuda architecture and version
@@ -198,13 +200,10 @@ def _gen_ops_cached(arch, version) -> list[Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "100":
-        try:
-            from cutlass_generator import GenerateSM100  # type: ignore[import]
-
-            GenerateSM100(manifest, args.cuda_version)
-        except ImportError:
-            log.warning("Cannot find GenerateSM100. Only GenerateSM90 will be used. ")
+        if hasattr(cutlass_generator, "GenerateSM100"):
+            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     elif arch == "90":
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
         cutlass_generator.GenerateSM80(manifest, args.cuda_version)

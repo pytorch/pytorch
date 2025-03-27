@@ -13,16 +13,15 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.virtualized import ops
+from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher
-from ..codegen.common import BackendFeature, has_backend_feature
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -32,6 +31,7 @@ from ..pattern_matcher import (
     CallFunction,
     CallFunctionVarArgs,
     filter_nodes,
+    fwd_only,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -43,9 +43,10 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_pointwise_use
+from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -114,7 +115,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "before_recompile_post_grad",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -138,9 +148,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pattern_matcher_pass.apply
             )
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": f"{pattern_matcher_pass.pass_name}_post_grad",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -183,10 +200,265 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
     )
+    GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
+        lower_scan_to_while_loop
+    )
 
     gm.recompile()
-    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "after_recompile_post_grad",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
     gm.graph.lint()
+
+
+def prepare_softmax_pattern(x, dim):
+    xmax = x.amax(dim=dim, keepdim=True)
+    xsub = x - xmax
+    xexp = xsub.exp()
+    xsum = xexp.sum(dim=dim, keepdim=True)
+    return xmax, xsum, xsub, xexp
+
+
+def prepare_softmax_replacement(x, dim):
+    """
+    Return xsub since otherwise log-softmax can not be matched
+    due to a use of this intermediate node. Same reason to return
+    xsub.exp() for softmax.
+    """
+    from torch._inductor.inductor_prims import prepare_softmax_online
+
+    xmax, xsum = prepare_softmax_online(x, dim)
+    xsub = x - xmax
+    return xmax, xsum, xsub, xsub.exp()
+
+
+def prepare_softmax_extra_check(match):
+    """
+    We only have triton online softmax kernels currently.
+    """
+    return (
+        config.online_softmax
+        and match.kwargs["x"].meta["val"].device.type == "cuda"
+        and config.cuda_backend == "triton"
+    )
+
+
+"""
+NOTE [lower scan to while_loop]
+This pass lowers `scan` to  `while_loop` by replacing the scan fx_node with a while_loop hop.
+
+Suppose we have a function f:
+
+    def f():
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        ys = []
+        for i in range(xs.size(0)):
+            init = xs[i] + init
+            ys.append(init)
+
+        # Return the final carry and stack the intermediates
+        return init, torch.stack(ys)
+
+We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
+memory usage, supporting loops over unbacked shapes and cudagraph etc.
+
+    def g():
+        def step_fn(init: torch.Tensor, x: torch.Tensor):
+            next_init = x + init
+            return next_init, next_init
+
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        final_carry, ys = torch._higher_order.scan(step_fn, init, xs)
+        return final_carry, ys
+
+This pass will rewrite scan into:
+
+    def k():
+        init = torch.zeros([])
+        xs = torch.arange(4)
+
+        # we create a loop_idx and loop through xs.shape[0]
+        loop_idx = torch.zeros([])
+        ys = torch.empty_strided(_shape_stride_of_ys)
+        def cond_fn(loop_idx, ys, init, xs):
+            return loop_idx < xs.shape[0]
+
+        # we pre-allocate the output buffer ys and inplace
+        # copy the y of each intermediate into a slice.
+        # NOTE [Pre-allocate scan's output buffer].
+        def body_fn(loop_idx, ys, init, xs):
+            int_idx = loop_idx.item()
+            next_init, y = step_fn(init, xs[int_idx])
+            ys[int_idx].copy_(y)
+            return loop_idx + 1, ys, next_init, xs
+
+        final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+        return final_carry, ys
+"""
+
+
+def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.scan),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        assert len(kwargs) == 0, (
+            "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+        )
+
+        combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
+        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
+        cur_node = match.nodes[0]
+        num_init_leaves = len(fx_init)
+        _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
+
+        def lower_to_while_loop(*args, **kwargs):
+            """
+            The traced graph of this function will be used to replace the original scan fx_node.
+            """
+            assert len(kwargs) == 0
+
+            def resolve_shape_to_proxy(
+                shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+            ):
+                """
+                Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
+                When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
+                computed from bound_symbols' values.
+
+                Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
+                (arg0 * arg1, arg0 + arg1).
+                """
+                from torch.utils._sympy.interp import sympy_interp
+                from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+                ret = []
+                for s in shape:
+                    if isinstance(s, torch.SymInt):
+                        ret.append(
+                            sympy_interp(
+                                PythonReferenceAnalysis,
+                                bound_symbols,
+                                s.node.expr,
+                            ),
+                        )
+                    else:
+                        assert isinstance(s, int)
+                        ret.append(s)
+                return ret
+
+            # Step 1: construct necessary inputs to while_loop based on scan's input.
+            (
+                init,
+                xs,
+                additional_inputs,
+            ) = pytree.tree_unflatten(args, tree_spec)
+            scan_length = xs[0].size(0)
+            loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
+
+            # NOTE [Pre-allocate scan's output buffer]
+            # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
+            # However, the meta consists of concrete symints, we need to bind those symints with
+            # proxies in order to trace the torch.empyt_strided call correctly.
+            #
+            # Also note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
+            # in dynamo so we can always re-construct the sym expression from placeholders.
+            # See Note [Auto lift basic free symbols when create_graph_input] for how this is done.
+            bound_symbols = {
+                arg.node.expr: arg
+                for arg in pytree.tree_leaves((args, scan_length))
+                if isinstance(arg, torch.SymInt)
+            }
+            ys_outs = [
+                torch.empty_strided(
+                    resolve_shape_to_proxy(ys_out.size(), bound_symbols),
+                    resolve_shape_to_proxy(ys_out.stride(), bound_symbols),
+                    device=ys_out.device,
+                    dtype=ys_out.dtype,
+                    layout=ys_out.layout,
+                    requires_grad=ys_out.requires_grad,
+                )
+                for ys_out in ys_outputs
+            ]
+
+            while_loop_operands = (loop_idx, ys_outs, init, xs)
+            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+            _, operands_and_additional_inputs_spec = pytree.tree_flatten(
+                (*while_loop_operands, additional_inputs)
+            )
+
+            # Step 2: create the cond_fn and body_fn for while_loop
+            def cond_fn(*flat_args):
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(
+                    flat_args, operands_and_additional_inputs_spec
+                )  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
+
+            def body_fn(*flat_args):
+                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                )
+
+                idx_int = loop_idx.item()
+                torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
+                torch.ops.aten._assert_scalar.default(idx_int < scan_length, "")
+                sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
+                next_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
+                )
+                for y, y_out in zip(ys, ys_outs):
+                    y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_int)
+                    y_out_slice.copy_(y)
+                return loop_idx + 1, *ys_outs, *next_carry, *xs
+
+            # Step 3: call the while_loop operator
+            _, ys_outs, last_carry, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn,
+                    body_fn,
+                    tuple(flat_operands),
+                    tuple(additional_inputs),
+                ),
+                operands_spec,
+            )
+            return list(last_carry) + list(ys_outs)
+
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
+            (
+                fx_init,
+                fx_xs,
+                fx_additional_inputs,
+            )
+        )
+        match.replace_by_example(
+            lower_to_while_loop,
+            lower_to_while_loop_args,
+            run_functional_passes=False,
+        )
+
+    graph_pass.apply(gm)
+
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.scan
+    ):
+        raise AssertionError("scan is not lowered to while_loop")
 
 
 @init_once_fakemode
@@ -196,6 +468,19 @@ def lazy_init():
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    # Put this patterns in post-grad pass rather than joint-graph
+    # pass since otherwise there will be perf/peak-memory regression:
+    # https://github.com/pytorch/pytorch/issues/148141
+    register_replacement(
+        prepare_softmax_pattern,
+        prepare_softmax_replacement,
+        [torch.empty(4, 8)],
+        scalar_workaround=dict(dim=-1),
+        trace_fn=fwd_only,
+        pass_dicts=pass_patterns[1],
+        extra_check=prepare_softmax_extra_check,
+    )
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -361,109 +646,6 @@ def scatter_upon_const_tensor(
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
-
-
-def cuda_and_enabled_mixed_mm(match):
-    return (
-        (config.use_mixed_mm or config.mixed_mm_choice != "default")
-        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
-        and (
-            match.kwargs["mat2_dtype"].itemsize
-            > match.kwargs["mat2"].meta.get("val").dtype.itemsize
-        )
-        and has_backend_feature("cuda", BackendFeature.TRITON_TEMPLATES)
-    )
-
-
-def cuda_and_enabled_mixed_mm_and_not_int8(match):
-    return (
-        cuda_and_enabled_mixed_mm(match)
-        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
-        and getattr(match.kwargs["mat2"].meta.get("val"), "dtype", torch.int8)
-        != torch.int8
-    )  # bitshift numerics in triton and pytorch don't match for torch.int8
-
-
-"""
-    this is intended to be used to unpack a [K,N] int4 tensor from a [K/2, N] uint4x2 tensor
-    (where the int4 and uint4x2 are represented with int8 and uint8 respectively)
-    where every other row of the int4 is packed with the row above it as:
-    uint4x2[k,n] = (8+int4[2*k,n])+(8+int4[2*k+1,n])<<4
-
-    unpack formulas:
-    int4[2*k,n]=(uint4x2[k,n] & 0xF) - 8
-    int4[2*k+1,n]=(uint4x2[k,n] >> 4) - 8
-
-    thus matching on unpack formula:
-    torch.mm(mat1, torch.cat((mat2 & 0xF, mat2>>4),1).reshape(mat2_mm_shape).to(mat2_dtype).sub(8))
-
-    note: although the unpack formula in pytorch and the triton kernel is designed for a uint8 mat2, the behavior
-    of the kernel matches the pytorch formula for all dtypes except torch.int8
-    where the bitwise numerics in triton do not match those in pytorch.
-"""
-
-
-@register_lowering_pattern(
-    CallFunction(
-        aten.mm.default,
-        KeywordArg("mat1"),
-        CallFunction(
-            aten.sub.Tensor,
-            CallFunction(
-                prims.convert_element_type.default,
-                CallFunction(
-                    aten.reshape.default,
-                    CallFunction(
-                        aten.cat.default,
-                        ListOf(
-                            CallFunction(
-                                aten.bitwise_and.Scalar,
-                                KeywordArg("mat2"),
-                                0xF,
-                            ),
-                            # CallFunction(
-                            #    aten.__rshift__.Scalar,
-                            #    KeywordArg("mat2"),
-                            #    4,
-                            # ),
-                            True,
-                        ),
-                        1,
-                    ),
-                    KeywordArg("mat2_mm_shape"),
-                ),
-                KeywordArg("mat2_dtype"),
-            ),
-            8,
-        ),
-    ),
-    extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
-)
-def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
-        mat1, mat2, mat2_mm_shape, mat2_dtype
-    )
-
-
-"""
-    torch.mm(mat1, mat2.to(mat2_dtype))
-"""
-
-
-@register_lowering_pattern(
-    CallFunction(
-        aten.mm,
-        KeywordArg("mat1"),
-        CallFunction(
-            prims.convert_element_type.default,
-            KeywordArg("mat2"),
-            KeywordArg("mat2_dtype"),
-        ),
-    ),
-    extra_check=cuda_and_enabled_mixed_mm,
-)
-def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
@@ -992,7 +1174,7 @@ def view_to_reshape(gm):
 
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
-    if not inp.meta["val"].is_cuda:
+    if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
@@ -1100,38 +1282,6 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
         and len(getattr(match.args[2].meta.get("val"), "shape", [])) == 2
         and getattr(match.args[2].meta.get("val"), "is_cuda", False)
     )
-
-
-@register_lowering_pattern(
-    CallFunction(
-        prims.convert_element_type.default,
-        CallFunction(
-            aten.mul,
-            CallFunction(
-                aten._int_mm,
-                Arg(),
-                Arg(),
-            ),
-            Arg(),
-        ),
-        Arg(),
-    ),
-    check_shape_cuda_and_fused_int_mm_mul_enabled,
-)
-@register_lowering_pattern(
-    CallFunction(
-        aten.mul,
-        CallFunction(
-            aten._int_mm,
-            Arg(),
-            Arg(),
-        ),
-        Arg(),
-    ),
-    check_shape_cuda_and_fused_int_mm_mul_enabled,
-)
-def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
-    return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
 def is_index_put_and_requires_h2d_sync_for_gpu_value(node):

@@ -283,9 +283,9 @@ class CommDebugMode(TorchDispatchMode):
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
                 and include_module_data
             ):
-                json_dict[
-                    "module_type"
-                ] = self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                json_dict["module_type"] = (
+                    self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                )
 
                 if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
                     for (
@@ -659,9 +659,9 @@ class CommDebugMode(TorchDispatchMode):
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
 
         # tracks if the operation is part of activation checkpointing
-        operation_dict[
-            "is_activation_checkpointing"
-        ] = self.advanced_module_tracker.activation_checkpointing
+        operation_dict["is_activation_checkpointing"] = (
+            self.advanced_module_tracker.activation_checkpointing
+        )
 
         if any(t == DTensor for t in types):
             for ele in args:
