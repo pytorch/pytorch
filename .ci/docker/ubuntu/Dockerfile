@@ -110,29 +110,19 @@ RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.t
 ARG TRITON
 ARG TRITON_CPU
 
-# Make assumptions about where pip packages are installed
-ENV PIP_PACKAGE_PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/python$ANACONDA_PYTHON_VERSION/site-packages
-# Create a separate stage for building Triton
+# Create a separate stage for building Triton and Triton-CPU.  install_triton
+# will check for the presence of env vars
 FROM base as triton-builder
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; else echo "Skipping Triton build"; mkdir -p $PIP_PACKAGE_PATH/triton; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
-
-# Create a separate stage for building Triton-CPU
-FROM base as triton-cpu-builder
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
-RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; else echo "Skipping Triton-CPU build"; mkdir -p $PIP_PACKAGE_PATH/triton; fi
-RUN rm install_triton.sh common_utils.sh triton-cpu.txt
+RUN bash ./install_triton.sh
 
 FROM base as final
-COPY --chown=jenkins:jenkins --from=triton-builder $PIP_PACKAGE_PATH/triton $PIP_PACKAGE_PATH/triton
-COPY --chown=jenkins:jenkins --from=triton-cpu-builder $PIP_PACKAGE_PATH/triton $PIP_PACKAGE_PATH/triton
-# Clean up triton directory if neither arg is set
-RUN if [ -z "${TRITON}" ] && [ -z "${TRITON_CPU}" ]; then rm -rf $PIP_PACKAGE_PATH/triton; fi
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
 # Build and install executorch
