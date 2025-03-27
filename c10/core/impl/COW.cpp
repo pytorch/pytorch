@@ -195,10 +195,7 @@ static c10::DataPtr clone_between_devices(
   DeviceType dst_type = dst_device.type();
   check_clone_between_devices(src_type, dst_type);
 
-  if (src_type == dst_type ||
-      (src_type == c10::kMPS && dst_type == c10::kCPU) ||
-      (src_type == c10::kCPU && dst_type == c10::kMPS)) {
-    // NOTE: For CPU-MPS, the CPU allocator should be MPSPinnedAllocator
+  if (src_type == dst_type) {
     return dst_allocator->clone(data, n, /*sync=*/true);
   } else if (src_type == c10::kCPU) {
     return dst_allocator->clone_from_cpu(data, n);
