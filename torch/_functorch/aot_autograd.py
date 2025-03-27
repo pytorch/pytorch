@@ -641,7 +641,6 @@ def _create_aot_dispatcher_function(
     ), (
         python_dispatcher_mode
     ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-        # XXX disable_saved
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,

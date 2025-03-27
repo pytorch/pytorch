@@ -200,7 +200,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // grad_fn.
 
   // If we have the original variable, we simply return it
-  // bool hooks_enabled = at::SavedTensorDefaultHooks::is_enabled();
   if (!hooks_ && saved_original_) {
     return data_;
   }
