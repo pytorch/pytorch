@@ -194,6 +194,9 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 with context:
                     grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
 
+            num_fw_outs = len(grad_outputs)
+            grad_outputs = [grad for grad in grad_outputs if grad is not None]
+
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in grad_outputs
@@ -213,7 +216,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 fw_inputs,
                 grad_outputs,
             )
-            return fw_graph, bw_graph, len(grad_outputs)
+            return fw_graph, bw_graph, num_fw_outs
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -247,8 +250,13 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         num_fw_outs = ctx._num_fw_outs
 
         # While tracing we made the assumption that tangents are contiguous. So,
-        # force the grad_outs to be contiguous.
-        contiguous_grad_outs = tuple([o.contiguous() for o in grad_outs])
+        # force the grad_outs to be contiguous. Some of the grads can be None,
+        # because the forward outs could be None. Filter them out.
+        contiguous_grad_outs = []
+        for o in grad_outs:
+            if o is not None:
+                contiguous_grad_outs.append(o.contiguous())
+        contiguous_grad_outs = tuple(contiguous_grad_outs)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
         # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs

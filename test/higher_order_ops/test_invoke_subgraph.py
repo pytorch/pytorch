@@ -768,6 +768,28 @@ class GraphModule(torch.nn.Module):
         r1.sum().backward()
         weight.grad.clone()
 
+    def test_return_none_from_fwd(self):
+        @mark_compile_region
+        def gn(x):
+            return x * 2, None, x * 3
+
+        def fn(x):
+            ys = gn(x)
+            return ys[0] + ys[2]
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x)
+        res = opt_fn(x_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
     def test_dynamic(self):
         @mark_compile_region
         def gn(x):
