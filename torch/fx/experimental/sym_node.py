@@ -853,6 +853,7 @@ def _optimized_add(
     from sympy.core.basic import _args_sortkey as sortkey
 
     def make_optimized(ordered_args):
+        print(" optimized")
         result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
@@ -869,6 +870,12 @@ def _optimized_add(
         if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
             return make_optimized(rhs._args + lhs._args)
 
+        #  (a1+a3) + (a0+a2) => (a0+a1+a2+a3)
+        new_args = list(lhs._args)
+        for a in rhs._args:
+            new_args = _binary_search_insert_arg(new_args, a)
+        return make_optimized(new_args)
+
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
         new_args = _binary_search_insert_arg(list(lhs._args), rhs)
@@ -881,6 +888,7 @@ def _optimized_add(
         if new_args is not None:
             return make_optimized(new_args)
 
+    print("not optimized")
     result = sympy.Add(lhs, rhs)
     return (_is_symbols_binary_summation(result), result)
 

@@ -344,10 +344,21 @@ def _get_onnx_devices(
 def _get_ortvalues_from_torch_tensors(
     tensors: tuple[torch.Tensor, ...], devices: tuple["ORTC.OrtDevice", ...]
 ) -> tuple[torch.Tensor, ...]:
+    # TODO(justinchuby): Refactor this function
+    import numpy as np
     from onnxruntime.capi import _pybind_state as ORTC
 
-    from torch.onnx._internal.fx.type_utils import _TORCH_DTYPE_TO_NUMPY_DTYPE
-
+    torch_dtype_to_numpy_dtype = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
     ortvalues = ORTC.OrtValueVector()
     ortvalues.reserve(len(tensors))
     dtypes = []
@@ -355,7 +366,7 @@ def _get_ortvalues_from_torch_tensors(
     data_ptrs = []
 
     for tensor in tensors:
-        dtypes.append(_TORCH_DTYPE_TO_NUMPY_DTYPE[tensor.dtype])
+        dtypes.append(torch_dtype_to_numpy_dtype[tensor.dtype])
         shapes.append(tensor.size())
         data_ptrs.append(tensor.data_ptr())
     ortvalues.push_back_batch(tensors, data_ptrs, dtypes, shapes, devices)
@@ -550,6 +561,29 @@ def _run_onnx_session_with_fetch(
     return pth_outputs
 
 
+def _from_python_type_to_onnx_tensor_element_type(type: type):
+    """
+    Converts a Python type to the corresponding ONNX tensor element type.
+    For example, `_from_python_type_to_onnx_tensor_element_type(float)` returns
+    `onnx.TensorProto.FLOAT`.
+
+    Args:
+      type (type): The Python type to convert.
+
+    Returns:
+      int: The corresponding ONNX tensor element type.
+
+    """
+    import onnx
+
+    _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
+        float: onnx.TensorProto.FLOAT,  # type: ignore[attr-defined]
+        int: onnx.TensorProto.INT64,  # type: ignore[attr-defined]
+        bool: onnx.TensorProto.BOOL,  # type: ignore[attr-defined]
+    }
+    return _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE.get(type)
+
+
 class OrtExecutionInfoPerSession:
     """Information required to execute torch.fx.GraphModule using onnxruntime.InferenceSession"""
 
@@ -587,10 +621,28 @@ class OrtExecutionInfoPerSession:
         )
 
     def is_supported(self, *args):
-        from torch.onnx._internal.fx.type_utils import (
-            _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
-            from_python_type_to_onnx_tensor_element_type,
-        )
+        # TODO(justinchuby): Simplify
+        import onnx
+
+        _onnx_tensor_element_type_to_torch_dtype = {
+            onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
+            onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
+            onnx.TensorProto.FLOAT8E5M2: torch.float8_e5m2,  # type: ignore[attr-defined]
+            onnx.TensorProto.FLOAT8E5M2FNUZ: torch.float8_e5m2fnuz,  # type: ignore[attr-defined]
+            onnx.TensorProto.FLOAT8E4M3FN: torch.float8_e4m3fn,  # type: ignore[attr-defined]
+            onnx.TensorProto.FLOAT8E4M3FNUZ: torch.float8_e4m3fnuz,  # type: ignore[attr-defined]
+            onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
+            onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
+            onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
+            onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
+            onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
+            onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
+            onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
+        }
+        _torch_dtype_to_onnx_tensor_element_type = {
+            value: key
+            for key, value in _onnx_tensor_element_type_to_torch_dtype.items()
+        }
 
         # Compare the args and the input schema in ONNX model and
         # return the first match.
@@ -603,7 +655,7 @@ class OrtExecutionInfoPerSession:
             # Check Python scalars such as int, float, and bool.
             if isinstance(arg, (int, float, bool)):
                 # Map, e.g., float to onnx.TensorProto.FLOAT.
-                onnx_dtype = from_python_type_to_onnx_tensor_element_type(type(arg))
+                onnx_dtype = _from_python_type_to_onnx_tensor_element_type(type(arg))
                 if onnx_dtype != value_info.type.tensor_type.elem_type:
                     return False
                 if len(value_info.type.tensor_type.shape.dim) != 0:
@@ -611,7 +663,7 @@ class OrtExecutionInfoPerSession:
                 continue
 
             # Check tensor.
-            onnx_dtype = _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[arg.dtype]
+            onnx_dtype = _torch_dtype_to_onnx_tensor_element_type[arg.dtype]
             if onnx_dtype != value_info.type.tensor_type.elem_type:
                 return False
             for dim, onnx_dim in zip(arg.shape, value_info.type.tensor_type.shape.dim):

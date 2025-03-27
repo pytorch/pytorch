@@ -2505,9 +2505,16 @@ class TestSDPACudaOnly(NNTestCase):
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
         v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
 
+        device_cap = torch.cuda.get_device_capability()
+        ISSM90 = device_cap == (9, 0)
+        ISSM100 = device_cap == (10, 0)
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+            # SM90/100 support d <= 256 as of cuDNN 9.5.1+
+            if (ISSM90 or ISSM100) and torch.backends.cudnn.version() >= 90501:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                    torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
