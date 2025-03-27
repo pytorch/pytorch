@@ -709,6 +709,7 @@ def check_input_alias_and_mutation(
         changed after run gm once to detect mutation and checks tensor storage
         to detect alias.
         """
+        from torch._prims_common import clone_preserve_strides
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
@@ -724,12 +725,11 @@ def check_input_alias_and_mutation(
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
-            cloned = fake_args
-            # cloned = [
-            #     clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
-            #     for arg in fake_args
-            # ]
-            before = [_tensor_version(arg) for arg in fake_args]
+            cloned = [
+                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in fake_args
+            ]
+            before = [_tensor_version(arg) for arg in cloned]
             outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
