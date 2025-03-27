@@ -24,12 +24,6 @@ DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 WITH_PUSH=${WITH_PUSH:-}
 
 case ${GPU_ARCH_TYPE} in
-    cpu)
-        TARGET=cpu_final
-        DOCKER_TAG=cpu
-        GPU_IMAGE=centos:7
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
-        ;;
     cpu-manylinux_2_28)
         TARGET=cpu_final
         DOCKER_TAG=cpu
@@ -64,13 +58,6 @@ case ${GPU_ARCH_TYPE} in
         GPU_IMAGE=s390x/almalinux:8
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
-        ;;
-    cuda)
-        TARGET=cuda_final
-        DOCKER_TAG=cuda${GPU_ARCH_VERSION}
-        # Keep this up to date with the minimum version of CUDA we currently support
-        GPU_IMAGE=centos:7
-        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=9"
         ;;
     cuda-manylinux_2_28)
         TARGET=cuda_final
