@@ -4052,7 +4052,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
                 return r.view(items[0], items[2])
 
         M = M_v0
