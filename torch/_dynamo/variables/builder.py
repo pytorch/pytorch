@@ -1516,9 +1516,7 @@ class VariableBuilder:
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
-        # if config.profile_params:
-        metrics_context = get_metrics_context()
-        if metrics_context.in_progress():
+        if config.log_compilation_metrics:
             try:
                 params = (
                     p
