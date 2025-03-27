@@ -127,12 +127,13 @@ def get_tolerances(
     else:
         return default_tolerances(*inputs)
 
+
 def _make_bitwise_mismatch_msg(
     *,
     default_identifier: str,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
     extra: Optional[str] = None,
-    first_mismatch_idx: Optional[int] = None
+    first_mismatch_idx: Optional[int] = None,
 ):
     """makes a mismatch error message for bitwise values.
 
@@ -156,6 +157,7 @@ def _make_bitwise_mismatch_msg(
     if first_mismatch_idx is not None:
         msg += f"The first mismatched element is at index {first_mismatch_idx}.\n"
     return msg.strip()
+
 
 def _make_mismatch_msg(
     *,
@@ -311,7 +313,6 @@ def make_tensor_mismatch_msg(
         #  overflow
         actual_flat = actual_flat.to(torch.int64)
         expected_flat = expected_flat.to(torch.int64)
-
 
     abs_diff = torch.abs(actual_flat - expected_flat)
     # Ensure that only mismatches are used for the max_abs_diff computation
@@ -866,7 +867,10 @@ class TensorLikePair(Pair):
         elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
             # intercept rtol and atol for bitwise comparison in low dimensional floats
             def bitwise_comp(actual, expected, rtol=0.0, atol=0.0, equal_nan=False):
-                return self._compare_regular_values_close(actual, expected, rtol = 0.0, atol = 0.0, equal_nan = equal_nan)
+                return self._compare_regular_values_close(
+                    actual, expected, rtol=0.0, atol=0.0, equal_nan=equal_nan
+                )
+
             compare_fn = bitwise_comp
         else:
             compare_fn = self._compare_regular_values_close
@@ -1333,7 +1337,7 @@ def assert_close(
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
     definition above.
 
-    If ``actual`` and ``expected`` are small floating point dtypes, they are compared bitwise. In other words, 
+    If ``actual`` and ``expected`` are small floating point dtypes, they are compared bitwise. In other words,
     ``rtol`` and ``atol`` are set to zero.
 
     ``actual`` and ``expected`` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which

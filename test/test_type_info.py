@@ -142,7 +142,6 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(torch.complex32.to_real(), torch.float16)
 
 
-
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
     run_tests()

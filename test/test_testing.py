@@ -958,7 +958,7 @@ class TestAssertCloseErrorMessage(TestCase):
             for fn in assert_close_with_inputs(x, y):
                 with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
                     fn()
-            
+
             for fn in assert_close_with_inputs(w, y):
                 with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
                     fn()
