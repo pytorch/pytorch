@@ -15,7 +15,7 @@ namespace impl {
 
 struct TORCH_API SavedTensorDefaultHooksTLS {
   // PyObject is defined in c10/util/python_stub.h
-  std::vector<std::pair<c10::SafePyObject, c10::SafePyObject>> stack;
+  std::stack<std::pair<c10::SafePyObject, c10::SafePyObject>> stack;
 
   // See NOTE: [Disabling SavedTensorDefaultHooks] for context
   // NOTE: [disabled_error_message invariant]
@@ -37,8 +37,6 @@ struct TORCH_API SavedTensorDefaultHooks {
   static std::pair<c10::SafePyObject, c10::SafePyObject> pop_hooks();
   static std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
   get_hooks(bool ignore_is_tracing = false);
-  static std::optional<std::vector<std::pair<SafePyObject, SafePyObject>>>
-  get_all_hooks(bool ignore_is_tracing = false);
   static void lazy_initialize();
 
   static const impl::SavedTensorDefaultHooksTLS& get_tls_state();
@@ -50,7 +48,9 @@ struct TORCH_API SavedTensorDefaultHooks {
   // disabled, then the following will raise an error:
   // - Attempting to push_hooks
   // - calling disable(message) with a non-zero stack (hooks) size
-  static void disable(const std::string& error_message);
+  static void disable(
+      const std::string& error_message,
+      const bool fail_if_non_empty = true);
   static void enable();
   static bool is_enabled();
   static const std::optional<std::string>& get_disabled_error_message();

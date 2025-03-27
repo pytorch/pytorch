@@ -26,9 +26,9 @@ bool SavedTensorDefaultHooks::is_enabled() {
   return !tls.disabled_error_message.has_value();
 }
 
-void SavedTensorDefaultHooks::disable(const std::string& message) {
+void SavedTensorDefaultHooks::disable(const std::string& message, const bool fail_if_non_empty) {
   tls.disabled_error_message = message;
-  if (!tls.stack.empty()) {
+  if (fail_if_non_empty && !tls.stack.empty()) {
     assertSavedTensorHooksNotDisabled();
   }
 }
@@ -62,13 +62,13 @@ void SavedTensorDefaultHooks::lazy_initialize() {
 void SavedTensorDefaultHooks::push_hooks(SafePyObject pack_hook, SafePyObject unpack_hook) {
   TORCH_INTERNAL_ASSERT(is_initialized);
   assertSavedTensorHooksNotDisabled();
-  tls.stack.emplace_back(std::move(pack_hook), std::move(unpack_hook));
+  tls.stack.emplace(std::move(pack_hook), std::move(unpack_hook));
 }
 
 std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::pop_hooks() {
   TORCH_INTERNAL_ASSERT(is_initialized && !tls.stack.empty());
-  std::pair<SafePyObject, SafePyObject> hooks = std::move(tls.stack.back());
-  tls.stack.pop_back();
+  std::pair<SafePyObject, SafePyObject> hooks = std::move(tls.stack.top());
+  tls.stack.pop();
   return hooks;
 }
 
@@ -77,15 +77,7 @@ std::optional<std::pair<SafePyObject, SafePyObject>> SavedTensorDefaultHooks::ge
   if (!is_initialized || tls.stack.empty() || (!ignore_is_tracing && tls.is_tracing)) {
     return std::nullopt;
   }
-  return tls.stack.back();
-}
-
-std::optional<std::vector<std::pair<SafePyObject, SafePyObject>>>
-SavedTensorDefaultHooks::get_all_hooks(bool ignore_is_tracing) {
-  if (!is_initialized || tls.stack.empty() || (!ignore_is_tracing && tls.is_tracing)) {
-    return std::nullopt;
-  }
-  return tls.stack;
+  return tls.stack.top();
 }
 
 }

@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import ContextDecorator, nullcontext, ExitStack
+from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
@@ -6601,33 +6601,29 @@ metadata incorrectly.
             self.assertEqual(1, len(ctx.tangent_strides))
             self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks(self):
         def _test_pack_hooks(fn, inp_fn, hooks):
+            # TODO XXX: Add Dynamo ID_MATCH guards on hooks
             torch._dynamo.reset()
             with ExitStack() as stack:
                 for hook in hooks:
                     pack, unpack = hook
-                    stack.enter_context(torch.autograd.graph.saved_tensors_hooks(pack, unpack))
+                    stack.enter_context(
+                        torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+                    )
                 ref_x = inp_fn()
                 x = ref_x.detach().clone().requires_grad_()
 
-                print(f"XXX EAGER BEGIN")
                 ref_y = fn(ref_x)
                 ref_y.sum().backward()
-                print(f"XXX EAGER END")
 
                 torch._dynamo.mark_dynamic(x, 0)
                 torch._dynamo.mark_dynamic(x, 1)
                 y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
                 y.sum().backward()
                 self.assertEqual(ref_y, y, atol=1e-2, rtol=1e-2)
-                print(f"XXX REF_X.GRAD:{ref_x.grad}")
-                print(f"XXX X.GRAD:{x.grad}")
                 self.assertEqual(ref_x.grad, x.grad, atol=1e-2, rtol=1e-2)
-
-        from torch.utils._traceback import CapturedTraceback
-        def _print_traceback():
-            print("".join(CapturedTraceback.extract(cpp=True).format()))
 
         class SAF(torch.autograd.Function):
             @staticmethod
@@ -6664,13 +6660,14 @@ metadata incorrectly.
             x = x + 1
             x = SAF.apply(x)
             return x
-        device=torch.device("cuda:0")
+
+        device = torch.device("cuda:0")
 
         def inp_fn():
             return torch.ones(2, 3, device=device, requires_grad=True)
 
         def pack_dev_sym_cpu(x):
-            return (x.device, x.size(0), x.cpu())
+            return (x.device, x.size(0), 10 * x.cpu())
 
         def unpack_dev_sym_cpu(packed):
             device, dim0, tensor = packed
@@ -6685,42 +6682,34 @@ metadata incorrectly.
             return t_cpu.to(device=device)
 
         def pack_bf16(x):
-            print(f"XXX PACK_BF16")
             return x.to(dtype=torch.bfloat16)
 
         def unpack_bf16(x):
-            print(f"XXX UNPACK_BF16")
             return x.to(dtype=torch.float)
 
         def pack_mul2(x):
-            print(f"XXX PACK_MUL2")
             return x * 2
 
         def unpack_mul2(x):
-            print(f"XXX UNPACK_MUL2")
             return x / 2
 
-        def pack_two_tensor(x):
-            return TwoTensor(x, x)
+        def pack_float8(x):
+            return (x.dtype, x.to(torch.float8_e4m3fn))
 
-        def unpack_two_tensor(x):
-            return x.a
+        def unpack_float8(packed):
+            dtype, tensor = packed
+            return tensor.to(dtype)
 
-        for test_fn in [simple_fn]:
-            # print("XXX 0")
-            # _test_pack_hooks(test_fn, inp_fn, [(pack_bf16, unpack_bf16)])
-            # print("XXX 1")
-            # _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2)])
-            # print("XXX 2")
-            # _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2), (pack_bf16, unpack_bf16)])
-            print("XXX 3")
+        for test_fn in [simple_fn, fn]:
+            _test_pack_hooks(test_fn, inp_fn, [(pack_bf16, unpack_bf16)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2)])
+            _test_pack_hooks(
+                test_fn, inp_fn, [(pack_mul2, unpack_mul2), (pack_bf16, unpack_bf16)]
+            )
+            _test_pack_hooks(test_fn, inp_fn, [(pack_float8, unpack_float8)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_tensor, unpack_tensor)])
             _test_pack_hooks(test_fn, inp_fn, [(pack_dev_sym_cpu, unpack_dev_sym_cpu)])
-            # print("XXX 4")
-            # _test_pack_hooks(test_fn, inp_fn, [(pack_tensor, unpack_tensor)])
-            # print("XXX 5")
-            # _test_pack_hooks(test_fn, inp_fn, [(pack_two_tensor, unpack_two_tensor)])
-            # TODO XXX: Add packing to subclasses
-
+            # TODO XXX: Test packing/unpacking to subclasses
 
 
 # entries in here don't work and need to be fixed.

@@ -473,7 +473,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def(
       "_top_saved_tensors_default_hooks",
-      [](bool ignore_is_tracing) -> std::optional<std::pair<py::function, py::function>> {
+      [](bool ignore_is_tracing)
+          -> std::optional<std::pair<py::function, py::function>> {
         auto out = at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing);
 
         if (!out.has_value()) {
@@ -481,38 +482,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         }
 
         auto [pack_hook, unpack_hook] = *out;
-
+        // gil for destructor of pack_hook, unpack_hook that decrements
+        // reference
         py::gil_scoped_acquire gil;
 
-        py::function pack_hook_ =
-            py::reinterpret_steal<py::function>(pack_hook.release());
-
-        py::function unpack_hook_ =
-            py::reinterpret_steal<py::function>(unpack_hook.release());
-
-        return std::make_pair(pack_hook_, unpack_hook_);
-      }
-
-  );
-  m.def(
-      "_get_all_saved_tensors_default_hooks",
-      [](bool ignore_is_tracing) -> std::optional<std::vector<std::pair<py::function, py::function>>> {
-        auto out = at::SavedTensorDefaultHooks::get_all_hooks(ignore_is_tracing);
-        if (!out.has_value()) {
-          return std::nullopt;
-        }
-
-        // TODO XXX: Why gil is needed here and why we do release?
-        py::gil_scoped_acquire gil;
-
-        std::vector<std::pair<py::function, py::function>> ret;
-        for (auto [pack_hook, unpack_hook] : *out) {
-          ret.push_back(std::make_pair(
+        return std::make_pair(
             py::reinterpret_steal<py::function>(pack_hook.release()),
-            py::reinterpret_steal<py::function>(unpack_hook.release())
-          ));
-        }
-        return ret;
+            py::reinterpret_steal<py::function>(unpack_hook.release()));
       }
 
   );
