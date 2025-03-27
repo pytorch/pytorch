@@ -841,6 +841,87 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        res = opt_fn(x_clone)
+        res.sum().backward()
+
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.count_unique_get_attr_nodes(backend.graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 1)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8, 8]"):
+        l_x_ = L_x_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_0 = l_x_ = None
+        getitem: "f32[8, 8]" = invoke_subgraph[0]
+        getitem_1: "f32[8, 8]" = invoke_subgraph[2];  invoke_subgraph = None
+
+        add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        return (add,)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8, 8]"):
+            child: "f32[8, 8]" = l_x_ * 2
+            child_1: "f32[8, 8]" = l_x_ * 3;  l_x_ = None
+            return (child, None, child_1)
+""",
+            )
+
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8, 8]"):
+        ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1,));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
+        getitem: "f32[8, 8]" = invoke_subgraph_2[0]
+        getitem_2: "f32[8, 8]" = invoke_subgraph_2[2];  invoke_subgraph_2 = None
+
+        add: "f32[8, 8]" = torch.ops.aten.add.Tensor(getitem, getitem_2);  getitem = getitem_2 = None
+        return (add,)
+
+    class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]"):
+            mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 2)
+            mul_1: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 3);  primals_0 = None
+            return (mul, None, mul_1)
+""",
+            )
+
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[8, 8]"):
+        ___backward_invoke_subgraph_0_post_graph = self.___backward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (tangents_1, tangents_1));  ___backward_invoke_subgraph_0_post_graph = tangents_1 = None
+        getitem_3: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
+        return (getitem_3,)
+
+    class ___backward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+            mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3)
+            mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+            add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+            return (add,)
+""",
+            )
+
     def test_dynamic(self):
         @mark_compile_region
         def gn(x):
