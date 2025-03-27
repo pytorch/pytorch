@@ -104,6 +104,7 @@ class L1Loss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        weight (Tensor, optional): Weights for each sample. Default: None.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -121,11 +122,18 @@ class L1Loss(_Loss):
     """
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction: str = "mean",
+        weight: Optional[Tensor] = None,
+    ) -> None:
         super().__init__(size_average, reduce, reduction)
+        self.weight = weight
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.l1_loss(input, target, reduction=self.reduction)
+        return F.l1_loss(input, target, reduction=self.reduction, weight=self.weight)
 
 
 class NLLLoss(_WeightedLoss):

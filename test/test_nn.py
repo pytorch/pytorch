@@ -2619,7 +2619,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.5)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertTrue(torch.isclose(loss, expected_loss), f"l1_loss Expected {expected_loss}, but got {loss}")
+
+        loss = nn.L1Loss(weight=weight, reduction='mean')
+        self.assertTrue(torch.isclose(loss(inputs, targets), expected_loss), f"L1Loss Expected {expected_loss}, but got {loss}")
+
 
     def test_weighted_huber_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
