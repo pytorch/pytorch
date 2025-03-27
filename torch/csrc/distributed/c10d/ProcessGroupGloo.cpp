@@ -2621,7 +2621,44 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupGloo does not support reduce_scatter");
+  const auto rank = getRank();
+  const auto worldSize = getSize();
+
+  TORCH_CHECK(outputs.size() == 1, "reduce_scatter only supports 1 output");
+  TORCH_CHECK(
+      outputs.size() == inputs.size(),
+      "requires input/output tensor lists to have the same length");
+  TORCH_CHECK(
+      static_cast<int>(inputs[0].size()) == worldSize,
+      "invalid input tensor list size, must be world size");
+
+  std::vector<at::Tensor> buffers;
+  for (const auto i : c10::irange(worldSize)) {
+    if (i == rank) {
+      TORCH_CHECK_EQ(outputs[0].dtype(), inputs[0][i].dtype());
+      TORCH_CHECK_EQ(outputs[0].sizes().vec(), inputs[0][i].sizes().vec());
+
+      // for our own input, we can just use the output tensor instead of
+      // allocating a new tensor
+      outputs[0].copy_(inputs[0][i]);
+      buffers.push_back(outputs[0]);
+    } else {
+      buffers.push_back(inputs[0][i].clone());
+    }
+  }
+  std::vector<c10::intrusive_ptr<Work>> works;
+  for (const auto i : c10::irange(buffers.size())) {
+    std::vector<at::Tensor> inp = {buffers[i]};
+    AllreduceOptions arOpts;
+    arOpts.reduceOp = opts.reduceOp;
+    works.push_back(allreduce(inp));
+  }
+  return c10::make_intrusive<LambdaWork>(
+      [worldSize, works = std::move(works)]() {
+        for (const auto i : c10::irange(worldSize)) {
+          works[i]->wait();
+        }
+      });
 }
 
 namespace {

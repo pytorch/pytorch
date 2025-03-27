@@ -21,14 +21,13 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
-from ..lowering import register_lowering
+from ..lowering import lowerings as L, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
 from ..utils import (
-    get_gpu_shared_memory,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
@@ -41,26 +40,17 @@ from ..utils import (
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
-    extra_mm_configs,
-    int8_mm_configs,
     mm_args,
-    mm_configs,
+    mm_config_kwargs,
     mm_grid,
     mm_options,
-    persistent_mm_configs,
     persistent_mm_grid,
     persistent_mm_options,
-    scaled_mm_configs,
     scale_mm_epilogue,
     scaled_mm_options,
-    scaled_persistent_mm_configs,
     should_fallback_to_aten,
-    triton_config,
 )
 
-from ..lowering import (
-    lowerings as L,
-)
 
 try:
     import triton
@@ -204,9 +194,9 @@ mm_template = TritonTemplate(
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        if USE_FAST_ACCUM:
+        {% if USE_FAST_ACCUM %}
             acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        else:
+        {% else %}
             acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 
     # rematerialize rm and rn to save registers
@@ -498,7 +488,6 @@ scaled_mm_device_tma_template = TritonTemplate(
 )
 
 
-
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
 def lazy_register_extern_choice(fn):
@@ -541,6 +530,7 @@ def mm_config_kwargs(device):
         }
     return {}
 
+
 @functools.lru_cache
 def using_b200() -> bool:
     """Returns true if the device is a NVIDIA B200, otherwise returns false."""
@@ -561,16 +551,21 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
         return torch.addmm(inp[0], mat1, mat2, out=out, alpha=alpha, beta=beta)
     return torch.addmm(inp, mat1, mat2, out=out, alpha=alpha, beta=beta)
 
+
 def check_supported_striding(mat_a, mat_b) -> None:
     def is_row_major(stride) -> bool:
-        return stride[1] == 1
+        return V.graph.sizevars.statically_known_equals(stride[1], 1)
 
     def is_col_major(stride) -> bool:
-        return stride[0] == 1
+        return V.graph.sizevars.statically_known_equals(stride[0], 1)
 
     def has_zero_dim(size) -> bool:
-        return bool(size[0] == 0 or size[1] == 0)
+        return bool(
+            V.graph.sizevars.statically_known_equals(size[0], 0)
+            or V.graph.sizevars.statically_known_equals(size[1], 0)
+        )
 
+    import pdb; pdb.set_trace
     # Check mat_a (self) stride requirements
     torch._check(
         is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
@@ -583,12 +578,14 @@ def check_supported_striding(mat_a, mat_b) -> None:
         lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
     )
 
+
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    device_type = ir.get_device_type(mat1)
     name = "mm"
 
     # below is for getting an overview logging info of inductor mms
@@ -614,8 +611,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
     static_shape, is_nonzero = _is_static_problem(layout)
+
+    mm_configs = V.choices.get_base_mm_configs(device_type)
+    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+    extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
+
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
+        for config in mm_configs(
+            m, n, k, *mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -624,7 +628,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -663,7 +667,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -725,6 +729,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         layout,
     )
 
+    device_type = ir.get_device_type(mat1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
@@ -736,9 +742,12 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+
+    int8_mm_configs = V.choices.get_int8_mm_configs(device_type)
+
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -756,6 +765,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
+    device_type = ir.get_device_type(mat1)
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
 
@@ -821,8 +831,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
+    mm_configs = V.choices.get_base_mm_configs(device_type)
+    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
+        for config in mm_configs(
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -834,7 +849,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -992,43 +1007,74 @@ def tuned_scaled_mm(
         layout,
     )
 
-    check_supported_striding(mat_a, mat_b)
-    
-    scale_a, scale_b = realize_inputs(scale_a, scale_b)
+    device_type = ir.get_device_type(mat_a)
 
-    # input_nodes: tuple[Any, ...]
-    # workaround for Inductor not supporting optional tensor input arguments
-    # if bias is None:
+    check_supported_striding(mat_a, mat_b)
+
+    scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
 
     if not bias:
-        input_nodes = (mat_a, mat_b, scale_a, scale_b)
+        input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real)
         suffix_args = 2
     else:
-        bias_arg = realize_inputs(bias)
-        input_nodes = (mat_a, mat_b, scale_a, scale_b, bias_arg)
+        bias_real = realize_inputs(bias)
+        input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real, bias_real)
         suffix_args = 3
 
     aten_choice = aten__fp8_mm.bind(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices= []
+    choices = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
     _, is_nonzero = _is_static_problem(layout)
 
+    scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)
+    scaled_persistent_mm_configs = V.choices.get_scaled_persistent_mm_configs(
+        device_type
+    )
+
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
             # Need to unsqueeze bias from [N] -> [1, N]
-            triton_input_nodes = (mat_a, mat_b, scale_a, scale_b, L[aten.unsqueeze](bias, 0))
+            triton_bias = L[aten.unsqueeze](bias, 0)
         else:
-            triton_input_nodes = input_nodes
+            triton_bias = bias
 
-        if use_triton_tma_template(mat_a, mat_b) and bias is None:
+        if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
+            assert len(scale_a.get_size()) == len(scale_b.get_size())
+            # Need to unsqueeze scale from [] -> [1, 1]
+            triton_scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
+            triton_scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
+        else:
+            triton_scale_a = scale_a
+            triton_scale_b = scale_b
+
+        if bias:
+            triton_input_nodes = (
+                mat_a,
+                mat_b,
+                triton_scale_a,
+                triton_scale_b,
+                triton_bias,
+            )
+        else:
+            triton_input_nodes = (mat_a, mat_b, triton_scale_a, triton_scale_b)
+
+        if use_triton_tma_template(mat_a, mat_b):
             for config in scaled_persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options(
-                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum, device_tma=True
+                    config,
+                    m,
+                    n,
+                    k,
+                    layout,
+                    scale_a,
+                    scale_b,
+                    use_fast_accum,
+                    device_tma=True,
                 )
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
@@ -1040,28 +1086,28 @@ def tuned_scaled_mm(
                     ),
                     **kwargs,
                 )
-        else:
-            for config in scaled_mm_configs(m, n, k):
-                if k == 16 and config.kwargs["BLOCK_M"] >= 64:
-                    continue  # Triton crashes in this case
 
-                # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
-                # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-                if using_b200() and k < 32:
-                    continue
-                
-                kwargs = scaled_mm_options(
-                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum
-                )
-                # possibly appends a TritonTemplateCaller to choices
-                mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=triton_input_nodes,
-                    layout=layout,
-                    **kwargs,
-                    suffix_args=suffix_args,
-                    epilogue_fn=scale_mm_epilogue(),
-                )
+        for config in scaled_mm_configs(m, n, k):
+            if k == 16 and config.kwargs["BLOCK_M"] >= 64:
+                continue  # Triton crashes in this case
+
+            # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+            # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+            if using_b200() and k < 32:
+                continue
+
+            kwargs = scaled_mm_options(
+                config, m, n, k, layout, scale_a, scale_b, use_fast_accum
+            )
+            # possibly appends a TritonTemplateCaller to choices
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=triton_input_nodes,
+                layout=layout,
+                **kwargs,
+                suffix_args=suffix_args,
+                epilogue_fn=scale_mm_epilogue(),
+            )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
@@ -1072,7 +1118,6 @@ def tuned_scaled_mm(
     return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
-
 @functools.lru_cache(None)
 def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     props = torch.cuda.get_device_properties(index or 0)
@@ -1081,52 +1126,6 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 
 def dims_are_int(dims):
     return all(isinstance(dim, int) for dim in dims)
-
-
-def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
-    m, n, k = get_size_hints(mat1, mat2, m, n, k)
-    if not dims_are_int([m, n, k]):
-        return None
-
-    if mat1.dtype != torch.float16:
-        return None
-
-    # only use heuristic if we are running on an A100
-    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
-    # which does not have enough shared memory for one of the configs
-    if (
-        not torch.cuda.get_device_capability() >= (8, 0)
-    ) or get_gpu_shared_memory() != 166912:
-        return None
-
-    if m == 1 and (n % 16 != 0 or k % 16 != 0):
-        return None
-
-    if m <= 16 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=16,
-            BLOCK_N=64,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=32,
-            BLOCK_N=32,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=64,
-            BLOCK_N=32,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    return None
 
 
 def mm_autoheuristic(
