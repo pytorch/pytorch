@@ -2068,7 +2068,9 @@ class CommonTemplate:
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
-    @unittest.skipIf(IS_S390X, "fails sometimes based on unidentified conditions")  # accuracy failure
+    @unittest.skipIf(
+        IS_S390X, "fails sometimes based on unidentified conditions"
+    )  # accuracy failure
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)

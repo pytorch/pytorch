@@ -21,7 +21,12 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, IS_S390X, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import (
+    IS_S390X,
+    IS_WINDOWS,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")

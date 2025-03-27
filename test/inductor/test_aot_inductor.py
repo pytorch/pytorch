@@ -4057,23 +4057,23 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 dynamic dims for which we generate different checks
+                (
+                    21 if SM80OrLater else 19
+                ),  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18
-                if SM80OrLater
-                else 16,  # we have 9 dynamic dims for which we generate two checks
+                (
+                    18 if SM80OrLater else 16
+                ),  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 symbolic strides for which we don't generate checks
+                (
+                    21 if SM80OrLater else 19
+                ),  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
 

@@ -465,9 +465,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     v,
                 )
                 self.assertIn(
-                    "torch.ops.mkldnn._linear_pointwise.default"
-                    if autocast_enabled
-                    else "torch.ops.mkl._mkl_linear.default",
+                    (
+                        "torch.ops.mkldnn._linear_pointwise.default"
+                        if autocast_enabled
+                        else "torch.ops.mkl._mkl_linear.default"
+                    ),
                     source_code,
                 )
                 torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
@@ -3933,9 +3935,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             include_ops = [
-                "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
-                if torch._inductor.config.cpp_wrapper
-                else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
+                (
+                    "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
+                    if torch._inductor.config.cpp_wrapper
+                    else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
+                )
             ]
             self._test_code_common(
                 m,
