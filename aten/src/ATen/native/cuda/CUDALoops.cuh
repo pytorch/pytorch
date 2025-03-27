@@ -666,7 +666,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 #ifdef USE_ROCM
     // Attempt to call specialized vectorized elementwise kernel
     // that enables interleaving.
-    if (check_binary_rt_types_for_specialization(iter) &&
+    if (false && check_binary_rt_types_for_specialization(iter) &&
         memory::can_vectorize_up_to<func_t>(data) > 1) {
       // constexpr to reduce the amount of kernels (empty) generated for
       // unrolled templated elementwise and limit which functors are actually
