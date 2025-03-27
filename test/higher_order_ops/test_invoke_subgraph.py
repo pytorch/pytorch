@@ -115,7 +115,58 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        ref = gn(x, y)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    def test_list(self):
+        @mark_compile_region
+        def gn(x, y):
+            return [torch.mul(x, y), torch.add(x, y)]
+
+        def fn(x, y):
+            lst = gn(x, y)
+            lst.append(torch.sin(x))
+            return lst[0] + lst[1] + lst[2]
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    def test_tuple_of_tuple(self):
+        @mark_compile_region
+        def gn(x, y):
+            return ((torch.mul(x, y),), torch.add(x, y))
+
+        def fn(x, y):
+            tup = gn(x, y)
+            return tup[0][0] + tup[1]
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
 
         x_clone = x.detach().clone().requires_grad_(True)
         y_clone = y.detach().clone().requires_grad_(True)
