@@ -49,15 +49,18 @@ class FileBaton:
         The amount of time slept depends on the ``wait_seconds`` parameter
         passed to the constructor.
         """
+        warned_existing = False
+
         tik = time.time()
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
             # If lock file has no handle and waited too long,
             # then warn user of existing lock file and print path.
-            if time.time() - tik > 200:
+            if time.time() - tik > 200 and not warned_existing:
                 if not has_handle(self.lock_file_path):
                     print(f"WARN: You may want to delete existing lock file: {self.lock_file_path}")
+                    warned_existing = True
 
     def release(self):
         """Release the baton and removes its file."""
