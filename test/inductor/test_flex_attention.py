@@ -3745,6 +3745,7 @@ class GraphModule(torch.nn.Module):
             create_selective_checkpoint_contexts,
         )
 
+        # ops_to_save = [torch.ops.aten.mm.default, flex_attention_hop]
         ops_to_save = [torch.ops.aten.mm.default]
         context_fn = functools.partial(
             create_selective_checkpoint_contexts, ops_to_save

@@ -483,14 +483,14 @@ def flex_attention_fake_tensor_mode(
 def _flex_caching(
     mode: _CachingTorchDispatchMode, *args: Any, **kwargs: Any
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return flex_attention(*args, **kwargs)
+    return mode.__torch_dispatch__(flex_attention, (), args, kwargs)
 
 
 @flex_attention.py_impl(_CachedTorchDispatchMode)
 def _flex_cached(
     mode: _CachedTorchDispatchMode, *args: Any, **kwargs: Any
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return flex_attention(*args, **kwargs)
+    return mode.__torch_dispatch__(flex_attention, (), args, kwargs)
 
 
 # ---------------------------- Autograd Implementation ----------------------------
