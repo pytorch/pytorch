@@ -7,6 +7,7 @@ import os
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
+from enum import Enum
 from functools import wraps
 from pstats import Stats
 from typing import Any, Callable, cast, Optional, TypeVar, Union
@@ -30,6 +31,30 @@ __all__ = ["find_tensor_shard", "find_state_dict_object"]
 T = TypeVar("T")
 R = TypeVar("R")
 
+class DistributedCheckpointingType(Enum):
+    SINGLE_RANK_CHECKPOINTING = 1
+    NO_COORDINATION_CHECKPOINTING = 2
+    DISTRIBUTED_CHECKPOINTING = 3
+
+def _get_distributed_checkpointing_type(
+    no_dist: bool,
+) -> DistributedCheckpointingType:
+        distributed_checkpointing_type: DistributedCheckpointingType = DistributedCheckpointingType.DISTRIBUTED_CHECKPOINTING
+
+        if no_dist:
+            if dist.is_available() and dist.is_initialized():
+                warnings.warn(
+                    f"torch.distributed is available or initialized but no-dist={no_dist}, "
+                    "assuming the intent is to save the checkpoint local to each rank without any rank coordination."
+                )
+                distributed_checkpointing_type = DistributedCheckpointingType.NO_COORDINATION_CHECKPOINTING
+            else:
+                warnings.warn(
+                    f"torch.distributed is unavailable or uninitialized but no-dist={no_dist}, "
+                    "assuming the intent is to save the checkpoint on a single rank."
+                )
+                distributed_checkpointing_type = DistributedCheckpointingType.SINGLE_RANK_CHECKPOINTING
+        return distributed_checkpointing_type
 
 def _get_failure_dict(
     results: list[Union[T, WRAPPED_EXCEPTION]],
