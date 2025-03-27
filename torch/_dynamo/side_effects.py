@@ -11,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import utils, variables
+from . import graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -19,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import SideEffectsError, unimplemented_v2
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -186,8 +186,12 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            # TODO plumb HOP information here
+            unimplemented_v2(
+                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
+                context="",
+                explanation="This is not supported.",
+                hints=[],
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
@@ -202,12 +206,22 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented("read deleted attribute")
+            unimplemented_v2(
+                gb_type="Attempted to read a deleted variable",
+                context=f"item: {item}, name: {name}",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return result
 
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
-            unimplemented("Dynamo currently doesn't support writing to such cell")
+            unimplemented_v2(
+                gb_type="Write to immutable cell",
+                context=f"cellvar: {cellvar}, value: {value}",
+                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -218,7 +232,12 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented("cannot read uninitialized cell")
+        unimplemented_v2(
+            gb_type="Read uninitialized cell",
+            context=str(cellvar),
+            explanation="Attempted to read a cell variable that has not been populated yet.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -237,6 +256,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            BaseException.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -333,9 +353,9 @@ class SideEffects:
         from .variables.torch_function import TorchFunctionModeVariable
         from .variables.user_defined import is_forbidden_context_manager
 
-        variable_cls: type[
+        variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
-        ] = variables.UserDefinedObjectVariable
+        )
         if issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
@@ -358,6 +378,8 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
+        elif issubclass(user_cls, BaseException):
+            variable_cls = variables.UserDefinedExceptionObjectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 
@@ -489,7 +511,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var]  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):
@@ -574,7 +597,12 @@ class SideEffects:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
-                    unimplemented("AutogradFunctionContextVariable escaped")
+                    unimplemented_v2(
+                        gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
+                        context="",
+                        explanation="We cannot reconstruct a torch.autograd.Function's context object.",
+                        hints=[],
+                    )
 
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -723,7 +751,14 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented("side effect on existing deque with limited maxlen")
+                    unimplemented_v2(
+                        gb_type="Side effect on existing deque with limited maxlen",
+                        context="",
+                        explanation="This is not supported.",
+                        hints=[
+                            "Don't use a deque with `maxlen` specified.",
+                        ],
+                    )
 
                 # old.extend(new), this runs last
                 cg(var.source)
