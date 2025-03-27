@@ -1430,7 +1430,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Add MX format validation for gfx950
   if (scaling_choice == ScalingType::RowWise) {
 #ifdef USE_ROCM
-    if (IsGfx950Device()) {
+    if (IsGfx950Device(mat1.device().index())) {
       // Validate matrix dimensions for MX format
       TORCH_CHECK(ValidateMXFormatRequirements(mat1.size(0), mat2.size(1), mat1.size(1)),
                  "For MX format on gfx950, matrix dimensions must be multiples of 32. ",
