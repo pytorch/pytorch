@@ -533,7 +533,7 @@ def build_deps():
 
 missing_pydep = """
 Missing build dependency: Unable to `import {importname}`.
-Please install it via `conda install {module}` or `pip install {module}`
+Please install it via `pip install {module}`
 """.strip()
 
 
