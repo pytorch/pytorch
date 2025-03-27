@@ -2019,6 +2019,21 @@ class FakeTensorMode(TorchDispatchMode):
                         f"fake shape {s_fake} and real shape {s_real}, "
                         f"at output{keystr(path)}.size({j}), for func: {func}"
                     ) from exc
+        elif fake is None and real is not None:
+            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                dtrace_structured(
+                    "mismatched_fake_kernel",
+                    metadata_fn=lambda: {
+                        "op": str(func),
+                        "reason": f"mismatch between fake value {fake} and real value {real}",  # noqa: F821
+                    },
+                )
+                return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
+            raise MetadataMismatchError(
+                f"Real tensor propagation found a metadata mismatch between "
+                f"fake tensor {fake} and real tensor {real}, "
+                f" at output{keystr(path)}, for func: {func}"
+            )
         else:
             try:
                 _check_fake_real_vals(fake, real)
