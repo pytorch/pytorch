@@ -1490,7 +1490,6 @@ struct WithCurrentScope {
   ScopePtr prev_scope_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
@@ -1651,7 +1650,6 @@ struct TORCH_API OperatorSet {
 };
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct OperatorMap {
   // Type aliasing
   using OpMapType = typename std::pair<std::shared_ptr<Operator>, T>;
@@ -1659,12 +1657,10 @@ struct OperatorMap {
   using MapType = std::unordered_map<Symbol, ValueType>;
 
   OperatorMap() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
     insert(init);
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(std::initializer_list<std::pair<const char*, T>> init) {
     insert(init);
   }
@@ -1760,7 +1756,6 @@ struct OperatorMap {
 };
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct FunctionSchemaMap {
   // Type aliasing
   using FuncSchemaMapType = typename std::pair<FunctionSchema, T>;
