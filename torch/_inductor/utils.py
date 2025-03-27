@@ -2727,13 +2727,19 @@ def set_kernel_post_grad_provenance_tracing(
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
     from .virtualized import V
 
-    for node in node_schedule:
-        if node not in (EnableReduction, DisableReduction):
-            if node.node is not None:
-                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+    for snode in node_schedule:
+        if snode not in (EnableReduction, DisableReduction):
+            if snode.node is not None:
+                curr_node_info = (
+                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                        kernel_name, []
+                    )
+                )
+                curr_node_info.extend(
                     origin.name
-                    for origin in node.node.origins  # type: ignore[attr-defined]
-                ]
+                    for origin in snode.node.origins  # type: ignore[attr-defined]
+                    if origin.name not in curr_node_info
+                )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
@@ -2774,16 +2780,3 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
-
-
-def get_ld_library_path() -> str:
-    path = os.environ.get("LD_LIBRARY_PATH", "")
-    if config.is_fbcode():
-        from libfb.py.parutil import get_runtime_path
-
-        runtime_path = get_runtime_path()
-        if runtime_path:
-            lib_path = os.path.join(runtime_path, "runtime", "lib")
-            path = os.pathsep.join([lib_path, path]) if path else lib_path
-
-    return path
