@@ -8,6 +8,7 @@ import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
@@ -24,6 +25,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -31,7 +33,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-from .utils import _maybe_reenter_make_fx
+from .utils import _from_fun, _maybe_reenter_make_fx
 
 
 aten = torch._ops.ops.aten
@@ -338,6 +340,7 @@ def trace_scan(
 
     outputs = None
     for node in combine_graph.graph.nodes:
+        print((node, node.meta))
         if node.op == "output":
             assert outputs is None
             assert len(node.args) == 1
@@ -414,20 +417,30 @@ class ScanAutogradOp(torch.autograd.Function):
         additional_inputs_tensor_mask = get_tensor_mask(additional_inputs)
         ctx._additional_inputs_tensor_mask = additional_inputs_tensor_mask
 
-        # 1.) Prepare the forward graph
-        # The wrapper of the forward graph returns carries from all iterations,
-        # not just from the last iteration. These are required in the backward path
-        def wrapper_fwd_combine_fn(*args):
-            new_carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
-            return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                # 1.) Prepare the forward graph
+                # The wrapper of the forward graph returns carries from all iterations,
+                # not just from the last iteration. These are required in the backward path
+                def wrapper_fwd_combine_fn(*args):
+                    new_carry, y = _extract_carry_and_out(
+                        combine_fn(*args), num_leaves_init
+                    )
+                    return [
+                        *new_carry,
+                        *[n_c.clone().detach() for n_c in new_carry],
+                        *y,
+                    ]
 
-        # First_slice_copy does not keep the original requires_grad flag,
-        # but we need it here in order to compute the correcte gradients
-        xs_slice = ScanAutogradOp.first_slice_copy_with_grad(xs)
+                fw_init = [pytree.tree_map(_from_fun, x) for x in init]
+                fw_xs = [first_slice_copy(pytree.tree_map(_from_fun, x)) for x in xs]
+                fw_additional_inputs = [
+                    pytree.tree_map(_from_fun, a) for a in additional_inputs
+                ]
 
-        combine_fn_wrapped = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
-            *init, *xs_slice, *additional_inputs
-        )
+                combine_fn_wrapped = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
+                    *fw_init, *fw_xs, *fw_additional_inputs
+                )
 
         # 2.) Prepare the backward graph
         ctx._combine_fn_bw = create_bw_fn(
@@ -656,13 +669,13 @@ class ScanAutogradOp(torch.autograd.Function):
 
             g_xs = [torch.flip(elem, [0]) for elem in g_xs]
 
-        new_g_additional_inputs = mask_list(
-            additional_inputs_tensor_mask,
-            new_g_additional_inputs,
-            [None] * num_additional_inputs,
-        )
+            new_g_additional_inputs = mask_list(
+                additional_inputs_tensor_mask,
+                new_g_additional_inputs,
+                [None] * num_additional_inputs,
+            )
 
-        return *[None] * 3, *g_init, *g_xs, *new_g_additional_inputs
+            return *[None] * 3, *g_init, *g_xs, *new_g_additional_inputs
 
 
 @scan_op.py_impl(DispatchKey.Autograd)

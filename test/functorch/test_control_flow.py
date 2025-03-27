@@ -3355,7 +3355,6 @@ class GraphModule(torch.nn.Module):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
-    select = torch.ops.aten.select.int(flip, 0, 0);  select = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
