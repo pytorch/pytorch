@@ -127,6 +127,11 @@ TORCH_API void checkSameGPU(
     const TensorArg& t1,
     const TensorArg& t2);
 TORCH_API void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
+TORCH_API void checkSameXPU(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+TORCH_API void checkAllSameXPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkSameType(
     CheckedFrom c,
     const TensorArg& t1,
