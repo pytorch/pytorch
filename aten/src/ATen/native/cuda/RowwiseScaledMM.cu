@@ -41,6 +41,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+#include <ATen/native/cuda/cutlass_common.cuh>
+
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
@@ -221,10 +223,11 @@ void f8f8bf16_rowwise_impl(
           typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
 
-  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      cute::Shape<int, int, int>,
-      CollectiveMainloop,
-      CollectiveEpilogue>;
+  using GemmKernel = at::cuda::detail::enable_3x_kernel_for_sm9x<
+      cutlass::gemm::kernel::GemmUniversal<
+          cute::Shape<int, int, int>,
+          CollectiveMainloop,
+          CollectiveEpilogue>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
@@ -402,10 +405,11 @@ void f8f8bf16_rowwise_impl_sm100(
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
           MainloopScheduleType>::CollectiveOp;
 
-  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      cute::Shape<int, int, int>,
-      CollectiveMainloop,
-      CollectiveEpilogue>;
+  using GemmKernel = at::cuda::detail::enable_3x_kernel_for_sm10_or_later<
+      cutlass::gemm::kernel::GemmUniversal<
+          cute::Shape<int, int, int>,
+          CollectiveMainloop,
+          CollectiveEpilogue>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
@@ -480,6 +484,9 @@ void f8f8bf16_rowwise_impl_sm100(
 
 // Cutlass rowwise kernel for SM89
 template <
+    typename ThreadblockShape,
+    typename WarpShape,
+    int NumStages,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -511,12 +518,7 @@ void f8f8bf16_rowwise_impl_sm89(
   using ThreadblockSwizzle =
       cutlass::gemm::threadblock::ThreadblockSwizzleStreamK;
 
-  // TODO: instead of fixing these values, implement logic alike to
-  // what is used for SM90+.
-  using ThreadblockShape = cutlass::gemm::GemmShape<64, 128, 64>;
-  using WarpShape = cutlass::gemm::GemmShape<32, 64, 64>;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
-  constexpr auto NumStages = 4;
 
   using Operator = std::conditional_t<
       FastAccum::value,
@@ -586,23 +588,23 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
-      DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
-      DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
-      DtypeOutput, LayoutOutput, AlignmentOutput,
-      DtypeAccum,
-      DtypeEpilogue,
-      OperatorClass,
-      ArchTag,
-      ThreadblockShape,
-      WarpShape,
-      InstructionShape,
-      EVTOutput,
-      ThreadblockSwizzle,
-      NumStages,
-      Operator,
-      NumEVTEpilogueStages
-  >::GemmKernel;
+  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89<
+      typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
+          DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
+          DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
+          DtypeOutput, LayoutOutput, AlignmentOutput,
+          DtypeAccum,
+          DtypeEpilogue,
+          OperatorClass,
+          ArchTag,
+          ThreadblockShape,
+          WarpShape,
+          InstructionShape,
+          EVTOutput,
+          ThreadblockSwizzle,
+          NumStages,
+          Operator,
+          NumEVTEpilogueStages>::GemmKernel>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<EVTKernel>;
 
@@ -881,6 +883,49 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
 }
 
 template <typename... Types>
+void dispatch_fp8_rowwise_kernel_sm89(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  int M = XQ.size(0);
+
+  if (M <= 16) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<16, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<16, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 32) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<32, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<16, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 64) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<64, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<32, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 256) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<64, 128, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<64, 64, 64>,
+        /*NumStages=*/3,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<128, 128, 64>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<64, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
+template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -900,7 +945,7 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   if (sm9x || sm10x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
