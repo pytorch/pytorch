@@ -173,8 +173,26 @@ struct C10_API Allocator {
   // Note that this explicitly ignores any context that may have been
   // attached to the input data.
   //
+  // If `sync=true` is given, then the device will synchronize after the clone
+  // happens, if the device is normally asynchronous.
+  //
   // Requires: input data was allocated by the same allocator.
-  DataPtr clone(const void* data, std::size_t n);
+  DataPtr clone(const void* data, std::size_t n, bool sync = false);
+
+  // TODO: I don't think these two clone funcs are needed anymore
+  virtual DataPtr clone_from_cpu(const void* data, std::size_t n);
+  virtual DataPtr clone_to_cpu(const void* data, std::size_t n);
+
+  // Some allocators have a unified memory space that both the device
+  // and the CPU can access. However, the device and CPU may need to
+  // use different pointer values to access the same memory location.
+  // The following two functions are used to map between CPU and device
+  // memory address spaces. By default, they return nullptr.
+  virtual void* get_cpu_ptr_from_device_ptr(void* device_ptr) const;
+  virtual const void* get_cpu_ptr_from_device_ptr(const void* device_ptr) const;
+  virtual void* get_device_ptr_from_cpu_ptr(void* cpu_ptr) const;
+  virtual const void* get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const;
+  virtual bool has_unified_memory() const;
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.
@@ -205,8 +223,11 @@ struct C10_API Allocator {
   //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
-  virtual void copy_data(void* dest, const void* src, std::size_t count)
-      const = 0;
+  virtual void copy_data(
+      void* dest,
+      const void* src,
+      std::size_t count,
+      bool sync = false) const = 0;
 
  protected:
   // Uses `std::memcpy` to copy data.

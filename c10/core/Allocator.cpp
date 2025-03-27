@@ -7,9 +7,9 @@
 
 namespace c10 {
 
-DataPtr Allocator::clone(const void* data, std::size_t n) {
+DataPtr Allocator::clone(const void* data, std::size_t n, bool sync) {
   DataPtr new_data = allocate(n);
-  copy_data(new_data.mutable_get(), data, n);
+  copy_data(new_data.mutable_get(), data, n, sync);
   return new_data;
 }
 
@@ -18,6 +18,39 @@ void Allocator::default_copy_data(
     const void* src,
     std::size_t count) const {
   std::memcpy(dest, src, count);
+}
+
+void* Allocator::get_cpu_ptr_from_device_ptr(void* device_ptr) const {
+  return nullptr;
+}
+
+const void* Allocator::get_cpu_ptr_from_device_ptr(
+    const void* device_ptr) const {
+  return nullptr;
+}
+
+void* Allocator::get_device_ptr_from_cpu_ptr(void* cpu_ptr) const {
+  return nullptr;
+}
+
+const void* Allocator::get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const {
+  return nullptr;
+}
+
+bool Allocator::has_unified_memory() const {
+  return false;
+}
+
+DataPtr Allocator::clone_from_cpu(const void* data, std::size_t n) {
+  DataPtr new_data = allocate(n);
+  copy_data(new_data.mutable_get(), data, n, true);
+  return new_data;
+}
+
+DataPtr Allocator::clone_to_cpu(const void* data, std::size_t n) {
+  DataPtr new_data = allocate(n);
+  copy_data(new_data.mutable_get(), data, n, true);
+  return new_data;
 }
 
 bool Allocator::is_simple_data_ptr(const DataPtr& data_ptr) const {
