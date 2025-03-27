@@ -47,6 +47,7 @@ class CppTemplate(KernelTemplate):
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
             patch.object(ir.FlexibleLayout, "allow_indexing", True),
+            V.graph.set_current_device(self.layout.device),
             CppTemplateKernel(
                 kernel_name=kernel_name, num_threads=self.num_threads
             ) as kernel,

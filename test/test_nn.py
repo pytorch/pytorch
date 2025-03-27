@@ -4375,6 +4375,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 outs[0].sum().backward()
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm(msg="ROCm doesn't support 'dropout' for RNN "
+                "(WIP to enable dropout https://github.com/pytorch/pytorch/pull/144572)")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -7192,6 +7194,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.Tensor([[[2.0, 2.0], [14.0, 14.0]], [[2.0, 2.0], [14.0, 14.0]]])
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_layer_norm_backwards_eps(self):
+        dtype = torch.float
+        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
+                      (32, 32), (1024, 32), (1024, 1024),
+                      (33, 33), (1025, 33), (1025, 1025)]
+        for m, n in m_x_n_list:
+            x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+            grad_output = torch.rand_like(x)
+            x_cuda = x.clone().detach().to("cuda").requires_grad_()
+            grad_output_cuda = grad_output.clone().detach().to("cuda")
+            ln = nn.LayerNorm(n, dtype=dtype)
+            ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype)
+            ln_out = ln(x)
+            ln_out_cuda = ln_cuda(x_cuda)
+            ln_out.backward(grad_output)
+            ln_out_cuda.backward(grad_output_cuda)
+            self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+            self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):

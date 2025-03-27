@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import re
+import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -116,7 +117,14 @@ class ExportDynamoConfig:
     # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
     # but if we want to reason more about what guards/runtime asserts to emit,
     # this makes it a bit cleaner to do from the export side. Also no real point in running this twice.
-    do_not_emit_runtime_asserts = True
+    do_not_emit_runtime_asserts: bool = True
+    specialize_int: bool = True
+    specialize_float: bool = True
+    assume_static_by_default: bool = False
+    automatic_dynamic_shapes: bool = False
+    capture_dynamic_output_shape_ops: bool = True
+    capture_scalar_outputs: bool = True
+    prefer_deferred_runtime_asserts_over_guards: bool = False
 
 
 @dataclasses.dataclass
@@ -1089,6 +1097,13 @@ def _log_export_wrapper(fn):
                     message=str(e),
                     flags=_EXPORT_FLAGS,
                 )
+
+            if hasattr(e, "partial_fx_graph"):
+                print(
+                    e.partial_fx_graph,
+                    file=sys.stderr,
+                )
+
             raise e
         finally:
             _EXPORT_FLAGS = None
@@ -1194,7 +1209,12 @@ def _get_module_call_graph(
 
 
 def _get_range_constraints(
-    export_artifact: ExportArtifact, combined_args: dict[str, Any], dynamic_shapes
+    mod: torch.nn.Module,
+    export_artifact: ExportArtifact,
+    args,
+    kwargs,
+    dynamic_shapes,
+    _is_torch_jit_trace=False,
 ):
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
@@ -1207,6 +1227,25 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
+    combined_args = _combine_args(
+        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
+
+    # This is because we trace based on the kewargs passed in from user
+    # not based on the signature. I feel it would be better to just enforce
+    # one ordering at the start of tracing to avoid confusions, but that is
+    # bigger refactor, so do this to unblock for now.
+    if not _is_torch_jit_trace:
+        combined_args_traced_order = {}
+        for arg in combined_args:
+            if arg not in kwargs:
+                combined_args_traced_order[arg] = combined_args[arg]
+
+        for key in kwargs:
+            combined_args_traced_order[key] = kwargs[key]
+
+        combined_args = combined_args_traced_order
+
     range_constraints = make_constraints(
         fake_mode,
         gm,
@@ -1864,7 +1903,17 @@ def _non_strict_export(
         )
 
     tx = TracingContext(fake_mode)
-    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(tx):
+
+    # We also need to attach dynamo configs as these will be used in HOOs that
+    # use torch.compile, like cond
+    dynamo_config = dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+    dynamo_config[
+        "do_not_emit_runtime_asserts"
+    ] = False  # We want to emit runtime asserts
+
+    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(
+        tx
+    ), torch._dynamo.config.patch(dynamo_config):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
@@ -1950,8 +1999,10 @@ def _export_for_training(
     # Note: _get_range_constraints depends on "inline_constraints" to be set.
     export_artifact.aten.gm.meta["inline_constraints"] = inline_constraints
     range_constraints = _get_range_constraints(
+        mod,
         export_artifact,
-        _combine_args(mod, args, kwargs, _is_torch_jit_trace=False),
+        args,
+        kwargs,
         dynamic_shapes,
     )
     # The returned the gm is in-place modified
@@ -2114,9 +2165,12 @@ def _export(
     # Note: this step must be before _get_range_constraints.
     export_artifact.aten.gm.meta["inline_constraints"] = inline_constraints
     range_constraints = _get_range_constraints(
+        mod,
         export_artifact,
-        _combine_args(mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace),
+        args,
+        kwargs,
         dynamic_shapes,
+        _is_torch_jit_trace=_is_torch_jit_trace,
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,

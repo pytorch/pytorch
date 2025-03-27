@@ -1128,7 +1128,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool)>(
+      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1137,7 +1137,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           std::optional<std::string>,
           const std::string&,
-          size_t)>(torch::cuda::_record_memory_history));
+          size_t,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
