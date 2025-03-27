@@ -1176,6 +1176,7 @@ build_xla() {
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   retry install_post_deps_pytorch_xla
+  assert_git_not_dirty
 }
 
 test_xla() {
