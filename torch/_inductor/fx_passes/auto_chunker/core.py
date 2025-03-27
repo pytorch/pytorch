@@ -37,6 +37,48 @@ class ChunkingMeta:
     def copy(self):
         return ChunkingMeta(**self.__dict__)
 
+    def chunk_by_dim(self, dim: int):
+        return self.chunk_dim == dim
+
+def set_chunking_meta(node, meta=None, **kwargs):
+    """
+    kwargs can override fields in the passed in `meta`
+    """
+    changed = False
+    if meta is None:
+        meta = ChunkingMeta(**kwargs)
+    else:
+        # make a copy to avoid override the passed in instance
+        meta = meta.copy()
+        for k, v in kwargs.items():
+            setattr(meta, k, v)
+
+    old_meta = get_chunking_meta(node)
+    node.meta["chunking"] = meta
+    return old_meta is None or old_meta != meta
+
+def set_chunking_meta_if_none(nodes, meta):
+    changed = False
+    for node in nodes:
+        if get_chunking_meta(node) is None:
+            changed = True
+            set_chunking_meta(node, meta)
+    return changed
+            
+
+def copy_chunking_meta(dst_node, src_node):
+    if isinstance(src_node, torch.fx.Node):
+        src_meta = get_chunking_meta(src_node)
+    else:
+        assert isinstance(src_node, ChunkingMeta)
+        src_meta = src_node
+    assert src_meta
+    return set_chunking_meta(dst_node, **src_meta.__dict__)
+
+
+def get_chunking_meta(node):
+    return node.meta.get("chunking")
+
 eligible_amplifier_node = {
     aten.mm.default,
     aten.addmm.default,

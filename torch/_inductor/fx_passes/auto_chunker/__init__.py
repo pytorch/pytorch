@@ -17,7 +17,7 @@ from torch.utils._ordered_set import OrderedSet
 from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
 from .partitioner import Partitioner
-from .propagator import Propagator, format_node_with_chunking_meta
+from .old_propagator import Propagator
 from .collector import get_fake_tensor_from_node_arg, maybe_permuted, get_tangent_nodes
 from .applier import ChunkingApplier
 
@@ -57,4 +57,11 @@ class AutoChunker:
         newgm = ChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 8).apply()
 
         metrics.num_auto_chunking += 1
+
+        if os.getenv("NEW_API") == "1":
+            # test new API
+            from .core import find_amplifier_node
+            from .propagator import propagate
+            amplifier_node = find_amplifier_node(graph)
+            propagate(amplifier_node)
         return newgm

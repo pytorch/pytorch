@@ -14,7 +14,7 @@ class ChunkingSubgraph:
 
     @property
     def external_nodes_to_chunk(self):
-        from .propagator import get_chunking_meta
+        from .old_propagator import get_chunking_meta
         out = OrderedSet()
         for node in self.external_nodes:
             if get_chunking_meta(node) is not None:

@@ -5,7 +5,7 @@ import torch
 import copy
 from torch.utils import _pytree
 
-from .propagator import get_chunking_meta
+from .old_propagator import get_chunking_meta
 from .collector import get_fake_tensor_from_node_arg
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
