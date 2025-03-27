@@ -85,6 +85,11 @@ from .dicts import DefaultDictVariable
 
 
 try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
+
+try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
@@ -423,7 +428,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import NullContextVariable
 
             return NullContextVariable()
-        elif self.value is collections.OrderedDict:
+        elif self.value is collections.OrderedDict or (edict and self.value is edict):
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.construct_dict),
                 [self, *args],
@@ -1537,9 +1542,18 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "dict_vt must be constructed by builder.py when source is present"
             )
-            self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
-            )
+            if (
+                edict
+                and self.base_cls_vt is UserDefinedClassVariable
+                and self.base_cls_vt.value is edict
+            ):
+                self._dict_vt = variables.EasyDictVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
+            else:
+                self._dict_vt = variables.ConstDictVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
         self._dict_methods = dict_methods
 
     def call_method(
@@ -1551,6 +1565,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
+            return self._dict_vt.call_method(tx, name, args, kwargs)
+        if isinstance(self._dict_vt, variables.EasyDictVariable):
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 

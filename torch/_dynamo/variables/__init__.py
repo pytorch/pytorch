@@ -44,6 +44,7 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
+    EasyDictVariable,
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,

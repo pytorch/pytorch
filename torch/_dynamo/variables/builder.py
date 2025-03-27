@@ -696,7 +696,7 @@ class VariableBuilder:
                     ),
                     source=self.source,
                 )
-            elif istype(value, edict):
+            elif edict is not None and istype(value, edict):
                 result = EasyDictVariable(result, source=self.source)
             else:
                 result = ConstDictVariable(

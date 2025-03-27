@@ -22,7 +22,7 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TEST_EASYDICT, TestCase
 
 
 class SimpleDict(dict):
@@ -935,6 +935,51 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d2)
         self.assertEqual(ref, res)
         self.assertEqual(d1.calls, d2.calls)
+
+
+@unittest.skipIf(not TEST_EASYDICT, "easydict unavailable")
+class EasyDictTests(torch._dynamo.test_case.TestCase):
+    def test_easy_dict(self):
+        from easydict import EasyDict as edict
+
+        def fn(d: edict):
+            ed.a = "aa"
+            ed.b = 123
+            ed.c = 1.23
+            return ed, len(ed)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ed = edict({"a": "a", "b": 12})
+        ref = fn(ed)
+        res = opt_fn(ed)
+        self.assertEqual(ref, res)
+
+    def test_easy_dict_user_defined(self):
+        from easydict import EasyDict as edict
+
+        def fn():
+            ed = edict({"a": "a", "b": 12})
+            ed.a = "aa"
+            ed.b = 123
+            ed.c = 1.23
+            return ed, len(ed)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn()
+        res = opt_fn()
+        self.assertEqual(ref, res)
+
+    def test_easy_dict_update(self):
+        from easydict import EasyDict as edict
+
+        def fn():
+            ed = edict({"a": "a", "c": 1.2})
+            return ed.update({"b": 123, "c": 1.23})
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn()
+        res = opt_fn()
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
