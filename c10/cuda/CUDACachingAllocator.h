@@ -224,7 +224,9 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
-  virtual int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  virtual int getPoolUseCount(
+      c10::DeviceIndex device [[maybe_unused]],
+      MempoolId_t mempool_id [[maybe_unused]]) {
     TORCH_CHECK(
         false,
         name(),
@@ -232,8 +234,8 @@ class CUDAAllocator : public Allocator {
         "If you need it, please file an issue describing your use case.");
   }
   virtual void ensureExistsAndIncrefPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) {
+      c10::DeviceIndex device [[maybe_unused]],
+      MempoolId_t mempool_id [[maybe_unused]]) {
     TORCH_CHECK(
         false,
         name(),
@@ -242,9 +244,10 @@ class CUDAAllocator : public Allocator {
   }
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      const std::unordered_set<void*>& expected_live_allocations) {
+      c10::DeviceIndex device [[maybe_unused]],
+      MempoolId_t mempool_id [[maybe_unused]],
+      const std::unordered_set<void*>& expected_live_allocations
+      [[maybe_unused]]) {
     TORCH_CHECK(
         false,
         name(),
@@ -267,7 +270,8 @@ class CUDAAllocator : public Allocator {
       RecordContext when,
       bool clearHistory) = 0;
   virtual void recordAnnotation(
-      const std::vector<std::pair<std::string, std::string>>& md) {}
+      const std::vector<std::pair<std::string, std::string>>& md
+      [[maybe_unused]]) {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the

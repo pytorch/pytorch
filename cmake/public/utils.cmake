@@ -383,6 +383,8 @@ function(torch_compile_options libname)
       -Wall
       -Wextra
       -Wdeprecated
+      -Wunused
+      -Wno-unused-parameter
       -Wno-missing-field-initializers
       -Wno-array-bounds
       -Wno-unknown-pragmas
@@ -390,10 +392,10 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move -Wunused)
+      list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -406,8 +408,6 @@ function(torch_compile_options libname)
         -Werror
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
-        -Werror=unused-function
-        -Werror=unused-variable
         -Werror=pedantic
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
