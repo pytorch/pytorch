@@ -11822,7 +11822,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s64" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -12551,7 +12551,7 @@ class CommonTemplate:
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
         if is_dynamic_shape_enabled():
-            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, s1, s2, s2., .3\*s1\*s2\*s2, s1\*s2\*s2, 1, s1\*s2, s1.."  # noqa: B950
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, s12, s80, s80., .3\*s12\*s80\*s80, s12\*s80\*s80, 1, s12\*s80, s1.."  # noqa: B950
         else:
             size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
         FileCheck().check_regex(size_assert_pattern).run(code)
@@ -12570,8 +12570,8 @@ class CommonTemplate:
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s0, s1), (s1, 1))").check(
-                "assert_size_stride(buf2, (s0, s1), (s1, 1))"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
             ).run(code)
         else:
             FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
@@ -14186,12 +14186,43 @@ if RUN_GPU:
 
                 return torch.cond(p, true_fn, false_fn, [b])
 
+            compiled_f = torch.compile(f)
+
+            # static shape
             p = torch.tensor([True], device=self.device)
             a = torch.ones([2, 3], device=self.device)
-
-            compiled_f = torch.compile(f)
             eager_out = f(p, a)
             compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+            # dynamic shape with backed symint
+            p = torch.tensor([True], device=self.device)
+            a = torch.ones([4, 5], device=self.device)
+            eager_out = f(p, a)
+            compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_graph_partition_unbacked_symint_multi_output_layout(self):
+            def f(p, size_tensor):
+                size_val = size_tensor.item()
+                b = torch.ones([size_val, 3], device="cuda")
+
+                def true_fn(x):
+                    return torch.cos(x), torch.cos(x) + 1
+
+                def false_fn(x):
+                    return torch.sin(x), torch.sin(x) + 1
+
+                cond_out = torch.cond(p, true_fn, false_fn, [b])
+                return cond_out[0] + cond_out[1]
+
+            compiled_f = torch.compile(f)
+            p = torch.tensor([True], device="cuda")
+            size_tensor = torch.tensor(2, device="cuda")
+            eager_out = f(p, size_tensor)
+            compiled_out = compiled_f(p, size_tensor)
             self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
@@ -14216,6 +14247,46 @@ if RUN_GPU:
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
+        @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint_from_nested_indirect_indexing(self):
+            def nested(x, repeats):
+                rank = torch.arange(repeats.numel(), device=x.device)
+                index = rank.repeat_interleave(repeats, dim=0)
+                return torch.index_select(x, index=index, dim=0)
+
+            example_inputs = (
+                torch.randn((32, 64), device=self.device),
+                repeats := torch.tensor([5, 10, 15], device=self.device),
+            )
+            torch._dynamo.mark_dynamic(repeats, 0)  # create backed symint
+
+            nested_opt = torch.compile(nested, backend="inductor")
+
+            expect = nested(*example_inputs)
+            actual = nested_opt(*example_inputs)
+            self.assertEqual(expect, actual)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint_from_mutation_index(self):
+            x = torch.zeros(7, device="cuda")
+
+            def fn(n, a):
+                a[n] = -1
+                return a
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+
+            for n in range(2, x.shape[0]):
+                opt_fn(n, x)
+                self.assertEqual(x[n], -1)
+
+            # Negative index triggers new compilation.
+            opt_fn(-x.shape[0], x)
+
+            self.assertEqual(x[0], -1)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_unbacked_symint(self):
             def f(x, y):
@@ -14236,6 +14307,42 @@ if RUN_GPU:
             compiled_out = f_compiled(x, y)
             eager_out = f(x, y)
             self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_dynamic_scalar_inputs(self):
+            def f(x, y, integer):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                z += integer
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device=self.device), torch.randn(
+                3, 3, device=self.device
+            )
+
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(y, 1)
+
+            compiled_out = f_compiled(x, y, 5)
+            self.assertEqual(compiled_out, f(x, y, 5))
+
+            compiled_out = f_compiled(x, y, 6)
+            self.assertEqual(compiled_out, f(x, y, 6))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_graph_partition_item(self):
+            def f(x):
+                y = x + 1
+                scalar = y.item()
+                return x + y + scalar
+
+            compiled_f = torch.compile(f)
+            compiled_out = f(torch.tensor(1, device="cuda"))
+            self.assertEqual(compiled_out, f(torch.tensor(1, device="cuda")))
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_buffer_reuse(self):
