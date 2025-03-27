@@ -275,7 +275,7 @@ def reduce_scatter_tensor(
     group_size = c10d._get_group_size_by_name(group_name)
 
     assert self.size(scatter_dim) % group_size == 0, (
-        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
     )
     if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)

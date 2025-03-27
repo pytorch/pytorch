@@ -852,8 +852,20 @@ def get_first_incompatible_cudagraph_node(
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
+
+        if (
+            not torch._inductor.config.graph_partition
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+        ):
+            # skip cudagraph if a cudagraph_unsafe op is detected.
+            # graph_partition helps by spliting on this cudagraph_unsafe
+            # op and cudagraphifying the subgraphs.
+            return node
+
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
+
     return None
 
 
@@ -2780,3 +2792,22 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
+
+
+def is_cudagraph_unsafe_op(node: Operation) -> bool:
+    """
+    Returns True if the node is an op that is not cudagraphable.
+    Usually only custom ops have this tag.
+    """
+    from . import ir
+
+    if not isinstance(node, ir.FallbackKernel):
+        return False
+
+    if (
+        isinstance(node.op_overload, torch._ops.OpOverload)
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+    ):
+        return True
+
+    return False
