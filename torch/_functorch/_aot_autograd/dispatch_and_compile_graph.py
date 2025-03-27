@@ -378,7 +378,7 @@ def _fn_input_mutations_to_outputs(
 ) -> WrapResult:
     fn = fn_input_mutations_to_outputs(
         fn=result.fn,
-        keep_data_input_mutations=context["keep_data_input_mutations"],
+        keep_data_input_mutations=context["aot_config"].keep_inference_input_mutations,
         meta=context["meta"],
     )
     return _make_result(result, fn)
