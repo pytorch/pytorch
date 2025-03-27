@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -522,15 +522,6 @@ def _is_large_block_for_cpu(m, n, k):
     return m * n > 2**13
 
 
-def mm_config_kwargs(device):
-    if device == "cpu":
-        return {
-            "scale": 0.5,
-            "exclude": _is_large_block_for_cpu,
-        }
-    return {}
-
-
 @functools.lru_cache
 def using_b200() -> bool:
     """Returns true if the device is a NVIDIA B200, otherwise returns false."""
@@ -565,7 +556,6 @@ def check_supported_striding(mat_a, mat_b) -> None:
             or V.graph.sizevars.statically_known_equals(size[1], 0)
         )
 
-    import pdb; pdb.set_trace
     # Check mat_a (self) stride requirements
     torch._check(
         is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
@@ -1013,13 +1003,13 @@ def tuned_scaled_mm(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
 
+    input_nodes: tuple[Any, ...]
+
     if not bias:
         input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real)
-        suffix_args = 2
     else:
         bias_real = realize_inputs(bias)
         input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real, bias_real)
-        suffix_args = 3
 
     aten_choice = aten__fp8_mm.bind(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
@@ -1037,6 +1027,7 @@ def tuned_scaled_mm(
     )
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
+        triton_input_nodes: tuple[Any, ...]
         if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
             # Need to unsqueeze bias from [N] -> [1, N]
             triton_bias = L[aten.unsqueeze](bias, 0)
@@ -1060,10 +1051,14 @@ def tuned_scaled_mm(
                 triton_scale_b,
                 triton_bias,
             )
+            suffix_args = 3
         else:
             triton_input_nodes = (mat_a, mat_b, triton_scale_a, triton_scale_b)
+            suffix_args = 2
 
-        if use_triton_tma_template(mat_a, mat_b):
+        # TODO (paulzhan): There is no template that exists for bias and TMA
+        # Don't run tma template currently if bias exists
+        if use_triton_tma_template(mat_a, mat_b) and not bias:
             for config in scaled_persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options(
                     config,

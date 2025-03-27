@@ -853,10 +853,8 @@ def get_first_incompatible_cudagraph_node(
         if str(node.target) in forbidden_set:
             return node
 
-        if (
-            not torch._inductor.config.graph_partition
-            and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+        if not torch._inductor.config.graph_partition and isinstance(
+            node.target, torch._ops.OpOverload
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by spliting on this cudagraph_unsafe
