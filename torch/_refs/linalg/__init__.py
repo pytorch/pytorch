@@ -106,26 +106,21 @@ def _check_vector_norm_args(
     
     if not(ord < 0.0 or ord == float("inf")):
         return 
-
-    # No need to do the checks below if we can identify at compile time that
-    # x.numel() != 0.
-    # x.numel() != 0 is repeated in the checks on purpose to handle the situation
-    # where x.numel() == 0 is data dependent. In such case it will be checked at runtime.
-    if guard_or_true(x.numel() == 0):
-        torch._check(
-            sym_or(x.numel() != 0, not isinstance(dim, int) and dim is not None and len(dim) != 0),
-            "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-            "because the operation does not have an identity",
-        )
-        shape = x.shape
-        if dim is not None and not isinstance(dim, int):
-            for d in dim:
-                torch._check(
-                    sym_or(x.numel() != 0, shape[d] != 0),
-                    "linalg.vector_norm cannot compute the {ord} norm on the "
-                    f"dimension {d} because this dimension is empty and the "
-                    "operation does not have an identity",
-                )
+    
+    torch._check(
+        sym_or(x.numel() != 0, not isinstance(dim, int) and dim is not None and len(dim) != 0),
+        "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        "because the operation does not have an identity",
+    )
+    shape = x.shape
+    if dim is not None and not isinstance(dim, int):
+        for d in dim:
+            torch._check(
+                sym_or(x.numel() != 0, shape[d] != 0),
+                "linalg.vector_norm cannot compute the {ord} norm on the "
+                f"dimension {d} because this dimension is empty and the "
+                "operation does not have an identity",
+            )
         
 
 @register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
@@ -144,7 +139,7 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    _check_vector_norm_args(x, order, dim)
+    _check_vector_norm_args(x, ord, dim)
     
     _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
