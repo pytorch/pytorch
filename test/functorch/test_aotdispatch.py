@@ -4315,7 +4315,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4334,7 +4334,7 @@ def forward(self, arg0_1):
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [cos_1]);  gt = true_graph_0 = false_graph_0 = cos_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (cos_1,));  gt = true_graph_0 = false_graph_0 = cos_1 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -4391,7 +4391,7 @@ def forward(self, arg0_1, arg1_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1, arg1_1));  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4510,7 +4510,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4945,7 +4945,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
