@@ -456,7 +456,7 @@ def forward(self, x_1, output_1):
                 self.assertIn("output_handles[0] = ", code)
                 self.assertIn("output_handles[1] = ", code)
             else:
-                self.assertIn("return (buf0, s0, )", code)
+                self.assertIn("return (buf0, s92, )", code)
         else:
             self.assertIn(
                 "output_handles[0] = "

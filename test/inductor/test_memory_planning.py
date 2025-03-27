@@ -95,7 +95,7 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_2[] = {24L + align(12L*s0), };"
+            "int64_t int_array_2[] = {24L + align(12L*s77), };"
         ).check_next("int64_t int_array_3[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
@@ -103,7 +103,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "RAIIAtenTensorHandle pool1(pool1_handle);"
         ).check_next(
-            "int64_t int_array_4[] = {s0, 3L};"
+            "int64_t int_array_4[] = {s77, 3L};"
         ).check_next(
             "int64_t int_array_5[] = {3L, 1L};"
         ).check_next(
