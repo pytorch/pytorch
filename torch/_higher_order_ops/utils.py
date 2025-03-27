@@ -86,7 +86,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 def _maybe_compile_and_run_fn(fn, *args):
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_dynamo_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
