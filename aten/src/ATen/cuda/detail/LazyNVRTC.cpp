@@ -158,6 +158,8 @@ NVRTC_STUB3(nvrtcGetLoweredName, nvrtcProgram, const char *, const char **)
 
 CUDA_STUB2(cuModuleLoad, CUmodule*, const char*)
 CUDA_STUB2(cuModuleLoadData, CUmodule *, const void *)
+CUDA_STUB2(cuFuncSetCacheConfig, CUfunction, CUfunc_cache_enum)
+CUDA_STUB3(cuDeviceGetAttribute, int*, CUdevice_attribute_enum, CUdevice)
 CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *)
 CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t)
 CUDA_STUB2(cuGetErrorString, CUresult, const char **)
