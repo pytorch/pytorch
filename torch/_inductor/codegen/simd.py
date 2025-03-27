@@ -1729,10 +1729,11 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 # score by number of elements
-                score = V.graph.sizevars.size_hint(
+                score = V.graph.sizevars.atomically_apply_size_hint(
                     sympy_product(
                         size for size, stride in zip(ranges, strides) if stride != 0
-                    )
+                    ),
+                    fallback=config.unbacked_symint_fallback,
                 )
                 if dep.name in write_names:
                     # ngimel said contiguous writes is more important than reads
@@ -1743,8 +1744,10 @@ class SIMDScheduling(BaseScheduling):
                     score *= 2
 
                 if (
-                    V.graph.sizevars.size_hint(
-                        score - sympy_product(itertools.chain(ranges, reduction_ranges))
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        score
+                        - sympy_product(itertools.chain(ranges, reduction_ranges)),
+                        fallback=config.unbacked_symint_fallback,
                     )
                     >= 0
                 ):
@@ -1769,7 +1772,6 @@ class SIMDScheduling(BaseScheduling):
             return []
 
         # Tile either pointwise or reduction dims.
-        pointwise_ranges, reduction_ranges = node.get_ranges()
         partial_tilings = tile_ranges(
             is_pointwise,
             pointwise_ranges if is_pointwise else reduction_ranges,
@@ -2008,20 +2010,36 @@ class SIMDScheduling(BaseScheduling):
             # of stragglers which is annoying to generate code for.
             #
             # NB: More than three max tiles is not enabled by default.
-
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                if (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    == 0
+                ):
                     return None
-                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                if (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    < 0
+                ):
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert V.graph.sizevars.size_hint(a1 - b1) > 0
-                if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
+                assert (
+                    V.graph.sizevars.size_hint(
+                        a1 - b1, fallback=config.unbacked_symint_fallback
+                    )
+                    > 0
+                )
+                if not V.graph.sizevars.size_hint(
+                    a1 % b1 == 0, fallback=config.unbacked_symint_fallback
+                ):
                     return None
 
                 new_tiling = {
@@ -2116,8 +2134,8 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s)
-        return s >= 32 and (s % 32 == 0)
+        s = V.graph.sizevars.size_hint(s, fallback=config.unbacked_symint_fallback)
+        return s >= 32 and s % 32 == 0
 
 
 class CantSplit(Exception):
