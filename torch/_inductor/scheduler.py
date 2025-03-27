@@ -4317,7 +4317,11 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device is not None and device.type != "meta" and self.get_backend(device).ready_to_flush():
+                if (
+                    device is not None
+                    and device.type != "meta"
+                    and self.get_backend(device).ready_to_flush()
+                ):
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):
