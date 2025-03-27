@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 
+import itertools
 import os
 from unittest import skipIf
 
@@ -860,22 +861,26 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(4)
-    @parametrize("dtype", [torch.float, torch.bfloat16])
-    @parametrize("align_bytes", [4, 8, 16])
-    @parametrize("size_bytes", [4, 8192, 8196])
-    def test_one_shot_all_reduce(
-        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
-    ) -> None:
+    def test_one_shot_all_reduce(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        inp = symm_mem.empty(
-            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
-        ).normal_()
-        symm_mem.rendezvous(inp, group=group_name)
-
-        res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
-        self._verify_all_reduce_result(inp, res)
+        for dtype, size_bytes, align_bytes, copy in itertools.product(
+            [torch.float, torch.bfloat16], [4, 8192, 8196], [4, 8, 16], [True, False]
+        ):
+            inp = symm_mem.empty(
+                size_bytes // dtype.itemsize, dtype=dtype, device=self.device
+            )
+            symm_mem.rendezvous(inp, group=group_name)
+            if not copy:
+                inp.normal_()
+                res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+            if copy:
+                local_inp = torch.randn_like(inp)
+                res = torch.ops.symm_mem.one_shot_all_reduce_copy(
+                    inp, local_inp, "sum", group_name
+                )
+            self._verify_all_reduce_result(local_inp if copy else inp, res)
 
         dist.destroy_process_group()
 
