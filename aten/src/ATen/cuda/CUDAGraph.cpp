@@ -1,3 +1,4 @@
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
@@ -104,6 +105,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
 
+  // we need a way to check that a given allocation is being done within the
+  at::cuda::CachingHostAllocator_beginAllocateToPool(mempool_id_, [this](CUDAStream stream) {
+      cudaStreamCaptureStatus status{};
+      CaptureId_t stream_capture_id = 0;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  });
+
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
@@ -124,6 +133,7 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::cuda::CachingHostAllocator_endAllocateToPool(mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
@@ -256,6 +266,7 @@ void CUDAGraph::reset() {
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    at::cuda::CachingHostAllocator_releasePool(mempool_id_);
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
