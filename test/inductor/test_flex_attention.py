@@ -3770,12 +3770,9 @@ class GraphModule(torch.nn.Module):
 
                 return output
 
-        # Create a FlexAttention module
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
             "cuda", dtype=torch.bfloat16
         )
-
-        # Create input for the module
         x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
 
         # Run without compilation
@@ -3791,7 +3788,6 @@ class GraphModule(torch.nn.Module):
         output_compiled = compiled_module(x)
         grad_output = torch.ones_like(output_module)
 
-        # Compute gradients using torch.autograd.grad
         grad_module = torch.autograd.grad(
             outputs=output_module, inputs=x, grad_outputs=grad_output, retain_graph=True
         )[0]
@@ -3800,7 +3796,6 @@ class GraphModule(torch.nn.Module):
             outputs=output_compiled, inputs=x, grad_outputs=grad_output
         )[0]
 
-        # Verify gradients are similar
         torch.testing.assert_close(grad_module, grad_compiled, rtol=1e-2, atol=1e-2)
 
     @supported_platform
