@@ -609,7 +609,6 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     def test_meta_dynamic_shapes(self):
-
         def foobar(x):
             return x * 2
 
