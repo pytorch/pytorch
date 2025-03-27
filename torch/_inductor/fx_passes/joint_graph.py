@@ -13,7 +13,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import (
-    _guard_sizes_oblivious,
+    guard_size_oblivious,
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -28,12 +28,14 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_lowering_pattern,
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
 
 
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -555,6 +557,16 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         count += 1
 
     if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.AutoChunker.enable:
+        from .auto_chunker import AutoChunker
+
+        graph = AutoChunker.chunk(graph)
+
+    if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
                 graph, f"pass_pattern_{i}"
@@ -657,6 +669,29 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         node.replace_all_uses_with(repl)
         match.erase_nodes()
 
+def _is_identity_view_sizes(old_sizes, new_sizes):
+    """
+    Return true if view a tensor with size old_sizes to new_sizes does not
+    change anything. Can handle -1 in new_sizes.
+    """
+    num_neg1 = 0
+
+    if len(old_sizes) != len(new_sizes):
+        return False
+
+    for lhs_item, rhs_item in zip(old_sizes, new_sizes):
+        if guard_size_oblivious(lhs_item == rhs_item):
+            continue
+
+        if not guard_size_oblivious(rhs_item == -1):
+            return False
+
+        num_neg1 += 1
+
+        if num_neg1 > 1:
+            return False
+    return True
+
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
@@ -666,7 +701,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if _guard_sizes_oblivious(size, arg_size):
+    if _is_identity_view_sizes(arg_size, size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -677,7 +712,7 @@ def pointless_view(match: Match, arg, size):
         CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
         KeywordArg("size2"),
     ),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
     """
@@ -685,7 +720,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     """
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
-    if _guard_sizes_oblivious(arg_size, size2):
+    if _is_identity_view_sizes(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
 
@@ -696,7 +731,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
         KeywordArg("perm2"),
     ),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
