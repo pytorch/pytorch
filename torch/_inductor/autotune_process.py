@@ -638,8 +638,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         module_cache_key: str,
         num_stages: int,
         num_warps: int,
-        num_consumer_groups: int = 0,
-        num_buffers_warp_spec: int = 0,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
         waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
         kpack: int = 0,  # ROCm specific gemm paramete
@@ -650,8 +648,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.module_cache_key = module_cache_key
         self.num_stages = num_stages
         self.num_warps = num_warps
-        self.num_consumer_groups = num_consumer_groups
-        self.num_buffers_warp_spec = num_buffers_warp_spec
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
         self.waves_per_eu = waves_per_eu
         self.kpack = kpack

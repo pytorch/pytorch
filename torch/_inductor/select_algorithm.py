@@ -293,8 +293,6 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        num_consumer_groups=0,
-        num_buffers_warp_spec=0,
         use_jit=False,
         prefix_args=0,
         suffix_args=0,
@@ -318,8 +316,6 @@ class TritonTemplateKernel(TritonKernel):
         self.use_jit = use_jit
         self.num_stages = num_stages
         self.num_warps = num_warps
-        self.num_consumer_groups = num_consumer_groups
-        self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
         self.call_sizes = call_sizes
@@ -461,24 +457,12 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
-
-        template_args = f"""
-            num_stages={self.num_stages},
-            num_warps={self.num_warps},
-            triton_meta={triton_meta!r},
-            inductor_meta={inductor_meta!r},
-        """
-
-        # Conditionally add arguments based on iis_fbcode()
-        if config.is_fbcode():
-            template_args += f"""
-            num_consumer_groups={self.num_consumer_groups},
-            num_buffers_warp_spec={self.num_buffers_warp_spec},
-        """
-
         return f"""
             @triton_heuristics.template(
-                {template_args}
+                num_stages={self.num_stages},
+                num_warps={self.num_warps},
+                triton_meta={triton_meta!r},
+                inductor_meta={inductor_meta!r},
             )
             @triton.jit
         """
@@ -1086,8 +1070,6 @@ class TritonTemplate(KernelTemplate):
         layout,
         num_stages,
         num_warps,
-        num_consumer_groups=0,
-        num_buffers_warp_spec=0,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -1153,11 +1135,6 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
         }
-        if config.is_fbcode():
-            kernel_options.update({
-            "num_consumer_groups": num_consumer_groups,
-            "num_buffers_warp_spec": num_buffers_warp_spec,
-            })
 
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
@@ -1179,23 +1156,19 @@ class TritonTemplate(KernelTemplate):
                 return None
             if self.debug:
                 print("Generated Code:\n", code)
-            extra_parts = [
-                f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
-            ]
-
-            extra_parts.extend([
-                f"num_stages={num_stages}",
-                f"num_warps={num_warps}",
-            ])
-
-            # Conditionally add arguments based on inductor_config.is_fbcode()
-            if config.is_fbcode():
-                extra_parts.extend([
-                    f"num_consumer_groups={num_consumer_groups}",
-                    f"num_buffers_warp_spec={num_buffers_warp_spec}",
-                ])
-
-            extra = "-".join(extra_parts) + "-"
+            extra = (
+                "-".join(
+                    [
+                        *[
+                            f"{kwarg}={repr(kwargs[kwarg])}"
+                            for kwarg in sorted(kwargs.keys())
+                        ],
+                        f"num_stages={num_stages}",
+                        f"num_warps={num_warps}",
+                    ]
+                )
+                + "-"
+            )
             mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
@@ -1251,8 +1224,6 @@ class TritonTemplate(KernelTemplate):
             extra_args=[*extra_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
-            num_consumer_groups=num_consumer_groups,
-            num_buffers_warp_spec=num_buffers_warp_spec,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
