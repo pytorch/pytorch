@@ -98,6 +98,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_extern_kernel_out(*args, **kwargs)
 
+    def generate_fallback_kernel(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_fallback_kernel(*args, **kwargs)
+
     def _generate_kernel_call_helper(
         self,
         code: IndentedBuffer,
