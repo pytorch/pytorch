@@ -673,6 +673,49 @@ if HAS_CUDA:
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
         # Currently fx graph cache is turned off for specialize_float=False
         @torch._dynamo.config.patch("specialize_float", True)
+        @requires_multigpu()
+        def test_cached_boxed_forward_device_index(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            # Run with device index 1 so that we can see
+            # on a cache hit we stay on device index 1
+            with torch.cuda._DeviceGuard(1):
+                torch.cuda.set_device(1)
+
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                # Compile the backward and save to cache
+                back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                out.backward(back_inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+                # Reset dynamo and rerun a few times
+                for i in range(3):
+                    torch._dynamo.reset()
+
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    # Should cache hit each time; boxed_forward_device_index should still be set properly to 1
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_hit"], i + 1
+                    )
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # After everything, we should have cudagraphs on device 1
+            self.assertTrue(self.get_manager(device_index=0) is None)
+            self.assertFalse(self.get_manager(device_index=1) is None)
+
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_backward_gets_cached_cudagraphs(self):
             # We pass cpu tensors to foo and save that into the cache
             # On a subsequent run in a new process, cudagraphs should be
@@ -2709,6 +2752,75 @@ if HAS_CUDA:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_dynamic_shapes(self):
+            def foo(x):
+                return x + 1
+
+            compiled_foo = torch.compile(foo, mode="reduce-overhead", fullgraph=True)
+
+            for input_shape in range(1, 4):
+                for _ in range(3):
+                    compiled_foo(torch.randn(input_shape, device="cuda"))
+
+            # 3 cudagraphs for 3 input shapes
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_op_and_dynamic_shapes(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device="cuda"), torch.randn(3, 3, device="cuda")
+            for _ in range(3):
+                compiled_out = f_compiled(x, y)
+                self.assertEqual(compiled_out, f(x, y))
+
+            x, y = torch.ones(4, 4, device="cuda"), torch.randn(4, 4, device="cuda")
+            for _ in range(3):
+                compiled_out = f_compiled(x, y)
+                self.assertEqual(compiled_out, f(x, y))
+
+            # 4 cudagraphs, due to (2 dynamic shapes) x (2 graph partitions)
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_tensor_symints(self):
+            def f(x, y):
+                return x + 1, y + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape_x, shape_y):
+                x = torch.randn(shape_x, device="cuda")
+                y = torch.randn(shape_y, device="cpu")
+                for _ in range(3):
+                    compiled_f(x, y)
+
+            # static shape. record a NEW cudagraph
+            run(shape_x=(2, 3), shape_y=(4, 4))
+
+            # shape_y becomes dynamic shape leading to a new dynamo graph.
+            # This new dynamo graph forces a NEW cudagraph although tensor y is on cpu
+            run(shape_x=(2, 3), shape_y=(5, 6))
+
+            # tensor y is on cpu so NO new cudagraph is recorded
+            run(shape_x=(2, 3), shape_y=(7, 8))
+
+            # shape_x becomes dynamic shape, leading to a new dynamo graph
+            # this new dynamo graph forces a NEW cudagraph
+            run(shape_x=(3, 4), shape_y=(4, 4))
+
+            # tensor y is on cpu so NO new cudagraph is recorded
+            run(shape_x=(3, 4), shape_y=(10, 11))
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

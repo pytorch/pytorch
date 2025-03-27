@@ -2009,6 +2009,8 @@
     "constrain_unify",
     "definitely_false",
     "definitely_true",
+    "guard_or_true",
+    "guard_or_false",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
