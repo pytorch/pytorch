@@ -13016,6 +13016,18 @@ def forward(self, q, k, v):
         ep = export(Foov2(), (xs,))
         ep.module()(xs)
 
+        class Foov3(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                a, b = xsl
+                x = torch.zeros(a)
+                return x.reshape(b)
+
+        xs = torch.tensor([4, 4])
+        ep = export(Foov3(), (xs,))
+        ep.module()(xs)
+        ep.module()(torch.tensor([5, 5]))
+
     def test_none_input_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
