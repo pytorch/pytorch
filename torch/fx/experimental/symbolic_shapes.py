@@ -121,6 +121,8 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
+    "guard_or_false",
+    "guard_or_true",
     "has_symbolic_sizes_strides",
     "create_contiguous",
     "ShapeEnv",
@@ -1178,6 +1180,38 @@ def compute_unbacked_bindings(
                     shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
 
     return symbol_to_path
+
+
+# The following two functions are common utilities used while defining unbacked semantics
+# of various framework code. Those would be used in situations you prefer to guard and know
+# the result of the expression over not guarding, but in case you hit a data dependent error
+# you are ok with just returning true or false.
+# Some reasons you might be ok with returning true/false instead could be:
+#  (1) It's an optimization/additional check I do not want to fail for not performing it.
+#  (2) I am willing to deviate from the normal semantics when I have unbacked for the
+#      benefit of not failing.
+def guard_or_false(a: BoolLikeType) -> bool:
+    """
+    Try to gaurd a, if data dependent error encountered just return false.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return False
+    return bool(a)
+
+
+def guard_or_true(a: BoolLikeType) -> bool:
+    """
+    Try to gaurd a, if data dependent error encountered just return true.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return True
+    return bool(a)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -7105,7 +7139,7 @@ class ShapeEnv:
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
-                log.warning("runtime_asserts_frozen but then got %s", expr)
+                log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):

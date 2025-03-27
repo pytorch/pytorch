@@ -13,14 +13,15 @@ from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
     _set_compilation_env,
     clone_outputs_aliasing_inputs,
+    FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
@@ -39,12 +40,18 @@ invoke_subgraph_counter = 0
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("invoke_subgraph")
+        # This is used by the fake tensor cache key validator to extract the
+        # subgraph and iterate over the nodes to find if all nodes are fake
+        # tensor cacheable.
+        self.subgraph_indexes = [
+            0,
+        ]
 
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: GraphModule,
+        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
         identifier: Optional[str],
         operands: Union[
             list[Union[torch.Tensor, int, torch.SymInt]],
@@ -308,16 +315,15 @@ def _(ctx, subgraph, identifier, operands):
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
-        functionalized_subgraph = ctx.functionalize(subgraph)
+        functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
 
 
-@invoke_subgraph.py_impl(FakeTensorMode)
-def _(mode, subgraph, identifier, operands):
-    # TODO(anijain2305) - Implement fake tensor caching.
-    with mode, mode.shape_env.ignore_fresh_unbacked_symbols():
-        return subgraph(*operands)
+# Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
+@register_fake(invoke_subgraph)
+def _(subgraph, identifier, operands):
+    return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
