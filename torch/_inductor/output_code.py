@@ -32,7 +32,6 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
-import torch._inductor.async_compile
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -66,7 +65,7 @@ if TYPE_CHECKING:
     from torch._library.fake_class_registry import FakeScriptObject
 
     from .compile_fx import _CompileFxKwargs
-    from .triton_bundler import TritonBundle
+    from .triton_bundler import TritonKernelArtifacts
 
 log = logging.getLogger(__name__)
 
@@ -421,7 +420,7 @@ class CompiledFxGraph(OutputCode):
     inputs_to_check: Sequence[int]
 
     _boxed_call: Optional[bool] = None
-    _triton_bundle: Optional[TritonBundle] = None
+    _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
