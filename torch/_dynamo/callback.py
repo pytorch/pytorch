@@ -123,9 +123,9 @@ class CompilationCallbackHandler:
                 yield
             finally:
                 with self.__pending_callbacks_counter_lock:
-                    assert (
-                        self.__pending_callbacks_counter > 0
-                    ), "Pending callbacks counter cannot become negative."
+                    assert self.__pending_callbacks_counter > 0, (
+                        "Pending callbacks counter cannot become negative."
+                    )
                     if self.__pending_callbacks_counter == 1:
                         self.run_end_callbacks()
                     self.__pending_callbacks_counter -= 1

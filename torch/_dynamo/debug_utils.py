@@ -84,7 +84,7 @@ class BuckTargetWriter:
         self.target = self.py_file.replace(".py", "")
 
         # Get main_module path from fbcode
-        self.path = f'{self.subdir.replace("/", ".")}.{self.target}'
+        self.path = f"{self.subdir.replace('/', '.')}.{self.target}"
         self.path = self.path[self.path.find("fbcode.") :]
         self.path = self.path[7:]
 
