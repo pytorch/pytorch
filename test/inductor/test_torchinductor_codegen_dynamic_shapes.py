@@ -380,7 +380,7 @@ test_failures = {
     **dynamic_shapes_test_failures,
 }
 
-if TEST_WITH_ROCM:
+if not TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
