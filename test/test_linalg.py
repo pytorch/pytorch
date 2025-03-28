@@ -4732,7 +4732,7 @@ class TestLinalg(TestCase):
 
         def has_any_dim_size_one(tensor: torch.Tensor):
             """Check if any dimension of a PyTorch tensor has size 1."""
-            return torch.any(torch.eq(torch.tensor(tensor.shape), 1)).item()
+            return any(dim == 1 for dim in tensor.shape)
 
         def is_mm_compatible(A, B):
             """Check if two matrices A and B are compatible for torch.mm."""
