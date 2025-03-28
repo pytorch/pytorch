@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C as _C
@@ -1676,8 +1676,8 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         stream: Optional[Any] = None,
-        max_version: Optional[Tuple[int, int]] = None,
-        dl_device: Optional[Tuple[enum.IntEnum, int]] = None,
+        max_version: Optional[tuple[int, int]] = None,
+        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
         copy: Optional[bool] = None,
     ):
         """
@@ -1740,9 +1740,9 @@ class Tensor(torch._C.TensorBase):
                     if is_cuda and stream == 2:
                         raise BufferError("per-thread default stream is not supported.")
 
-                    assert is_cuda or (
-                        is_rocm and stream not in (1, 2)
-                    ), f"unsupported stream {stream} for ROCm."
+                    assert is_cuda or (is_rocm and stream not in (1, 2)), (
+                        f"unsupported stream {stream} for ROCm."
+                    )
 
                     stream = torch.cuda.ExternalStream(stream)
 

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 import enum
@@ -106,7 +106,7 @@ def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None
 
     """
     if hasattr(ext_tensor, '__dlpack__'):
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
 
         kwargs["max_version"] = (1, 0)
         kwargs["copy"] = copy
