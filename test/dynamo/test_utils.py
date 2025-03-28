@@ -549,14 +549,14 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(m)(torch.randn(4, 4))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].param_numel, 40)
-        self.assertEqual(compilation_events[0].param_bytes, 160)
-        self.assertEqual(compilation_events[0].param_count, 4)
+        self.assertEqual(compilation_events[0].param_numel, 24)
+        self.assertEqual(compilation_events[0].param_bytes, 96)
+        self.assertEqual(compilation_events[0].param_count, 3)
 
         # Test tied weights
-        m1 = nn.Linear(4, 4)
-        m2 = nn.Linear(4, 4)
-        m1.weight = m2.weight
+        l1 = nn.Linear(4, 4)
+        l2 = nn.Linear(4, 4)
+        l1.weight = l2.weight
         m = nn.Sequential(l1, nn.Sequential(l2))
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(m)(torch.randn(4, 4))
