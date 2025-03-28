@@ -957,11 +957,12 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
                 for (int vec_num = 0; vec_num < 4; vec_num++) {
                     __m512* tmp =
                         reinterpret_cast<__m512*>(
-                            A_block_{{block_m}} + 16 * vec_num + 64 * A_row);
-                    *tmp = _mm512_castsi512_ps(
-                        _mm512_slli_epi32(
-                            _mm512_cvtepu16_epi32(
-                                *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda)), 16));
+                            A_block_{{block_m}} + 16 * vec_num + {{block_k}} * A_row
+                        );
+                    at::vec::cvtbf16_fp32(
+                        *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
+                        *tmp
+                    );
                 }
             }
             {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
@@ -983,11 +984,14 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
                 float A_block_{{b}}[A_block_{{b}}_size];
                 for (int A_row = 0; A_row < {{b}}; A_row++) {
                     for (int vec_num = 0; vec_num < 4; vec_num++) {
-                        __m512* tmp = reinterpret_cast<__m512*>(A_block_{{b}} + 16 * vec_num + 64 * A_row);
-                        *tmp = _mm512_castsi512_ps(
-                            _mm512_slli_epi32(
-                                _mm512_cvtepu16_epi32(
-                                    *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda)), 16));
+                        __m512* tmp =
+                            reinterpret_cast<__m512*>(
+                                A_block_{{b}} + 16 * vec_num + {{block_k}} * A_row
+                            );
+                        at::vec::cvtbf16_fp32(
+                            *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
+                            *tmp
+                        );
                     }
                 }
                 {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
@@ -1041,7 +1045,7 @@ inline void {{kernel_name}}_kernel(
             va = _mm512_set1_ps(A[row * lda + k]);
         }
         if constexpr (row == 0) {
-            // Convert VLEN int8 elements to int32, then fp32
+            // Convert VLEN int8 elements to int16, then fp16, and then apply scale
             auto int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN));
             vb[col] =  _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(int8_vector));
             if C10_LIKELY(prefetch) {
