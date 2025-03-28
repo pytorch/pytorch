@@ -405,6 +405,7 @@ def mps_ops_modifier(ops):
         'constant_pad_nd',
         'cos',
         'cosh',
+        'cov',
         'count_nonzero',
         'diff',
         'div',
