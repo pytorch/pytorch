@@ -2265,7 +2265,7 @@ class PythonWrapperCodegen(CodeGen):
                 # first we generate the underlying buffer
                 buf_name = raw_arg.tensor.get_name()
                 buf = self.args_to_buffers[arg]
-            elif arg in self.args_to_buffers:
+            elif self.args_to_buffers.get(arg):
                 buf_name = arg
                 buf = self.args_to_buffers[arg]
             else:
