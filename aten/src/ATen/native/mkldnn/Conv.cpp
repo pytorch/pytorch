@@ -450,6 +450,7 @@ Tensor mkldnn_convolution_pointwise_binary(
       po.append_eltwise(unary_alg, 0.f, 0.f);
     }
     op_attr.set_post_ops(po);
+    auto aprop_kind = ideep::prop_kind::forward_inference;
 
     if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -470,7 +471,9 @@ Tensor mkldnn_convolution_pointwise_binary(
           padding_expanded,
           groups,
           /* is_channels_last */ true,
-          op_attr);
+          op_attr,
+          ideep::algorithm::convolution_direct,
+          aprop_kind);
     } else {
       ideep::convolution_forward::compute_binary(
           x,
@@ -484,7 +487,9 @@ Tensor mkldnn_convolution_pointwise_binary(
           padding_expanded,
           groups,
           /* is_channels_last */ true,
-          op_attr);
+          op_attr,
+          ideep::algorithm::convolution_direct,
+          aprop_kind);
     }
     return output;
   } else {
@@ -587,6 +592,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     } else {
       op_attr = ideep::attr_t::fuse_sum();
     }
+    auto aprop_kind = ideep::prop_kind::forward_inference;
     if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
         input_t.scalar_type() == at::kFloat) {
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -602,7 +608,8 @@ Tensor& mkldnn_convolution_pointwise_binary_(
         padding_expanded,
         groups,
         true,
-        op_attr);
+        op_attr,
+        aprop_kind);
   } else {
     // Fallback case, if inputs are not channels last or have different dtype,
     // OneDNN fusion may have performance regression.

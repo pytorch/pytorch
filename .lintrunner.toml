@@ -398,6 +398,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '**/*.png',
     '**/*.gz',
+    '**/*.patch',
 ]
 command = [
     'python3',
@@ -452,7 +453,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
-    '.ci/magma/package_files/*.patch',
+    '**/*.patch',
 ]
 command = [
     'python3',
