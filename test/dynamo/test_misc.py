@@ -12173,6 +12173,20 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
         opt_fn(x, y).sum().backward()
         self.assertTrue(y.grad is not None)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_expand_unbacked(self):
+        def fn(x, repeats):
+            u0 = repeats.item()
+            torch._check_is_size(u0)
+            x_unbacked = x.expand(u0, u0)
+            return x_unbacked
+
+        example_inputs = (
+            torch.rand(3, 3),
+            torch.tensor(3),
+        )
+        torch.compile(fn, fullgraph=True)(*example_inputs)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
