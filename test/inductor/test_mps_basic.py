@@ -34,6 +34,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # This tests basic MPS compile functionality
 
 
+@instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
@@ -97,6 +98,10 @@ class MPSBasicTests(TestCase):
         "bessel_y1",
         "modified_bessel_i0",
         "modified_bessel_i1",
+        "modified_bessel_k0",
+        "modified_bessel_k1",
+        "scaled_modified_bessel_k0",
+        "scaled_modified_bessel_k1",
         "entr",
     ]
 
@@ -118,16 +123,20 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
-    def test_pointwise_zeta(self):
+    @parametrize(
+        "op_name",
+        [
+            "zeta",
+            "xlog1py",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+        ],
+    )
+    def test_pointwise_binary_op(self, op_name):
         self.common(
-            torch.special.zeta,
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
-    def test_pointwise_xlog1py(self):
-        self.common(
-            torch.special.xlog1py,
+            lambda x, y: getattr(torch.special, op_name)(x, y),
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
@@ -190,7 +199,8 @@ for test_name in [
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
-    "test_low_memory_max_pool",
+    "test_low_memory_max_pool_dilation_1",
+    "test_low_memory_max_pool_dilation_2",
     "test_max_min",
     "test_max_pool2d2",
     "test_multilayer_prime_size",
@@ -225,8 +235,6 @@ for test_name in [
     "test_zero_dim_reductions",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
-
-instantiate_parametrized_tests(MPSBasicTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

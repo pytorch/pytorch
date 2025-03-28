@@ -3253,6 +3253,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   return endCoalescing(OpType::COALESCED);
 }
 
+void ProcessGroupNCCL::startTimeEstimate() {
+  groupStart();
+}
+
+float ProcessGroupNCCL::endTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
+  C10D_NCCL_CHECK(ncclGroupSimulateEnd(&simInfo), std::nullopt);
+  return simInfo.estimatedTime;
+#else
+  TORCH_CHECK(
+      false,
+      c10::str(
+          "The current nccl version does not support nccl comm time estimation. "));
+#endif
+}
+
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,

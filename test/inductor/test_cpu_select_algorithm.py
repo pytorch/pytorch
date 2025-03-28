@@ -265,6 +265,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -1377,29 +1378,20 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         "batch_size",
         (
             1,
+            17,
             32,
         ),
     )
     @parametrize(
-        "in_features",
+        "mid_dim",
         (
-            128,
-            144,
-            4096,
+            1,
+            8,
         ),
     )
-    @parametrize(
-        "out_features",
-        (
-            64,
-            65,
-            4096,
-        ),
-    )
-    def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
-        # x will be reshaped from 3d to 2d
-        second_dim_size = 1
-
+    @parametrize("in_features", (128, 144, 1024))
+    @parametrize("out_features", (64, 65, 1024))
+    def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
                 w.to(torch.float), torch.int8
@@ -1431,13 +1423,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, second_dim_size, in_features), dtype=dtype)
+        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype)
         w = torch.rand((out_features, in_features), dtype=dtype)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        if batch_size * second_dim_size >= 16:
+        if batch_size * mid_dim >= 16:
             vec_amx = VecAMX()
             self._check_amx_counter(vec_amx)
 
@@ -1830,7 +1822,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2066,7 +2057,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2441,7 +2431,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(x, w)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x, w),
             )
@@ -2498,7 +2487,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 x,
             )
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x,),
             )

@@ -466,6 +466,33 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
+    ("_unsafe_masked_index", f16): {
+        "reference_in_float": True,
+        "atol": 3e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.interpolate.linear", f16): {"reference_in_float": True},
+    ("nn.functional.prelu", f16): {
+        "reference_in_float": True,
+        "atol": 1e-3,
+        "rtol": 4e-3,
+    },
+    ("addmm", f16): {"reference_in_float": True},
+    ("logaddexp", f16): {"reference_in_float": True},
+    ("std_mean", f16): {"reference_in_float": True},
+    ("hypot", f16): {"reference_in_float": True, "atol": 3e-4, "rtol": 2e-3},
+    ("cummin", f16): {"reference_in_float": True, "atol": 5e-5, "rtol": 2e-3},
+    ("unfold_copy", f16): {"reference_in_float": True, "atol": 2e-5, "rtol": 1e-2},
+    ("nn.functional.upsample_bilinear", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.embedding_bag", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 1e-2,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -914,6 +941,7 @@ class TestInductorOpInfo(TestCase):
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
