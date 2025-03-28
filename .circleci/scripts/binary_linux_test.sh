@@ -90,8 +90,17 @@ fi
 /pytorch/.ci/pytorch/check_binary.sh
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
-  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
-  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+
+  torch_pkg_size=$(wc -c < "\$pkg")
+  # todo: implement check for large binaries
+  # if the package is larger than 1.5GB, we disable the pypi check.
+  # this package contains all libraries packaged in torch libs folder
+  extra_parameters=""
+  if [[ "\$torch_pkg_size" -gt  1500000000 ]]; then
+    extra_parameters="--pypi-pckg-check disabled"
+  fi
+
+  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled "$extra_parameters"
 fi
 
 # Clean temp files
