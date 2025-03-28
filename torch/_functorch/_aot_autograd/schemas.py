@@ -15,6 +15,7 @@ from typing import Any, Callable, NewType, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.compile_package import _CompilePackage
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
@@ -936,6 +937,7 @@ class AOTConfig:
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
     cache_info: Optional[AOTAutogradCacheInfo] = None
+    package: Optional[_CompilePackage] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

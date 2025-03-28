@@ -308,6 +308,9 @@ class OptimizedModule(torch.nn.Module):
         "_forward",
         "__dict__",
         "named_children_walk",
+        "save_package",
+        "load_package",
+        "reset_package",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
@@ -490,6 +493,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        package=None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -502,6 +506,7 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
+        self._package = package
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -578,6 +583,11 @@ class _TorchDynamoContext:
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
             new_mod.get_compiler_config = get_compiler_config
+            if self._package is not None:
+                self._package.set_fn(new_mod)
+                new_mod.save_package = self._package.save  # type: ignore[attr-defined]
+                new_mod.load_package = self._package.load  # type: ignore[attr-defined]
+                new_mod.reset_package = self._package.reset  # type: ignore[attr-defined]
 
             return new_mod
 
@@ -694,6 +704,12 @@ class _TorchDynamoContext:
         assert not hasattr(_fn, "get_compiler_config")
         _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
+        if self._package is not None:
+            self._package.set_fn(fn)
+            _fn.save_package = self._package.save  # type: ignore[attr-defined]
+            _fn.load_package = self._package.load  # type: ignore[attr-defined]
+            _fn.reset_package = self._package.reset  # type: ignore[attr-defined]
+
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
@@ -749,6 +765,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        package=None,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -762,6 +779,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            package=package,
         )
 
         if config.compiled_autograd:
@@ -873,6 +891,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    package=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -882,6 +901,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -969,6 +989,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    package=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1022,7 +1043,14 @@ def _optimize(
             dynamic=dynamic,
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
+            package=package,
         )
+
+    if package is not None:
+        raise RuntimeError(
+            "compile package is only supported with torch.compile(fullgraph=True)"
+        )
+
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
@@ -1869,6 +1897,7 @@ def optimize_assert(
     export_constraints=None,
     dynamic=None,
     rebuild_ctx=None,
+    package=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1880,13 +1909,17 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            package=package,
         ),
         hooks,
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
