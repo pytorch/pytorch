@@ -75,6 +75,14 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   cudaDataType type;
   auto compression_factor = 9;
 
+  #ifdef USE_ROCM
+  TORCH_CHECK(
+      isHipSparseLtSupported(sparse_input.device().index()),
+      "hipSparseLt not supported on this device, supported architectures: "
+      "gfx950, gfx940, gfx941, gfx942, gfx1200, gfx1201. "
+      "required ROCM version: 6.4.0 or later.");
+  #endif
+
   switch (sparse_input.scalar_type()) {
     case at::ScalarType::Char:
       type = CUDA_R_8I;
@@ -86,10 +94,12 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
     case at::ScalarType::BFloat16:
       type = CUDA_R_16BF;
       break;
+#ifndef USE_ROCM
     case at::ScalarType::Float:
       type = CUDA_R_32F;
       break;
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+#endif
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       type = CUDA_R_8F_E4M3;
       compression_factor = 10;
@@ -170,6 +180,12 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cusparseComputeType compute_type;
   auto compression_factor = 9;
 
+  TORCH_CHECK(
+      isHipSparseLtSupported(sparse_input.device().index()),
+      "hipSparseLt not supported on this device, supported architectures: "
+      "gfx950, gfx940, gfx941, gfx942, gfx1200, gfx1201. "
+      "required ROCM version: 6.4.0 or later.");
+
   switch (compressed_A.scalar_type()) {
     case at::ScalarType::Char:
       input_type = CUDA_R_8I;
@@ -181,7 +197,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F
 // to CUSPARSE_COMPUTE_32F
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502 || defined(USE_ROCM)
     case at::ScalarType::Half:
       input_type = CUDA_R_16F;
       output_type = CUDA_R_16F;
@@ -194,12 +210,14 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       C_type = CUDA_R_16BF;
       compute_type = CUSPARSE_COMPUTE_32F;
       break;
+#ifndef USE_ROCM
     case at::ScalarType::Float:
       input_type = CUDA_R_32F;
       output_type = CUDA_R_32F;
       C_type = CUDA_R_32F;
       compute_type = CUSPARSE_COMPUTE_32F;
       break;
+#endif
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
     case at::ScalarType::Float8_e4m3fn:
