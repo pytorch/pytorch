@@ -515,7 +515,7 @@ docker build \
 UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
-  docker run --rm "$tmp_tag" $*
+  docker run --rm "$tmp_tag" "$@"
 }
 
 if [[ "$OS" == "ubuntu" ]]; then
@@ -562,4 +562,15 @@ if [ -n "$KATEX" ]; then
     drun katex --version
     exit 1
   fi
+fi
+
+HAS_TRITON=$(drun python -c "import triton" > /dev/null 2>&1 && echo "yes" || echo "no")
+if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
+  if [ "$HAS_TRITON" = "no" ]; then
+    echo "expecting triton to be installed, but it is not"
+    exit 1
+  fi
+elif [ "$HAS_TRITON" = "yes" ]; then
+  echo "expecting triton to not be installed, but it is"
+  exit 1
 fi
