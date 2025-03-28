@@ -38,10 +38,13 @@ from torch.distributed.checkpoint.planner import (
     WriteItemType,
 )
 from torch.distributed.checkpoint.planner_helpers import (
+    _compare_save_plans,
+    _contains_usable_plan,
     _create_default_metadata_only_plan,
     _create_read_items,
     _create_write_items,
     _init_state_dict,
+    _merge_delta_local_plans,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
@@ -72,6 +75,7 @@ class DefaultSavePlanner(SavePlanner):
         flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: Optional[bool] = None,
         dedup_save_to_lowest_rank: bool = False,
+        enable_plan_caching: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
@@ -83,6 +87,8 @@ class DefaultSavePlanner(SavePlanner):
                 "deprecated, and no longer has any effect. Please remove this argument "
                 "from your call."
             )
+        self._cached_plans_key: str = self.__class__.__name__
+        self._enable_plan_caching = enable_plan_caching
 
     def set_up_planner(
         self,
@@ -103,14 +109,32 @@ class DefaultSavePlanner(SavePlanner):
             plan = dataclasses.replace(plan, planner_data=self.mappings)
         self.plan = plan
 
+        if self._enable_plan_caching:
+            # If plans are equal, we can skip sending the plan to the coordinator.
+            if (
+                self._cached_plans_key in SavePlanner._cached_save_plan
+                and _compare_save_plans(
+                    plan, SavePlanner._cached_save_plan[self._cached_plans_key]
+                )
+            ):
+                logger.info(
+                    "No change in the local plan. Skipping sending the plan to the coordinator"
+                )
+                return SavePlan([], usable=False)
+            else:
+                SavePlanner._cached_save_plan[self._cached_plans_key] = plan
+
         return self.plan
 
-    def create_global_plan(
+    def _dedup_save_plans(self, all_plans: list[SavePlan]) -> list[SavePlan]:
+        return dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
+
+    def _create_global_plan(
         self, all_plans: list[SavePlan]
     ) -> tuple[list[SavePlan], Metadata]:
-        all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
+        deduped_plans = self._dedup_save_plans(all_plans)
 
-        global_plan, metadata = create_default_global_save_plan(all_plans)
+        global_plan, metadata = create_default_global_save_plan(deduped_plans)
 
         if self.flatten_state_dict:
             # | does not work for Python 3.8 or older version.
@@ -124,14 +148,107 @@ class DefaultSavePlanner(SavePlanner):
         if not _validate_global_plan(global_plan, metadata):
             raise ValueError("Failed to validate global plan")
 
+        return global_plan, metadata
+
+    def _create_global_plan_with_caching(
+        self, all_plans: list[SavePlan]
+    ) -> tuple[list[SavePlan], list[SavePlan], Metadata]:
+        """
+        Create global plan with caching.
+        Returns a tuple of global_plan_delta, global_plan, metadata.
+        """
+        global_plan_delta: list[SavePlan] = []
+
+        if self._cached_plans_key not in SavePlanner._cached_all_plans:
+            # Case 1: If the plans are not cached, the cache will be hydrated with the
+            # all_plans, global_plans (Deduped), and metadata.
+
+            # Cache the original all_plans
+            SavePlanner._cached_all_plans[self._cached_plans_key] = all_plans
+            global_plan, metadata = self._create_global_plan(all_plans)
+            # Cache the deduped and validated global_plan
+            SavePlanner._cached_global_plan[self._cached_plans_key] = global_plan
+            # Cache the metadata
+            SavePlanner._cached_metadata[self._cached_plans_key] = metadata
+            # If plans are not cached, global_plan delta will be the same as global plan.
+            return global_plan, global_plan, metadata
+
+        # Case 2: Plans are cached
+        if not _contains_usable_plan(all_plans):
+            # Case 2.1: Plans are cached and the local plans have NOT changed (No usable plans).
+            # Global plan delta will be empty plans to avoid the collective overhead.
+            # We can reuse the deduped global plan and metadata from the cache directly.
+            global_plan_delta = [SavePlan([], usable=False)] * len(all_plans)
+            global_plan = SavePlanner._cached_global_plan[self._cached_plans_key]
+            metadata = SavePlanner._cached_metadata[self._cached_plans_key]
+        else:
+            # Case 2.2: Plans are cached but the local plans have changed.
+            # We will merge the changed local plans with the cached local plans.
+            # Updated plans will overwrite the cached plans. New global plan and metadata will be created and cached.
+            # Global plan delta will be created by comparing the new global plan with the cached global plan.
+            # Only the global plan delta (updated ones) will be sent to the coordinator to avoid the collective overhead.
+            merged_plans = _merge_delta_local_plans(
+                SavePlanner._cached_all_plans[self._cached_plans_key], all_plans
+            )
+            # Cache the updated local plans
+            SavePlanner._cached_all_plans[self._cached_plans_key] = merged_plans
+            global_plan, metadata = self._create_global_plan(merged_plans)
+
+            if self._cached_plans_key in self._cached_global_plan:
+                for cached_plan, new_plan in zip(
+                    SavePlanner._cached_global_plan[self._cached_plans_key], global_plan
+                ):
+                    if _compare_save_plans(cached_plan, new_plan):
+                        global_plan_delta.append(SavePlan([], usable=False))
+                    else:
+                        global_plan_delta.append(new_plan)
+
+            # Cache the new global plan and the metadata
+            SavePlanner._cached_global_plan[self._cached_plans_key] = global_plan
+            SavePlanner._cached_metadata[self._cached_plans_key] = metadata
+
+        return global_plan_delta, global_plan, metadata
+
+    def create_global_plan(
+        self, all_plans: list[SavePlan]
+    ) -> tuple[list[SavePlan], Metadata]:
+        global_plan_delta: list[SavePlan] = []
+        if self._enable_plan_caching:
+            # If the plans are cached, we only need to send the global plan delta to be scattered
+            # across ranks. Ranks will use the cached final plans instead.
+            (
+                global_plan_delta,
+                global_plan,
+                metadata,
+            ) = self._create_global_plan_with_caching(all_plans)
+        else:
+            global_plan, metadata = self._create_global_plan(all_plans)
+            # If the caching is not enabled, global delta plan will always be same as the new global plan.
+            global_plan_delta = global_plan
+
         self.global_plan = global_plan
         self.metadata = metadata
 
-        return self.global_plan, self.metadata
+        return global_plan_delta, self.metadata
+
+    def _finish_plan_with_caching(self, new_plan: SavePlan) -> SavePlan:
+        finished_plan: SavePlan = new_plan
+
+        if not new_plan.usable:
+            finished_plan = SavePlanner._cached_final_save_plan[self._cached_plans_key]
+        else:
+            finished_plan = new_plan
+            SavePlanner._cached_final_save_plan[self._cached_plans_key] = new_plan
+        return finished_plan
 
     def finish_plan(self, new_plan: SavePlan) -> SavePlan:
-        self.plan = new_plan
-        return new_plan
+        finished_plan: SavePlan = new_plan
+
+        if self._enable_plan_caching:
+            finished_plan = self._finish_plan_with_caching(new_plan)
+
+        self.plan = finished_plan
+        return self.plan
 
     def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
         object = self.lookup_object(write_item.index)
@@ -458,9 +575,7 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                assert (
-                    item.tensor_data.chunk is not None
-                ), f"""
+                assert item.tensor_data.chunk is not None, f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
                 """

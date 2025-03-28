@@ -1,4 +1,20 @@
 # mypy: allow-untyped-defs
+
+"""Common utilities for testing Dynamo's minifier functionality.
+
+This module provides the base infrastructure for running minification tests in Dynamo.
+It includes:
+- MinifierTestResult: A dataclass for storing and processing minifier test results
+- MinifierTestBase: A base test class with utilities for:
+  - Running tests in isolated environments
+  - Managing temporary directories and configurations
+  - Executing minifier launcher scripts
+  - Running and validating reproduction scripts
+  - Supporting both compile-time and runtime error testing
+
+The minifier helps reduce failing Dynamo compilations to minimal reproductions.
+"""
+
 import dataclasses
 import io
 import logging

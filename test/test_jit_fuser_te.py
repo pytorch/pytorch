@@ -2878,8 +2878,8 @@ class TestNNCOpInfo(TestNNCOpInfoParent):
                     fx_args.append(f"{k} = {repr(v)}")
 
             code = f"""
-def f({', '.join(param_names)}):
-    return op.op({', '.join(fx_args)})"""
+def f({", ".join(param_names)}):
+    return op.op({", ".join(fx_args)})"""
             g = {"torch": torch, "inf": math.inf, "op": op}
             exec(code, g)
             f = g["f"]

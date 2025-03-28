@@ -356,7 +356,7 @@ class DataLoader(Generic[_T_co]):
             self._dataset_kind = _DatasetKind.Map
 
         if sampler is not None and shuffle:
-            raise ValueError("sampler option is mutually exclusive with " "shuffle")
+            raise ValueError("sampler option is mutually exclusive with shuffle")
 
         if batch_sampler is not None:
             # auto_collation with custom batch_sampler
@@ -672,7 +672,8 @@ class _BaseDataLoaderIter:
             # memory allocation for MPS is fixed.
             if (
                 self._pin_memory
-                and torch.accelerator.current_accelerator().type == "mps"
+                and (acc := torch.accelerator.current_accelerator()) is not None
+                and acc.type == "mps"
             ):
                 self._pin_memory = False
                 warn_msg = (

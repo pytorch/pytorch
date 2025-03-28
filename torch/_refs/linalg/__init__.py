@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims

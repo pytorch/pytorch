@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
     parametrize,
+    serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -57,9 +58,12 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
+if not torch._inductor.config.cpp_wrapper:
+    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
+        ("cuda", "xpu")
+    )
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
@@ -474,7 +478,9 @@ class TestInductorDynamic(TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
-        expect_fail = device == "cpu" and not IS_ARM64
+        expect_fail = (
+            device == "cpu" and not IS_ARM64 and not torch._inductor.config.cpp_wrapper
+        )
         try:
 
             def f(x):
@@ -557,7 +563,7 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
+        @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             stride = x.item()
             return torch.empty_strided((1,), (stride,), device=x.device)
@@ -570,7 +576,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            r = torch.ops.test.foo(x)
+            r = torch.ops.test_dynamic_stride_nobreak.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
 
@@ -602,10 +608,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
-    @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
-        # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
-        # If cpp codegen is disabled, we should generate `math.floor` using PythonPrinter.
         def fn(x):
             n = x.size(-1)
             y = x + int(n * 0.2) + 1
@@ -851,6 +854,7 @@ class TestInductorDynamic(TestCase):
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)
 
+    @serialTest()
     def test_wrapper_codegen_statically_known_int_or_none(self):
         torch._dynamo.reset()
 
@@ -1039,6 +1043,19 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_unspecialized_float_dynamic(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, dynamic=True, backend=cnt)
+        x = torch.randn(5, 5)
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+        self.assertEqual(cnt.frame_count, 1)
+
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
         def fn(x, y):
@@ -1055,7 +1072,7 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
+        if torch.device(device).type != GPU_TYPE:
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
