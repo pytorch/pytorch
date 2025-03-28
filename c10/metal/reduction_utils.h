@@ -8,9 +8,9 @@ namespace metal {
 
 template <typename T>
 opmath_t<T> threadgroup_sum(threadgroup T* data, unsigned size) {
-  opmath_t<T> rc = data[0];
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  opmath_t<T> rc = data[0];
   // TODO: Use `simd_shuffle_down`
   for (unsigned idx = 1; idx < size; ++idx) {
     rc += data[idx];
@@ -20,9 +20,9 @@ opmath_t<T> threadgroup_sum(threadgroup T* data, unsigned size) {
 
 template <typename T>
 opmath_t<T> threadgroup_prod(threadgroup T* data, unsigned size) {
-  opmath_t<T> rc = data[0];
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  opmath_t<T> rc = data[0];
   for (unsigned idx = 1; idx < size; ++idx) {
     rc *= data[idx];
   }
@@ -64,11 +64,11 @@ T threadgroup_min(threadgroup T* data, unsigned size) {
 }
 
 template <typename T>
-long threadgroup_argmax(threadgroup T* data, unsigned size) {
+int threadgroup_argmax(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  long rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
+  int rc = 0;
+  for (int idx = 1; idx < size; ++idx) {
     if (data[idx] > data[rc]) {
       rc = idx;
     }
@@ -77,11 +77,11 @@ long threadgroup_argmax(threadgroup T* data, unsigned size) {
 }
 
 template <typename T>
-T threadgroup_argmin(threadgroup T* data, unsigned size) {
+int threadgroup_argmin(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  long rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
+  int rc = 0;
+  for (int idx = 1; idx < size; ++idx) {
     if (data[idx] < data[rc]) {
       rc = idx;
     }

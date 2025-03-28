@@ -58,6 +58,20 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Single-threaded variant of previous.
+AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
 // Retrieves the number of constants for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
@@ -117,6 +131,10 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// Free the inactive constant buffer in model container.
+AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle);
 
 // Run constant folding on constant buffer.
 AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(

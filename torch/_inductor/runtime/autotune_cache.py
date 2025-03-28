@@ -197,11 +197,7 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self,
-        config: Config,
-        time_taken_ns: int,
-        found_by_coordesc: bool = False,
-        triton_cache_hash: Optional[str] = None,
+        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
     ) -> None:
         data = {
             **config.kwargs,
@@ -210,7 +206,6 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            "triton_cache_hash": triton_cache_hash,
         }
 
         if local_cache := self.local_cache:
@@ -498,8 +493,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

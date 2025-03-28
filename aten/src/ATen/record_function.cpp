@@ -1,5 +1,5 @@
-#include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/overloaded.h>
@@ -16,12 +16,12 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_cb_id {1};
+  static std::atomic<uint64_t> unique_cb_id{1};
   return CallbackHandle(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
-  static std::atomic<uint64_t> unique_rf_id {1};
+  static std::atomic<uint64_t> unique_rf_id{1};
   return RecordFunctionHandle(unique_rf_id++);
 }
 
@@ -30,7 +30,7 @@ std::atomic<int64_t> defaultNodeId(-1);
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
-std::atomic<uint64_t> next_thread_id_ {0};
+std::atomic<uint64_t> next_thread_id_{0};
 thread_local uint64_t current_thread_id_ = 0;
 
 static constexpr size_t NumRecordScopes =
@@ -174,7 +174,8 @@ class LocalCallbackManager {
  public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
-  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(const RecordScope scope);
+  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(
+      const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -217,7 +218,8 @@ size_t GlobalCallbackManager::version() const {
   return version_.load(std::memory_order_relaxed);
 }
 
-std::pair<size_t, RecordFunctionCallbacks> GlobalCallbackManager::getSnapshot() const {
+std::pair<size_t, RecordFunctionCallbacks> GlobalCallbackManager::getSnapshot()
+    const {
   std::lock_guard<std::mutex> guard(update_mutex_);
   return {version_.load(std::memory_order_seq_cst), global_callbacks_};
 }
@@ -333,7 +335,8 @@ void CacheEntry::rebuildActiveCallbacks() {
 
     } else if (i.tries_left_ == 0) {
       // Callback is sampled and we have reached a sampling event. Push and
-      // set `sampling_countdown_` to one so we trigger a rebuild after one call.
+      // set `sampling_countdown_` to one so we trigger a rebuild after one
+      // call.
       active_callbacks_.callbacks_.push_back(
           {i.callback_.start(), i.callback_.end()});
       sampling_countdown_ = 1;
@@ -397,10 +400,11 @@ StepCallbacks LocalCallbackManager::getActiveCallbacks(
   return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacks();
 }
 
-std::optional<StepCallbacks> LocalCallbackManager::getActiveCallbacksUnlessEmpty(
-    const RecordScope scope) {
+std::optional<StepCallbacks> LocalCallbackManager::
+    getActiveCallbacksUnlessEmpty(const RecordScope scope) {
   rebuildActiveCallbacksIfNeeded();
-  return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacksUnlessEmpty();
+  return active_callbacks_[static_cast<size_t>(scope)]
+      .getActiveCallbacksUnlessEmpty();
 }
 
 void LocalCallbackManager::setTLS(const RecordFunctionTLS& tls) {
@@ -450,7 +454,8 @@ void LocalCallbackManager::clearCallbacks() {
   rebuild_all(GlobalCallbackManager::get().getSnapshot());
 }
 
-void LocalCallbackManager::rebuild_all(const GlobalCallbackManager::snapshot_t& global_snapshot) {
+void LocalCallbackManager::rebuild_all(
+    const GlobalCallbackManager::snapshot_t& global_snapshot) {
   global_version_ = global_snapshot.first;
   for (auto i : c10::irange(NumRecordScopes)) {
     rebuild_scope(global_snapshot, static_cast<RecordScope>(i));
@@ -549,7 +554,7 @@ void RecordFunction::end() {
   if (called_start_callbacks_) {
     for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
       tryRunCallback</*is_start=*/false>(
-        step_callbacks_.callbacks_[i], *this, ctx_[i]);
+          step_callbacks_.callbacks_[i], *this, ctx_[i]);
     }
     step_callbacks_.callbacks_.clear();
   }
@@ -609,6 +614,16 @@ std::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
       fn_);
 }
 
+const char* RecordFunction::overload_name() const {
+  return std::visit(
+      c10::overloaded(
+          [&](const std::string&) -> const char* { return ""; },
+          [](const schema_ref_t schema) -> const char* {
+            return schema.get().overload_name().c_str();
+          }),
+      fn_);
+}
+
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
@@ -645,13 +660,11 @@ bool hasThreadLocalCallbacks() {
   return anyEnabled(get_record_function_tls_().sorted_tls_callbacks_);
 }
 
-CallbackHandle addThreadLocalCallback(
-    RecordFunctionCallback cb) {
+CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
   return LocalCallbackManager::get().addCallback(cb);
 }
 
-CallbackHandle addGlobalCallback(
-    RecordFunctionCallback cb) {
+CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
   return GlobalCallbackManager::get().addCallback(cb);
 }
 
@@ -717,7 +730,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   is_nccl_meta_ = (std::strcmp(name, kParamCommsCallName.c_str()) == 0);
 
 #ifndef NDEBUG
-    inputs_valid_ = true;
+  inputs_valid_ = true;
 #endif
   runStartCallbacks();
   invalidateInputs();
@@ -729,7 +742,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
 
 #ifndef NDEBUG
-    inputs_valid_ = true;
+  inputs_valid_ = true;
 #endif
   runStartCallbacks();
   invalidateInputs();
@@ -743,7 +756,7 @@ void RecordFunction::before(
   is_nccl_meta_ = (schema.get().name() == kParamCommsCallName);
 
 #ifndef NDEBUG
-    inputs_valid_ = true;
+  inputs_valid_ = true;
 #endif
   runStartCallbacks();
   invalidateInputs();
