@@ -5,8 +5,10 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    skipCUDAIfNotRocm,
     skipCUDAIfRocm,
     skipMeta,
 )
@@ -236,6 +238,29 @@ class TestTorchDlPack(TestCase):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
 
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(BufferError, "per-thread default stream is not supported"):
+            torch.from_dlpack(x.__dlpack__(stream=2))
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(BufferError, r"unsupported stream \d for ROCm"):
+                torch.from_dlpack(x.__dlpack__(stream=stream))
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
+
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
     def test_dlpack_export_requires_grad(self):
@@ -280,6 +305,60 @@ class TestTorchDlPack(TestCase):
         # by element.
         new_tensor = torch.tensor(wrap)
         self.assertEqual(tensor, new_tensor)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    def test_max_version(self, device):
+        def test(device, **kwargs):
+            inp = make_tensor((5,), dtype=torch.float32, device=device)
+            out = torch.from_dlpack(inp.__dlpack__(**kwargs))
+            self.assertEqual(inp, out)
+
+        # Use the DLPack 0.X version implementation, since max_version=None.
+        test(device)
+        # Use the DLPack 0.X version implementation.
+        test(device, max_version=(0, 8))
+        # Current highest DLPack version implemented.
+        test(device, max_version=(1, 0))
+        # Newer DLPack version.
+        # Consumer should still be able to process a smaller version capsule.
+        test(device, max_version=(2, 0))
+
+    @skipMeta
+    @onlyCPU
+    @dtypes(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bool,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
+        import numpy as np
+
+        t = make_tensor((5,), dtype=dtype, device=device)
+
+        if hasattr(np, "from_dlpack"):
+            # DLPack support only available from NumPy 1.22 onwards.
+            # Here, we test having another framework (NumPy) calling our
+            # Tensor.__dlpack__ implementation.
+            arr = np.from_dlpack(t)
+            self.assertEqual(t, arr)
+
+        # We can't use the array created above as input to from_dlpack.
+        # That's because DLPack imported NumPy arrays are read-only.
+        # Thus, we need to convert it to NumPy by using the numpy() method.
+        t_arr = t.numpy()
+
+        # Transform the NumPy array back using DLPack.
+        res = from_dlpack(t_arr)
+
+        self.assertEqual(t, res.cpu())
+        # If device is CPU (same as our original tensor), then they
+        # should alias each other.
+        self.assertEqual(t.data_ptr(), res.data_ptr())
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
