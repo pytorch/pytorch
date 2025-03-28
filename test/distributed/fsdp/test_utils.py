@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 
@@ -32,7 +33,12 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-list_device = "hpu" if TEST_HPU else "cuda"
+if TEST_HPU:
+    list_device = "hpu"
+elif TEST_XPU:
+    list_device = "xpu"
+else:
+    list_device = "cuda"
 
 
 class TestUtils(TestCase):
@@ -129,7 +135,7 @@ class TestUtils(TestCase):
         self.assertEqual(torch.sum(x), 0)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

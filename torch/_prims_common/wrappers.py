@@ -121,6 +121,9 @@ class elementwise_type_promotion_wrapper:
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
 
+        # TorchDynamo tracing of inspect causes fake tensor dynamo_wrapped tests to fail
+        # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_fake_tensor.py FakeTensorTest.test_basic
+        @torch._disable_dynamo
         @wraps(fn)
         def _fn(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)

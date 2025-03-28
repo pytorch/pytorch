@@ -60,7 +60,7 @@ def call_op(
     return node.outputs
 
 
-@onnx_impl(torch.ops.higher_order.cond)
+@onnx_impl(torch.ops.higher_order.cond, no_compile=True)
 def higher_order_cond(
     cond: ir.Value,
     true_func: ir.Function,

@@ -133,4 +133,41 @@ at::Tensor quantized_convolution(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
+void quantized_matmul(
+    at::Tensor mat1, // act
+    double input_scale,
+    int64_t input_zero_point,
+    at::Tensor mat2, // weight
+    at::Tensor& weight_scales,
+    at::Tensor& weight_zero_points,
+    at::Tensor& b_raw,
+    at::Tensor result, // output
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<at::Tensor> other, // extra input for binary-post-op
+    double other_scale,
+    int64_t other_zero_point,
+    const c10::string_view& binary_post_op,
+    double binary_alpha,
+    const c10::string_view& unary_post_op,
+    torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    c10::string_view unary_post_op_algorithm,
+    bool m2_trnas);
+
+void gpu_float_sdpa(
+    int batch_size,
+    int seq_len_q,
+    int seq_len_k,
+    int num_head,
+    int num_head_kv,
+    int head_dim,
+    int head_dim_v,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    std::optional<at::Tensor> attn_mask,
+    bool is_causal,
+    float softmax_scale,
+    const Tensor& output);
 } // namespace at::native::onednn

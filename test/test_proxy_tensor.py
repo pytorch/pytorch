@@ -2042,15 +2042,12 @@ out_symbolic_tensor_failures = {
     xfail('gather', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('lu', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
 
     # SymIntArrayRef expected to contain only concrete
-    xfail('ones', ''),
     xfail('randn', ''),
-    xfail('zeros', ''),
 
     # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
     xfail('index_reduce', 'prod'),

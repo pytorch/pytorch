@@ -82,12 +82,9 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
-  # Find ROCM version for checks
-  if(UNIX)
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-  else()
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/hip/hip_version.h)
-  endif()
+  # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
+  find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h hip_version.h
+      HINTS ${ROCM_INCLUDE_DIRS}/rocm-core ${ROCM_INCLUDE_DIRS}/hip /usr/include)
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
   if(EXISTS ${ROCM_VERSION_HEADER_PATH})
@@ -158,69 +155,41 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(hiprtc REQUIRED)
+  find_package_and_print_version(hipblaslt REQUIRED)
 
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    find_package_and_print_version(hipblaslt REQUIRED)
 
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
-    # check whether HIP declares new types
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
-    set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
-    file(WRITE ${file} ""
-      "#include <hip/library_types.h>\n"
-      "int main() {\n"
-      "    hipDataType baz = HIP_R_8F_E4M3_FNUZ;\n"
-      "    return 0;\n"
-      "}\n"
-      )
 
-    try_compile(hip_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-      OUTPUT_VARIABLE hip_compile_output)
-
-    if(hip_compile_result)
-      set(HIP_NEW_TYPE_ENUMS ON)
-      #message("HIP is using new type enums: ${hip_compile_output}")
-      message("HIP is using new type enums")
-    else()
-      set(HIP_NEW_TYPE_ENUMS OFF)
-      #message("HIP is NOT using new type enums: ${hip_compile_output}")
-      message("HIP is NOT using new type enums")
-    endif()
-  else() # Win32
-    # With HIP-SDK 6.2, HIP declares new enum types on Windows
-    set(HIP_NEW_TYPE_ENUMS ON)
-  endif()
-
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-    # check whether hipblaslt provides HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
-    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_vec_ext.cc")
-    file(WRITE ${file} ""
-      "#define LEGACY_HIPBLAS_DIRECT\n"
-      "#include <hipblaslt/hipblaslt.h>\n"
-      "int main() {\n"
-      "    hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;\n"
-      "    return 0;\n"
-      "}\n"
-      )
-    try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-      OUTPUT_VARIABLE hipblaslt_compile_output)
-    if(hipblaslt_compile_result_vec_ext)
-      set(HIPBLASLT_VEC_EXT ON)
-      #message("hipblaslt is using scale pointer vec ext: ${hipblaslt_compile_output}")
-      message("hipblaslt is using scale pointer vec ext")
-    else()
-      set(HIPBLASLT_VEC_EXT OFF)
-      message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output}")
-      #message("hipblaslt is NOT using scale pointer vec ext")
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      # check whether hipblaslt provides HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
+      set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_vec_ext.cc")
+      file(WRITE ${file} ""
+        "#define LEGACY_HIPBLAS_DIRECT\n"
+        "#include <hipblaslt/hipblaslt.h>\n"
+        "int main() {\n"
+        "    hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;\n"
+        "    return 0;\n"
+        "}\n"
+        )
+      try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+        COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+        OUTPUT_VARIABLE hipblaslt_compile_output)
+      if(hipblaslt_compile_result_vec_ext)
+        set(HIPBLASLT_VEC_EXT ON)
+        #message("hipblaslt is using scale pointer vec ext: ${hipblaslt_compile_output}")
+        message("hipblaslt is using scale pointer vec ext")
+      else()
+        set(HIPBLASLT_VEC_EXT OFF)
+        message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output}")
+        #message("hipblaslt is NOT using scale pointer vec ext")
+      endif()
     endif()
   endif()
-
 endif()
