@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
-    IS_WINDOWS,
     retry_shell,
     set_cwd,
     shell,
@@ -1377,11 +1376,7 @@ def parse_args():
         default=IS_CI
         and (
             TEST_WITH_CROSSREF
-            or TEST_WITH_ASAN
-            or (TEST_CONFIG == "distributed" and TEST_CUDA)
-            or (IS_WINDOWS and not TEST_CUDA)
-            or TEST_CONFIG == "nogpu_AVX512"
-            or TEST_CONFIG == "nogpu_NO_AVX2"
+            or TEST_CONFIG == "distributed"
             or TEST_CONFIG == "default"
         )
         and get_pr_number() is not None
