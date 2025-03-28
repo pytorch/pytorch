@@ -655,7 +655,6 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
@@ -713,6 +712,7 @@ def mps_ops_modifier(ops):
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.chebyshev_polynomial_t': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.chebyshev_polynomial_u': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # entr does not support boolean types
         'special.entr': [torch.bool],
@@ -12601,8 +12601,10 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            cpu_out = op(*cpu_args, **cpu_kwargs)
-            mps_out = op(*mps_args, **mps_kwargs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                cpu_out = op(*cpu_args, **cpu_kwargs)
+                mps_out = op(*mps_args, **mps_kwargs)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12649,8 +12651,10 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            cpu_out = op(*cpu_args, **cpu_kwargs)
-            mps_out = op(*mps_args, **mps_kwargs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                cpu_out = op(*cpu_args, **cpu_kwargs)
+                mps_out = op(*mps_args, **mps_kwargs)
 
             if op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
@@ -12703,6 +12707,22 @@ class TestConsistency(TestCaseMPS):
                 atol = 1e-5
                 rtol = 1.5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+    def test_fmax_mixed_dtypes(self, device):
+        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # fmax and fmin are implemented as binary metal shaders and they were implemented
+        # with the assumption that both args have the same dtype
+        x = torch.rand((3, 3), device=device, dtype=torch.float32)
+        x_int = torch.randint(-10, 10, (3, 3), device=device, dtype=torch.int8)
+        y = torch.rand((3, 3), device=device, dtype=torch.float16)
+        for op in [torch.fmax, torch.fmin]:
+            self.assertEqual(op(x, y), op(x.to("mps"), y.to("mps")).cpu())
+            self.assertEqual(op(x_int, y), op(x_int.to("mps"), y.to("mps")).cpu())
+            # Stride
+            self.assertEqual(op(x.t(), y), op(x.to("mps").t(), y.to("mps")).cpu())
+            # Broadcast
+            self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
+
 
 
 class TestErrorInputs(TestCase):

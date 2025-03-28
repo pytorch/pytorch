@@ -54,6 +54,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -151,7 +152,7 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn)
+        result = CustomOpDef(namespace, opname, schema_str, fn, tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -183,11 +184,19 @@ class CustomOpDef:
     :func:`torch.library.custom_op` API.
     """
 
-    def __init__(self, namespace: str, name: str, schema: str, fn: Callable) -> None:
+    def __init__(
+        self,
+        namespace: str,
+        name: str,
+        schema: str,
+        fn: Callable,
+        tags: Optional[Sequence[_C.Tag]] = None,
+    ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
         self._schema = schema
+        self._tags = tags if tags is not None else []
 
         self._init_fn = fn
 
@@ -201,7 +210,7 @@ class CustomOpDef:
         self._autocast_cpu_dtype: Optional[_dtype] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
-        self._register_to_dispatcher()
+        self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
         OPDEFS[self._qualname] = self
 
@@ -338,10 +347,9 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils._c_check_aliasing_constraint(
+                        utils.check_aliasing_constraint(
                             self._name,
-                            args,
-                            kwargs,
+                            utils.iter_tensors(args, kwargs),
                             result,
                             get_module,
                         )
@@ -587,7 +595,7 @@ class CustomOpDef:
         self._backward_fn = backward
         self._setup_context_fn = setup_context
 
-    def _register_to_dispatcher(self) -> None:
+    def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
         if torch._running_with_deploy():
             utils.warn_deploy(stacklevel=5)
             return
@@ -606,7 +614,7 @@ class CustomOpDef:
 
         lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
+            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order, *tags],
         )
         self._opoverload = utils.lookup_op(self._qualname)
 

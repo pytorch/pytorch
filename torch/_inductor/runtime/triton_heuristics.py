@@ -534,9 +534,18 @@ class CachingAutotuner(KernelInterface):
             ),
         )
 
+        if self.device_props.type == "mtia":
+            from mtia.host_runtime.torch_mtia.acc_flags import (  # type: ignore[import-not-found]
+                build_codename,
+            )
+
+            arch = build_codename()
+        else:
+            arch = compile_meta["cc"]
+
         target = GPUTarget(
             compile_meta["device_type"],
-            compile_meta["cc"],
+            arch,
             cc_warp_size(compile_meta["cc"]),
         )
 
@@ -1191,7 +1200,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
 
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
-        self.kernel.load_kernel()
+        self.kernel.load_kernel(self.compile_meta.get("device", 0))
         scope = {
             "runner": self.kernel.run,
         }
