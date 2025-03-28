@@ -897,6 +897,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
+        def handle_guard_or_true(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.guard_or_true(expr.sym_num)
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
+        def handle_guard_or_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(
             self, tx: "InstructionTranslator", *args, **kwargs
