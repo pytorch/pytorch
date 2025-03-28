@@ -2863,12 +2863,6 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
         )
-        self.assertEqual(
-            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
-        )
-        self.assertEqual(
-            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
-        )
 
         # Test backed_size_oblivious
         with torch.fx.experimental._config.patch("backed_size_oblivious", True):
@@ -2928,13 +2922,6 @@ class TestGuardsExpressions(TestCase):
         b = torch.tensor([1])
         unbacked_func2(a, b)
         # always return b*10
-        self.assertEqual(
-            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
-        )
-        self.assertEqual(
-            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
-        )
-
         self.assertEqual(
             unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
         )
