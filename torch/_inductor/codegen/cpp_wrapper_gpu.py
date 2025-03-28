@@ -54,7 +54,7 @@ class DeferredTritonCallWrapper:
 
     wrapper_name: str
     kernel_name: str
-    kernel_body: str
+    kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
@@ -123,9 +123,11 @@ class DeferredTritonCallWrapper:
             )
         prefix.writeline("){")
         with prefix.indent():
-            prefix.writeline("/*")
-            prefix.splice(self.kernel_body)
-            prefix.writeline("*/")
+            if V.graph.aot_mode:
+                # Emit the original Triton kernel for debugging purposes
+                prefix.writeline("/*")
+                prefix.splice(self.kernel_name_to_body[self.kernel_name])
+                prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
@@ -510,7 +512,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
                     wrapper_name,
                     kernel_name,
-                    self._kernel_name_to_body[kernel_name],
+                    self._kernel_name_to_body,
                     arg_types,
                 )
             call_args.append(stream)
