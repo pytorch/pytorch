@@ -80,7 +80,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # following builds that we know should use conda. Specifically, Ubuntu bionic
   # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
   if [ -n "${CONDA_CMAKE}" ]; then
-    conda_install cmake
+    conda_install cmake==3.31.2
   fi
 
   # Magma package names are concatenation of CUDA major and minor ignoring revision
