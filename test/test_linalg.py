@@ -1479,8 +1479,7 @@ class TestLinalg(TestCase):
         # len(dim) ==0
         test(-1, [], True)
 
-        # test()
-        # shape[d] ==0
+        # shape[d] == 0
         test(-1, [0], False, True)
 
         # u0+1==0 is False so we do not see a runtime assert
