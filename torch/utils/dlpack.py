@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import enum
@@ -106,7 +106,7 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
 
     """
     if hasattr(ext_tensor, '__dlpack__'):
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         kwargs["max_version"] = (1, 0)
 
         device = ext_tensor.__dlpack_device__()
