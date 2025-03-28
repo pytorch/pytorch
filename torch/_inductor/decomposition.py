@@ -574,44 +574,6 @@ def randn_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition(aten.full_like)
-def full_like(
-    self: torch.Tensor,
-    fill_value: Union[int, float],
-    *,
-    dtype: Optional[torch.dtype] = None,
-    layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
-    pin_memory: bool = False,
-    requires_grad: bool = False,
-    memory_format: Optional[torch.memory_format] = torch.preserve_format,
-) -> torch.Tensor:
-    # Can't use aten.fill_ as that dispatches to full_like
-    full = torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
-    )
-    if memory_format is torch.preserve_format or memory_format is None:
-        if self.is_contiguous():
-            return full
-
-        result = torch.empty_like(
-            self,
-            dtype=dtype,
-            device=device,
-            memory_format=memory_format,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-        return aten.copy(result, full)
-    else:
-        return full.to(memory_format=memory_format)
-
-
 @register_decomposition(aten.randint_like.default)
 def randint_like(
     self: torch.Tensor,
