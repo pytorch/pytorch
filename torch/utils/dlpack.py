@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import enum
@@ -54,7 +54,7 @@ The DLPack capsule shares the tensor's memory.
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
 # __dlpack__ and __dlpack_device__ methods are accepted.
-def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
+def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None) -> 'torch.Tensor':
     """from_dlpack(ext_tensor) -> Tensor
 
     Converts a tensor from an external library into a ``torch.Tensor``.
@@ -107,19 +107,34 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
     """
     if hasattr(ext_tensor, '__dlpack__'):
         kwargs: dict[str, Any] = {}
-        kwargs["max_version"] = (1, 0)
 
-        device = ext_tensor.__dlpack_device__()
-        # device is either CUDA or ROCm, we need to pass the current
+        kwargs["max_version"] = (1, 0)
+        kwargs["copy"] = copy
+
+        # Parse the device parameter.
+        # At this moment, it can either be a torch.device or a str representing
+        # a torch.device, e.g. "cpu", "cuda", etc.
+        if device is not None:
+            if isinstance(device, str):
+                device = torch.device(device)
+            assert isinstance(device, torch.device), (
+                f"from_dlpack: unsupported device type: {type(device)}"
+            )
+            device = torch._C._torchDeviceToDLDevice(device)
+
+        kwargs["dl_device"] = device
+
+        ext_device = ext_tensor.__dlpack_device__()
+        # ext_device is either CUDA or ROCm, we need to pass the current
         # stream
-        if device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
-            stream = torch.cuda.current_stream(f'cuda:{device[1]}')
+        if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
+            stream = torch.cuda.current_stream(f'cuda:{ext_device[1]}')
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed
             # with a value of 1 for CUDA
             # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
-            is_cuda = device[0] == DLDeviceType.kDLCUDA
+            is_cuda = ext_device[0] == DLDeviceType.kDLCUDA
             # Since pytorch is not using PTDS by default, lets directly pass
             # the legacy stream
             stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
@@ -129,11 +144,18 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
             # Try running __dlpack__ while specifying `max_version` argument.
             dlpack = ext_tensor.__dlpack__(**kwargs)
         except TypeError:
-            # If that doesn't work, try removing the `max_version` argument.
+            # If that doesn't work, try removing the all the arguments but those
+            # corresponding to DLPack 2022.12 specification.
             kwargs.pop("max_version")
+            kwargs.pop("dl_device")
+            kwargs.pop("copy")
             dlpack = ext_tensor.__dlpack__(**kwargs)
 
     else:
+        assert device is None and copy is None, (
+            "device and copy kwargs not supported when ext_tensor is "
+            "already a DLPack capsule."
+        )
         # Old versions just call the converter
         dlpack = ext_tensor
     return torch._C._from_dlpack(dlpack)

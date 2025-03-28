@@ -21,6 +21,16 @@ TORCH_API Tensor fromDLPackVersioned(
 TORCH_API DLDataType getDLDataType(const Tensor& t);
 TORCH_API DLDevice getDLContext(const Tensor& tensor, const int64_t& device_id);
 
+// Copies the Tensor if there's a device mismatch or copy is forced.
+// This should be used before actually creating the DLPack capsule.
+TORCH_API Tensor maybeCopyTensor(
+    const Tensor& data,
+    std::optional<DLDevice> optional_dl_device,
+    std::optional<bool> copy);
+
+// Converts the given at::Device into a DLDevice.
+TORCH_API DLDevice torchDeviceToDLDevice(at::Device device);
+
 // This trait class is used for retrieving different attributes, such as the
 // PyCapsule names and conversion functions for both DLPack tensor classes:
 // `DLManagedTensor` and `DLManagedTensorVersioned`.

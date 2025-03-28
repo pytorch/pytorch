@@ -1673,7 +1673,13 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, stream=None, max_version=None):
+    def __dlpack__(
+        self,
+        stream: Optional[Any] = None,
+        max_version: Optional[tuple[int, int]] = None,
+        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
+        copy: Optional[bool] = None,
+    ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1764,9 +1770,9 @@ class Tensor(torch._C.TensorBase):
 
         if max_version is None or max_version[0] < 1:
             # Fallback to the old, unversioned variant.
-            return torch.to_dlpack(self)
+            return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
 
-        return _C._to_dlpack_versioned(self)
+        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
