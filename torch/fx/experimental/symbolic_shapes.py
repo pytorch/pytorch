@@ -148,6 +148,7 @@ __all__ = [
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
     "SubclassSymbolicContext",
+    "SymIntSymbolicContext",
     "statically_known_true",
     "guard_size_oblivious",
     "check_consistent",
@@ -1811,6 +1812,15 @@ class SymbolicContext:
     another version of this that says "use exactly these SymInts, don't
     allocate fresh symbols."
     """
+
+
+@dataclass(frozen=True)
+class SymIntSymbolicContext(SymbolicContext):
+    """
+    Data structure specifying any constraints on a SymInt input
+    """
+
+    constraint: DimConstraint
 
 
 @dataclass(frozen=True)
@@ -5099,7 +5109,10 @@ class ShapeEnv:
             if t is None:
                 continue
             if isinstance(t, (SymInt, int)):
-                track_symint(source, t)
+                constraint = (
+                    None if context is None else getattr(context, "constraint", None)
+                )
+                track_symint(source, t, constraint)
                 continue
             elif isinstance(t, (SymFloat, float)):
                 track_symfloat(source, t)
