@@ -163,8 +163,10 @@ Ecosystem libraries branch cut is done a few days after branch cut for the `pyto
 After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
-* torchvision : https://github.com/pytorch/vision/pull/5400
-* torchaudio: https://github.com/pytorch/audio/pull/2210
+* torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
+* torchaudio: [Update version.txt](https://github.com/pytorch/audio/commit/654fee8fd17784271be1637eac1293fd834b4e9a) and [change workflow branch references](https://github.com/pytorch/audio/pull/3890)
+
+The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in both pytorch/audio and pytorch/vision.
 
 ## Running Launch Execution team Core XFN sync
 
