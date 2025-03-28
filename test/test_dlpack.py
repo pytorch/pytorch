@@ -245,7 +245,9 @@ class TestTorchDlPack(TestCase):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(BufferError, "per-thread default stream is not supported"):
+        with self.assertRaisesRegex(
+            BufferError, "per-thread default stream is not supported"
+        ):
             torch.from_dlpack(x.__dlpack__(stream=2))
 
     @skipMeta

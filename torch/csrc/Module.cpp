@@ -602,7 +602,10 @@ void DLPack_Capsule_Destructor(PyObject* data) {
 }
 
 template <class T>
-PyObject* THPModule_toDLPackImpl(PyObject* self, PyObject* args, PyObject* kwargs) {
+PyObject* THPModule_toDLPackImpl(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
       {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None)"});
@@ -619,11 +622,11 @@ PyObject* THPModule_toDLPackImpl(PyObject* self, PyObject* args, PyObject* kwarg
 
     if (!dl_device.empty()) {
       TORCH_CHECK(
-          dl_device.size() == 2, "dl_device must be either None or a tuple of ints");
-      optional_dl_device = DLDevice {
+          dl_device.size() == 2,
+          "dl_device must be either None or a tuple of ints");
+      optional_dl_device = DLDevice{
           static_cast<DLDeviceType>(dl_device[0]),
-          static_cast<int32_t>(dl_device[1])
-      };
+          static_cast<int32_t>(dl_device[1])};
     }
 
     auto tensor = at::DLPackTraits<T>::toDLPack(
@@ -638,11 +641,17 @@ PyObject* THPModule_toDLPackImpl(PyObject* self, PyObject* args, PyObject* kwarg
 
 } // namespace
 
-static PyObject* THPModule_toDLPack(PyObject* self, PyObject* args, PyObject* kwargs) {
+static PyObject* THPModule_toDLPack(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   return THPModule_toDLPackImpl<DLManagedTensor>(self, args, kwargs);
 }
 
-static PyObject* THPModule_toDLPackVersioned(PyObject* self, PyObject* args, PyObject* kwargs) {
+static PyObject* THPModule_toDLPackVersioned(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   return THPModule_toDLPackImpl<DLManagedTensorVersioned>(self, args, kwargs);
 }
 
@@ -654,9 +663,13 @@ static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_torchDeviceToDLDevice(PyObject* _unused, PyObject* data) {
+static PyObject* THPModule_torchDeviceToDLDevice(
+    PyObject* _unused,
+    PyObject* data) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPDevice_Check(data), "torchDeviceToDLDevice: expected torch.device argument.");
+  TORCH_CHECK(
+      THPDevice_Check(data),
+      "torchDeviceToDLDevice: expected torch.device argument.");
   auto device = reinterpret_cast<THPDevice*>(data)->device;
   auto dl_device = at::torchDeviceToDLDevice(device);
   auto tuple = PyTuple_New(2);
@@ -1659,7 +1672,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
-    {"_torchDeviceToDLDevice", THPModule_torchDeviceToDLDevice, METH_O, nullptr},
+    {"_torchDeviceToDLDevice",
+     THPModule_torchDeviceToDLDevice,
+     METH_O,
+     nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
