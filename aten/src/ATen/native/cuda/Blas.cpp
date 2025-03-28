@@ -1109,22 +1109,6 @@ ScalingType get_scaling_type(
 
 } // namespace
 
-// Add helper function to cache device properties check
-static bool IsGfx950Device(int device_index) {
-  static std::mutex mutex;
-  static std::unordered_map<int, bool> device_check_cache;
-  
-  std::lock_guard<std::mutex> guard(mutex);
-  auto it = device_check_cache.find(device_index);
-  if (it != device_check_cache.end()) {
-    return it->second;
-  }
-  
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
-  bool is_gfx950 = (std::string(prop->gcnArchName) == "gfx950");
-  device_check_cache[device_index] = is_gfx950;
-  return is_gfx950;
-}
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
@@ -1272,7 +1256,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 "Block-wise scaling requires both matrices to be Float8_e8m0fnu type");
     
 #if ROCM_VERSION >= 60500
-    TORCH_CHECK(IsGfx950Device(mat1.device().index()),
+    TORCH_CHECK(at::cuda::tunable::IsGfx950Device(),
                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
     
     TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
@@ -1430,7 +1414,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Add MX format validation for gfx950
   if (scaling_choice == ScalingType::RowWise) {
 #ifdef USE_ROCM
-    if (IsGfx950Device(mat1.device().index())) {
+    if (at::cuda::tunable::IsGfx950Device()) {
       // Validate matrix dimensions for MX format
       TORCH_CHECK(at::cuda::tunable::ValidateMXFormatRequirements(mat1.size(0), mat2.size(1), mat1.size(1)),
                  "For MX format on gfx950, matrix dimensions must be multiples of 32. ",
