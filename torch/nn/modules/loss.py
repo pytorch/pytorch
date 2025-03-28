@@ -37,6 +37,9 @@ __all__ = [
 
 class _Loss(Module):
     reduction: str
+    # Add type annotations to __call__ method, so that the type checker can infer the correct return type.
+    # See https://github.com/microsoft/pyright/issues/3249
+    __call__: Callable[..., Tensor]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
         super().__init__()
