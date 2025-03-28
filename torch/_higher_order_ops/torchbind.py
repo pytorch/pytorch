@@ -42,7 +42,9 @@ class CallTorchBind(HigherOrderOperator):
         val = obj.get_real_obj()
         schema = val._get_method(method).schema
         schema_str = str(schema)
-        new_schema_str = f"call_torchbind({str(schema.arguments[0].real_type)} {schema.arguments[0].name},"
+        new_schema_str = (
+            "call_torchbind(" + str(schema.arguments[0].real_type) + " obj,"
+        )
         first_comma_index = schema_str.find(",")
         if first_comma_index == -1:
             # If no comma is found, find the last closing parenthesis
