@@ -54,7 +54,7 @@ from torch.export.graph_signature import (
     TensorArgument,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -294,12 +294,7 @@ class TestDynamismExpression(TestCase):
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
 
-        if is_non_strict_test(self._testMethodName):
-            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
-        else:
-            error_type = torch._dynamo.exc.UserError
-
-        with self.assertRaisesRegex(error_type, "not in range"):
+        with self.assertRaisesRegex(ConstraintViolationError, "not in range"):
             export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
@@ -1144,7 +1139,7 @@ graph():
             torch.ones(4),
         )
         with self.assertRaisesRegex(
-            torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+            ConstraintViolationError,
             "2 not in range.*3,",
         ):
             ep_ns = torch.export.export(
@@ -1803,19 +1798,19 @@ graph():
             """\
 def forward(self, x, y):
     foo = torch.ops.export.foo.default(x, y);  x = None
-    sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
-    ge = sym_size_int >= 0;  sym_size_int = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default_1 = None
-    ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(foo, 0)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_3);  sym_constrain_range_for_size_default = None
+    ge_3 = sym_size_int_3 >= 0;  sym_size_int_3 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_default = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_4);  sym_constrain_range_for_size_default_1 = None
+    ge_4 = sym_size_int_4 >= 0;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u1 >= 0 on node 'ge_4'");  ge_4 = _assert_scalar_default_1 = None
     bar = torch.ops.export.bar.default(y);  y = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
-    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_2 = None
-    ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
+    sym_size_int_5 = torch.ops.aten.sym_size.int(bar, 0)
+    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_5);  sym_constrain_range_for_size_default_2 = None
+    ge_5 = sym_size_int_5 >= 0;  sym_size_int_5 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_5'");  ge_5 = _assert_scalar_default_2 = None
     return (foo, bar)""",
         )
 
@@ -3650,18 +3645,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # check raised errors
         with self.assertRaisesRegex(
-            (
-                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
-                torch._dynamo.exc.UserError,
-            ),
+            ConstraintViolationError,
             "Static shape constraint of 5 does not match input size of 4, for .*",
         ):
             _ = export(foo, inputs, dynamic_shapes=((5, None), None, None))
         with self.assertRaisesRegex(
-            (
-                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
-                torch._dynamo.exc.UserError,
-            ),
+            ConstraintViolationError,
             "Static shape constraint of 9 does not match input size of 6, for .*",
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))

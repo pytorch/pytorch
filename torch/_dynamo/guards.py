@@ -2533,7 +2533,13 @@ class CheckFunctionManager:
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
-        if not output_graph.export:
+        if output_graph.export:
+            # TODO: We should assert that this is always true in export, but
+            # currently guards fail with derived dims, as the derived dims do
+            # not get initialized anywhere. The supposed solution is to add the
+            # derived dim initializations to the _CLOSURE_VARS dict.
+            self.guard_manager.check(output_graph.local_scope)
+        elif not output_graph.export:
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,  # type: ignore[arg-type]

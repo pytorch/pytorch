@@ -113,11 +113,6 @@ class ExportDynamoConfig:
     reorderable_logging_functions: set[Callable] = dataclasses.field(
         default_factory=set
     )
-    # Emit runtime asserts after AOTAutograd instead.
-    # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
-    # but if we want to reason more about what guards/runtime asserts to emit,
-    # this makes it a bit cleaner to do from the export side. Also no real point in running this twice.
-    do_not_emit_runtime_asserts: bool = True
     specialize_int: bool = True
     specialize_float: bool = True
     assume_static_by_default: bool = False
@@ -1353,26 +1348,46 @@ def _strict_export(
     """
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
     """
-
-    gm_torch_level = _export_to_torch_ir(
+    (
+        fake_mode,
+        fake_args,
+        fake_kwargs,
+        equalities_inputs,
+        original_signature,
+        dynamic_shapes,
+    ) = make_fake_inputs(
         mod,
         args,
         kwargs,
         dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        restore_fqn=False,  # don't need to restore because we will do it later
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        _log_export_usage=False,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 
-    # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
-    (
-        fake_args,
-        fake_kwargs,
-        dynamo_fake_mode,
-    ) = _extract_fake_inputs(gm_torch_level, args, kwargs)
+    with fake_mode:
+        gm_torch_level = _export_to_torch_ir(
+            mod,
+            fake_args,
+            fake_kwargs,
+            preserve_module_call_signature=preserve_module_call_signature,
+            restore_fqn=False,  # don't need to restore because we will do it later
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            _log_export_usage=False,
+        )
 
-    fake_params_buffers = _fakify_params_buffers(dynamo_fake_mode, gm_torch_level)
+    try:
+        produce_guards_and_solve_constraints(
+            fake_mode=fake_mode,
+            gm=gm_torch_level,
+            dynamic_shapes=dynamic_shapes,
+            equalities_inputs=equalities_inputs,
+            original_signature=original_signature,
+            _is_torch_jit_trace=_is_torch_jit_trace,
+        )
+    except (ConstraintViolationError, ValueRangeError) as e:
+        raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
+
+    fake_params_buffers = _fakify_params_buffers(fake_mode, gm_torch_level)
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
@@ -1383,12 +1398,7 @@ def _strict_export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
-                assert (
-                    dynamo_fake_mode is not None
-                ), "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
-                node.meta["val"] = dynamo_fake_mode.from_tensor(
-                    attr, static_shapes=True
-                )
+                node.meta["val"] = fake_mode.from_tensor(attr, static_shapes=True)
 
     # Fix the graph output signature to be tuple if scalar
 
@@ -1442,8 +1452,8 @@ def _strict_export(
         if name in reverse_name_lookup
     }
 
-    tx = TracingContext(dynamo_fake_mode)
-    with dynamo_fake_mode, tracing(tx):
+    tx = TracingContext(fake_mode)
+    with fake_mode, tracing(tx):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
@@ -1489,7 +1499,7 @@ def _strict_export(
         aten=aten_export_artifact,
         in_spec=orig_in_spec,
         out_spec=orig_out_spec,
-        fake_mode=dynamo_fake_mode,
+        fake_mode=fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
     )
 
