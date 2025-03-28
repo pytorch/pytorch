@@ -19,6 +19,8 @@ fi
 
 conda_install numpy scipy imageio cmake ninja
 
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
 git clone --depth 1 --branch release/16.x --recursive https://github.com/llvm/llvm-project.git
 cmake -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="clang" \
