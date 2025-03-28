@@ -118,10 +118,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
                                    dataType:getMPSDataType(self)];
     return {nil, nil, output};
   }
-  auto selfTensor = mpsGraphRankedPlaceHolder(graph, self);
-  auto otherTensor = mpsGraphRankedPlaceHolder(graph, other);
+  auto selfTensor_ = mpsGraphRankedPlaceHolder(graph, self);
+  auto otherTensor_ = mpsGraphRankedPlaceHolder(graph, other);
+  auto selfTensor = self.is_conj() ? [graph conjugateWithTensor:selfTensor_ name:nil] : selfTensor_;
+  auto otherTensor = other.is_conj() ? [graph conjugateWithTensor:otherTensor_ name:nil] : otherTensor_;
   auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
-  return {selfTensor, otherTensor, output};
+  return {selfTensor_, otherTensor_, output};
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {

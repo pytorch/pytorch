@@ -405,6 +405,7 @@ def mps_ops_modifier(ops):
         'constant_pad_nd',
         'cos',
         'cosh',
+        'cov',
         'count_nonzero',
         'diff',
         'div',
@@ -12455,8 +12456,16 @@ MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 def transform_opinfo_sample_to_mps(sample):
     """Transforms opinfo.core.SampleInput from CPU to MPS"""
-    mps_sample = sample.transform(
-        lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+    def transform_sample(x):
+        if not isinstance(x, torch.Tensor):
+            return x
+        requires_grad = x.requires_grad
+        conjugated = x.is_conj()
+        rc = x.detach()
+        rc = rc.to("mps") if not conjugated else x.conj().to("mps").conj()
+        return rc.requires_grad_(x.requires_grad)
+
+    mps_sample = sample.transform(transform_sample)
 
     # Transform kwargs `device="cpu"` to `device="mps"`
     if mps_sample.kwargs.get("device", "") == "cpu":
@@ -12575,12 +12584,14 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
+        include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
 
         def get_samples():
             return op.sample_inputs(
                 device,
                 dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                include_conjugated_inputs=include_conjugated_inputs,
                 # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
                 set_seed=False,
             )
