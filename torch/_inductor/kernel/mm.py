@@ -21,7 +21,12 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
-from ..lowering import add_layout_constraint, constrain_to_fx_strides, lowerings as L, register_lowering
+from ..lowering import (
+    add_layout_constraint,
+    constrain_to_fx_strides,
+    lowerings as L,
+    register_lowering,
+)
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -970,6 +975,7 @@ def tuned_sparse_semi_structured_mm(
 
 
 add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
+
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
