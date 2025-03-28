@@ -95,6 +95,12 @@ class Stream:
     def wait_stream(self, stream) -> None:
         pass
 
+    def record_event(self) -> None:
+        pass
+
+    def wait_event(self, event) -> None:
+        pass
+
 
 class Event:
     def query(self) -> bool:

@@ -14,6 +14,7 @@ from torch._export.non_strict_utils import (
 )
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
+from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -26,20 +27,46 @@ from .exported_program import (
 )
 
 
+def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
+    """
+    Refinement of TreeSpec.__eq__ where, e.g., torch.Size(...) matches tuple(...).
+    See _pytree_subclasses_that_lose_info in proxy_tensor.py for more details.
+    """
+
+    def _normalize_type(t):
+        return str(_pytree_subclasses_that_lose_info.get(t, t))
+
+    def _match_normalized_structure(a, b):
+        if a is b:
+            return True
+        if _normalize_type(a.type) != _normalize_type(b.type):
+            return False
+        if a.context != b.context:
+            return False
+        if len(a.children_specs) != len(b.children_specs):
+            return False
+        return all(
+            _match_normalized_structure(a, b)
+            for a, b in zip(a.children_specs, b.children_specs)
+        )
+
+    return _match_normalized_structure(self, other)
+
+
 def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     reordered_kwargs = reorder_kwargs(kwargs, in_spec)
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, reordered_kwargs)
     )
 
-    if received_spec != in_spec:
+    if not eq_spec(received_spec, in_spec):
         raise ValueError(  # noqa: B904
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"
             f"{received_spec}.\n"
-            "Please check that the inputs have the same number of args "
-            "and kwargs as the ones you used when tracing."
+            "Please check that the inputs have the same number and type of "
+            "args and kwargs as the ones you used when tracing."
         )
 
     return flat_args_with_path
@@ -239,7 +266,7 @@ def _register_attrs_to_new_gm(
         )
 
     # Technically this doesn't account for the aliased multiple constants but
-    # it is ok because we have a seperate pass later in the stack that populates
+    # it is ok because we have a separate pass later in the stack that populates
     # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants

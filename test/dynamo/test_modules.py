@@ -2764,6 +2764,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         run()
         self.assertTrue(models[0].abc)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

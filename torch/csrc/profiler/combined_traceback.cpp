@@ -92,7 +92,6 @@ SymbolizedTracebacks symbolize(
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
         if (cur_python) {
-          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
           cur_python->appendSymbolized(cur_py_frames, r);
         }
         cur_py_frames.clear();
@@ -108,7 +107,6 @@ SymbolizedTracebacks symbolize(
   }
   if (!cur_py_frames.empty()) {
     if (cur_python) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       cur_python->appendSymbolized(cur_py_frames, r);
     }
     cur_py_frames.clear();
