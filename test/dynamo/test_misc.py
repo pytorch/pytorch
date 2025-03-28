@@ -586,6 +586,22 @@ class MiscTests(torch._inductor.test_case.TestCase):
         ref = f(x)
         self.assertEqual(res, ref)
 
+    def test_newly_constructed_tensor_attr_mutation(self):
+        def f(x):
+            y = x + 10
+            y.grad = x
+            y.foo = 42
+            return y
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.ones(5)
+
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res.grad, ref.grad)
+        self.assertEqual(res.foo, ref.foo)
+
     def test_closure_recompiles(self):
         cnt = CompileCounter()
 
