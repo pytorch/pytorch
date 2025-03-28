@@ -454,6 +454,36 @@ std::ostream& operator<<(
   return output << workInfo;
 }
 
+/* Implementation of TensorShelf class */
+
+void TensorShelf::stash(std::vector<at::Tensor>& tensors) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  tVector_.insert(tVector_.end(), tensors.begin(), tensors.end());
+}
+
+void TensorShelf::stash(TensorShelf& other) {
+  std::vector<at::Tensor>& otherVec = other.get();
+  this->stash(otherVec);
+}
+
+void TensorShelf::unstash() {
+  this->clear();
+}
+
+bool TensorShelf::empty() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return tVector_.empty();
+}
+
+void TensorShelf::clear() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  tVector_.clear();
+}
+
+std::vector<at::Tensor>& TensorShelf::get() {
+  return tVector_;
+}
+
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     std::string pgUID,
     std::string pgDesc,
@@ -497,7 +527,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   futureWorkResult_ =
       c10::make_intrusive<at::ivalue::Future>(c10::AnyEnumType::get());
   // other functions expect an initialized ptr
-  stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+  stashed_for_allocator_safety_ = std::make_shared<TensorShelf>();
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -717,25 +747,13 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   }
 }
 
-void ProcessGroupNCCL::WorkNCCL::stashTensors(
-    std::vector<at::Tensor>& tensors) {
-  std::lock_guard<std::mutex> lock(stashMutex_);
-  stashed_for_allocator_safety_->insert(
-      stashed_for_allocator_safety_->end(), tensors.begin(), tensors.end());
-}
-
-void ProcessGroupNCCL::WorkNCCL::unstashTensors() {
-  std::lock_guard<std::mutex> lock(stashMutex_);
-  stashed_for_allocator_safety_->clear();
-}
-
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
   auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
   // Block the current stream on the NCCL stream
   ncclEndEvent_->block(currentStream);
   // Unstage the stashed tensors so that CachingAllocator can recycle them
   // THIS MUST HAPPEN AFTER THE BLOCKING CALL ABOVE
-  unstashTensors();
+  stashed_for_allocator_safety_->unstash();
 }
 
 // Same as calling synchronize() when blockingWait_ is false
@@ -2348,7 +2366,18 @@ void ProcessGroupNCCL::watchdogHandler() {
         // watchdog would unstage the stashed tensors when detecting completion
         // of the collective, to prevent ProcessGroupNCCL from holding reference
         // to those tensors forever.
-        work.unstashTensors();
+        // work.stashed_for_allocator_safety_->unstash();
+        // Update: it seems directly unstashing from watchdog thread would cause
+        // some rare problems. We thus move the unstashing to main thread,
+        // triggered by a next user call, see `workEnqueue`. But `work` is going
+        // to be destructed, so we transfer the work's shelf to a shelves
+        // structure owned by the PG.
+        if (!work.stashed_for_allocator_safety_->empty()) {
+          std::lock_guard<std::mutex> lock(shelvesMutex_);
+          // We are just pushing back a shared_ptr here, so the cost should be
+          // minimal
+          shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+        }
 
         // Work status logging for desync debug
         desyncDebugger_.logWorkEnd(work);
@@ -3136,6 +3165,17 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+  // We clean up the TensorShelf's in case user hasn't called `work.wait()`.
+  // This has nothing to do with new work enqueue. We are just using a place
+  // that would be triggered by a next user call.
+  {
+    std::lock_guard<std::mutex> lock(shelvesMutex_);
+    for (auto& shelf : shelvesToUnstash_) {
+      shelf->unstash();
+    }
+    shelvesToUnstash_.clear();
+  }
+
   // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue
   // the work
   if (!terminateProcessGroup_.load() && !blockingWait_) {
@@ -3219,7 +3259,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   assignTimeoutToWork(work, options_);
 
   // Hand over references to tensors during coalescing to work's stash
-  work->stashTensors(coalescedTensors_);
+  work->stashed_for_allocator_safety_->stash(coalescedTensors_);
 
   // Record start before ncclGroupEnd
   if (work->timingEnabled_) {
@@ -3330,14 +3370,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
+    // First select which shelf to stash onto: to `work` if single collective;
+    // to an inflight shelf if coalescing.
     if (coalescing_state_) {
-      coalescedTensors_.insert(
-          coalescedTensors_.end(), inputs.begin(), inputs.end());
-      coalescedTensors_.insert(
-          coalescedTensors_.end(), outputs.begin(), outputs.end());
+      coalescedTensors_.stash(inputs);
+      coalescedTensors_.stash(outputs);
     } else {
-      work->stashTensors(inputs);
-      work->stashTensors(outputs);
+      work->stashed_for_allocator_safety_->stash(inputs);
+      work->stashed_for_allocator_safety_->stash(outputs);
     }
   }
 
@@ -3517,8 +3557,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashTensors(inputs);
-    work->stashTensors(outputs);
+    work->stashed_for_allocator_safety_->stash(inputs);
+    work->stashed_for_allocator_safety_->stash(outputs);
   }
 
   // Start event should only be recorded before the ncclGroupStart() (which
@@ -4383,7 +4423,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           // which can cause an early recyle by the CachingAllocator, which can
           // lead to segfault or data corruption.
           if (opts.asyncOp) {
-            work->stashTensors(outputTensors_);
+            work->stashed_for_allocator_safety_->stash(outputTensors_);
           }
           // Copy the flattened output tensors to the outputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
@@ -4526,7 +4566,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           //  collective(), and should also be held by the user until after
           //  waiting on work_.
           if (opts.asyncOp) {
-            work->stashTensors(inputTensors_);
+            work->stashed_for_allocator_safety_->stash(inputTensors_);
           }
           // Copy the input tensors to the flattened inputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
