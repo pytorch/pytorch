@@ -395,6 +395,25 @@ bool isPureFunction(const Node* node) {
 
 } // namespace
 
+void ManagedTensorRanges::extendLifetime(Value* input, size_t new_end) {
+  auto* lifetime = getLifetime(input);
+  if (lifetime) {
+    TORCH_DCHECK_LE(lifetime->end, new_end);
+    lifetime->end = new_end;
+  }
+}
+
+void ManagedTensorRanges::extendInputLifetime(Node* node, size_t new_end) {
+  for (auto* input : node->inputs()) {
+    extendLifetime(input, new_end);
+  }
+  for (auto* subblock : node->blocks()) {
+    for (auto* subnode : subblock->nodes()) {
+      extendInputLifetime(subnode, new_end);
+    }
+  }
+}
+
 ManagedTensorRanges::ManagedTensorRanges(
     Block& block,
     const AliasDb& alias_db,
@@ -404,14 +423,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   const auto num_nodes = static_cast<uint32_t>(nodes.size());
   for (const auto i : c10::irange(num_nodes)) {
     auto* node = nodes[i];
-    for (auto* input : node->inputs()) {
-      auto* lifetime = getLifetime(input);
-      if (!lifetime) {
-        continue;
-      }
-      DCHECK(lifetime->end <= i);
-      lifetime->end = i;
-    }
+    extendInputLifetime(node, i);
     for (auto* output : node->outputs()) {
       if (!alias_db.isMutableType(output)) {
         continue;
@@ -965,6 +977,9 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
   // Fast path for most common case
   if (arg.isTensor() &&
       schema_arg.type()->kind() == c10::TypeKind::TensorType) {
+    return;
+  }
+  if (arg.isGenericDict() && arg.toGenericDict().empty()) {
     return;
   }
   TORCH_CHECK(

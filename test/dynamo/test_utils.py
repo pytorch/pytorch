@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
 import pprint
+import sys
 from unittest import mock
 
 import torch
@@ -40,7 +41,7 @@ class TestUtils(TestCase):
         self.assertFalse(
             utils.same(
                 a,
-                a * 6,
+                a * 9,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
@@ -74,6 +75,71 @@ class TestUtils(TestCase):
                 tol=tol,
             )
         )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+            "inline_inbuilt_nn_modules": False,
+        }
+    )
+    def test_graph_break_counting(self):
+        """
+        Run a compilation that includes a graph break and validate that the
+        graph break counter is incremented.
+        """
+
+        def run_forward_backward():
+            model = torch.compile(TestModel())
+            x = torch.rand([3], requires_grad=True)
+            output = model(x)
+            loss_fn = torch.nn.MSELoss()
+            target = torch.tensor([1.0])
+            loss = loss_fn(output, target)
+            loss.backward()
+
+        @torch.compile
+        def add(x, y):
+            return x + y
+
+        @torch.compile
+        def break_it(x):
+            y = x.sum()
+            if y > 0:
+                return x + y.item()
+            return x - y.item()
+
+        @torch.compile
+        def break_it2(x):
+            y = x.sum()
+            if y > 0:
+                if y > 1:
+                    return x * y.item()
+                return x + y.item()
+            return x - y.item()
+
+        add(torch.rand([10]), torch.rand([10]))
+        utils.reset_frame_count()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 0)
+
+            # We should fallback to normal mode and increment the graph break counter
+            torch.compile(break_it, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 1)
+
+            # Graph break counter should be incremented by 1 (after a reset), not 2
+            torch.compile(break_it, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 1)
+
+            # Graph break counter should be incremented by 2
+            torch.compile(break_it2, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
 
 
 class TestModel(torch.nn.Module):
@@ -207,11 +273,13 @@ class TestDynamoTimed(TestCase):
             e.inductor_config = None
             e.cuda_version = None
             e.triton_version = None
+            e.python_version = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["ir_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -233,6 +301,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -266,9 +335,12 @@ class TestDynamoTimed(TestCase):
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
  'non_compliant_ops': set(),
+ 'num_graph_breaks': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
+ 'python_version': None,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -288,12 +360,14 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
+ 'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
 
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
@@ -314,6 +388,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,
@@ -347,9 +422,12 @@ class TestDynamoTimed(TestCase):
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
  'non_compliant_ops': None,
+ 'num_graph_breaks': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
+ 'python_version': None,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -369,8 +447,47 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
+ 'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    def test_ir_count(self):
+        # Different python versions have different potential IR counts.
+        version = (sys.version_info[0], sys.version_info[1])
+        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13)))
+        first, second = {
+            (3, 9): (10, 6),
+            (3, 10): (10, 6),
+            (3, 11): (10, 6),
+            (3, 12): (10, 6),
+            (3, 13): (11, 7),
+        }[version]
+
+        def test1(x):
+            y = x + x
+            z = y * y
+            return z
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test1)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, first)
+
+        def test2(x):
+            y = x + x
+            return y
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test2)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, second)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

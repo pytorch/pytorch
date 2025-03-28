@@ -680,7 +680,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError(
-                "All inputs are required to be `IterDataPipe` " "for `ZipIterDataPipe`."
+                "All inputs are required to be `IterDataPipe` for `ZipIterDataPipe`."
             )
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]

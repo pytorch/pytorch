@@ -119,6 +119,7 @@ struct TorchOpBasicFields {
   uint64_t record_function_id_{0};
   int64_t debug_handle_{0};
   std::string name_;
+  std::string overload_name_;
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
@@ -211,7 +212,9 @@ struct RawAllocation {
 };
 
 // For performance.
-static_assert(c10::is_pod_v<RawAllocation>, "Non-POD member of RawAllocation.");
+static_assert(
+    std::is_trivial_v<RawAllocation>,
+    "Non-Trivial member of RawAllocation.");
 
 template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
@@ -237,8 +240,8 @@ struct ExtraFields<EventType::OutOfMemory> {
 
 // For performance.
 static_assert(
-    c10::is_pod_v<ExtraFields<EventType::OutOfMemory>>,
-    "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
+    std::is_trivial_v<ExtraFields<EventType::OutOfMemory>>,
+    "Non-Trivial member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
   int line_no_;
@@ -394,6 +397,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
+  std::string overload_name() const;
   libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
   int64_t endTimeNS() const;

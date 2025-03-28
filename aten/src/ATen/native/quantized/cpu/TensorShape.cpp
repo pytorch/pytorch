@@ -102,7 +102,6 @@ Tensor quantized_cat_impl(
   const Tensor y = at::cat(xs, dim);
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(x_dtype, "qcat", [&]() {
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     qy = at::quantize_per_tensor(y, scale, zero_point, SCALAR_TYPE);
     if (ReLUFused) {
       auto iter = TensorIterator::unary_op(qy, qy);
