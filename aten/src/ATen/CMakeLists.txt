@@ -564,7 +564,18 @@ endif()
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
-    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_h} ${native_mps_cpp} ${native_mps_h})
+
+    list(APPEND ATen_MPS_SRCS ${ops_generated_remoting_frontend})
+
+    if(USE_PYTORCH_MPS_REMOTING_FRONTEND)
+        list(APPEND ATen_MPS_SRCS ${ops_generated_remoting_frontend})
+    else()
+        if(USE_PYTORCH_MPS_REMOTING_BACKEND)
+            list(APPEND ATen_MPS_SRCS ${ops_generated_remoting_backend})
+        endif()
+        #list(APPEND ATen_MPS_SRCS ${mps_mm} ${native_mps_mm})
+    endif()
 
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal})
