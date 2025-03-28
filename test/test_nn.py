@@ -23,7 +23,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
-from torch.nn.utils import clip_grad_norm_, clip_grad_value_, clip_grads_with_norm_, get_total_norm
+from torch.nn.utils import clip_grad_norm_, clip_grad_value_, clip_grads_with_norm_, get_total_norm, scale_grad_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.nn.utils.fusion import fuse_linear_bn_weights
@@ -12347,6 +12347,29 @@ if __name__ == '__main__':
             self.assertEqual(norm, expected)
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @parametrize_test('foreach', (False, True))
+    def test_scale_grad(self, devices, foreach):
+        class TestModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer1 = nn.Linear(10, 10)
+                self.layer2 = nn.Linear(10, 10)
+
+        test_model = TestModel()
+        test_model.layer1.to(devices[0])
+        test_model.layer2.to(devices[1])
+        ref_model = TestModel().to(devices[0])
+        for p in test_model.parameters():
+            p.grad = torch.ones_like(p)
+        for p in ref_model.parameters():
+            p.grad = torch.ones_like(p)
+        scale_grad_(test_model.parameters(), torch.tensor(0.5), foreach=foreach)
+        scale_grad_(ref_model.parameters(), torch.tensor(0.5), foreach=foreach)
+        for ref_p, p in zip(ref_model.parameters(), test_model.parameters()):
+            self.assertEqual(ref_p.grad, p.grad)
 
     def test_elu_inplace_overlap(self, device):
         dtype = torch.bfloat16 if device != 'mps:0' else torch.float16

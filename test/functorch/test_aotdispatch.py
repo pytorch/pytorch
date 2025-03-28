@@ -6601,6 +6601,35 @@ metadata incorrectly.
             self.assertEqual(1, len(ctx.tangent_strides))
             self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_scale_grad(self):
+        scale_grad_ = torch.nn.utils.scale_grad_
+        devices = [torch.device("cpu"), torch.device("cuda")]
+
+        class TestModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer1 = nn.Linear(10, 10)
+                self.layer2 = nn.Linear(10, 10)
+
+        test_model = TestModel().to(devices[0])
+        test_model.layer1.to(devices[0])
+        test_model.layer2.to(devices[1])
+        ref_model = TestModel().to(devices[0])
+        for p in test_model.parameters():
+            p.grad = torch.ones_like(p)
+        for p in ref_model.parameters():
+            p.grad = torch.ones_like(p)
+
+        scale_grad_(ref_model.parameters(), torch.tensor(0.5), foreach=True)
+
+        def fn():
+            scale_grad_(test_model.parameters(), torch.tensor(0.5), foreach=True)
+
+        torch.compile(fn, fullgraph=True)()
+        for ref_p, p in zip(ref_model.parameters(), test_model.parameters()):
+            self.assertEqual(ref_p.grad, p.grad)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
