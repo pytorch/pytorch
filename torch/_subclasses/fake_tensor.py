@@ -1523,6 +1523,8 @@ class FakeTensorMode(TorchDispatchMode):
                             and not op.__name__.startswith("i")
                         ):
                             continue
+                        if op in (torch._check, torch._check_is_size):
+                            continue
                         try:
                             self._validate_cache_key(op, [], {})
                         except _BypassDispatchCache as e:
