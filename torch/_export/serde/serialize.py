@@ -1243,7 +1243,7 @@ class GraphModuleSerializer(metaclass=Final):
         def store_namedtuple_fields(ts):
             if ts.type is None:
                 return
-            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
+            if ts.type == namedtuple:
                 serialized_type_name = pytree.SUPPORTED_SERIALIZED_TYPES[ts.context].serialized_type_name
                 if serialized_type_name in self.treespec_namedtuple_fields:
                     field_names = self.treespec_namedtuple_fields[serialized_type_name].field_names
@@ -1564,9 +1564,7 @@ class ExportedProgramSerializer(metaclass=Final):
         # TODO: Directly serialize exported_program.constants once
         # CustomClassHolders get stored in the ExportedProgram rather than in
         # the graph
-        constants: dict[str, Any] = {}
-        for n, c in gm_serializer.custom_objs.items():
-            constants[n] = c
+        constants: dict[str, Any] = gm_serializer.custom_objs.copy()
         for n, t in exported_program.constants.items():
             assert n not in constants
             constants[n] = t
