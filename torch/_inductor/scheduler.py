@@ -28,9 +28,9 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -788,7 +788,7 @@ class BaseSchedulerNode:
                 from torch.utils.flop_counter import FlopCounterMode
 
                 if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
+                    len(free_unbacked_symbols(n.get_numel())) > 0  # type: ignore[union-attr]
                     for n in self.node.inputs
                 ):
                     # Tensor has unbacked symints, we don't know how to estimate
@@ -804,7 +804,7 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input, guard_shape=False)
+                        ir_node_to_tensor(input, guard_shape=False)  # type: ignore[arg-type]
                         for input in self.node.inputs
                     ]
                     cls = self.node.__class__
@@ -2261,7 +2261,7 @@ class Scheduler:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
-                node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
+                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
@@ -2326,7 +2326,7 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
-            for s in out.get_unbacked_symbol_uses():
+            for s in out.get_free_symbol_uses(unbacked_only=True):
                 assert s in unbacked_symbol_to_origin_node, (
                     f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                 )
@@ -2659,7 +2659,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -3546,7 +3546,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
+                OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - allowed_prologue_inps
             )
 
@@ -3981,16 +3981,6 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if (
-            hasattr(node.node, "layout")
-            and hasattr(node.node.layout, "size")
-            and any(
-                isinstance(expr, sympy.Expr) and expr.free_symbols
-                for expr in node.node.layout.size
-            )
-        ):
-            return True
-
         return False
 
     def get_name_to_nodes(
@@ -4049,6 +4039,102 @@ class Scheduler:
                     signature.constant_names,
                 )
             )
+
+    def get_graph_partition_symbol_inputs(
+        self,
+        partition: PartitionType,
+        input_nodes: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]],
+    ) -> OrderedSet[sympy.Symbol]:
+        """
+        Returns all symbol inputs which are required to be in scope to successfully
+        perform codegen for this graph partition, including:
+        - free symbols used in partition nodes
+        - free symbols in partition input/node shapes, strides, and offsets. This is needed
+          for recording cudagraphs for tensors with dynamic shapes.
+        """
+
+        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
+            layout = node.maybe_get_layout()
+            if isinstance(layout, ir.Layout):
+                free_symbol_uses.update(
+                    free_symbols(layout.size)
+                    | free_symbols(layout.stride)
+                    | free_symbols(layout.offset)
+                )
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    # symint may be used as index in layout.target
+                    free_symbol_uses.update(get_layout_symints(layout.target))
+            else:
+                assert layout is None, (
+                    f"Expect layout to be None but found layout={layout}"
+                )
+            return free_symbol_uses
+
+        def get_scheduler_node_symbol_uses(
+            node: BaseSchedulerNode,
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in node.
+            """
+            if isinstance(node, FusedSchedulerNode):
+                return OrderedSet().union(
+                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+                )
+            assert node.node is not None
+            free_symbol_uses = node.node.get_free_symbol_uses()
+            free_symbol_uses.update(
+                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+            )
+            return free_symbol_uses
+
+        def get_input_node_symbols(
+            node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in input node shapes, strides, and offsets.
+            """
+            if isinstance(node, ir.TorchBindObject):
+                # TorchBindObject does not involve dynamic shapes yet
+                return OrderedSet()
+            elif isinstance(node, ir.IRNode):
+                return get_layout_symints(node)
+            else:
+                # node cannot be sympy.Expr since node comes from read_writes and
+                # read_writes does not contain sympy.Expr
+                raise NotImplementedError(f"Unsupported input node type: {type(node)}")
+
+        def filter_symbols(
+            symbols: OrderedSet[sympy.Symbol],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Filters a set of symbols that are required for codegen. Skip symbols
+            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
+            and SymT.R0_INDEX.
+            """
+            return OrderedSet(
+                s
+                for s in symbols
+                if symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.FLOAT,
+                        SymT.UNBACKED_INT,
+                        SymT.UNBACKED_FLOAT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+            )
+
+        candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(node) for node in partition)
+        )
+        candidate_symbols.union(
+            *(get_input_node_symbols(node) for _, node in input_nodes.items())
+        )
+
+        return filter_symbols(candidate_symbols)
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4115,7 +4201,12 @@ class Scheduler:
                 name for name in partition_input_names if name in V.graph.constants
             ]
 
+            symbol_inputs = self.get_graph_partition_symbol_inputs(
+                partition, input_nodes
+            )
+
             partition_signature = GraphPartitionSignature(
+                symbol_inputs,
                 input_nodes,
                 output_nodes,
                 input_deallocation,

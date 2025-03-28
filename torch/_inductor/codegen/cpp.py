@@ -4636,7 +4636,7 @@ class CppScheduling(BaseScheduling):
                 isinstance(template_buf.layout, ir.MultiOutputLayout)
                 and isinstance(node2.node, ir.MultiOutput)
                 and len(node2.node.inputs) == 1
-                and node2.node.inputs[0].get_name() == template_buf.name
+                and node2.node.inputs[0].get_name() == template_buf.name  # type: ignore[union-attr]
             )
         return False
 
