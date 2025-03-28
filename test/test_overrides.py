@@ -33,7 +33,10 @@ Tensor = torch.Tensor
 
 if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
     # This test is not supported on ARM
-    print("Skipping due to failing when cuda build runs on non cuda machine, see #150059 for example")
+    print(
+        "Skipping due to failing when cuda build runs on non cuda machine, "
+        + "see https://github.com/pytorch/pytorch/pull/150059 for example"
+    )
     sys.exit()
 
 # The functions below simulate the pure-python torch functions in the
