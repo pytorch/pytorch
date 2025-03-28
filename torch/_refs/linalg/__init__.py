@@ -111,7 +111,7 @@ def _check_vector_norm_args(
         "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
-    
+
     shape = x.shape
     if dim is not None and not isinstance(dim, IntLike):
         for d in dim:
