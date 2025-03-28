@@ -23,6 +23,9 @@ def _print_debugging_tensor_value_info(msg, arg):
     # at jit inductor level codegen
     max_numel_to_print = 64
     print(msg)
+    if not isinstance(arg, torch.Tensor):
+        print("Value: ", arg)
+        return
     numel = arg.float().numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
