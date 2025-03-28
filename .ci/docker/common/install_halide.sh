@@ -19,9 +19,6 @@ fi
 
 conda_install numpy scipy imageio cmake ninja
 
-# Remove this when cmake 4.0.0 is more supported
-export CMAKE_POLICY_VERSION_MINIMUM=3.5
-
 git clone --depth 1 --branch release/16.x --recursive https://github.com/llvm/llvm-project.git
 cmake -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="clang" \
