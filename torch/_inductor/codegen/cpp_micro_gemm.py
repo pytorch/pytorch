@@ -317,13 +317,18 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-# For int8 WoQ GEMM with small M, use CppMicroGemmWoQSmallMDim instead of CppMicroGemmFP32Vec
-def do_not_use_fp32_gemm_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
-    return not (
+# extra check for CppMicroGemmWoQSmallMDim
+def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+    return (
         k % config.register_blocking.block_k == 0
         and n % config.register_blocking.block_n == 0
         and m < 16
     )
+
+
+# For int8 WoQ GEMM with small M, use CppMicroGemmWoQSmallMDim instead of CppMicroGemmFP32Vec
+def do_not_use_fp32_gemm_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
+    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads)
 
 
 @register_micro_gemm(
@@ -917,15 +922,6 @@ inline void {{kernel_name}}_transpose_b_kernel(
         return result
 
 
-# extra check for CppMicroGemmWoQSmallMDim
-def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
-    return (
-        k % config.register_blocking.block_k == 0
-        and n % config.register_blocking.block_n == 0
-        and m < 16
-    )
-
-
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
@@ -1045,7 +1041,7 @@ inline void {{kernel_name}}_kernel(
             va = _mm512_set1_ps(A[row * lda + k]);
         }
         if constexpr (row == 0) {
-            // Convert VLEN int8 elements to int16, then fp16, and then apply scale
+            // Convert VLEN int8 elements to int32, then fp32
             auto int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN));
             vb[col] =  _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(int8_vector));
             if C10_LIKELY(prefetch) {
