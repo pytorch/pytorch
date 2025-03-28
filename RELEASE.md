@@ -166,6 +166,8 @@ Follow these examples of PR that updates the version and sets RC Candidate uploa
 * torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change CI workflow references](https://github.com/pytorch/vision/pull/8969)
 * torchaudio: [Update version.txt](https://github.com/pytorch/audio/commit/654fee8fd17784271be1637eac1293fd834b4e9a) and [change CI workflow references](https://github.com/pytorch/audio/pull/3890)
 
+The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in both pytorch/audio and pytorch/vision.
+
 ## Running Launch Execution team Core XFN sync
 
 The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
