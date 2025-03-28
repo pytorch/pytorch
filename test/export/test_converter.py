@@ -10,7 +10,7 @@ from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -1403,6 +1403,8 @@ class TestConverter(TestCase):
         IS_WINDOWS,
         "Windows does not support qnnpack",
     )
+    # qnnpack not supported on s390x
+    @xfailIfS390X
     def test_ts2ep_convert_quantized_model(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
@@ -1446,6 +1448,8 @@ class TestConverter(TestCase):
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
             self._check_tensor_list_equal(orig_out, ep_out)
 
+    # qnnpack not supported on s390x
+    @xfailIfS390X
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1459,6 +1463,26 @@ class TestConverter(TestCase):
         linear_op = torch.ops.prepacked.linear_clamp_prepack(
             torch.randn(10, 10), torch.randn(10)
         )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+    def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(
+                    x + torch.ones(1), self.linear_op
+                )
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
