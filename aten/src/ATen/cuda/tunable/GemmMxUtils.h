@@ -1,8 +1,6 @@
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
-#include <mutex>
-#include <unordered_map>
 #include <string>
 
 namespace at::cuda::tunable {
