@@ -347,6 +347,30 @@ class TestTorchbind(TestCase):
         new_res = torch.compile(m, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(orig_res, new_res))
 
+    def test_torchbind_input_aot_compile(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.ops._TorchScriptTesting.takes_foo_list_return(x, y)
+                return a
+
+        m = M()
+        inputs = (torch.classes._TorchScriptTesting._Foo(10, 20), torch.ones(2, 3))
+
+        # We can't directly torch.compile because dynamo doesn't trace ScriptObjects yet
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        from torch._dynamo.exc import UserError
+
+        with self.assertRaisesRegex(
+            UserError,
+            expected_regex="TorchBind object inputs are not supported in AOTInductor",
+        ):
+            aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
+
 
 if __name__ == "__main__":
     run_tests()
