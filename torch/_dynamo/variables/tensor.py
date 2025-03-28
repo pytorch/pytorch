@@ -796,8 +796,14 @@ class TensorVariable(VariableTracker):
                 object(), var, mutation_type_cls=AttributeMutationNew
             )
             return var
-        unimplemented(
-            "Argument of `as_subclass` must be a tensor subclass which Dynamo supports tracing"
+        unimplemented_v2(
+            gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+            context=f"{self}.as_subclass({cls})",
+            explanation="Currently not supported",
+            hints=[
+                "Avoid this call or move it outside `torch.compile` regione",
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
     def method_get_device(self):
