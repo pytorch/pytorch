@@ -144,8 +144,8 @@ class MetricsContext:
         """
         if self._level == 0:
             raise RuntimeError("Cannot track params outside of a MetricsContext")
-        tracked = param in self._traced_parameters
-        self._traced_parameters.add(param)
+        tracked = id(param) in self._traced_parameters
+        self._traced_parameters.add(id(param))
         return tracked
 
     def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
