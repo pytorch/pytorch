@@ -222,6 +222,10 @@ static size_t _getWorkspaceSize() {
   return workspace_size;
 }
 
+static at::DataPtr _getNewWorkspace() {
+  return c10::cuda::CUDACachingAllocator::get()->allocate(_getWorkspaceSize());
+}
+
 // See Note [hipblaslt handles].
 // ROCm's hipblas and hipblaslt do not share handles, unlike with CUDA.
 // Using getCurrentCUDABlasLtHandle is on purpose. For CUDA it's the same as
@@ -235,8 +239,7 @@ void* _getWorkspaceWithoutHandle() {
 #ifdef USE_ROCM
   // The first call to _getWorkspaceWithoutHandle could be empty, so allocate and store.
   if (workspace_it == at::cuda::cublas_handle_stream_to_workspace().end()) {
-    at::DataPtr ptr = c10::cuda::CUDACachingAllocator::get()->allocate(_getWorkspaceSize());
-    workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, ptr});
+    workspace_it = at::cuda::cublas_handle_stream_to_workspace().insert(workspace_it, {key, _getNewWorkspace()});
   }
 #else
   TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
