@@ -104,8 +104,6 @@ Package not found in win-32 channel.
     - pytorch
 
     Current channels:
-    - https://conda.anaconda.org/pytorch/win-32
-    - https://conda.anaconda.org/pytorch/noarch
     - https://repo.continuum.io/pkgs/main/win-32
     - https://repo.continuum.io/pkgs/main/noarch
     - https://repo.continuum.io/pkgs/free/win-32
@@ -136,6 +134,9 @@ we include almost all the essential files that PyTorch need for the conda
 package except VC2017 redistributable and some mkl libraries.
 You can resolve this by typing the following command.
 
+..
+    TODO update this
+
 .. code-block:: bat
 
     conda install -c peterjc123 vc vs2017_runtime
@@ -161,6 +162,9 @@ graphics cards. Please replace your GPU package with the CPU one.
 
     ImportError: DLL load failed: The operating system cannot run %1.
 
+
+..
+    TODO update this
 
 This is actually an upstream issue of Anaconda. When you initialize your
 environment with conda-forge channel, this issue will emerge. You may fix
