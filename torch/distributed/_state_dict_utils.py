@@ -653,7 +653,8 @@ def _broadcast_state_dict(
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
             if cpu_offload:
                 for key in keys:
-                    local_state_dict[key] = local_state_dict[key].cpu()
+                    if key in local_state_dict or not strict:
+                        local_state_dict[key] = local_state_dict[key].cpu()
             keys.clear()
 
     if strict:

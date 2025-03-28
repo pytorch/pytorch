@@ -125,6 +125,15 @@ class StateDictOptions:
        the tensors and shard according to the local shards in the model and
        optimizer. ``full_state_dict`` must be set to True when using this option.
        This option currently only supports DTensor, not the legacy ShardedTensor.
+
+    **Important Notices:**
+
+    When broadcast_from_rank0 is disabled, all ranks rely on the storage checkpoint as the
+    source of truth to identify missing or extra keys. However, when broadcast_from_rank0
+    is enabled, rank 0 uses the storage checkpoint as the source of the truth as usual,
+    while other ranks use rank 0's state dictionary. This can lead to ambiguity and potential
+    issues if MPMD is also employed. Therefore, users must take responsibility for ensuring
+    correctness when using these two options in conjunction.
     """
 
     full_state_dict: bool = False
