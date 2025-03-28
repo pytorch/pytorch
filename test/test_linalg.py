@@ -1447,6 +1447,7 @@ class TestLinalg(TestCase):
                             keepdim,
                             norm_dtype)
  
+
     def test_vector_norm_decom_unbacked_checks(self):
         from torch._refs.linalg import _check_vector_norm_args
 
