@@ -355,9 +355,9 @@ Please make sure [the common prerequisites](#prerequisites) as well as [the prer
 Then PyTorch can be built with the command:
 
 ```cmd
+:: CMD Commands:
 :: Set the CMAKE_PREFIX_PATH to help find corresponding packages
 :: %CONDA_PREFIX% only works after `conda activate custom_env`
-:: Use `$env:CMAKE_PREFIX_PATH = "${env:CONDA_PREFIX};${env:CMAKE_PREFIX_PATH}"` for powershell
 
 if defined CMAKE_PREFIX_PATH (
     set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
