@@ -1505,6 +1505,7 @@ class FakeTensorMode(TorchDispatchMode):
                             and getattr(op, "__module__", None)
                             in {"_operator", "operator"}
                             and not op.__name__.startswith("i")
+                            and op not in (torch._check, torch._check_is_size)
                         ):
                             continue
                         try:
