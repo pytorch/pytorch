@@ -1113,8 +1113,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if config.aot_inductor.enable_kernel_profile:
                 shim_fn_codes = (
                     """{ RECORD_FUNCTION("%s", c10::ArrayRef<c10::IValue>()); %s }"""
-                )
-                shim_fn_codes = shim_fn_codes % (shim_fn, shim_fn_codes)
+                ) % (shim_fn, shim_fn_codes)
             self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
