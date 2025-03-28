@@ -60,6 +60,8 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         )
 
 
+import operator
+
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 from torch._decomp.decompositions import pw_cast_for_opmath

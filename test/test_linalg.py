@@ -1458,12 +1458,11 @@ class TestLinalg(TestCase):
 
             def forward(self, a):
                 x = a.item()
-                tensor_unbacked_size = torch.ones(x,x+1,x+2)
+                tensor_unbacked_size = torch.ones(x, x+1, x+2)
                 _check_vector_norm_args(tensor_unbacked_size, self.ord, self.dim)
                 return tensor_unbacked_size
 
-        # When expect_runtime_check we expect a runtime check to inserted.
-        def test(ord: Union[float, int], dim: Optional[DimsType], expect_numel_runtime_check:bool, expect_index_0_check:bool=False) -> None: 
+        def test(ord: Union[float, int], dim: Optional[DimsType], expect_numel_runtime_check:bool, expect_index_0_check:bool=False) -> None:
             m = Mod(ord, dim)
             exported_program: torch.export.ExportedProgram = torch.export.export(
                 m , args= tuple(torch.tensor([1])))
@@ -1471,8 +1470,6 @@ class TestLinalg(TestCase):
             self.assertEqual("Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)" in exported_program.graph_module.code, expect_index_0_check)
 
 
-
-        # Those are situation where we should throw error if input.size()==0
         # dim is int.
         test(-1, 1, True)
 
@@ -1485,7 +1482,7 @@ class TestLinalg(TestCase):
         # test()
         # shape[d] ==0
         test(-1, [0], False, True)
-        
+
         # u0+1==0 is False so we do not see a runtime assert
         test(-1, [1], False, False)
 
