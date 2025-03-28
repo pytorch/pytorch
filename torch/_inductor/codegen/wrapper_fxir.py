@@ -185,6 +185,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Disable this function, since FXIR does its own output handling for views.
         """
+        pass
 
     def _codegen_outputs_wrapper_ir(self):
         """
