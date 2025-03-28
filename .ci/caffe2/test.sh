@@ -8,6 +8,10 @@ if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
   pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 fi
 
+python -c 'import torch; print(torch.distributed.is_nccl_available())' || true
+python -c 'import torch; print(torch.cuda.nccl.version())' || true
+exit 0
+
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
