@@ -2019,8 +2019,10 @@ class SIMDScheduling(BaseScheduling):
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.size_hint(a1 - b1) == 0 or free_unbacked_symbols(
-                    [a1, b1]
+
+                if (
+                    free_unbacked_symbols([a1, b1])
+                    or V.graph.sizevars.size_hint(a1 - b1) == 0
                 ):
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
