@@ -18,7 +18,6 @@ import time
 from collections.abc import Iterator
 from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import TypeAlias
-from weakref import WeakSet
 
 
 if TYPE_CHECKING:
@@ -64,7 +63,7 @@ class MetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
-        self._traced_parameters: WeakSet[nn.Parameter] = WeakSet()
+        self._traced_parameters: set[int] = set()
 
     def __enter__(self) -> "MetricsContext":
         """
