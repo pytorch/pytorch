@@ -3,6 +3,9 @@ import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Generic, Optional, TypeVar, Union
 
+import numpy as np
+from numpy.typing import NDArray
+
 import torch
 
 
@@ -101,7 +104,15 @@ class Sampler(Generic[_T_co]):
     #     (@ssnl verifies that this works on at least Python 3.7.)
 
 
-class SequentialSampler(Sampler[int]):
+class ArrayableSampler(Sampler[int]):
+    """
+        Base class for samplers that construct all epoch indices and returns them as a ndarray.
+        This class should be used with BatchSampler for faster batching.
+    """
+    def to_array(self) -> NDArray[np.int_]:
+        raise NotImplementedError
+
+class SequentialSampler(ArrayableSampler):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
@@ -116,11 +127,14 @@ class SequentialSampler(Sampler[int]):
     def __iter__(self) -> Iterator[int]:
         return iter(range(len(self.data_source)))
 
+    def to_array(self) -> NDArray[np.int_]:
+        return np.arange(len(self.data_source))
+
     def __len__(self) -> int:
         return len(self.data_source)
 
 
-class RandomSampler(Sampler[int]):
+class RandomSampler(ArrayableSampler):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
 
     If with replacement, then user can specify :attr:`num_samples` to draw.
@@ -190,6 +204,18 @@ class RandomSampler(Sampler[int]):
             yield from torch.randperm(n, generator=generator).tolist()[
                 : self.num_samples % n
             ]
+
+    def to_array(self) -> NDArray[np.int_]:
+        seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        generator = np.random.default_rng(seed)
+
+        if self.replacement:
+            indices = generator.integers(0, len(self.data_source), len(self.data_source))
+        else:
+            indices = np.arange(len(self.data_source))
+            generator.shuffle(indices)
+
+        return indices
 
     def __len__(self) -> int:
         return self.num_samples
@@ -346,3 +372,22 @@ class BatchSampler(Sampler[list[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
+
+class NewBatchSampler(BatchSampler):
+    def __iter__(self) -> Iterator[list[int]]:
+        if isinstance(self.sampler, ArrayableSampler):
+            indices = self.sampler.to_array()
+
+            reminder_size = len(indices) % self.batch_size
+            last = None
+            if reminder_size > 0:
+                indices, last = indices[:-reminder_size], indices[-reminder_size:]
+
+            indices_batched = indices.reshape(-1, self.batch_size)
+            yield from indices_batched
+
+            if not self.drop_last and last is not None:
+                yield last
+
+        else:
+            yield from super().__iter__()
