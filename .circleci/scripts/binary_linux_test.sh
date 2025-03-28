@@ -95,6 +95,7 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
   # todo: implement check for large binaries
   # if the package is larger than 1.5GB, we disable the pypi check.
   # this package contains all libraries packaged in torch libs folder
+  # example of such package is https://download.pytorch.org/whl/cu124_full/torch
   extra_parameters=""
   if [[ "\$torch_pkg_size" -gt  1500000000 ]]; then
     extra_parameters="--pypi-pckg-check disabled"
