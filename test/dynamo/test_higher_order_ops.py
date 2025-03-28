@@ -2143,7 +2143,7 @@ def forward(self, L_x_ : torch.Tensor):
     gt = sum_1 > 0;  sum_1 = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_,));  gt = cond_true_0 = cond_false_0 = l_x_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
             )
@@ -2187,7 +2187,7 @@ def forward(self, L_x_ : torch.Tensor):
     gt = sum_1 > 0;  sum_1 = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
+    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, ());  gt = cond_true_0 = cond_false_0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
             )
@@ -3115,7 +3115,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     l_pytree_in_4_g_ = L_pytree_in_4_g_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_));  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -6656,6 +6656,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 18)
+
+    def test_vmap_out_dims_None(self):
+        # issue https://github.com/pytorch/pytorch/issues/149509
+        def fn(x, y):
+            return x, y * 2
+
+        def wrapper_fn(x, y):
+            return torch.func.vmap(fn, in_dims=(None, 0), out_dims=(None, 0))(x, y)
+
+        x, y = torch.randn(4), torch.randn(3, 4)
+        expected = wrapper_fn(x, y)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x, y)
+        self.assertEqual(expected, got)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
