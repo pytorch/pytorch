@@ -1234,6 +1234,13 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    # The number of elements within parameters. This is classically what people think of when they think of parameters
+    # in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes, per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters count by fields. This mostly is a proxy for number of distinct type of params
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):

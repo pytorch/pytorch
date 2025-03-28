@@ -1522,6 +1522,29 @@ class VariableBuilder:
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
+        if config.log_compilation_metrics:
+            try:
+                params = [
+                    p
+                    for _, p in value.named_parameters(
+                        recurse=False, remove_duplicate=True
+                    )
+                    if not torch.nn.parameter.is_lazy(p)
+                ]
+            except (AttributeError, TypeError, RuntimeError):
+                params = []
+                # Fails for weird things without params, and cpp_frontend_extension.cpp.Net, which doesn't support remove_duplicate
+                # Fails for sparse tensors, as well as expanded weights
+
+            metrics_context = get_metrics_context()
+            for p in params:
+                # This is somewhat clever. Weights may be saved between models. This code is designed to
+                # correctly de deuplicate them when duplicated.
+                if not metrics_context.track(p):
+                    metrics_context.increment("param_numel", p.numel())
+                    metrics_context.increment("param_bytes", p.nbytes)
+                    metrics_context.increment("param_count", 1)
+
         if len(value.__dict__) == 0:
             unimplemented_v2(
                 gb_type="Uninitialized nn.Module",

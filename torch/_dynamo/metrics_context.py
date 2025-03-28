@@ -16,8 +16,12 @@ execution performance.
 import heapq
 import time
 from collections.abc import Iterator
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import TypeAlias
+
+
+if TYPE_CHECKING:
+    from torch import nn
 
 
 class TopN:
@@ -59,6 +63,7 @@ class MetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
+        self._traced_parameters: set[int] = set()
 
     def __enter__(self) -> "MetricsContext":
         """
@@ -131,6 +136,16 @@ class MetricsContext:
         if metric not in self._metrics:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
+
+    def track(self, param: "nn.Parameter") -> bool:
+        """
+        Indicates if we've already seen a tracked paramater
+        """
+        if self._level == 0:
+            raise RuntimeError("Cannot track params outside of a MetricsContext")
+        tracked = id(param) in self._traced_parameters
+        self._traced_parameters.add(id(param))
+        return tracked
 
     def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
