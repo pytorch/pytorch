@@ -181,6 +181,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
+    def generate_return(self, output_refs: list[str]) -> None:
+        """
+        Disable this function, since FXIR does its own output handling for views.
+        """
+
     def _codegen_outputs_wrapper_ir(self):
         """
         Graph outputs can perform some operations, like ReinterpretView.
@@ -217,10 +222,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             else:
                 raise NotImplementedError(f"Unrecognized output node: {node}")
 
-        output_buffers = tuple(
-            codegen_output(node) for idx, node in enumerate(V.graph.graph_outputs)
+        output_refs = tuple(
+            codegen_output(node).get_name()
+            for idx, node in enumerate(V.graph.graph_outputs)
         )
-        self.writeline(OutputLine(output_buffers))
+        self.writeline(OutputLine(self, output_refs))
 
     def _generate(self, is_inference):
         self._codegen_outputs_wrapper_ir()
@@ -343,9 +349,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_output(self, line: Line) -> None:
         assert isinstance(line, OutputLine)
 
-        outputs = tuple(
-            self.buffer_to_node[buffer.get_name()] for buffer in line.buffers
-        )
+        outputs = tuple(self.buffer_to_node[ref] for ref in line.output_refs)
         self.gm.graph.output(outputs)
 
     def _generate_reinterpret(self, line: Line) -> None:
