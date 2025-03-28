@@ -2559,11 +2559,8 @@ def forward(self, pred_1, x_1):
 
         # Wrong pytree of the carry produced by the operation
         with self.assertRaisesRegex(
-            # Should be
-            # RuntimeError,
-            # "The number of leaves of the pytree of the new carry produced by the operator.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
+            "Expected init and carry to have same.*",
         ):
             scan(
                 fct_pointwise_carry_wrong_pytree,
