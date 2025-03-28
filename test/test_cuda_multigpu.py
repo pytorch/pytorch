@@ -1121,7 +1121,7 @@ class TestCudaMultiGPU(TestCase):
         self.assertTrue(a.grad.sum().item() == 4 * size)
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
-    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 3, "GPU count is less than 3")
+    @unittest.skipIf(torch.cuda.device_count() < 3, "GPU count is less than 3")
     def test_streaming_backwards_device_transfer_2(self):
         class Func(torch.autograd.Function):
             @staticmethod
@@ -1142,14 +1142,10 @@ class TestCudaMultiGPU(TestCase):
         )
         grad_ref = torch.tensor([0.1, 0.1, 0.1], device="cuda:0")
         out1, out2 = Func.apply(a)
-        out1_1 = out1 + 1
         # [backward grad accumulation] case 4
         # MulBackward0 node: producer stream is on device2, consumer stream is on device1
-        # var is on device2
+        # out2.grad is on device2
         out2_1 = out2 * 0.5
-        torch.cuda.synchronize(device=torch.device("cuda:0"))
-        torch.cuda.synchronize(device=torch.device("cuda:1"))
-        torch.cuda.synchronize(device=torch.device("cuda:2"))
         out2_1.sum().backward()
         self.assertEqual(a.grad, grad_ref)
 
@@ -1159,20 +1155,17 @@ class TestCudaMultiGPU(TestCase):
         grad_ref = torch.tensor([0.7, 0.7, 0.7], device="cuda:0")
         # [backward grad accumulation] case 3
         # MyFunctionBackward node: producer stream is on device1, consumer stream is on device0
-        # var is on device0
+        # b.grad is on device0
         out1, out2 = Func.apply(b)
         # [backward grad accumulation] case 3
         # ToCopyBackward node: producer stream is on device0, consumer stream is on device1
-        # var is on device1
+        # out1.grad is on device1
         out1_1 = out1.to("cuda:0")
         # [backward grad accumulation] case 5
         # ToCopyBackward node: producer stream is on device0, consumer stream is on device1
-        # var is on device2
+        # out2.grad is on device2
         out2_1 = out2.to("cuda:0")
         res = out1_1 + out2_1
-        torch.cuda.synchronize(device=torch.device("cuda:0"))
-        torch.cuda.synchronize(device=torch.device("cuda:1"))
-        torch.cuda.synchronize(device=torch.device("cuda:2"))
         res.sum().backward()
         self.assertEqual(b.grad, grad_ref)
 
