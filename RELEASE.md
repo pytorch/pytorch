@@ -141,8 +141,11 @@ DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/releas
 ```
 
 ### Making release branch specific changes for PyTorch
+First you should cut a release branch for pytorch/test-infra:
+* Create a new branch using the naming convention `release/[major].[minor]`, e.g. `release/2.7`
+* On that release branch, update branch pointers for any pytorch-managed reusable actions or workflows to point to the new release's branch ([example](https://github.com/pytorch/test-infra/commit/749b9e36afa23298ad5498c9f5bcd96f5467baff#diff-d41015f3ac6cfa64b00e366bec416bb9487ac27493de7ebe7778fdfc7518b003R39)).
 
-These are examples of changes that should be made to release branches so that CI / tooling can function normally on
+Here are examples of changes that should be made to the pytorch/pytorch release branches so that CI / tooling can function normally on
 them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies
