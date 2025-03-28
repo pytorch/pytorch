@@ -188,7 +188,7 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1
 rewrite_assert_with_torch_assert = True
 
 # Disable dynamo
-disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
+disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
@@ -534,8 +534,19 @@ fake_tensor_cache_crosscheck_enabled = (
     os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
 )
 
-# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
-# Note: AOT Autograd will still trace joint graphs.
+# Disables inference mode for fake tensor prop during compilation. At runtime,
+# the inference_mode is still respected.
+fake_tensor_disable_inference_mode = True
+
+# Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
+# Note: AOTAutograd will still trace and partition an AOT backward graph local to that
+# compiled region. But AOTAutograd traces without knowledge of backward hooks which are
+# coordinated by the Autograd engine, and under the hood, it uses the torch.autograd.grad
+# API, so it cannot capture gradient accumulation operations (AccumulateGrad).
+#
+# Compiled Autograd will trace all autograd operations as seen by the Autograd engine.
+# This flag will also lift certain restrictions during the forward trace such as
+# registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
@@ -595,6 +606,10 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
+
+# Takes the function/module decorated with torch.compile and passes it through a
+# wrapper. This ensures that nn.module hooks are also compiled in the same frame.
+wrap_top_frame = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
