@@ -11,7 +11,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils._sympy.symbol import make_symbol, SymT
@@ -752,17 +752,18 @@ def canonicalization_prefix() -> str:
     return "c"
 
 
-# ops handler which computes all the free unbacked symbols for an IR
-class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
+# ops handler which computes all the free symbols for an IR
+class FreeSymbolsOpsHandler(DefaultHandler):
     symbols: OrderedSet[sympy.Symbol]
 
-    def __init__(self) -> None:
+    def __init__(self, unbacked_only: bool = True) -> None:
         self.symbols = OrderedSet()
+        self.get_symbols = free_unbacked_symbols if unbacked_only else free_symbols
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         for a in itertools.chain(args, kwargs.values()):
             if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
-                self.symbols |= free_unbacked_symbols(a)
+                self.symbols |= self.get_symbols(a)
 
     def indirect_indexing(
         self,
@@ -772,7 +773,7 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
-        self.symbols |= free_unbacked_symbols(size)
+        self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
     def frexp(self, x: Any) -> tuple[None, ...]:
@@ -804,15 +805,16 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
         body()
 
 
-def extract_free_unbacked_symbols(
+def extract_free_symbols(
     fn: Callable[..., Any],
     index: Sequence[sympy.Expr],
     rindex: Optional[Sequence[sympy.Expr]] = None,
+    unbacked_only: bool = True,
 ) -> OrderedSet[sympy.Symbol]:
     from .ir import FlexibleLayout
 
     args = [index, rindex] if rindex is not None else [index]
-    handler = FreeUnbackedSymbolsOpsHandler()
+    handler = FreeSymbolsOpsHandler(unbacked_only)
     # NB: I cargo culted the allow_indexing patch here, I don't understand why
     # people do this all over
     with (
