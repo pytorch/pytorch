@@ -297,6 +297,11 @@ class SuperVariable(VariableTracker):
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     tx_old
                 )
+        elif isinstance(inner_fn, types.MethodDescriptorType):
+            # FunctionType but implementation is in C, we support some of these,
+            # e.g., tensor ops like `torch.Tensor.to`.
+            fn_var = VariableTracker.build(tx, inner_fn, source)
+            return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
