@@ -1,5 +1,9 @@
+#pragma once
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
-
+#include <unordered_map>
+#include <set>
+#include <mutex>
+#include <string_view>
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
@@ -14,6 +18,52 @@ namespace at::native {
 // DeviceThreadHandlePool.
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
+
+#ifdef USE_ROCM && AT_HIPSPARSELT_ENABLED() 
+// Single global flag for platform-wide hipSparseLt support
+std::once_flag g_hipSparseLtSupportInitFlag;
+static bool g_hipSparseLtSupported = false;
+
+// Set of supported architectures
+//TODO: Verify gfx1200 and gfx1201 are supported
+const static std::unordered_set<std::string> supported_archs = {"gfx950", "gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+
+// Initialize the hipSparseLt support status once for the platform
+static void initHipSparseLtSupport() {
+    // Default to not supported
+    g_hipSparseLtSupported = false;
+    
+    // Check the first available device
+    try {
+        int device_count = at::cuda::device_count();
+        for (int idx = 0; idx < device_count; idx++) {
+            auto prop = at::cuda::getDeviceProperties(idx);
+            std::string_view gcnArchName(prop->gcnArchName);
+            size_t colonPos = gcnArchName.find(':');
+            std::string_view baseArch = (colonPos != std::string_view::npos) ? 
+                                        gcnArchName.substr(0, colonPos) : gcnArchName;
+            
+            if (supported_archs.count(std::string(baseArch)) > 0) {
+                g_hipSparseLtSupported = true;
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+        // If an exception occurs during device property check, we assume hipSparseLt is not supported
+        // This could happen due to driver issues, device access problems, or other runtime errors
+        g_hipSparseLtSupported = false;
+        TORCH_WARN("Exception occurred while checking hipSparseLt support. Assuming not supported.");
+    }
+}
+
+static bool isHipSparseLtSupported(int idx) {
+    // Initialize support check only once
+    std::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
+    
+    // Return cached result (platform-wide)
+    return g_hipSparseLtSupported;
+}
+#endif
 
 at::Tensor _cslt_compress(const Tensor& sparse_input) {
   if (!handle_initialized) {
