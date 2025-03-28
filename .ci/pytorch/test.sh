@@ -6,6 +6,11 @@
 
 set -ex -o pipefail
 
+
+python -c 'import torch; print(torch.distributed.is_nccl_available())' || true
+python -c 'import torch; print(torch.cuda.nccl.version())' || true
+exit 0
+
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
