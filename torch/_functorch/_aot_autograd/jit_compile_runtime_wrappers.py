@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
@@ -29,11 +30,12 @@ from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import is_sym_node, make_fx
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.types import py_sym_types
 from torchgen.utils import dataclass_repr
 
 from .. import config
@@ -878,12 +880,205 @@ def aot_dispatch_autograd(
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
+            num_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = [
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
+            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+
+            # TODO XXX: Note about handling saved_tensors_hooks
+            hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+            # TODO XXX: Set compilation guards on hooks py objects,
+            # to recompile if previous hooks changed
+            if hooks:
+                pack_hook, unpack_hook = hooks
+
+                def log_graph(gm, graph_name, structured_log_tag):
+                    aot_graphs_log.info(
+                        "%s",
+                        lazy_format_graph_code(
+                            f"{graph_name}",
+                            gm,
+                            aot_config.aot_id,
+                            include_stride=True,
+                            include_device=True,
+                            colored=True,
+                        ),
+                    )
+                    gm_str = gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    )
+                    trace_structured(
+                        f"{structured_log_tag}",
+                        payload_fn=lambda: gm_str,
+                    )
+
+                log_graph(
+                    fw_module,
+                    "Forward graph pre saved_tensors_hooks inlining",
+                    "aot_forward_graph_pre_saved_tensors_hooks",
+                )
+                log_graph(
+                    fw_module,
+                    "Backward graph pre saved_tensors_hooks inlining",
+                    "aot_backward_graph_pre_saved_tensors_hooks",
+                )
+                fw_g = fw_module.graph
+                bw_g = bw_module.graph
+                bw_g_inputs = bw_g.find_nodes(op="placeholder")
+
+                fw_out_n = fw_g.output_node()
+                fw_outs_packed_tensors = []
+                fw_outs_packed_syms = []
+
+                for saved in fw_outs_saved_for_bw:
+                    val = saved.meta["val"]
+                    if not isinstance(val, torch.Tensor):
+                        continue
+
+                    pack_gm = make_fx(pack_hook)(val)
+                    pack_g = pack_gm.graph
+                    if aot_config.enable_log:
+                        log_graph(
+                            pack_gm,
+                            f"saved_tensors_pack_hook {saved.name}",
+                            "aot_saved_tensors_hooks_pack",
+                        )
+                    pack_out_val = pack_gm(val)
+
+                    # Install pack hook graph as eiplogue of fw_module.
+                    # Saved tensor output becomes input of pack hook graph.
+                    # Replace saved tensor output with pack hook graph output.
+                    # Outputs symbolic scalars, tensors  are accumulated separately.
+                    # Then in forward outputs and backward inputs installed in order
+                    # sym_scalars, packed_saved_tensors.
+                    # Keeping all tensors together allows to preserve
+                    # the same identification at runtime,
+                    # updating only number of saved sym_scalars and tensors.
+                    pack_g_inputs = pack_g.find_nodes(op="placeholder")
+                    assert len(pack_g_inputs) == 1
+                    env = {pack_g_inputs[0]: saved}
+                    fw_pack_out_n = None
+                    with fw_g.inserting_before(saved.next):
+                        for node in pack_g.nodes:
+                            if node.op == "placeholder":
+                                continue
+                            new_n = fw_g.node_copy(node, lambda n: env[n])
+                            env[node] = new_n
+                            # Output node is temporarily copied to have remapped arguments.
+                            # Removed in the end.
+                            if node.op == "output":
+                                fw_pack_out_n = new_n
+                    env.clear()
+                    assert fw_pack_out_n
+                    for n in pytree.tree_leaves(fw_pack_out_n.args[0]):
+                        if not isinstance(n, torch.fx.Node):
+                            continue
+
+                        if isinstance(n.meta["val"], torch.Tensor):
+                            fw_outs_packed_tensors.append(n)
+                        elif is_sym_node(n):
+                            fw_outs_packed_syms.append(n)
+                    fw_g.erase_node(fw_pack_out_n)
+
+                    # Install unpack hook graph as a prologue of backward graph
+                    # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
+                    # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
+                    unpack_gm = make_fx(unpack_hook)(pack_out_val)
+                    unpack_g = unpack_gm.graph
+                    if aot_config.enable_log:
+                        log_graph(
+                            pack_gm,
+                            f"saved_tensors_unpack_hook {saved.name}",
+                            "aot_saved_tensors_hooks_unpack",
+                        )
+
+                    def find_saved_in_bw_inputs(bw_inputs):
+                        for n in bw_inputs:
+                            if n.name == saved.name:
+                                return n
+
+                    bw_g_input = find_saved_in_bw_inputs(bw_g_inputs)
+                    assert bw_g_input
+                    # Replace backward graph saved tensor input with copy of pack graph outputs
+                    # All non-Tensor, non-symscalars outputs are constanted.
+
+                    unpack_g_inputs = unpack_g.find_nodes(op="placeholder")
+                    env = {}
+                    for unp_in_n, val in zip(
+                        unpack_g_inputs, pytree.tree_leaves(pack_out_val)
+                    ):
+                        is_sym = isinstance(val, py_sym_types)
+                        if isinstance(val, torch.Tensor) or is_sym:
+                            new_node_name = bw_g_input.name + "_" + unp_in_n.name
+                            # Backward calling convention: ctx_symints,ctx_saved_tensors
+                            # Inserting packed sym scalars before first saved tensor input.
+                            # Inserting packed tensors before last saved tensor input.
+                            # Saved tensor inputs between them will be removed.
+                            with bw_g.inserting_before(
+                                bw_g_inputs[0]
+                            ) if is_sym else bw_g.inserting_before(
+                                bw_g_inputs[num_saved_for_bw]
+                            ):
+                                new_n = bw_g.placeholder(new_node_name)
+                            new_n.meta["val"] = val
+                            env[unp_in_n] = new_n
+                        else:
+                            # Inline values of non-Tensor, non-SymScalars
+                            env[unp_in_n] = val
+
+                    # Inserting unpack hook after placeholders.
+                    bw_unpack_out_n = None
+                    with bw_g.inserting_before(bw_g_inputs[-1].next):
+                        for node in unpack_g.nodes:
+                            if node.op == "placeholder":
+                                continue
+                            new_n = bw_g.node_copy(node, lambda n: env[n])
+                            env[node] = new_n
+                            # Temporary insert output, to have remapped by node_copy args.
+                            # Removed in the end.
+                            if node.op == "output":
+                                bw_unpack_out_n = new_n
+
+                    assert bw_unpack_out_n
+                    _leaves = pytree.tree_leaves(bw_unpack_out_n.args)
+                    assert len(_leaves) == 1
+                    unpack_saved_tensor_n = _leaves[0]
+
+                    bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
+                    bw_g.erase_node(bw_unpack_out_n)
+                    bw_g.erase_node(bw_g_input)
+
+                # Changing forward graph outputs,
+                # Inserting packed_tensors and packed_syms on the place of saved tensors.
+                # Packed sym_scalars are together with saved symints
+                fw_out_n.args = (
+                    tuple(
+                        pytree.tree_leaves(
+                            (
+                                fw_outs[:num_inner_fwd_outputs],
+                                fw_outs_packed_tensors,
+                                fw_outs_packed_syms,
+                                symint_outs_saved_for_bw,
+                            )
+                        )
+                    ),
+                )
+                fw_g.lint()
+                bw_g.lint()
+
+                # Recompute after changing forward outputs
+                fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
+                fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
+                num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
+                num_saved_for_bw = len(fw_outs_saved_for_bw)
+                symint_outs_saved_for_bw = [
+                    n for n in fw_outs_saved_for_bw if is_sym_node(n)
+                ]
+                num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
