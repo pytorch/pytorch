@@ -918,13 +918,15 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
-    to setting a view's strides manually with `as_strided`, as this
-    function's behavior depends on the implementation of a tensor's storage.
-    The constructed view of the storage must only refer to elements within
-    the storage or a runtime error will be thrown, and if the view is
-    "overlapped" (with multiple indices referring to the same element in
-    memory) its behavior is undefined.
+    Prefer using other view functions, like :meth:`torch.Tensor.view` or
+    :meth:`torch.Tensor.expand`, to setting a view's strides manually with
+    `as_strided`, as this function will throw an error on non-standard Pytorch
+    backends (that do not have a concept of stride) and the result will depend
+    on the current layout in memory. The constructed view must only refer to
+    elements within the Tensor's storage or a runtime error will be thrown.
+    If the generated view is "overlapped" (with multiple indices referring to
+    the same element in memory), the behavior of inplace operations on this view
+    is undefined (and might not throw runtime errors).
 
 Args:
     {input}
@@ -4012,7 +4014,11 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
-Note that tensors containing NaNs are never equal to each other.
+.. note::
+
+    Tensors containing NaNs are never equal to each other. Additionally, this function does not
+    differentiate between the data types of the tensors during comparison. For more thorough tensor checks,
+    use :meth:`torch.testing.assert_close`.
 
 Example::
 
@@ -4020,6 +4026,8 @@ Example::
     True
     >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
     False
+    >>> torch.equal(torch.tensor([1, 2, 3], dtype=torch.int32), torch.tensor([1, 2, 3], dtype=torch.float32))
+    True
 """,
 )
 
