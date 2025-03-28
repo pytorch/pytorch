@@ -299,6 +299,7 @@ class TestTorchDlPack(TestCase):
         # Consumer should still be able to process a smaller version capsule.
         test(device, max_version=(2, 0))
 
+
 instantiate_device_type_tests(TestTorchDlPack, globals())
 
 if __name__ == "__main__":
