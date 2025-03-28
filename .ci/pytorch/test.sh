@@ -7,15 +7,16 @@
 set -ex -o pipefail
 
 
-python -c 'import torch; print(torch.distributed.is_nccl_available())' || true
-python -c 'import torch; print(torch.cuda.nccl.version())' || true
-exit 0
-
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+python3 -c 'import torch; print(torch.distributed.is_nccl_available())' || true
+python3 -c 'import torch; print(torch.cuda.nccl.version())' || true
+exit 0
+
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
