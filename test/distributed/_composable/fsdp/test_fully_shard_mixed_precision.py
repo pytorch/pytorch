@@ -583,24 +583,25 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_autocast_with_checkpoint(self):
+    def test_mp_with_checkpoint(self):
         class ForwardModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear1 = nn.Linear(2048, 2048)
+                self.linear = nn.Linear(2048, 2048)
 
             def forward(self, x):
-                return self.linear1(nn.functional.gelu(x))
+                return self.linear(nn.functional.gelu(x))
 
+        x = torch.randn(256, 2048).cuda()
+        x.requires_grad = True
         model = ForwardModel().cuda()
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
         )
         fully_shard(model, mp_policy=mp_policy)
-        x = torch.randn(256, 2048).cuda()
-        x.requires_grad = True
         out = checkpoint(model, x, use_reentrant=False)
         loss = out.sum()
+        # checkpoint would call pre_forward again
         loss.backward()
 
 
