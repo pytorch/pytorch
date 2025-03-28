@@ -6495,6 +6495,7 @@ metadata incorrectly.
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
     @parametrize("device", ["cuda", "cpu"])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
@@ -6560,6 +6561,7 @@ metadata incorrectly.
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
