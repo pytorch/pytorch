@@ -15,6 +15,7 @@ C10_DEFINE_bool(
 
 namespace c10 {
 
+// Allocate space in the CPU
 struct C10_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) override {
