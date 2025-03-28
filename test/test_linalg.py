@@ -1451,42 +1451,48 @@ class TestLinalg(TestCase):
         from torch._refs.linalg import _check_vector_norm_args
 
         class Mod(torch.nn.Module):
-            def __init__(self, ord, dim, add_assert):
+            def __init__(self, ord, dim):
                 super().__init__()
-                self.ord=ord
+                self.ord = ord
                 self.dim = dim
 
             def forward(self, a):
                 x = a.item()
-
-                if add_assert:
-                    torch._check(x>100)
-                tensor_unbacked_size = torch.ones((x))
-                _check_vector_norm_args(tensor_unbacked_size, -1, 1)
+                tensor_unbacked_size = torch.ones(x,x+1,x+2)
+                _check_vector_norm_args(tensor_unbacked_size, self.ord, self.dim)
                 return tensor_unbacked_size
 
         # When expect_runtime_check we expect a runtime check to inserted.
-        def test(ord: Union[float, int], dim: Optional[DimsType], expect_runtime_check:bool)->None:
+        def test(ord: Union[float, int], dim: Optional[DimsType], expect_numel_runtime_check:bool, expect_index_0_check:bool=False) -> None: 
             m = Mod(ord, dim)
             exported_program: torch.export.ExportedProgram = torch.export.export(
                 m , args= tuple(torch.tensor([1])))
-            print(exported_program.graph_module.code.strip())     
+            self.assertEqual("Runtime assertion failed for expression Ne(u0*(u0 + 1)*(u0 + 2), 0)" in exported_program.graph_module.code, expect_numel_runtime_check)
+            self.assertEqual("Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)" in exported_program.graph_module.code, expect_index_0_check)
 
-        # # Those are situation where we should throw error if input.size()==0
-        # # dim is int.  
-        # test()
-        # # dim is None
-        # test()
-        # # len(dim) ==0
-        # test()
-        # # shape[d] ==0
-        # test()
 
-        # situaitons where we do not expect to throw.
-        # dim is non list.
 
-        # x.numel() == 0 is known statically to be false.
-    
+        # Those are situation where we should throw error if input.size()==0
+        # dim is int.
+        test(-1, 1, True)
+
+        # dim is None
+        test(-1, None, True)
+
+        # len(dim) ==0
+        test(-1, [], True)
+
+        # test()
+        # shape[d] ==0
+        test(-1, [0], False, True)
+        
+        # u0+1==0 is False so we do not see a runtime assert
+        test(-1, [1], False, False)
+
+        test(-1, [0,1], False, True)
+        test(-1, [0,0], False, True)
+
+
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
             # input size, dim, error, error message

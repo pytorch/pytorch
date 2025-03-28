@@ -60,9 +60,6 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         )
 
 
-import operator
-from operator import or_ as sym_or
-
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 from torch._decomp.decompositions import pw_cast_for_opmath
@@ -99,21 +96,24 @@ def diagonal(
 
 
 def _check_vector_norm_args(
-    x: TensorLikeType,
-    ord: Union[float, int] = 2,
-    dim: Optional[DimsType] = None):
-    from torch.fx.experimental.symbolic_shapes import guard_or_true
-    
-    if not(ord < 0.0 or ord == float("inf")):
-        return 
-    
+    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
+):
+    from torch.fx.experimental.symbolic_shapes import sym_or
+
+    if not (ord < 0.0 or ord == float("inf")):
+        return
+
     torch._check(
-        sym_or(x.numel() != 0, not isinstance(dim, int) and dim is not None and len(dim) != 0),
+        sym_or(
+            x.numel() != 0,
+            not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
+        ),
         "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
+    
     shape = x.shape
-    if dim is not None and not isinstance(dim, int):
+    if dim is not None and not isinstance(dim, IntLike):
         for d in dim:
             torch._check(
                 sym_or(x.numel() != 0, shape[d] != 0),
@@ -121,7 +121,7 @@ def _check_vector_norm_args(
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
-        
+
 
 @register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
 @out_wrapper(exact_dtype=True)
@@ -133,14 +133,13 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
     _check_vector_norm_args(x, ord, dim)
-    
+
     _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = utils.reduction_dtypes(
