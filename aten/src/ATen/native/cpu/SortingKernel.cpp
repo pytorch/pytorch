@@ -19,6 +19,9 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/Utils.h>
 #endif
+#if __has_include(<parallel/algorithm>) && defined(_OPENMP)
+#include <parallel/algorithm>
+#endif
 
 namespace at::native {
 
@@ -146,22 +149,24 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
   auto composite_accessor = CompositeRandomAccessorCPU<
     value_accessor_t, indices_accessor_t
   >(value_accessor, indices_accessor);
-  if (descending) {
-    if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+#if __has_include(<parallel/algorithm>) && defined(_OPENMP)
+  namespace sort_impl = __gnu_parallel;
+#else
+  namespace sort_impl = std;
+#endif
+
+  auto comp = [descending](const auto &a, const auto &b) {
+    if (descending) {
+      return KeyValueCompDesc<scalar_t>()(a, b);
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      return KeyValueCompAsc<scalar_t>()(a, b);
     }
+  };
+
+  if (stable) {
+    sort_impl::stable_sort(composite_accessor, composite_accessor + dim_size, comp);
   } else {
-    if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
-    } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
-    }
+    sort_impl::sort(composite_accessor, composite_accessor + dim_size, comp);
   }
 }
 
