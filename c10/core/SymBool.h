@@ -116,31 +116,31 @@ inline bool guard_size_oblivious(
 }
 
 inline bool guard_or_false(
-  bool b,
-  const char* file [[maybe_unused]],
-  int64_t line [[maybe_unused]]) {
-return b;
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
+  return b;
 }
 
 inline bool guard_or_false(
-  const c10::SymBool& b,
-  const char* file,
-  int64_t line) {
-return b.guard_or_false(file, line);
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.guard_or_false(file, line);
 }
 
 inline bool guard_or_true(
-  bool b,
-  const char* file [[maybe_unused]],
-  int64_t line [[maybe_unused]]) {
-return b;
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
+  return b;
 }
 
 inline bool guard_or_true(
-  const c10::SymBool& b,
-  const char* file,
-  int64_t line) {
-return b.guard_or_true(file, line);
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.guard_or_true(file, line);
 }
 
 #define TORCH_GUARD_SIZE_OBLIVIOUS(cond) \
@@ -149,7 +149,6 @@ return b.guard_or_true(file, line);
 #define TORCH_GUARD_OR_FALSE(cond) \
   c10::guard_or_false((cond), __FILE__, __LINE__)
 
-#define TORCH_GUARD_OR_TRUE(cond) \
-  c10::guard_or_true((cond), __FILE__, __LINE__)
+#define TORCH_GUARD_OR_TRUE(cond) c10::guard_or_true((cond), __FILE__, __LINE__)
 
 } // namespace c10
