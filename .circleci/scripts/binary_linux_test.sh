@@ -91,7 +91,8 @@ fi
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
 
-  torch_pkg_size=$(wc -c < \$pkg)
+  pkg_torch="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
+  torch_pkg_size="$(wc -c < \$pkg_torch)"
   # todo: implement check for large binaries
   # if the package is larger than 1.5GB, we disable the pypi check.
   # this package contains all libraries packaged in torch libs folder
