@@ -1493,6 +1493,30 @@ def get_ns_grouped_kernels(
             )
     return ns_grouped_kernels
 
+def get_native_function_remoting_frontend_from_ns_grouped_kernels(
+    *,
+    ns_grouped_kernels: dict[str, list[str]],
+) -> list[str]:
+    declarations: list[str] = []
+    newline = "\n"
+    for namespace, kernels in ns_grouped_kernels.items():
+        ns_helper = NamespaceHelper(
+            namespace_str=namespace,
+            entity_name="",
+            max_level=4,
+        )
+        # Convert to a set first to remove duplicate kernel names. Backends are
+        # allowed to repeat kernel names; only generate the declaration once!
+        ordered_kernels = list(OrderedDict.fromkeys(kernels))
+        declarations.extend(
+            f"""
+{ns_helper.prologue}
+{newline.join(ordered_kernels)}
+{ns_helper.epilogue}
+        """.split(newline)
+        )
+    return declarations
+
 
 def get_native_function_declarations_from_ns_grouped_kernels(
     *,
@@ -1517,6 +1541,37 @@ def get_native_function_declarations_from_ns_grouped_kernels(
         """.split(newline)
         )
     return declarations
+
+# Return native function remoting grouped by their namespaces.
+def get_native_function_remoting_frontend(
+    *,
+    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
+    backend_indices: dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
+    ] = dest.compute_native_function_remoting_frontend,
+) -> list[str]:
+    """
+    Generate kernel declarations, in `NativeFunction(s).h`.
+    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
+    :param backend_indices: kernel collections grouped by dispatch key.
+    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
+    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
+    """
+
+    # torchgen/dest/native_functions.py(69)compute_native_function_declaration
+    # torchgen/dest/native_functions.py(47)gen_structured()
+    # torchgen/dest/native_functions.py(47)gen_unstructured())
+    # change here compute_native_function_declaration
+
+    ns_grouped_kernels = get_ns_grouped_kernels(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+        native_function_decl_gen=native_function_decl_gen,
+    )
+    return get_native_function_remoting_frontend_from_ns_grouped_kernels(
+        ns_grouped_kernels=ns_grouped_kernels
+    )
 
 
 # Return native function declarations grouped by their namespaces.
@@ -2062,6 +2117,72 @@ def gen_per_operator_headers(
             "MethodOperators_declarations": [],
         },
     )
+
+
+def gen_remoting(
+    *,
+    native_functions: Sequence[NativeFunction],
+    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
+    structured_native_functions: Sequence[NativeFunctionsGroup],
+    static_dispatch_idx: list[BackendIndex],
+    selector: SelectiveBuilder,
+    backend_indices: dict[DispatchKey, BackendIndex],
+    ops_fm: FileManager,
+    device_fms: dict[str, FileManager],
+    dispatch_keys: Sequence[DispatchKey],
+    functions_keys: set[DispatchKey],
+) -> None:
+    # For CMake builds, split operator declarations into separate headers in
+    # the ATen/ops folder to split up header dependencies
+    functions_by_root_name: dict[str, list[NativeFunction]] = defaultdict(list)
+    for fn in native_functions:
+        functions_by_root_name[fn.root_name].append(fn)
+
+    grouped_functions_by_root_name: dict[
+        str, list[NativeFunction | NativeFunctionsGroup]
+    ] = defaultdict(list)
+    for group in grouped_native_functions:
+        name = group.root_name
+        grouped_functions_by_root_name[name].append(group)
+
+    for name, functions in functions_by_root_name.items():
+        grouped_functions = grouped_functions_by_root_name.get(name, [])
+        structured_functions = [
+            fn
+            for fn in grouped_functions
+            if isinstance(fn, NativeFunctionsGroup) and fn.structured
+        ]
+        is_structured = len(structured_functions) > 0
+
+        if is_structured:
+            ops_fm.write_with_template(
+                f"{name}_meta.h",
+                "NativeMetaFunction.h",
+                lambda: {
+                    "meta_function_declarations": list(
+                        mapMaybe(
+                            compute_meta_function_declaration, structured_functions
+                        )
+                    ),
+                },
+            )
+
+        declarations = get_native_function_remoting_frontend(
+            grouped_native_functions=grouped_functions,
+            backend_indices=backend_indices,
+            native_function_decl_gen=dest.compute_native_function_remoting_frontend,
+        )
+
+        ops_fm.write_with_template(
+            f"{name}_remoting_frontend.cpp",
+            "RemotingFrontendFunction.cpp",
+            lambda: {
+                "extra_includes": (
+                    f"#include <ATen/ops/{name}_meta.h>" if is_structured else []
+                ),
+                "native_function_declarations": declarations,
+            },
+        )
 
 
 def gen_headers(
@@ -2859,7 +2980,7 @@ def main() -> None:
         "--generate",
         type=str,
         nargs="*",
-        choices=["headers", "sources", "declarations_yaml"],
+        choices=["headers", "sources", "declarations_yaml", "remoting_frontend"],
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
@@ -2899,6 +3020,14 @@ def main() -> None:
 
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
+    if "remoting_frontend" in options.generate:
+        # ignore_keys.add(DispatchKey.CPU)
+        # ignore_keys.add(DispatchKey.CUDA)
+        # ignore_keys.add(DispatchKey.QuantizedCPU)
+        # ignore_keys.add(DispatchKey.QuantizedCUDA)
+        ignore_keys.update(dispatch_keys)
+        ignore_keys.add(DispatchKey.MPS)
 
     if not options.xpu:
         ignore_keys.add(DispatchKey.XPU)
@@ -2998,6 +3127,12 @@ def main() -> None:
                 functions_keys.add(dp_key)
 
     if "sources" in options.generate:
+        # workaround: do not generate `RegisterMPS.cpp` when compiling the CPU sources
+        # this makes many 'undefined reference to function ...mps...'
+        # should be better to not pass the --mps flag when running this command.
+        ignore_keys.add(DispatchKey.MPS)
+        del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
         gen_source_files(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
@@ -3039,6 +3174,20 @@ def main() -> None:
             functions_keys=functions_keys,
             rocm=options.rocm,
             per_operator_headers=options.per_operator_headers,
+        )
+
+    if "remoting_frontend" in options.generate:
+        gen_remoting(
+            native_functions=native_functions,
+            grouped_native_functions=grouped_native_functions,
+            structured_native_functions=structured_native_functions,
+            static_dispatch_idx=static_dispatch_idx,
+            selector=selector,
+            backend_indices=backend_indices,
+            ops_fm=ops_fm,
+            device_fms=device_fms,
+            dispatch_keys=dispatch_keys,
+            functions_keys=functions_keys,
         )
 
     if "declarations_yaml" in options.generate:

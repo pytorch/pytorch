@@ -233,7 +233,7 @@ def argument_type(a: Argument, *, binds: ArgName, symint: bool = False) -> Named
 # This is mostly because of the mismatch between return types and return names.
 # e.g. a function with a return type of 'void' has 0 return names,
 # and a function with a return type of 'std::tuple' has >1 return name.
-def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
+def returntype_type(t: Type, *, mutable: bool, symint: bool = False, is_var_decl: bool = False) -> CType:
     # placeholder is ignored
     # NB: symint is ALWAYS respected for return types.  So symint argument
     # here is IGNORED
@@ -257,8 +257,9 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
-        elem = returntype_type(t.elem, mutable=False)
+        if mutable and not is_var_decl:
+            assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
+        elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
     elif isinstance(t, OptionalType):
@@ -271,7 +272,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
 
 # Translation of a single return to its C++ type
 def return_type(r: Return, *, symint: bool = False) -> CType:
-    return returntype_type(r.type, mutable=r.is_write, symint=symint)
+    return returntype_type(r.type, mutable=r.is_write, symint=symint, is_var_decl=r.as_var_decl)
 
 
 # Translation of a full (possibly multi) return from JIT to its C++ type

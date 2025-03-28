@@ -7,6 +7,9 @@ from torchgen.dest.lazy_ir import (
 from torchgen.dest.native_functions import (
     compute_native_function_declaration as compute_native_function_declaration,
 )
+from torchgen.dest.remoting_functions import (
+    compute_native_function_remoting_frontend as compute_native_function_remoting_frontend,
+)
 from torchgen.dest.register_dispatch_key import (
     gen_registration_headers as gen_registration_headers,
     gen_registration_helpers as gen_registration_helpers,

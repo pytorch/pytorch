@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from torchgen.api.types.types_base import Binding, CType, Expr
-
+from torchgen.model import Return, Annotation
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -282,6 +282,11 @@ class NativeSignature:
 
     def returns_type(self) -> CType:
         return native.returns_type(self.func.returns, symint=self.symint)
+
+    def returns_type_var_decl(self) -> CType:
+        returns = [Return(ret.name, ret.type, ret.annotation, as_var_decl=True) for ret in self.func.returns]
+
+        return native.returns_type(returns, symint=self.symint)
 
     def dispatcher_exprs(self) -> list[Expr]:
         return translate.translate(
