@@ -127,7 +127,6 @@ if RELEASE:
 
 switcher_version = "main" if not RELEASE else version
 html_static_path = ["_static"]
-
 html_theme_options = {
     "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
