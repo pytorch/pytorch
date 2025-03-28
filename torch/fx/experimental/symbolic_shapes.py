@@ -4536,7 +4536,16 @@ class ShapeEnv:
 
         if val in (0, 1) and specialize_zero_one:
             r = self.val_to_var[val]
-        elif not duck or val not in self.val_to_var:
+        elif (
+            not duck
+            or val not in self.val_to_var
+            or (
+                # avoid 0/1 specializing with this flag + duck sizing
+                config.backed_size_oblivious
+                and do_not_specialize_zero_one
+                and isinstance(self.val_to_var[val], sympy.Number)
+            )
+        ):
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
