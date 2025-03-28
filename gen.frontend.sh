@@ -1,0 +1,1 @@
+exec ./gen.sh frontend
