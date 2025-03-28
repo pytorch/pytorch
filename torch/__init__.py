@@ -279,6 +279,16 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
+def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
+    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+    nvidia_lib_paths = glob.glob(
+        os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
+    )
+    lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
+
+    return nvidia_lib_paths + lib_paths
+
+
 def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
@@ -286,21 +296,9 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
 
     lib_path = None
     for path in sys.path:
-        nvidia_path = os.path.join(path, "nvidia")
-        if not os.path.exists(nvidia_path):
-            continue
-        candidate_lib_paths = glob.glob(
-            os.path.join(nvidia_path, lib_folder, "lib", lib_name)
-        )
-        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
-        if not candidate_lib_paths:
-            candidate_lib_paths = glob.glob(
-                os.path.join(path, lib_folder, "lib", lib_name)
-            )
-
-        if candidate_lib_paths and not lib_path:
+        candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name)
+        if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
-        if lib_path:
             break
     if not lib_path:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
