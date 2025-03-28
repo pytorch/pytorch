@@ -1451,6 +1451,10 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        kernel_code = (
+            f"// Triton kernels are embedded as comments in {wrapper_path}\n"
+            + kernel_code
+        )
         _, kernel_path = write(
             kernel_code,
             "kernel.cpp",
