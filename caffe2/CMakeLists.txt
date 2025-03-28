@@ -848,10 +848,6 @@ set_property(SOURCE ${ATen_CORE_SRCS} APPEND
 set_property(SOURCE ${ATen_ATTENTION_KERNEL_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_NO_OPERATORS")
 
-if(USE_MPS OR USE_PYTORCH_METAL)
-  enable_language(OBJC OBJCXX)
-endif()
-
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
