@@ -783,7 +783,7 @@ if(USE_NUMA)
   endif()
 endif()
 
-if(USE_ITT)
+if(USE_ITT AND CMAKE_VERSION VERSION_LESS "4.0.0")
   find_package(ITT)
   if(ITT_FOUND)
     include_directories(SYSTEM ${ITT_INCLUDE_DIR})
@@ -1150,7 +1150,14 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+      message(WARNING "Archived TensorPIpe forces CMake compatibility mode")
+      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+      unset(CMAKE_POLICY_VERSION_MINIMUM)
+    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
