@@ -59,7 +59,7 @@ else:
 
 PYTHON_PROTOBUF_NOT_INSTALLED = """
 You have not installed python protobuf. Protobuf is needed to run caffe2. You
-can install protobuf via pip or conda (if you are using anaconda python).
+can install protobuf via pip.
 """
 
 NATIVE_PROTOBUF_NOT_INSTALLED = """
