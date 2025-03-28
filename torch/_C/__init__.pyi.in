@@ -1917,12 +1917,14 @@ def _cuda_record_memory_history_legacy(
     record_context_cpp: _bool,
     alloc_trace_max_entries: _int,
     alloc_trace_record_context: _bool,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: Optional[str],
     context: Optional[str],
     stacks: str,
-    max_entries
+    max_entries: _int,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 
@@ -2547,3 +2549,29 @@ class _NodeIter(Iterator):
     def __init__(self, root: FxNode, reversed: _bool) -> None: ...
     def __iter__(self) -> Iterator[FxNode]: ...
     def __next__(self) -> FxNode: ...
+
+
+# Defined in torch/csrc/inductor/static_cuda_launcher.cpp
+class _StaticCudaLauncher:
+    @staticmethod
+    def _load_kernel(
+        cubin_file: str,
+        func_name: str,
+        shared_mem_bytes: _int,
+        device: _int,
+    ) -> Tuple[_int, _int, _int]:
+        ...
+
+    @staticmethod
+    def _launch_kernel(
+        func: _int,
+        grid_x: _int,
+        grid_y: _int,
+        grid_z: _int,
+        num_warps: _int,
+        shared_mem_bytes: _int,
+        arg_types: str,
+        args: Tuple[Any, ...],
+        stream: _int,
+    ) ->  None:
+        ...
