@@ -885,7 +885,8 @@ def forward(self, x_1):
             cf(
                 torch.empty_strided(
                     (2, 3, 1, u0),
-                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    # (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    (3*u0, u0, u0, 1),
                     device="meta",
                 )
             )

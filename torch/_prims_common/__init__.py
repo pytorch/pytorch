@@ -266,18 +266,18 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import _guard_semantics
 
-    if guard_size_oblivious(a.numel() < 2):
+    if _guard_semantics(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if guard_size_oblivious(x == 1):
+        if _guard_semantics(x == 1):
             continue
 
-        if guard_size_oblivious(y != expected_stride):
+        if not _guard_semantics(y == expected_stride):
             return False
         expected_stride = expected_stride * x
 
@@ -387,7 +387,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import _guard_semantics, guard_size_oblivious
 
     if a.is_sparse:
         return False
@@ -432,10 +432,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if guard_size_oblivious(length == 1):
+        if _guard_semantics(length == 1):
             continue
 
-        if guard_size_oblivious(stride != expected_stride):
+        if not _guard_semantics(stride == expected_stride):
             return False
 
         expected_stride *= length
