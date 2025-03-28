@@ -11286,6 +11286,43 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    def test_unbacked_expand(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0, u1, 1)
+                return x.expand(-1, u1, u2)
+
+        ep = export(Foo(), (torch.tensor([1, 2, 3]),))
+        self.assertEqual(
+            list(ep.module()(torch.tensor([3, 4, 5])).shape),
+            [3, 4, 5],
+        )
+        self.assertEqual(
+            list(ep.module()(torch.tensor([0, 1, 0])).shape),
+            [0, 1, 0],
+        )
+
+        class Bar(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty(u0)
+                return x.expand(u1)
+
+        ep = export(Bar(), (torch.tensor([2, 2]),))
+        self.assertEqual(
+            ep.module()(torch.tensor([5, 5])).shape[0],
+            5,
+        )
+        self.assertEqual(
+            ep.module()(torch.tensor([0, 0])).shape[0],
+            0,
+        )
+        self.assertEqual(
+            ep.module()(torch.tensor([1, 1])).shape[0],
+            1,
+        )
+
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):
