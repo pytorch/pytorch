@@ -20,6 +20,8 @@ class C10_API AllocatorConfig {
  public:
   AllocatorConfig(c10::DeviceType t);
 
+  virtual ~AllocatorConfig() = default;
+
   size_t max_split_size() {
     return max_split_size_;
   }

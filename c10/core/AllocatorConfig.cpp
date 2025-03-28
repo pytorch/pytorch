@@ -9,7 +9,7 @@ namespace {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 constexpr size_t kMB = 1024 * 1024ul;
 constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
-constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024 * kMB; // 64GB
+constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 constexpr size_t kPinnedMaxRegisterThreads = 128;
 } // anonymous namespace
 
