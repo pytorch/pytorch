@@ -8,8 +8,8 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
-import copy
 import contextlib
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -1800,8 +1800,10 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
 
 @contextlib.contextmanager
 def _disable_saved_tensors_hooks():
-    error_message = ("Saved tensors hooks in aot_autograd were inlined in forward and backward graph."
-                     "Changing hooks must recompile.")
+    error_message = (
+        "Saved tensors hooks in aot_autograd were inlined in forward and backward graph."
+        "Changing hooks must recompile."
+    )
     fail_if_non_empty = False
     maybe_prev_message = None
     try:
