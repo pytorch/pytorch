@@ -616,14 +616,19 @@ class VariableBuilder:
             return id_dispatch(self, value)
 
         # Everything else (NB: order matters!)
-        if isinstance(value, torch.Tensor) and type(value) not in (
-            # These torch-native subclasses have overly restrictive
-            # `__torch_function__` which prevents Dynamo from reading their
-            # tensor attributes like `is_nested` or calling methods like
-            # `_is_view`.
-            torch.nn.parameter.UninitializedBuffer,
-            torch.nn.parameter.UninitializedParameter,
-            ExpandedWeight,
+        if (
+            isinstance(value, torch.Tensor)
+            and type(value)
+            not in (
+                # These torch-native subclasses have overly restrictive
+                # `__torch_function__` which prevents Dynamo from reading their
+                # tensor attributes like `is_nested` or calling methods like
+                # `_is_view`.
+                torch.nn.parameter.UninitializedBuffer,
+                torch.nn.parameter.UninitializedParameter,
+                ExpandedWeight,
+            )
+            and type(value) not in config.nontraceable_tensor_subclasses
         ):
             if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
                 # This case it's either tensor or subclass with default
