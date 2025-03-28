@@ -8,7 +8,7 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
-One may also need to install [pandoc](https://pandoc.org/installing.html). On Linux we can use: `sudo apt-get install pandoc`. Or using `conda` we can use: `conda install -c conda-forge pandoc`.
+One may also need to install [pandoc](https://pandoc.org/installing.html). On Linux we can use: `sudo apt-get install pandoc`.
 
 To run the docs build:
 ```
