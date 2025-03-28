@@ -7,24 +7,17 @@
 
 namespace at::cuda::tunable {
 
-// Helper function to cache device properties check
+#ifdef USE_ROCM
 static bool IsGfx950Device() {
-  static std::mutex mutex;
-  static std::unordered_map<int, bool> device_check_cache;
-  
-  auto device = at::cuda::current_device();
-  
-  std::lock_guard<std::mutex> guard(mutex);
-  auto it = device_check_cache.find(device);
-  if (it != device_check_cache.end()) {
-    return it->second;
-  }
-  
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device);
-  bool is_gfx950 = (std::string(prop->gcnArchName) == "gfx950");
-  device_check_cache[device] = is_gfx950;
+  // Single static check - only evaluated once
+  static bool is_gfx950 = []() {
+    auto device = at::cuda::current_device();
+    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device);
+    return (std::string(prop->gcnArchName) == "gfx950");
+  }();
   return is_gfx950;
 }
+#endif
 
 // Helper function to validate MX format requirements
 static bool ValidateMXFormatRequirements(int64_t m, int64_t n, int64_t k) {
