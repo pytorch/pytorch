@@ -1194,8 +1194,9 @@ def aot_dispatch_autograd(
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
                 try:
+                    # See Note: [Backward graph lazy lowering]
                     compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
+                        copy.deepcopy(bw_module), placeholder_list
                     )
                 except Exception as e:
                     exc = e

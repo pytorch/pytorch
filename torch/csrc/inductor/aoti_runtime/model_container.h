@@ -53,7 +53,8 @@ class AOTInductorModelContainer {
     }
     model->load_constants();
     constant_blob_ = model->release_constant_blob();
-    constants_internal_offset_.resize(model->num_constants());
+    constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
     model->compute_constant_blob(blob_size_, constants_internal_offset_);
 
     for (auto& model : models_) {
@@ -448,10 +449,23 @@ class AOTInductorModelContainer {
   }
 
   void free_inactive_constant_buffer() {
-    if (use_secondary_ && constant_blob_) {
+    if (use_secondary_) {
       constant_blob_.reset();
-    } else if (constant_blob_secondary_) {
+    } else {
       constant_blob_secondary_.reset();
+    }
+    // Free the internally held constants
+    int num_constants = static_cast<int>(models_[0]->num_constants());
+    std::shared_ptr<ConstantMap> to_free_map =
+        use_secondary_ ? constants_map_ : constants_map_secondary_;
+
+    for (int i = 0; i < num_constants; i++) {
+      if (models_[0]->constant_from_folded(i)) {
+        auto it = to_free_map->find(models_[0]->constant_name(i));
+        if (it != to_free_map->end()) {
+          it->second.reset();
+        }
+      }
     }
   }
 
