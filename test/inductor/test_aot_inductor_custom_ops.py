@@ -131,7 +131,7 @@ class AOTInductorTestsTemplate:
             torch.randn(3, 3, device=self.device),
             torch.randn(3, 3, device=self.device),
         )
-        with config.patch("aot_inductor.output_path", "model.so"):
+        with config.patch("aot_inductor.output_path", "model.pt2"):
             with self.assertRaises(Exception):
                 self.check_model(m, args)
 

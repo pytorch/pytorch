@@ -40,6 +40,8 @@ torch.fx.experimental.symbolic_shapes
     has_free_unbacked_symbols
     definitely_true
     definitely_false
+    guard_or_true
+    guard_or_false
     guard_size_oblivious
     sym_eq
     constrain_range

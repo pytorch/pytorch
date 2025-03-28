@@ -784,7 +784,9 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   // The group_name passed to rendezvous() takes precedence over
   // the default group_name specified during allocation.
   std::string group_name_;
-  if (group_name.has_value()) {
+  // Treat empty string and std::nullopt the same as empty string seems to be
+  // implicitly used that way
+  if (group_name != "") {
     group_name_ = *group_name;
   } else {
     if (!block->default_group_name.has_value()) {

@@ -398,9 +398,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
+    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
+        return self.features.select_index_dtype()
+
     @property
     def index_dtype(self) -> str:
-        return self.dtype_to_str(self.features.select_index_dtype())
+        return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
 
     def want_no_x_dim(self) -> bool:
         return False
@@ -424,13 +427,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             }
 
         grid_dims = ["x", "y", "z"]
+        pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = grid_dims
+            tensor_dims = pointwise_tensor_dims
         else:
-            tensor_dims = grid_dims + reduction_dims
+            tensor_dims = pointwise_tensor_dims + reduction_dims
 
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
@@ -814,17 +818,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         return self.codegen_indexing(simp_index)
 
-    def active_range_trees(self, reorder: bool = False) -> list[IterationRangesRoot]:
-        trees = [
+    def active_range_trees(self) -> list[IterationRangesRoot]:
+        return [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
-        if reorder and len(trees) > 1:
-            count = sum(t.prefix in "xyz" for t in trees)
-            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
-                t.prefix for t in trees[:count]
-            ]
-            trees[:count] = reversed(trees[:count])
-        return trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -1656,6 +1653,11 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            # dump provenance node info for ComboKernelNode/ForeachKernel type
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(
+                    combo_kernel_node.snodes, kernel_name
+                )
             self.codegen_comment([combo_kernel_node])
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
