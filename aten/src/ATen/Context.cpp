@@ -326,7 +326,34 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
 }
 
 at::BlasBackend Context::blasPreferredBackend() {
+  // Rather than put logic for interpreting what Default means at every
+  // call site for blasPreferredBackend(), we set it to an actual value.
+  if (blas_preferred_backend == at::BlasBackend::Default) {
+    blas_preferred_backend = at::BlasBackend::Cublas;
 #ifdef USE_ROCM
+    // AMD Instinct targets prefer hipblaslt
+    static const bool hipblaslt_preferred = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60500
+          "gfx950"
+#endif
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          return false;
+        }
+      }
+      return true;
+    }();
+    if (hipblaslt_preferred) {
+      blas_preferred_backend = at::BlasBackend::Cublaslt;
+    }
+#endif
+  }
+
+#ifdef USE_ROCM
+  // hipblaslt support for all archs is not as complete as hipblas
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
@@ -365,7 +392,7 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
   TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
       "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
-  if (b != at::BlasBackend::Cublas) {
+  if (b != at::BlasBackend::Default || b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
       "If you see any error or unexpected behavior when this flag is set "
