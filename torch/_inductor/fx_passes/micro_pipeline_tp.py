@@ -870,7 +870,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     )
 
     assert is_symm_mem_enabled_for_group(group_name), (
-        f"symmetric memory is not enabled for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion"
+        f"symmetric memory is not enabled for process group {group_name}, this is required for async TP"
     )
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
