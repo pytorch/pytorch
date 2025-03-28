@@ -34,6 +34,10 @@ decompose_custom_triton_ops = True
 
 static_weight_shapes = True
 
+# See https://github.com/pytorch/pytorch/issues/141881
+# Tells partitioner that parameters are free to save for backward.
+treat_parameters_as_free_to_save = True
+
 # Applies CSE to the graph before partitioning
 cse = True
 
@@ -44,6 +48,10 @@ enable_autograd_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_autograd_cache",
     env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
     default=True,
+)
+
+autograd_cache_allow_custom_autograd_functions: bool = Config(
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
 )
 
 
