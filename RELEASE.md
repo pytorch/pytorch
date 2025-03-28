@@ -209,9 +209,7 @@ git tag -f  v1.12.0-rc2
 git push origin  v1.12.0-rc2
 ```
 
-Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
-
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
+Pushing a release candidate tag should trigger the `binary_build` workflows. This trigger functionality is configured in [`linux_binary_build_workflow.yml.j2]`][(https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml](https://github.com/pytorch/pytorch/blob/main/.github/templates/linux_binary_build_workflow.yml.j2#L19-L22)) and in the matching templates for the other OSes.
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). And make sure all binary builds are successful.
 ### Release Candidate Storage
