@@ -13,12 +13,6 @@ export TERM=vt100
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-cd test
-python3 -c 'import torch; print(torch.distributed.is_nccl_available())' || true
-python3 -c 'import torch; print(torch.cuda.nccl.version())' || true
-exit 0
-
-
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
