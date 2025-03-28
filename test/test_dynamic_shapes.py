@@ -2815,6 +2815,104 @@ class TestGuardsExpressions(TestCase):
         guards = shape_env.produce_guards_expression([s0])
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_true(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_true(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*10
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_true(x != x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*20
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_false(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_false(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*20
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_false(x == x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*10
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
     def test_guards_float_div(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 8)
