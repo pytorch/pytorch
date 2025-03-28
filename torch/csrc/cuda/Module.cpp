@@ -29,7 +29,6 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
-#include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
 #include <torch/csrc/CudaIPCTypes.h>
@@ -594,10 +593,10 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
   using c10::CachingDeviceAllocator::DeviceStats;
-  using c10::CachingDeviceAllocator::Stat;
-  using c10::CachingDeviceAllocator::StatArray;
-  using c10::CachingDeviceAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -664,6 +663,70 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
   c10::cuda::CUDACachingAllocator::resetPeakStats(device_index);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
+PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+
+  using at::HostStats;
+  using c10::CachingAllocator::DurationStat;
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
+
+  const auto statToDict = [](const Stat& stat) {
+    py::dict dict;
+
+    dict["current"] = stat.current;
+    dict["peak"] = stat.peak;
+    dict["allocated"] = stat.allocated;
+    dict["freed"] = stat.freed;
+    return dict;
+  };
+
+  const auto durationStatToDict = [](const DurationStat& stat) {
+    py::dict dict;
+
+    dict["total"] = stat.total;
+    dict["max"] = stat.max;
+    dict["min"] = stat.min;
+    dict["count"] = stat.count;
+    dict["avg"] = stat.count == 0 ? 0 : stat.total / stat.count;
+    return dict;
+  };
+
+  const HostStats stats = at::cuda::CachingHostAllocator_getStats();
+
+  py::dict result;
+  result["num_host_alloc"] = stats.num_host_alloc;
+  result["num_host_free"] = stats.num_host_free;
+  result["allocation"] = statToDict(stats.allocation);
+  result["segment"] = statToDict(stats.segment);
+  result["allocated_bytes"] = statToDict(stats.allocated_bytes);
+  result["reserved_bytes"] = statToDict(stats.reserved_bytes);
+  result["host_alloc_time"] = durationStatToDict(stats.host_alloc_time);
+  result["host_free_time"] = durationStatToDict(stats.host_free_time);
+
+  return result.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_resetAccumulatedHostMemoryStats(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::CachingHostAllocator_resetAccumulatedStats();
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
+PyObject* THCPModule_resetPeakHostMemoryStats(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::CachingHostAllocator_resetPeakStats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -1065,7 +1128,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool)>(
+      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1074,7 +1137,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           std::optional<std::string>,
           const std::string&,
-          size_t)>(torch::cuda::_record_memory_history));
+          size_t,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1957,6 +2021,15 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,
+     nullptr},
+    {"_cuda_hostMemoryStats", THCPModule_hostMemoryStats, METH_NOARGS, nullptr},
+    {"_cuda_resetAccumulatedHostMemoryStats",
+     THCPModule_resetAccumulatedHostMemoryStats,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_resetPeakHostMemoryStats",
+     THCPModule_resetPeakHostMemoryStats,
+     METH_NOARGS,
      nullptr},
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,

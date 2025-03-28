@@ -200,7 +200,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 )
         else:
             raise RuntimeError(
-                "0D or 1D target tensor expected, " "multi-target not supported"
+                "0D or 1D target tensor expected, multi-target not supported"
             )
 
         is_batched = targ_dim > 0

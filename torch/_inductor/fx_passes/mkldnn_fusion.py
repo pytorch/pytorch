@@ -558,9 +558,9 @@ if torch._C._has_mkldnn:
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
             def _get_compute_node(_binary_node, _other_index):
-                assert (
-                    len(_binary_node.all_input_nodes) == 2
-                ), "Binary node should have 2 input nodes."
+                assert len(_binary_node.all_input_nodes) == 2, (
+                    "Binary node should have 2 input nodes."
+                )
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
@@ -614,9 +614,9 @@ if torch._C._has_mkldnn:
                 else:
                     computation_args += [1.0, None, [], None]
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
-            counters["inductor"][
-                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
-            ] += len(match.nodes)
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
+                len(match.nodes)
+            )
             return L[fusion_op](*computation_args)
 
         return fn
@@ -659,9 +659,9 @@ if torch._C._has_mkldnn:
                 else:
                     computation_args += [1.0, None, [], None]
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
-            counters["inductor"][
-                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
-            ] += len(match.nodes)
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
+                len(match.nodes)
+            )
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
             if not _can_be_inplace(other) or other.data.shape != list(
@@ -1310,9 +1310,9 @@ if torch._C._has_mkldnn:
                 )
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
-                    assert (
-                        is_lp_weight or mkldnn._is_mkldnn_acl_supported()
-                    ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
+                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                    )
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,

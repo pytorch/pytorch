@@ -1,6 +1,44 @@
+"""Metrics collection and management system for Dynamo.
+
+This module provides context managers for gathering and reporting metrics during
+compilation and runtime.
+
+It includes two main components:
+- MetricsContext: A context manager for collecting metrics during compilation, supporting
+  nested contexts and various metric types (counters, sets, key-value pairs)
+- RuntimeMetricsContext: A specialized context for runtime metrics collection that doesn't
+  require explicit context management
+
+The metrics system enables comprehensive monitoring and analysis of both compilation and
+execution performance.
+"""
+
+import heapq
 import time
+from collections.abc import Iterator
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
+
+
+class TopN:
+    """
+    Helper to record a list of metrics, keeping only the top N "most expensive" elements.
+    """
+
+    def __init__(self, at_most: int = 25):
+        self.at_most = at_most
+        self.heap: list[tuple[int, Any]] = []
+
+    def add(self, key: Any, val: int) -> None:
+        # Push if we haven't reached the max size, else push and pop the smallest
+        fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
+        fn(self.heap, (val, key))
+
+    def __len__(self) -> int:
+        return len(self.heap)
+
+    def __iter__(self) -> Iterator[tuple[Any, int]]:
+        return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
 OnExitType: TypeAlias = Callable[
@@ -94,15 +132,16 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
-        metric has been assigned previously in the current context.
+        metric has been assigned previously in the current context and overwrite is
+        not set to True.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         existing = self._metrics.keys() & values.keys()
-        if existing:
+        if existing and not overwrite:
             raise RuntimeError(
                 f"Metric(s) {existing} have already been set in the current context"
             )
@@ -126,6 +165,16 @@ class MetricsContext:
         if metric not in self._metrics:
             self._metrics[metric] = set()
         self._metrics[metric].add(value)
+
+    def add_top_n(self, metric: str, key: Any, val: int) -> None:
+        """
+        Records a metric as a TopN set of values.
+        """
+        if self._level == 0:
+            return
+        if metric not in self._metrics:
+            self._metrics[metric] = TopN()
+        self._metrics[metric].add(key, val)
 
 
 class RuntimeMetricsContext:

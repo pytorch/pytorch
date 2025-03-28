@@ -689,7 +689,7 @@ def generate_tensor_like_override_tests(cls):
                 return torch.float32
             elif arg_type == "c10::string_view":
                 return ""
-            elif arg_type == "std::string_view":
+            elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":
                 # TODO: generate actual SymbolicInt
@@ -706,8 +706,7 @@ def generate_tensor_like_override_tests(cls):
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg["simple_type"]
-                if t.endswith("?"):
-                    t = t[:-1]
+                t = t.removesuffix("?")
                 if t == "Tensor" and is_method and arg["name"] == "self":
                     # See "Note: properties and __get__"
                     func = func.__get__(instance_gen())
