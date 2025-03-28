@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-cmake
+cmake<=3.31.6
 expecttest>=0.3.0
 filelock
 fsspec
