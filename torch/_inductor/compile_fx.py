@@ -2303,6 +2303,15 @@ def _aoti_flatten_inputs(
         (args, kwargs or {})
     )
 
+    if any(isinstance(x[1], torch.ScriptObject) for x in flat_args_with_path):
+        from torch._dynamo.exc import UserError, UserErrorType
+
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "TorchBind objects found in inputs. TorchBind object inputs are not supported in AOTInductor. "
+            "TorchBind objects can only be attributes.",
+        )
+
     # Replace non-tensor (constant) inputs with Nones, since these are not being
     # used anyways by the graph
     flat_example_inputs = [
