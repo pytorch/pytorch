@@ -325,13 +325,15 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         str += "Scalar";
       } else {
         if (exclude_shape) {
-          str += "[-1]";
+          str += "-1";
         } else {
           str +=
               std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
         }
       }
       str += "]";
+      if (tensor.is_conj())
+        str += "_conj";
     } else {
       str += "Undefined";
     }
