@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#include <Python.h>
+#include </usr/include/python3.12/Python.h>
 
 // Python 3.11.0b4 added PyFrame_Back() to Python.h
 #if PY_VERSION_HEX < 0x030b00B4 && !defined(PYPY_VERSION)
