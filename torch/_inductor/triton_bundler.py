@@ -1,15 +1,17 @@
 import dataclasses
 import logging
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
+from torch.utils._filelock import FileLock
 
 from .runtime.runtime_utils import triton_cache_dir
-from .utils import GPU_KERNEL_BIN_EXTS
+from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
 
 log = logging.getLogger(__name__)
@@ -238,7 +240,7 @@ class TritonBundler:
                     )
                     continue
 
-                Path(directory).mkdir(parents=True, exist_ok=True)
+                Path(basedir).mkdir(parents=True, exist_ok=True)
 
                 # Random ID to avoid any collisions
                 rnd_id = str(uuid.uuid4())
@@ -260,6 +262,14 @@ class TritonBundler:
                         # Each kernel has bunch of files like .cubin(for cuda), spv(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
-                # Atomic on POSIX systems
-                os.replace(tmp_dir, directory)
+
+                if _IS_WINDOWS:
+                    with FileLock(directory + ".lock"):
+                        if os.path.exists(directory):
+                            shutil.rmtree(directory)
+                        os.replace(tmp_dir, directory)
+                else:
+                    # Atomic on POSIX systems
+                    os.replace(tmp_dir, directory)
+
             return TritonBundlerMetadata(kernel_names)

@@ -245,7 +245,9 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
 
         # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
         # We are only interested in the former here
-        if not is_rerun_disabled_tests(tests):
+        if not is_rerun_disabled_tests(
+            report, workflow_run_id, workflow_run_attempt, tests
+        ):
             continue
 
         for name, stats in tests.items():

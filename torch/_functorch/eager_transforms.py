@@ -26,6 +26,8 @@ from torch._C._functorch import (
     _wrap_for_grad,
     _wrap_functional_tensor,
     get_inplace_requires_grad_allowed,
+    get_unwrapped,
+    is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
 )
 from torch._functorch.utils import argnums_t, exposed_in
@@ -73,9 +75,7 @@ def _create_differentiable(inps, level=None):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
                 return _set_tensor_requires_grad(x)
-        raise ValueError(
-            f"Thing passed to transform API must be Tensor, " f"got {type(x)}"
-        )
+        raise ValueError(f"Thing passed to transform API must be Tensor, got {type(x)}")
 
     return tree_map(create_differentiable, inps)
 
@@ -954,7 +954,7 @@ def assert_non_empty_list_of_tensors(
         if isinstance(out, torch.Tensor):
             continue
         raise RuntimeError(
-            f"{api}: Expected {argname} to only contain Tensors, got " f"{type(out)}"
+            f"{api}: Expected {argname} to only contain Tensors, got {type(out)}"
         )
 
 
@@ -1797,3 +1797,19 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
         return tree_unflatten(flat_output, output_spec)
 
     return output, jvp_fn
+
+
+@exposed_in("torch.func")
+def debug_unwrap(tensor: torch.Tensor, *, recurse=True) -> torch.Tensor:
+    """Unwraps a functorch tensor (e.g. BatchedTensor, GradTrackingTensor) to its underlying tensor.
+
+    This function should only be used in a debug setting (e.g. trying to print the
+    value of a Tensor in a debugger). Otherwise, using the result of function
+    inside of a function being transformed will lead to undefined behavior.
+    """
+    if not is_functorch_wrapped_tensor(tensor):
+        return tensor
+    result = get_unwrapped(tensor)
+    if recurse:
+        return debug_unwrap(result)
+    return result

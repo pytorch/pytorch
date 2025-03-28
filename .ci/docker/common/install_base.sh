@@ -32,8 +32,12 @@ install_ubuntu() {
 
   # HACK: UCC testing relies on libnccl library from NVIDIA repo, and version 2.16 crashes
   # See https://github.com/pytorch/pytorch/pull/105260#issuecomment-1673399729
+  # TODO: Eliminate this hack, we should not relay on apt-get installation
+  # See https://github.com/pytorch/pytorch/issues/144768
   if [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "11.8"* ]]; then
     maybe_libnccl_dev="libnccl2=2.15.5-1+cuda11.8 libnccl-dev=2.15.5-1+cuda11.8 --allow-downgrades --allow-change-held-packages"
+  elif [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "12.4"* ]]; then
+    maybe_libnccl_dev="libnccl2=2.26.2-1+cuda12.4 libnccl-dev=2.26.2-1+cuda12.4 --allow-downgrades --allow-change-held-packages"
   else
     maybe_libnccl_dev=""
   fi
