@@ -1653,6 +1653,11 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            # dump provenance node info for ComboKernelNode/ForeachKernel type
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(
+                    combo_kernel_node.snodes, kernel_name
+                )
             self.codegen_comment([combo_kernel_node])
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)

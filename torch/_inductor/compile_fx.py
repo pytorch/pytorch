@@ -626,6 +626,9 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+        stack.enter_context(
+            _WaitCounter("pytorch.wait_counter.all_compilation_types").guard()
+        )
 
         if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
@@ -2302,6 +2305,15 @@ def _aoti_flatten_inputs(
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, kwargs or {})
     )
+
+    if any(isinstance(x[1], torch.ScriptObject) for x in flat_args_with_path):
+        from torch._dynamo.exc import UserError, UserErrorType
+
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "TorchBind objects found in inputs. TorchBind object inputs are not supported in AOTInductor. "
+            "TorchBind objects can only be attributes.",
+        )
 
     # Replace non-tensor (constant) inputs with Nones, since these are not being
     # used anyways by the graph

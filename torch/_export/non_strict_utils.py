@@ -398,16 +398,11 @@ def make_constraints(
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
-                # Look up the range constraint for the symbol corresponding to this shape dimension
-                # and store it indexed by the symbolic expression corresponding to it.
-                # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
-                # we want the symbol, not its replacement, which could be an expression. Maybe
-                # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
+                # Compute the range constraint for the symbolic expression corresponding
+                # to this shape dimension and store it.
                 dim = shape_spec[i] if shape_spec else None
                 if dim is None or isinstance(dim, _DimHint):
-                    range_constraints[d.node.expr] = shape_env.var_to_range[
-                        d.node._expr
-                    ]
+                    range_constraints[d.node.expr] = shape_env.bound_sympy(d.node.expr)
                 else:
                     range_constraints[d.node.expr] = ValueRanges(
                         lower=dim.min, upper=dim.max

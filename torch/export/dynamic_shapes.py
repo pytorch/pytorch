@@ -70,19 +70,94 @@ class _DimHint:
         return _DimHint(_DimHintType.STATIC)
 
 
-class _Dim(type):
+class Dim:
     """
-    Metaclass for :func:`Dim` types.
+    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
+    It can be used to describe multiple possible values of a dynamic tensor dimension.
+    Note that different dynamic dimensions of the same tensor, or of different tensors,
+    can be described by the same type.
+
+    Args:
+        name (str): Human-readable name for debugging.
+        min (Optional[int]): Minimum possible value of given symbol (inclusive)
+        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+
+    Returns:
+        A type that can be used in dynamic shape specifications for tensors.
     """
 
+    AUTO = _DimHint.AUTO()
+    DYNAMIC = _DimHint.DYNAMIC()
+    STATIC = _DimHint.STATIC()
+
+    def __init__(
+        self, name: str, *, min: Optional[int] = None, max: Optional[int] = None
+    ):
+        from torch.utils._sympy.numbers import int_oo
+
+        _min = 0 if min is None else min
+        _max = int_oo if max is None else max
+        assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+        assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
+        self.__name__ = name
+        self.min = _min
+        self.max = _max
+
+    def __add__(self, other) -> "Dim":
+        # e.g., dim + 1
+        if type(other) is not int:
+            raise NotImplementedError(
+                f"Attempted to add {other} to {self.__name__}, where an integer was expected. "
+                "(Only increasing linear operations with integer coefficients are supported.)"
+            )
+        return self._derive(lambda x: x + other)
+
+    def __radd__(self, other) -> "Dim":
+        return self + other
+
+    def __sub__(self, other) -> "Dim":
+        # e.g., dim - 1
+        if type(other) is not int:
+            raise NotImplementedError(
+                f"Attempted to subtract {other} from {self.__name__}, where an integer was expected. "
+                "(Only increasing linear operations with integer coefficients are supported.)"
+            )
+        return self._derive(lambda x: x - other)
+
+    def __rsub__(self, other) -> "Dim":
+        raise NotImplementedError(
+            f"Attempted to negate {self.__name__}. "
+            "(Only increasing linear operations with integer coefficients are supported.)"
+        )
+
+    def __mul__(self, other) -> "Dim":
+        # e.g., dim * 2
+        if type(other) is not int or other <= 0:
+            raise NotImplementedError(
+                f"Attempted to multiply {other} with {self.__name__}, where a positive integer was expected. "
+                "(Only increasing linear operations with integer coefficients are supported.)"
+            )
+        return self._derive(lambda x: x * other)
+
+    def __rmul__(self, other) -> "Dim":
+        return self * other
+
+    def _derived_name(self, fn) -> str:
+        from sympy import sympify
+
+        return str(fn(sympify(self.__name__)))
+
+    def _derive(self, fn) -> "Dim":
+        return _DerivedDim(self._derived_name(fn), self, fn)
+
     @staticmethod
-    def readable(name, min_, max_):
+    def _readable(name: str, min_: int, max_: int) -> str:
         from torch.utils._sympy.numbers import int_oo
 
         if min_ == 2:
-            min_ = None
+            min_ = None  # type: ignore[assignment]
         if max_ == int_oo:
-            max_ = None
+            max_ = None  # type: ignore[assignment]
         if min_ is None and max_ is None:
             return f"Dim('{name}')"
         if min_ is None:
@@ -91,61 +166,24 @@ class _Dim(type):
             return f"Dim('{name}', min={min_})"
         return f"Dim('{name}', min={min_}, max={max_})"
 
-    def __add__(cls, other):
-        # e.g., dim + 1
-        if type(other) is not int:
-            raise NotImplementedError(
-                f"Attempted to add {other} to {cls.__name__}, where an integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
-            )
-        return cls._derive(lambda x: x + other)
-
-    def __radd__(cls, other):
-        return cls + other
-
-    def __sub__(cls, other):
-        # e.g., dim - 1
-        if type(other) is not int:
-            raise NotImplementedError(
-                f"Attempted to subtract {other} from {cls.__name__}, where an integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
-            )
-        return cls._derive(lambda x: x - other)
-
-    def __rsub__(cls, other):
-        raise NotImplementedError(
-            f"Attempted to negate {cls.__name__}. "
-            "(Only increasing linear operations with integer coefficients are supported.)"
-        )
-
-    def __mul__(cls, other):
-        # e.g., dim * 2
-        if type(other) is not int or other <= 0:
-            raise NotImplementedError(
-                f"Attempted to multiply {other} with {cls.__name__}, where a positive integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
-            )
-        return cls._derive(lambda x: x * other)
-
-    def __rmul__(cls, other):
-        return cls * other
-
-    def _derived_name(cls, fn):
-        from sympy import sympify
-
-        return str(fn(sympify(cls.__name__)))
-
-    def _derive(cls, fn):
-        return _DerivedDim(cls._derived_name(fn), (int,), {"root": cls, "fn": fn})
+    def __repr__(self):
+        return Dim._readable(self.__name__, self.min, self.max)
 
 
-class _StaticDim(_Dim):
+_Dim = Dim  # TODO(pianpwk): remove after it's no longer internally breaking
+
+
+class _StaticDim(Dim):
     """
-    Meta class for static :func:`Dim` types.
+    Class for static :func:`Dim` types.
 
     This class is only for setting and checking static dim constraints,
     and the user should never interact with it.
     """
+
+    def __init__(self, value: int):
+        self.__name__ = str(value)
+        self.value = value
 
     @property
     def min(self):
@@ -156,9 +194,9 @@ class _StaticDim(_Dim):
         return self.value  # type: ignore[attr-defined]
 
 
-class _DerivedDim(_Dim):
+class _DerivedDim(Dim):
     """
-    Metaclass for derived :func:`Dim` types.
+    Class for derived :func:`Dim` types.
 
     Currently we only support increasing linear expressions with integer coefficients.
     In other words, a derived Dim can always be written in the form Ax + B, where
@@ -171,6 +209,11 @@ class _DerivedDim(_Dim):
     The function lambda x: Ax + B is expressed by `fn`, where x is a normal Dim, `root`.
     The range of a derived Dim is computed by mapping `fn` over the range of its `root`.
     """
+
+    def __init__(self, name: str, root: Dim, fn: Callable):
+        self.__name__ = name
+        self.root = root
+        self.fn = fn
 
     @property
     def min(self):
@@ -218,50 +261,17 @@ class _DerivedDim(_Dim):
         # As a consequence, roots are always regular Dims (i.e., not derived Dims).
         return _DerivedDim(
             self._derived_name(fn),
-            (int,),
-            {"root": self.root, "fn": lambda x: fn(self.fn(x))},  # type: ignore[attr-defined]
+            self.root,
+            lambda x: fn(self.fn(x)),
         )
 
-
-class Dim(type):
-    """
-    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
-    It can be used to describe multiple possible values of a dynamic tensor dimension.
-    Note that different dynamic dimensions of the same tensor, or of different tensors,
-    can be described by the same type.
-
-    Args:
-        name (str): Human-readable name for debugging.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
-
-    Returns:
-        A type that can be used in dynamic shape specifications for tensors.
-    """
-
-    AUTO = _DimHint.AUTO()
-    DYNAMIC = _DimHint.DYNAMIC()
-    STATIC = _DimHint.STATIC()
-
-    def __new__(
-        metacls, name: str, *, min: Optional[int] = None, max: Optional[int] = None
-    ):
-        from torch.utils._sympy.numbers import int_oo
-
-        _min = 0 if min is None else min
-        _max = int_oo if max is None else max
-        assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-        assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
-        dim = _Dim(name, (int,), {"min": _min, "max": _max})
-        dim.__module__ = getattr(
-            inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
-        )
-        return dim
+    def __repr__(self):
+        return self.__name__
 
 
 def dims(
     *names: str, min: Optional[int] = None, max: Optional[int] = None
-) -> tuple[_Dim, ...]:
+) -> tuple[Dim, ...]:
     """
     Util to create multiple :func:`Dim` types.
 
@@ -722,8 +732,8 @@ def _check_dynamic_shapes(
         if dim.__name__ in bounds:
             min_, max_ = bounds[dim.__name__]
             if dim.min != min_ or dim.max != max_:
-                this_ = _Dim.readable(dim.__name__, min_, max_)
-                that_ = _Dim.readable(dim.__name__, dim.min, dim.max)
+                this_ = Dim._readable(dim.__name__, min_, max_)
+                that_ = Dim._readable(dim.__name__, dim.min, dim.max)
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"Found different definitions {this_} and {that_} "
@@ -735,7 +745,7 @@ def _check_dynamic_shapes(
     def check_symbols(path, tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, _Dim):
+                if isinstance(dim, Dim):
                     check_same_bounds(dim)
                 elif dim is None:
                     _warn_on_None_dynamic_shape_dimension()
@@ -750,7 +760,7 @@ def _check_dynamic_shapes(
                     )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, _Dim):
+                if isinstance(dim, Dim):
                     check_same_bounds(dim)
                 elif dim is None:
                     _warn_on_None_dynamic_shape_dimension()
@@ -911,7 +921,7 @@ def _process_dynamic_shapes(
                 ),
             )
         else:
-            assert isinstance(dim, _Dim)
+            assert isinstance(dim, Dim)
             constraint = _Constraint(  # type: ignore[assignment]
                 id(tensor),
                 i,
@@ -924,7 +934,7 @@ def _process_dynamic_shapes(
 
     def update_symbols(path, tensor, shape):
         def _create_static_dim(tensor, i, value):
-            return _StaticDim(str(value), (int,), {"value": value})
+            return _StaticDim(value)
 
         # clean out decorators from user side, or previous export call
         # we also delete these attributes in non_strict_utils.py/make_constraints()
@@ -936,7 +946,7 @@ def _process_dynamic_shapes(
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, (int, _Dim)):
+                if isinstance(dim, (int, Dim)):
                     if isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
                     constraint = to_constraint(dim, tensor, i)
@@ -953,7 +963,7 @@ def _process_dynamic_shapes(
                     torch._dynamo.mark_static(tensor, i)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, (int, _Dim)):
+                if isinstance(dim, (int, Dim)):
                     if isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
                     constraint = to_constraint(dim, tensor, i)
@@ -1002,14 +1012,14 @@ def _get_dim_name_mapping(
     name_to_dim = {}
     for dim in tree_flatten(
         dynamic_shapes,
-        is_leaf=lambda x: isinstance(x, _Dim),
+        is_leaf=lambda x: isinstance(x, Dim),
     )[0]:
         if dim is None:
             # NOTE: this must denote a non-Tensor or automatic at this point.
             continue
         if isinstance(dim, int):
             continue
-        elif isinstance(dim, _Dim):
+        elif isinstance(dim, Dim):
             name_to_dim[dim.__name__] = dim
             if isinstance(dim, _DerivedDim):
                 name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
@@ -1092,7 +1102,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
     # track derived dim roots
     roots: set[str] = set()
     for k, c in shape_fixes.items():
-        assert isinstance(c, (int, _Dim, _DerivedDim, sympy.Expr))
+        assert isinstance(c, (int, Dim, _DerivedDim, sympy.Expr))
         if isinstance(c, sympy.Expr):  # check dim/derived dim expression
             assert _is_supported_equivalence(c)
             shape_fixes[k] = c

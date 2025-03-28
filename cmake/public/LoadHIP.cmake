@@ -82,12 +82,9 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
-  # Find ROCM version for checks
-  if(UNIX)
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-  else()
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/hip/hip_version.h)
-  endif()
+  # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
+  find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h hip_version.h
+      HINTS ${ROCM_INCLUDE_DIRS}/rocm-core ${ROCM_INCLUDE_DIRS}/hip /usr/include)
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
   if(EXISTS ${ROCM_VERSION_HEADER_PATH})

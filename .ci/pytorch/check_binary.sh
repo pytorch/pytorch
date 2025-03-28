@@ -60,16 +60,6 @@ else
 fi
 
 ###############################################################################
-# Setup XPU ENV
-###############################################################################
-if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
-  set +u
-  # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
-  source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  source /opt/intel/oneapi/pti/latest/env/vars.sh
-fi
-
-###############################################################################
 # Check GCC ABI
 ###############################################################################
 

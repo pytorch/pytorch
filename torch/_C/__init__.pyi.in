@@ -2556,6 +2556,7 @@ class _StaticCudaLauncher:
         cubin_file: str,
         func_name: str,
         shared_mem_bytes: _int,
+        device: _int,
     ) -> Tuple[_int, _int, _int]:
         ...
 

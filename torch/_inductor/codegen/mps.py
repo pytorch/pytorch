@@ -430,6 +430,18 @@ class MetalOverrides(OpOverrides):
     def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
         return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
 
+    @staticmethod
+    def chebyshev_polynomial_u(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_u_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_v(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_v_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 

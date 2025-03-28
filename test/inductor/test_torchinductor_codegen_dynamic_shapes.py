@@ -44,20 +44,21 @@ def check_codegen(
     example_inputs,
     kwargs=None,
     *,
+    device: torch.types.Device,
     is_cpp_code: bool,
 ):
     kwargs = kwargs or {}
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to(device=GPU_TYPE)
+            model = model.to(device=device)
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
+                x.size(), x.stride(), device=device, dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
@@ -406,8 +407,9 @@ if HAS_CPU:
                 self=self,
                 model=model,
                 example_inputs=example_inputs,
+                device=self.device,
                 kwargs=kwargs,
-                is_cpp_code=True,
+                is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
             )
 
     copy_tests(
@@ -429,6 +431,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self=self,
                 model=model,
                 example_inputs=example_inputs,
+                device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
             )

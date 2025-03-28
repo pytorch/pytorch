@@ -1051,6 +1051,8 @@ def _jinja2_env():
 
 
 class TritonTemplate(KernelTemplate):
+    # Allow subclasses to override the kernel type
+    kernel_type: type[Any] = TritonTemplateKernel
     index_counter = itertools.count()
     all_templates: dict[str, "TritonTemplate"] = {}
 
@@ -1137,7 +1139,7 @@ class TritonTemplate(KernelTemplate):
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
-            TritonTemplateKernel(
+            self.kernel_type(
                 kernel_name=kernel_name,
                 output_node=fake_out,
                 workspace_arg=workspace_arg,
@@ -1187,7 +1189,7 @@ class TritonTemplate(KernelTemplate):
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
         def make_kernel_render(out_node):
-            kernel = TritonTemplateKernel(
+            kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 workspace_arg=workspace_arg,
@@ -1893,10 +1895,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_pool
-
-            # do the optional warmup
-            tuning_pool.initialize()
+            # Initialize the suprocess pool so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_process_pool()
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()

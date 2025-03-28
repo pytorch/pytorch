@@ -1,6 +1,6 @@
 ARG UBUNTU_VERSION
 
-FROM ubuntu:${UBUNTU_VERSION}
+FROM ubuntu:${UBUNTU_VERSION} as base
 
 ARG UBUNTU_VERSION
 
@@ -108,20 +108,21 @@ RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_d
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
 ARG TRITON
-# Install triton, this needs to be done before sccache because the latter will
-# try to reach out to S3, which docker build runners don't have access
+ARG TRITON_CPU
+
+# Create a separate stage for building Triton and Triton-CPU.  install_triton
+# will check for the presence of env vars
+FROM base as triton-builder
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
-
-ARG TRITON_CPU
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
-RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton-cpu.txt
+RUN bash ./install_triton.sh
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
 # Build and install executorch

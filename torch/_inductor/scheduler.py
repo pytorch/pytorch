@@ -60,6 +60,7 @@ from .utils import (
     GraphPartitionMap,
     IndentedBuffer,
     is_collective,
+    is_cudagraph_unsafe_op,
     is_gpu,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
@@ -3458,24 +3459,6 @@ class Scheduler:
             why("prologue fusion will not increase amount of bytes read in kernel")
             return False
 
-        # we want to avoid attempting to fuse predictably unprofitable prologues
-        # such as increasing the unaligned reads or writes.
-        # TODO - would be nice to generalize this, however, we would need more explicit
-        # knowledge of memory access patterns in the TritonTemplate in order to know
-        # the stride order to check alignment.
-        origins = tuple(
-            e.target
-            for n in prologue_node.get_nodes()
-            if n.node is not None
-            for e in n.node.get_origins()
-            if e.op == "call_function"
-        )
-        if origins == (torch.ops.aten.constant_pad_nd.default,):
-            why(
-                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
-            )
-            return False
-
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
@@ -3980,6 +3963,9 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
+        if is_cudagraph_unsafe_op(node.node):
+            return True
+
         return False
 
     def get_name_to_nodes(
@@ -4408,7 +4394,11 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device is not None and self.get_backend(device).ready_to_flush():
+                if (
+                    device is not None
+                    and device.type != "meta"
+                    and self.get_backend(device).ready_to_flush()
+                ):
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):
