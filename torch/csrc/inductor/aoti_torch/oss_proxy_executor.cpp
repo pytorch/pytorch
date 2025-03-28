@@ -1,7 +1,9 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 
 namespace {
@@ -13,7 +15,7 @@ at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
 namespace torch::aot_inductor {
 
 void OSSProxyExecutor::prefill_stack_with_static_arguments(
-    int index,
+    size_t index,
     const at::TypePtr& schema_arg_type,
     const nlohmann::json& serialized_arg,
     OSSOpKernel& op_kernel) {
@@ -34,7 +36,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::TensorType, 1);
       break;
     }
@@ -47,7 +48,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
     }
@@ -61,7 +61,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
     }
@@ -74,7 +73,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<double>());
+      stack.at(index) = serialized_arg_val.get<double>();
       break;
     }
     case c10::TypeKind::BoolType: {
@@ -86,18 +85,17 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<bool>());
+      stack.at(index) = serialized_arg_val.get<bool>();
       break;
     }
     case c10::TypeKind::NumberType: {
       if (serialized_arg_type == "as_int") {
         // Only int Scalar is treated as dynamic arg for now
-        stack.emplace_back();
         dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       } else if (serialized_arg_type == "as_float") {
-        stack.emplace_back(serialized_arg_val.get<double>());
+        stack.at(index) = serialized_arg_val.get<double>();
       } else if (serialized_arg_type == "as_bool") {
-        stack.emplace_back(serialized_arg_val.get<bool>());
+        stack.at(index) = serialized_arg_val.get<bool>();
       } else {
         TORCH_CHECK(
             false,
@@ -119,7 +117,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<std::string>());
+      stack.at(index) = serialized_arg_val.get<std::string>();
       break;
     }
     case c10::TypeKind::ScalarTypeType: {
@@ -131,7 +129,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<c10::ScalarType>());
+      stack.at(index) = serialized_arg_val.get<c10::ScalarType>();
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
@@ -143,7 +141,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<c10::MemoryFormat>());
+      stack.at(index) = serialized_arg_val.get<c10::MemoryFormat>();
       break;
     }
     case c10::TypeKind::LayoutType: {
@@ -155,7 +153,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.emplace_back(serialized_arg_val.get<c10::Layout>());
+      stack.at(index) = serialized_arg_val.get<c10::Layout>();
       break;
     }
     case c10::TypeKind::DeviceObjType: {
@@ -169,7 +167,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           serialized_arg_type);
 
       std::string device_string = serialized_arg_val["type"].get<std::string>();
-      if (serialized_arg_val["index"].is_number()) {
+      if (serialized_arg_val.contains("index") &&
+          serialized_arg_val["index"].is_number()) {
         device_string += ":" + serialized_arg_val["index"].get<std::string>();
       }
 
@@ -182,7 +181,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
                 << device << ". Please ensure this is intentional.";
       }
 
-      stack.emplace_back(*device_);
+      stack.at(index) = *device_;
       break;
     }
     case c10::TypeKind::ListType: {
@@ -196,7 +195,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             " but got ",
             serialized_arg_type);
         TORCH_CHECK(serialized_arg_type == "as_tensors");
-        stack.emplace_back();
         dynamic_args.emplace_back(
             index, DynamicArgType::ListTensorType, serialized_arg_val.size());
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofInts())) {
@@ -210,7 +208,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             serialized_arg_type);
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
-        stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofSymInts())) {
         TORCH_CHECK(
             serialized_arg_type == "as_ints" ||
@@ -223,7 +220,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             serialized_arg_type);
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
-        stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofFloats())) {
         TORCH_CHECK(
             serialized_arg_type == "as_floats",
@@ -237,7 +233,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<double>());
         }
-        stack.emplace_back(ret);
+        stack.at(index) = std::move(ret);
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofBools())) {
         TORCH_CHECK(
             serialized_arg_type == "as_bools",
@@ -251,24 +247,23 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<bool>());
         }
-        stack.emplace_back(ret);
+        stack.at(index) = std::move(ret);
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofNumbers())) {
         if (serialized_arg_type == "as_ints") {
           dynamic_args.emplace_back(
               index, DynamicArgType::ListIntType, serialized_arg_val.size());
-          stack.emplace_back();
         } else if (serialized_arg_type == "as_floats") {
           std::vector<double> ret;
           for (const auto& arg : serialized_arg_val) {
             ret.push_back(arg);
           }
-          stack.emplace_back(ret);
+          stack.at(index) = std::move(ret);
         } else if (serialized_arg_type == "as_bools") {
           std::vector<bool> ret;
           for (const auto& arg : serialized_arg_val) {
             ret.push_back(arg);
           }
-          stack.emplace_back(ret);
+          stack.at(index) = std::move(ret);
         } else {
           TORCH_CHECK(
               false,
@@ -286,14 +281,12 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           for (const auto& arg : serialized_arg_val) {
             list_item_types.push_back(arg.begin().key());
           }
-          stack.emplace_back();
           dynamic_args.emplace_back(
               index,
               DynamicArgType::ListOptionalTensorType,
               serialized_arg_val.size(),
               list_item_types);
         } else if (serialized_arg_type == "as_tensors") {
-          stack.emplace_back();
           dynamic_args.emplace_back(
               index, DynamicArgType::ListTensorType, serialized_arg_val.size());
         } else {
@@ -319,7 +312,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<std::string>());
         }
-        stack.emplace_back(ret);
+        stack.at(index) = std::move(ret);
       } else {
         TORCH_CHECK(
             false,
@@ -337,7 +330,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           schema_arg_type->castRaw<at::OptionalType>()->getElementType();
 
       if (serialized_arg_type == "as_none") {
-        stack.emplace_back(std::nullopt);
+        stack.at(index) = c10::IValue{};
         if (inner_type->kind() == c10::TypeKind::TensorType) {
           // Tensor is None
           dynamic_args.emplace_back(index, DynamicArgType::TensorType, 0);
@@ -381,16 +374,35 @@ void OSSProxyExecutor::get_input_info_from_serialized(
     const std::vector<c10::Argument>& schema_args,
     const nlohmann::json& serialized_node,
     OSSOpKernel& op_kernel) {
-  int index = 0;
+  std::vector<bool> filled(schema_args.size(), false);
+  TORCH_CHECK(op_kernel.stack_.size() == 0);
+  op_kernel.stack_.resize(schema_args.size());
   for (const auto& named_argument : serialized_node["inputs"]) {
     const auto& arg = named_argument["arg"];
-    auto& schema_arg = schema_args[index];
+    const auto& name = named_argument["name"].get<std::string>();
 
-    prefill_stack_with_static_arguments(
-        index++, schema_arg.real_type(), arg, op_kernel);
+    // Doing a linear lookup in the schema to find the index
+    // of a static argument. Should be fine performance wise
+    // because we usually only have small amount of arguments.
+    for (size_t index = 0; index < schema_args.size(); index++) {
+      auto& schema_arg = schema_args[index];
+      if (schema_arg.name() == name) {
+        prefill_stack_with_static_arguments(
+            index, schema_arg.real_type(), arg, op_kernel);
+        filled[index] = true;
+        break;
+      }
+    }
   }
 
-  // TODO: prefill default values
+  // If an argument is not filled and has a default value, we should
+  // also prefill the default value.
+  for (size_t index = 0; index < schema_args.size(); index++) {
+    if (!filled[index] && schema_args[index].default_value()) {
+      auto default_value = *schema_args[index].default_value();
+      op_kernel.stack_.at(index) = default_value;
+    }
+  }
 }
 
 // Populates op_kernel.outputs_

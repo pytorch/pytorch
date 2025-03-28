@@ -94,7 +94,6 @@ class TestAOTInductorPackage(TestCase):
         example_inputs,
         inductor_configs=None,
         dynamic_shapes=None,
-        disable_constraint_solver=False,
         atol=None,
         rtol=None,
     ) -> AOTICompiledModel:
