@@ -13,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_quantization import (
     _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
@@ -191,7 +192,10 @@ class TestPatternMatcherBase(TestCase):
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
                 actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                if self.precision != 0:
+                    torch.testing.assert_close(actual, expected, atol=self.precision, rtol=self.precision)
+                else:
+                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
 
     def _test_code_common(
@@ -311,12 +315,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv2d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv3d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=5)
 
@@ -676,12 +682,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off(0.02)
     def test_conv2d_binary(self):
         self._test_conv_binary_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off(0.02)
     def test_conv3d_binary(self):
         self._test_conv_binary_base(dim=5)
 
