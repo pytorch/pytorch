@@ -885,7 +885,6 @@ def aot_dispatch_autograd(
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            num_saved_tensors = len(fw_outs_saved_for_bw) - num_symints_saved_for_bw
 
             # TODO XXX: Note about handling saved_tensors_hooks
             hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
@@ -911,7 +910,7 @@ def aot_dispatch_autograd(
                     )
                     trace_structured(
                         f"{structured_log_tag}",
-                        payload_fn=lambda: fw_module_str,
+                        payload_fn=lambda: gm_str,
                     )
 
                 log_graph(
@@ -929,7 +928,6 @@ def aot_dispatch_autograd(
                 bw_g_inputs = bw_g.find_nodes(op="placeholder")
 
                 fw_out_n = fw_g.output_node()
-                fw_out_args = list(fw_out_n.args[0])
                 fw_outs_packed_tensors = []
                 fw_outs_packed_syms = []
 
@@ -987,7 +985,6 @@ def aot_dispatch_autograd(
                     # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
                     # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
                     unpack_gm = make_fx(unpack_hook)(pack_out_val)
-                    unpack_out_val = unpack_gm(pack_out_val)
                     unpack_g = unpack_gm.graph
                     if aot_config.enable_log:
                         log_graph(
@@ -1079,7 +1076,6 @@ def aot_dispatch_autograd(
                     n for n in fw_outs_saved_for_bw if is_sym_node(n)
                 ]
                 num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-                num_saved_tensors = len(fw_outs_saved_for_bw) - num_symints_saved_for_bw
 
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
@@ -1393,8 +1389,9 @@ def aot_dispatch_autograd(
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
                 try:
+                    # See Note: [Backward graph lazy lowering]
                     compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
+                        copy.deepcopy(bw_module), placeholder_list
                     )
                 except Exception as e:
                     exc = e
