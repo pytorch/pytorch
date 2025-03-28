@@ -21,7 +21,10 @@ cmake_policy(SET CMP0092 NEW)
 if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
   message(FATAL_ERROR "In-source build are not supported")
 endif()
-
+# Specify a minimum Policy Version for a project. Used to pass CMake 4 checks
+if(NOT CMAKE_POLICY_VERSION_MINIMUM)
+  set(CMAKE_POLICY_VERSION_MINIMUM "3.5")
+endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
