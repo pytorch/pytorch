@@ -1232,6 +1232,7 @@ def _group_tensors_by_device_and_dtype(nested_tensorlists: List[List[Optional[Te
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
+def _to_dlpack_versioned(data: Tensor) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _get_cpp_backtrace(
     frames_to_skip: _int,
