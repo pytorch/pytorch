@@ -85,7 +85,9 @@ autosectionlabel_prefix_document = True
 
 katex_prerender = True
 
+# napoleon options
 napoleon_use_ivar = True
+napoleon_custom_sections = ["Basics", "Details"]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
