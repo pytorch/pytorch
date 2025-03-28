@@ -259,20 +259,21 @@ def smoke_test_cuda(
             )
 
         print(f"torch cuda: {torch.version.cuda}")
-        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
-        torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
-        compare_pypi_to_torch_versions(
-            "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
-        )
-
         torch.cuda.init()
         print("CUDA initialized successfully")
         print(f"Number of CUDA devices: {torch.cuda.device_count()}")
         for i in range(torch.cuda.device_count()):
             print(f"Device {i}: {torch.cuda.get_device_name(i)}")
 
-        # nccl is availbale only on Linux
+        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
+        torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
+        print(f"Torch cuDNN version: {torch_cudnn_version}")
+
+        # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
         if sys.platform in ["linux", "linux2"]:
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             compare_pypi_to_torch_versions(
                 "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
