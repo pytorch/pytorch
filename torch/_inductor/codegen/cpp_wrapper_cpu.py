@@ -1107,9 +1107,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
-            )
+            shim_fn_codes = f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
+            if config.aot_inductor.enable_kernel_profile:
+                shim_fn_codes = """{ RECORD_FUNCTION("%s", c10::ArrayRef<c10::IValue>()); %s }"""
+                shim_fn_codes = shim_fn_codes % (shim_fn, shim_fn_codes)
+            self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
