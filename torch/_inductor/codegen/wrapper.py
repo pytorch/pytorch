@@ -819,6 +819,7 @@ class PythonWrapperCodegen(CodeGen):
     def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()
+        self.args_to_buffers: Dict[str, ir.Buffer] = {}
         self.imports = IndentedBuffer()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
@@ -2263,10 +2264,10 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
                 buf_name = raw_arg.tensor.get_name()
-                buf = V.graph.get_buffer(buf_name)
-            elif V.graph.try_get_buffer(arg) is not None:
+                buf = self.args_to_buffers[arg]
+            elif arg in self.args_to_buffers:
                 buf_name = arg
-                buf = V.graph.get_buffer(arg)
+                buf = self.args_to_buffers[arg]
             else:
                 assert raw_arg is not None, (
                     "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
@@ -2366,6 +2367,17 @@ class PythonWrapperCodegen(CodeGen):
         triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
                 and C++ when gpu=False.
         """
+
+        # Store buffers corresponding to each call arg.
+        # This is used to generate example args for autotuning later on.
+        self.args_to_buffers.update(
+            {
+                arg: V.graph.try_get_buffer(arg)
+                for arg in call_args
+                if isinstance(arg, str)
+            }
+        )
+
         device = device or V.graph.get_current_device_or_throw()
         self.writeline(
             KernelCallLine(
