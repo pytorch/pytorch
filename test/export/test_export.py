@@ -3700,6 +3700,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
 
+    def test_range_constraints_with_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y)[:3]
+
+        m = M()
+        inp = (torch.randn(4), torch.randn(4))
+        dynamic_shapes = ((torch.export.Dim.DYNAMIC,), (torch.export.Dim.DYNAMIC,))
+        ep = export(m, inp, dynamic_shapes=dynamic_shapes)
+        assert len(ep.range_constraints) == 1
+        vr = next(iter(ep.range_constraints.values()))
+        self.assertEqual(vr.lower, 3)
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
