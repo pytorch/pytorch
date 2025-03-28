@@ -41,13 +41,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import (
-    CeilDiv,
-    FloorDiv,
-    Identity,
-    IntTrueDiv,
-    ModularIndexing,
-)
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1940,12 +1934,14 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            node.target
+            isinstance(parent.target, torch._ops.OpOverload)
+            and parent.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
+                aten._scaled_mm.default,
             )
-            or is_view(node.target)
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
 
     return False
@@ -4319,14 +4315,22 @@ def constant_boundary_condition(
     return load
 
 
-def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None):
+    if dilation is None:
+        dilation = [1] * len(padding)
+
     x_out = FloorDiv(
-        x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
+        x + 2 * padding[i] - dilation[i] * (kernel_size[i] - 1) + (stride[i] - 1),
+        stride[i],
     )
 
     if ceil_mode:
         x_alt = FloorDiv(
-            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
+            x
+            + 2 * padding[i]
+            - dilation[i] * (kernel_size[i] - 1)
+            + 2 * (stride[i] - 1),
+            stride[i],
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
@@ -4341,10 +4345,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+def should_fallback_max_pool2d_with_indices(kernel_size):
     kernel_size = pad_listlike(kernel_size, 2)
     window_size = kernel_size[0] * kernel_size[1]
-    return (window_size > 25) or any(d > 1 for d in dilation)
+    return window_size > 25
 
 
 def max_pool2d_checks(
@@ -4369,7 +4373,7 @@ def max_pool2d_checks(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
-    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size)
     if assert_fallback is not None:
         assert use_fallback == assert_fallback
 
@@ -4387,8 +4391,12 @@ def _max_pool2d_with_offsets(
     x.realize_hint()
     *batch, h, w = x.get_size()
 
-    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+    h_out, ceil_mode1 = pooling_size(
+        h, 0, kernel_size, stride, padding, ceil_mode, dilation=dilation
+    )
+    w_out, ceil_mode2 = pooling_size(
+        w, 1, kernel_size, stride, padding, ceil_mode, dilation=dilation
+    )
 
     dtype = x.dtype
     min_value = (
@@ -4398,7 +4406,14 @@ def _max_pool2d_with_offsets(
     )
 
     new_size = list(batch) + [h_out, w_out]
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+    if (
+        padding[0]
+        or padding[1]
+        or ceil_mode1
+        or ceil_mode2
+        or (dilation[0] > 1)
+        or (dilation[1] > 1)
+    ):
         x_loader = constant_boundary_condition(x, min_value, dim=2)
     else:
         x_loader = x.make_loader()
@@ -4408,7 +4423,10 @@ def _max_pool2d_with_offsets(
     def fn_inner(idx, reduction_idx):
         prefix = idx[:-dim]
         bh = idx[-dim:]
-        ih = [bh[i] * stride[i] + reduction_idx[i] - padding[i] for i in range(dim)]
+        ih = [
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
+            for i in range(dim)
+        ]
         return x_loader([*prefix, *ih])
 
     result = Reduction.create(
@@ -4476,7 +4494,7 @@ def _low_memory_max_pool2d_with_offsets(
     prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
 )
 def _low_memory_max_pool2d_offsets_to_indices(
-    offsets, kernel_width, input_width, stride, padding
+    offsets, kernel_width, input_width, stride, padding, dilation
 ):
     # TODO: Generalize to other max pooling flavors, and arbitrary dim
 
@@ -4486,8 +4504,8 @@ def _low_memory_max_pool2d_offsets_to_indices(
         w_in = ops.index_expr(input_width, torch.int64)
         hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
         wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
-        ih = hbase + h_inc
-        iw = wbase + w_inc
+        ih = hbase + h_inc * ops.constant(dilation[0], torch.int64)
+        iw = wbase + w_inc * ops.constant(dilation[1], torch.int64)
         return ih * w_in + iw
 
     def offsets_to_indices(idx):
@@ -4507,12 +4525,6 @@ def _low_memory_max_pool2d_offsets_to_indices(
     return indices
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
-
-
 # Fallback when we do not decompose to the low-memory path.
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
 def max_pool2d_with_indices(
@@ -4527,17 +4539,12 @@ def max_pool2d_with_indices(
         x, kernel_size, stride, padding, dilation
     )
 
-    if any(d > 1 for d in dilation):
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode=ceil_mode
-        )
-
     out, offsets = _max_pool2d_with_offsets(
         x, kernel_size, stride, padding, dilation, ceil_mode
     )
 
     indices = _low_memory_max_pool2d_offsets_to_indices(
-        offsets, kernel_size[-1], x.shape[-1], stride, padding
+        offsets, kernel_size[-1], x.shape[-1], stride, padding, dilation
     )
 
     return out, indices
@@ -4996,23 +5003,21 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
         sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
-        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.trunc((i_expr + sample) * alpha_expr) - ops.trunc(
-            sample * alpha_expr
+        diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
+        out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
+        alpha = ops.truediv(
+            ops.to_dtype(diff, torch.float64), ops.to_dtype(out_sz_expr, torch.float64)
         )
+        alpha = ops.where(ops.eq(out_sz_expr, 0), 0, alpha)
+        seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
-
-        mask = ops.lt(
-            i_expr,
-            ops.index_expr(out_sz - 1, torch.int64),
-        )
-        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
+        mask = ops.lt(i_expr, out_sz_expr)
+        return ops.where(mask, seq_i, diff)
 
     return load
 
@@ -6860,8 +6865,18 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
+    def _map_output(out: Any):
+        if isinstance(out, TensorBox):
+            return out
+        elif isinstance(out, ir.StorageBox):
+            return TensorBox(out)
+        elif isinstance(out, ir.MultiOutput):
+            return TensorBox.create(out)
+        else:
+            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
+
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    return list(map(TensorBox.create, result))
+    return list(map(_map_output, result))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
@@ -6954,7 +6969,9 @@ def with_effects(token, op, *args, **kwargs):
         return (effectful_kernel,)
 
     result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    if not isinstance(result, (list, tuple)):
+    # See [NOTE: with_effects return type]
+    # Only return `result` if it is a tuple, not list.
+    if not isinstance(result, tuple):
         return (effectful_kernel, result)
     else:
         return (effectful_kernel, *result)
