@@ -72,6 +72,6 @@ jobs:
       build-environment: linux-s390x-binary-manywheel
       docker-image: pytorch/manylinuxs390x-builder:cpu-s390x-main
       test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
-      timeout-minutes: 480
+      timeout-minutes: 600
       use-gha: "yes"
     secrets: inherit
