@@ -2099,7 +2099,7 @@ for __name in dir(_C._VariableFunctions):
     __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
-        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        # TODO: Once the undocumented FC window is passed, remove the line below
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj

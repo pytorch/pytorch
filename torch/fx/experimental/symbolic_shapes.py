@@ -1277,6 +1277,12 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     return x
 
 
+# a or b is eager, meaning that (a==1 or True) will specialize a.
+# but operator.or_(a==1, True) generates sympy expression and avoid
+# the specialization.
+sym_or = operator.or_
+
+
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
