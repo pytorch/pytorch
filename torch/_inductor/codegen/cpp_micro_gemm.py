@@ -946,25 +946,37 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
+    // Counter-intuitively, converting A to FP32 in the macro-kernel (instead of the micro-kernel)
+    // did not degrade performance.
+    // TODO #1: check if we can reuse the existing GEMM micro-kernel, but with prefetching.
+    // If not, check if converting elements of A inside the micro-kernel works as well.
+    // BF16 elements are converted to FP32 inside the micro-kernel one at a time.
+    // However, that approach uses less memory.
+    // TODO #2: Consider moving the following check to the new template
     {{kernel.assert_function}}(N == {{block_n}}, "N dimension must be equal to {{block_n}}");
     {{kernel.assert_function}}(K == {{block_k}}, "K dimension must be equal to {{block_k}}");
+    auto cvt_bf16_to_fp32 = [&](float* A_fp32, int num_rows, int m) {
+        for (int A_row = 0; A_row < num_rows; A_row++) {
+            // Convert 16 BF16 elements at a time
+            for (int vec_num = 0; vec_num < 4; vec_num++) {
+                __m512* tmp =
+                    reinterpret_cast<__m512*>(
+                        A_fp32 + 16 * vec_num + {{block_k}} * A_row
+                    );
+                at::vec::cvtbf16_fp32(
+                    *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
+                    *tmp
+                );
+            }
+        }
+    };
+
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         if (block_m == {{block_m}}) {
             const int A_block_{{block_m}}_size = {{block_m}} * {{block_k}};
             float A_block_{{block_m}}[A_block_{{block_m}}_size];
-            for (int A_row = 0; A_row < {{block_m}}; A_row++) {
-                for (int vec_num = 0; vec_num < 4; vec_num++) {
-                    __m512* tmp =
-                        reinterpret_cast<__m512*>(
-                            A_block_{{block_m}} + 16 * vec_num + {{block_k}} * A_row
-                        );
-                    at::vec::cvtbf16_fp32(
-                        *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
-                        *tmp
-                    );
-                }
-            }
+            cvt_bf16_to_fp32(A_block_{{block_m}}, {{block_m}}, m);
             {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
                 A_block_{{block_m}},
                 B,
@@ -982,18 +994,7 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
                 {
                 const int A_block_{{b}}_size = {{b}} * {{block_k}};
                 float A_block_{{b}}[A_block_{{b}}_size];
-                for (int A_row = 0; A_row < {{b}}; A_row++) {
-                    for (int vec_num = 0; vec_num < 4; vec_num++) {
-                        __m512* tmp =
-                            reinterpret_cast<__m512*>(
-                                A_block_{{b}} + 16 * vec_num + {{block_k}} * A_row
-                            );
-                        at::vec::cvtbf16_fp32(
-                            *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
-                            *tmp
-                        );
-                    }
-                }
+                cvt_bf16_to_fp32(A_block_{{b}}, {{b}}, m);
                 {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
                     A_block_{{b}},
                     B,
