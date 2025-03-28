@@ -414,7 +414,7 @@ class EnterSubgraphLine(WrapperLine):
 
 @dataclasses.dataclass
 class CommentLine(WrapperLine):
-    line: Line
+    line: LineContext
 
     def codegen(self, code: IndentedBuffer) -> None:
         code.writeline(self.line)
@@ -531,7 +531,7 @@ class KernelCallLine(WrapperLine):
     raw_args: tuple[Any, ...]
     arg_types: list[str]
     triton: bool
-    triton_meta: dict
+    triton_meta: dict[str, Any]
     device: torch.device
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -553,7 +553,7 @@ class KernelDefinitionLine(WrapperLine):
     kernel_name: str
     kernel_body: str
     metadata: Optional[str] = None
-    gpu: bool = (True,)
+    gpu: bool = True
     cpp_definition: Optional[str] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -656,6 +656,7 @@ class ReinterpretLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert isinstance(self.layout, ir.NonOwningLayout)
+        assert isinstance(self.layout.view, ir.ReinterpretView)
         self.wrapper.codegen_deferred_allocation(
             code, self.reused_as.get_name(), self.layout.view
         )
@@ -819,7 +820,7 @@ class PythonWrapperCodegen(CodeGen):
     def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()
-        self.args_to_buffers: Dict[str, ir.Buffer] = {}
+        self.args_to_buffers: dict[str, ir.Buffer] = {}
         self.imports = IndentedBuffer()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
