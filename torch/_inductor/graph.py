@@ -97,6 +97,7 @@ from .utils import (
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
     get_sympy_Expr_dtype,
+    GraphPartitionMap,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
@@ -320,6 +321,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        self.partition_maps: Optional[list[GraphPartitionMap]] = None
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
@@ -346,7 +348,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.torchbind_constants: dict[str, torch._C.ScriptObject] = {}
+        self.torchbind_constants: dict[
+            str, Union[torch._C.ScriptObject, FakeScriptObject]
+        ] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
         self.removed_operations = OrderedSet[str]()
@@ -389,6 +393,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
+
+        # record intermediate results for input of UsedDefinedTritonKernels
+        # This will be used if autotuning is done in one pass.
+        self.autotuning_inputs: Optional[list[torch.Tensor]] = None
+        self.autotuning_mapping: Optional[dict[str, dict[str, int]]] = None
+        self.autotuning_grids: Optional[dict[str, Any]] = None
 
         # current_device is set only during codegen of a device-specific kernel
         # a graph can have many devices
@@ -1229,9 +1239,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
         elif isinstance(value, FakeScriptObject):
-            self.torchbind_constants[target] = value.real_obj
+            self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
-            return TorchBindObject(name=target, value=value.real_obj)
+            return TorchBindObject(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -1879,6 +1889,99 @@ class GraphLowering(torch.fx.Interpreter):
                 self.const_module.wrapper_code.src_to_kernel
             )
 
+    def extract_autotune_inputs(
+        self, example_inputs: list[Union[int, float, torch.Tensor]]
+    ) -> None:
+        import copy
+
+        cloned_gm = copy.deepcopy(self.orig_gm)
+        example_inputs = copy.deepcopy(example_inputs)
+        triton_nodes = []
+        for node in cloned_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+            ):
+                triton_nodes.append(node)
+
+        # Store grid related nodes
+        grid_inputs: list[torch.fx.Node] = []
+        visited_grids: dict[torch.fx.Node, int] = {}
+        # Store kwargs related nodes
+        triton_inputs: dict[str, Any] = {}
+        kwargs_inputs: list[torch.fx.Node] = []
+        visited_kwargs: dict[Any, int] = {}
+        for node in triton_nodes:
+            # first check whether we have fx node in grid settings.
+            for grid in node.kwargs["grid"]:
+                for val in grid:
+                    if val in visited_grids:
+                        continue
+
+                    if isinstance(val, torch.fx.Node):
+                        visited_grids[val] = len(grid_inputs)
+                        grid_inputs.append(val)
+
+            kwargs = node.kwargs["kwargs"]
+            # identify which args might be mutated, those should be cloned.
+            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
+                node.kwargs["kernel_idx"],
+                node.kwargs["constant_args_idx"],
+                {
+                    k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+                    for k, v in kwargs.items()
+                },
+            )
+
+            new_kwargs: dict[str, int] = {}
+            with cloned_gm.graph.inserting_before(node):
+                for k, v in kwargs.items():
+                    if k in mutated:
+                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        new_kwargs[k] = len(kwargs_inputs)
+                        kwargs_inputs.append(new_node)
+                        continue
+
+                    if v in visited_kwargs:
+                        new_kwargs[k] = visited_kwargs[v]
+                        continue
+                    visited_kwargs[v] = len(kwargs_inputs)
+                    kwargs_inputs.append(v)
+                    new_kwargs[k] = visited_kwargs[v]
+            triton_inputs[node.name] = new_kwargs
+
+        new_outputs = kwargs_inputs + grid_inputs
+        for node in cloned_gm.graph.nodes:
+            if node.op == "output":
+                node.args = (tuple(new_outputs),)
+                break
+
+        cloned_gm.recompile()
+        runner = torch.fx.Interpreter(cloned_gm)
+        returned_outputs = runner.run(example_inputs)
+        # Extract and store the grid for autotuning
+        if len(grid_inputs) > 0:
+            grid_outputs = returned_outputs[len(kwargs_inputs) :]
+            self.autotuning_grids = {}
+            for node in triton_nodes:
+                dynamic_grid = False
+                new_grids: list[tuple[Any]] = []
+                for grid in node.kwargs["grid"]:
+                    new_grid = []
+                    for val in grid:
+                        if not isinstance(val, torch.fx.Node):
+                            new_grid.append(val)
+                            continue
+                        dynamic_grid = True
+                        new_grid.append(grid_outputs[visited_grids[val]])
+                    new_grids.append(tuple(new_grid))
+
+                if dynamic_grid:
+                    self.autotuning_grids[node.name] = new_grids
+        # Store the kwargs input for autotuning
+        self.autotuning_inputs = returned_outputs[: len(kwargs_inputs)]
+        self.autotuning_mapping = triton_inputs
+
     def codegen_with_cpp_wrapper(
         self,
     ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
@@ -1886,15 +1989,8 @@ class GraphLowering(torch.fx.Interpreter):
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
         if any(device in self.device_types for device in ["cuda", "xpu"]):
-            if config.triton.autotune_at_compile_time:
-                # If autotune_at_compile_time is True, we can do the codegen in one-pass
-                # TODO: once autotune_at_compile_time is stable, we should delete the else branch
-                return self.codegen()
-            else:
-                # first pass
-                self.cpp_wrapper = False
-                compiled = self.compile_to_module().call
 
+            def extract_real_inputs() -> list[Union[int, float, torch.Tensor]]:
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
                 ) -> Union[int, float, torch.Tensor]:
@@ -1961,7 +2057,27 @@ class GraphLowering(torch.fx.Interpreter):
                         assert isinstance(mutated_inp, torch.Tensor)
                         real_inputs[idx] = clone_preserve_strides(mutated_inp)
                         del mutated_inp
+                return real_inputs
 
+            if config.triton.autotune_at_compile_time:
+                # If autotune_at_compile_time is True, we can do the codegen in one-pass
+                # We will construct the autotuning values if user defined kernel exists.
+                if config.triton.autotune_with_sample_inputs:
+                    user_defined_kernels = False
+                    for op in self.operations:
+                        if isinstance(op, ir.UserDefinedTritonKernel):
+                            user_defined_kernels = True
+                            break
+                    if user_defined_kernels:
+                        real_inputs = extract_real_inputs()
+                        self.extract_autotune_inputs(real_inputs)
+                return self.codegen()
+            else:
+                # first pass
+                self.cpp_wrapper = False
+                compiled = self.compile_to_module().call
+
+                real_inputs = extract_real_inputs()
                 with torch.utils._python_dispatch._disable_current_modes():
                     compiled(real_inputs)
                 del real_inputs
