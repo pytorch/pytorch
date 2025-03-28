@@ -339,7 +339,7 @@ at::BlasBackend Context::blasPreferredBackend() {
           "gfx950"
 #endif
       };
-      for (auto index: c10::irange(getNumGPUs())) {
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
           return false;
         }
@@ -365,7 +365,7 @@ at::BlasBackend Context::blasPreferredBackend() {
           "gfx950"
 #endif
       };
-      for (auto index: c10::irange(getNumGPUs())) {
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
           TORCH_WARN_ONCE(
             "Attempting to use hipBLASLt on an unsupported architecture! "
@@ -392,7 +392,7 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
   TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
       "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
-  if (b != at::BlasBackend::Default || b != at::BlasBackend::Cublas) {
+  if (b != at::BlasBackend::Default && b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
       "If you see any error or unexpected behavior when this flag is set "
@@ -418,7 +418,7 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
       static const std::vector<std::string> archs = {
           "gfx90a",  "gfx942"
       };
-      for (auto index: c10::irange(getNumGPUs())) {
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
           TORCH_WARN_ONCE(
             "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
