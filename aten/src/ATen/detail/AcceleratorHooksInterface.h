@@ -6,6 +6,8 @@
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
+
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -46,7 +48,7 @@ struct TORCH_API AcceleratorHooksInterface {
     return 0;
   }
 
-  virtual void setCurrentDevice(DeviceIndex device [[maybe_unused]]) const {
+  virtual void setCurrentDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support setCurrentDevice()");
   }
 
@@ -55,17 +57,17 @@ struct TORCH_API AcceleratorHooksInterface {
     return -1;
   }
 
-  virtual DeviceIndex exchangeDevice(DeviceIndex device [[maybe_unused]]) const {
+  virtual DeviceIndex exchangeDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support exchangeDevice()");
     return -1;
   }
 
-  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device [[maybe_unused]]) const {
+  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
     return -1;
   }
 
-  virtual bool isPinnedPtr(const void* data [[maybe_unused]]) const {
+  virtual bool isPinnedPtr(const void* data) const {
     return false;
   }
 
@@ -74,7 +76,7 @@ struct TORCH_API AcceleratorHooksInterface {
     return nullptr;
   }
 
-  virtual Device getDeviceFromPtr(void* data [[maybe_unused]]) const {
+  virtual Device getDeviceFromPtr(void* data) const {
     TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
   }
 
@@ -90,3 +92,5 @@ struct TORCH_API AcceleratorHooksInterface {
 };
 
 } // namespace at
+
+C10_DIAGNOSTIC_POP()
