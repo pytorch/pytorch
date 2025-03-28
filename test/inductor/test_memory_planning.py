@@ -53,7 +53,9 @@ class TestMemoryPlanning(TestCase):
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided_" + GPU_TYPE + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
+            "pool1 = empty_strided_"
+            + GPU_TYPE
+            + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s77, s77), (s77, 1))"
         ).check(

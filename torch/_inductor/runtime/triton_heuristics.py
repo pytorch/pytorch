@@ -1200,7 +1200,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
 
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
-        self.kernel.load_kernel()
+        self.kernel.load_kernel(self.compile_meta.get("device", 0))
         scope = {
             "runner": self.kernel.run,
         }
