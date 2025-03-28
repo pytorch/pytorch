@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -114,6 +115,8 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
 
@@ -289,6 +292,8 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -987,6 +992,9 @@ class TestFxGraphCache(TestCase):
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_cuda_launcher", (False, True))
     def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
+
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
