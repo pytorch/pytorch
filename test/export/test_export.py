@@ -11033,6 +11033,29 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_unbacked_dim_order(self):
+        class Foov1(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty(4, u0, u1, 4)
+                x = x.permute(2, 0, 1, 3)
+                return x.dim_order()
+
+        x = torch.tensor([1, 5])
+        ep = export(Foov1(), (x,))
+        self.assertEqual(ep.module()(x), (1, 2, 0, 3))
+
+        class Foov2(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2, u3 = xs.tolist()
+                x = torch.empty(u0, u1, u2, u3).contiguous()
+                x = x.permute(2, 0, 1, 3)
+                return x.dim_order()
+
+        x = torch.tensor([0, 1, 2, 3])
+        ep = export(Foov2(), (x,))
+        self.assertEqual(ep.module()(x), (1, 2, 0, 3))
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
