@@ -3129,6 +3129,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
+
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
