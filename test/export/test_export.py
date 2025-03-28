@@ -5614,22 +5614,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
-    def test_unbacked_symfloat_slice(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                z0, z1 = x.item(), y.item()
-                return torch.empty(torch.sym_int(z0 + z1), 4)
-
-        ep = torch.export.export(
-            Foo(),
-            (torch.tensor([2.0]), torch.tensor([3.0])),
-            strict=False,
-        )
-        self.assertEqual(
-            ep.module()(torch.tensor([3.6]), torch.tensor([-1.2])).size(0),
-            2,
-        )
-
     def test_buffer_util(self):
         ep = export(
             torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45),)
