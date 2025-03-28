@@ -21,10 +21,11 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
-from ..lowering import lowerings as L, register_lowering
+from ..lowering import add_layout_constraint, constrain_to_fx_strides, lowerings as L, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    realize_inputs,
     TritonTemplate,
 )
 from ..utils import (
@@ -968,6 +969,8 @@ def tuned_sparse_semi_structured_mm(
     )
 
 
+add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
@@ -980,8 +983,6 @@ def tuned_scaled_mm(
     use_fast_accum=False,
     layout=None,
 ):
-    from torch._inductor.select_algorithm import realize_inputs
-
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -998,7 +999,6 @@ def tuned_scaled_mm(
     )
 
     device_type = ir.get_device_type(mat_a)
-
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
