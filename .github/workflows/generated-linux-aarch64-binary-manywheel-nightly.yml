@@ -56,7 +56,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -64,7 +63,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-test:  # Testing
@@ -81,7 +80,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -105,7 +103,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -126,7 +123,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -134,7 +130,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -153,7 +149,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64-12_8
@@ -173,7 +168,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -181,7 +175,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-test:  # Testing
@@ -198,7 +192,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -222,7 +215,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -243,7 +235,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -251,7 +242,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -270,7 +261,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
@@ -290,7 +280,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -298,7 +287,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-test:  # Testing
@@ -315,7 +304,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -339,7 +327,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -360,7 +347,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -368,7 +354,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -387,7 +373,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
@@ -407,7 +392,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -415,7 +399,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-aarch64-test:  # Testing
@@ -432,7 +416,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -456,7 +439,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -477,7 +459,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -485,7 +466,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -504,7 +485,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
@@ -524,7 +504,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -532,7 +511,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-aarch64-test:  # Testing
@@ -549,7 +528,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-aarch64
@@ -573,7 +551,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-aarch64
@@ -594,7 +571,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -602,7 +578,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -621,7 +597,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
@@ -641,7 +616,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -649,7 +623,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cpu-aarch64-test:  # Testing
@@ -666,7 +640,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-aarch64
@@ -690,7 +663,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-aarch64
@@ -711,7 +683,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -719,7 +690,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
       build_environment: linux-aarch64-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -738,7 +709,6 @@ jobs:
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
