@@ -2866,6 +2866,9 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK, "Leaking memory, see #150059 for example"
+    )
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2880,6 +2883,9 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK, "Leaking memory, see #150059 for example"
+    )
     def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
@@ -2920,6 +2926,9 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK, "Leaking memory, see #150059 for example"
+    )
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
