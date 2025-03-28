@@ -3810,8 +3810,15 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         end = idx
         while not guard_or_false(accum % length == 0):
             if end == a_.ndim - 1:
-                msg = f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
-                raise ValueError(msg)
+                # try to fallback, and raise an error if we can't
+                if a.is_contiguous():
+                    return as_strided(a, shape, utils.make_contiguous_strides_for(shape))  # viewing the same tensor should work
+                elif allow_copy:
+                    return prims.reshape(a, shape)  # make a contiguous copy
+                raise ValueError(
+                    f"Could not view a tensor with shape {a.shape} as a tensor with shape {shape}, "
+                    "as the tensor is not contiguous!",
+                )
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
