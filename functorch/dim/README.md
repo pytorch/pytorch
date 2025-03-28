@@ -51,6 +51,7 @@ We may eventually upstream them into PyTorch itself along with `functorch`.
 We have to install a nightly build of PyTorch so first set up an environment:
 
 ```sh
+# TODO: update this
 conda create --name dim
 conda activate dim
 ```
@@ -59,6 +60,8 @@ First-class dims requires a fairly recent nightly build of PyTorch so that funct
 
 ```sh
 # For CUDA 10.2
+# TODO: update this
+
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch-nightly
 # For CUDA 11.3
 conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch-nightly
