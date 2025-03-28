@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import cast
 
@@ -14,6 +15,59 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+import logging
+logger= logging.getLogger(__name__)
+
+
+def _explicit_order_placements(
+    mesh_shape: ShapeType, placements: Sequence[Placement]
+) -> Sequence[tuple[int, Placement]]:
+
+    """
+    Replace Strided Shards with regular shards in an adjusted order.
+
+    Returns a list of (mesh_dim, placement) tuples where the list order is the sharding order.
+
+    ex.
+    [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] ->
+    [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
+
+    """
+    if not any(isinstance(p, _StridedShard) for p in placements):
+        return list(enumerate(placements))
+    
+    ordered = []
+    _strided_tmp = defaultdict(list)
+    for mesh_dim, p in enumerate(placements):
+        if isinstance(p, _StridedShard):
+            # validate the stride is the correct multiple of the meshdim and the earlier shard
+            _strided_tmp[p.dim].append((mesh_dim, p))
+
+        else:
+            ordered.append((mesh_dim, p))
+            if isinstance(p, Shard):
+                # we can only convert strided shardings to ordered shardings if split-factors are always __________
+                aggregate_size = mesh_shape[p.dim]
+                while p.dim in _strided_tmp and len(_strided_tmp[p.dim]) > 0:
+                    # We can process multiple strided shardings in reverse-order
+                    # (e.g. [_StridedShard(0, split_factor=4), _StridedShard(0, split_factor=2), Shard(0)])
+                    # TODO- validate this logic and enable it (mainly, validate aggregate_size part)
+                    if len(_strided_tmp[p.dim]) > 1:
+                        raise NotImplementedError(
+                            "NYI nested strided sharding conversion to ordered"
+                        )
+
+                    strided_dim, strided = _strided_tmp[p.dim].pop(-1)
+                    if not strided.split_factor == aggregate_size:
+                        raise RuntimeError(
+                            f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
+                            f" == aggregate mesh size ({aggregate_size})"
+                        )
+                    aggregate_size *= mesh_shape[strided_dim]
+                    ordered.append((strided_dim, Shard(p.dim)))
+    
+    return ordered
+
 
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
@@ -22,39 +76,10 @@ def compute_local_shape_and_global_offset(
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
 
-    Example (2 host with 4GPUs each):
-    # Below is a DeviceMesh with mesh_shape of (2, 4)
-    mesh = DeviceMesh(device_type="cuda",
-                        mesh=[
-                        [0, 1, 2, 3],
-                        [4, 5, 6, 7]
-                        ],
-    )
 
-    Let's say we distribute a global_tensor of shape (8,4) over the above DeviceMesh
-    with a placements of [Shard(0), Shard(0)].
-    The local shape and global offset will be as follows:
-    rank0 -- local_shape:[1, 4], global_offset:[0, 0]
-    rank1 -- local_shape:[1, 4], global_offset:[1, 0]
-    rank2 -- local_shape:[1, 4], global_offset:[2, 0]
-    rank5 -- local_shape:[1, 4], global_offset:[5, 0]
-    rank3 -- local_shape:[1, 4], global_offset:[3, 0]
-    rank4 -- local_shape:[1, 4], global_offset:[4, 0]
-    rank6 -- local_shape:[1, 4], global_offset:[6, 0]
-    rank7 -- local_shape:[1, 4], global_offset:[7, 0]
-
-    Let's say we distribute a global_tensor of shape (2) over the above DeviceMesh with
-    a placements of [Shard(0)]. We will not have non-empty local tensor for all the ranks.
-    The local shape and global offset will be as follows:
-    rank0 -- local_shape:[1,], global_offset:[0,]
-    rank1 -- local_shape:[1,], global_offset:[1,]
-    rank2 -- local_shape:[0,], global_offset:[2,]
-    rank5 -- local_shape:[0,], global_offset:[2,]
-    rank3 -- local_shape:[0,], global_offset:[2,]
-    rank4 -- local_shape:[0,], global_offset:[2,]
-    rank6 -- local_shape:[0,], global_offset:[2,]
-    rank7 -- local_shape:[0,], global_offset:[2,]
     """
+    ordered_placements = _explicit_order_placements(mesh.shape, placements)
+
     my_coordinate = mesh.get_coordinate()
 
     if my_coordinate is None:
@@ -68,8 +93,8 @@ def compute_local_shape_and_global_offset(
         ]  # index by (shard_dim, mesh_dim)
         num_shards_by_tensor_dim = [1] * len(global_shape)
 
-        for idx, placement in enumerate(placements):
-            mesh_dim_size = mesh.size(idx)
+        for mesh_dim, placement in ordered_placements:
+            mesh_dim_size = mesh.size(mesh_dim)
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
@@ -79,7 +104,7 @@ def compute_local_shape_and_global_offset(
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],
                     mesh_dim_size,
-                    my_coordinate[idx],
+                    my_coordinate[mesh_dim],
                     return_offset=True,
                 )
 
@@ -97,74 +122,99 @@ def compute_local_shape_and_global_offset(
 
                 num_shards_by_tensor_dim[shard_dim] *= mesh_dim_size
 
-        # NOTE: the offset compute relies on the local shard index and it has no
-        # problem when strided sharding is not present. To correctly compute, we assume
-        # that the ``_StridedShard.split_factor`` field encodes how many partitions
-        # each local tensor will be further split into when sharding on higher mesh
-        # dimensions. However, this number is only correct if the DTensor is not
-        # sharded after the strided sharding completes. For example,
-        # [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] is the placements
-        # where the DTensor's dim-0 is first sharded on device mesh dim-0, then on
-        # device mesh dim-2, and last on mesh dim-1. We define the
-        # "_StridedShard(0, split_factor=2), Shard(0)" part as the strided sharding
-        # part because strided sharding happens on mesh dim-1 and it was caused by
-        # the fact that sharding on dim-2 occurred ahead. In this case, there's no
-        # further sharding after this strided sharding part and ``split_factor``
-        # correctly encodes the number. Another example is
-        # [_StridedShard(0, split_factor=2), Shard(0), Shard(0)] where the DTensor's
-        # dim-0 is first sharded on mesh dim-1, then on mesh dim-0, and last on mesh
-        # dim-2. This violates our assumption that no further sharding shall occur
-        # after the strided sharding part and ``split_factor`` won't correctly
-        # encode the number of further split. So far, the only case where _StridedShard
-        # placement would appear is FSDP2 + TP on 2D mesh and the above case could only
-        # happen on mesh of 3 or more dimensions.
-        # TODO: change this function to correctly address this.
-        # TODO: this logic can be applied to contiguous sharding as well
-        strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
-        if strided_sharding:
-            # TODO(whc): Fix this for uneven padding case
-            #  - local_shapes should not include padding
-            #  - develop a test based off DCP usage, see:
-            #       impl: https://github.com/pytorch/pytorch/pull/132391
-            #       DCP test: https://github.com/pytorch/pytorch/pull/131408
-            strided_part_seen = [False] * len(global_shape)
-            strided_part_end = [False] * len(global_shape)
+                logger.warning(f"{mesh_dim=} {local_shape[shard_dim]=} {local_offset[shard_dim]=} {global_offset[shard_dim]=}")
+                """
 
-            for idx, placement in enumerate(placements):
-                mesh_dim_size = mesh.size(idx)
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
+#     # 01234
+#     # Rank0: 012   Rank1: 34
+#     # Rank2: 012   Rank3: 34
+#     # Rank0: 01    Rank1: 3
+#     # Rank2: 2    Rank3: 4
 
-                    if strided_part_end[shard_dim]:
-                        raise NotImplementedError(
-                            f"Strided sharding does not allow Shard() to appear after "
-                            f"the strided part has ended. {placement} at idx {idx} in "
-                            f"{placements} violates this assumption."
-                        )
+# [rank0]:W0331 18:18:10.874000 3331413 torch/distributed/tensor/_utils.py:101] idx=0 local_shape[shard_dim]=3 local_offset[shard_dim]=0 global_offset[shard_dim]=0
+# [rank0]:W0331 18:18:10.874000 3331413 torch/distributed/tensor/_utils.py:101] idx=1 local_shape[shard_dim]=2 local_offset[shard_dim]=0 global_offset[shard_dim]=0
 
-                    if strided_part_seen[shard_dim]:
-                        strided_part_end[shard_dim] = True
+# [rank1]:W0331 18:18:10.825000 3331414 torch/distributed/tensor/_utils.py:101] idx=0 local_shape[shard_dim]=3 local_offset[shard_dim]=0 global_offset[shard_dim]=0
+# [rank1]:W0331 18:18:10.825000 3331414 torch/distributed/tensor/_utils.py:101] idx=1 local_shape[shard_dim]=1 local_offset[shard_dim]=2 global_offset[shard_dim]=2
 
-                    if isinstance(placement, _StridedShard):
-                        strided_part_seen[shard_dim] = True
-                        shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
-                            num_shards_by_tensor_dim[shard_dim]
-                            // (placement.split_factor * mesh_dim_size)
-                        )
-                    else:
-                        num_shards_by_tensor_dim[shard_dim] //= mesh_dim_size
-                        shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
-                            num_shards_by_tensor_dim[shard_dim]
-                        )
+# [rank2]:W0331 18:18:10.863000 3331415 torch/distributed/tensor/_utils.py:101] idx=0 local_shape[shard_dim]=2 local_offset[shard_dim]=3 global_offset[shard_dim]=3
+# [rank2]:W0331 18:18:10.864000 3331415 torch/distributed/tensor/_utils.py:101] idx=1 local_shape[shard_dim]=1 local_offset[shard_dim]=0 global_offset[shard_dim]=3
 
-            shard_idx = [
-                sum([x * y for x, y in zip(shard_idx_stride, my_coordinate)])
-                for shard_dim, shard_idx_stride in enumerate(
-                    shard_idx_stride_by_mesh_dim
-                )
-            ]
+# [rank3]:W0331 18:18:10.825000 3331416 torch/distributed/tensor/_utils.py:101] idx=0 local_shape[shard_dim]=2 local_offset[shard_dim]=3 global_offset[shard_dim]=3
+# [rank3]:W0331 18:18:10.825000 3331416 torch/distributed/tensor/_utils.py:101] idx=1 local_shape[shard_dim]=1 local_offset[shard_dim]=1 global_offset[shard_dim]=4
+#                 """
 
-            global_offset = [x * y for x, y in zip(local_shape, shard_idx)]
+#         logger.warning(f"{num_shards_by_tensor_dim=}")
+#         # NOTE: the offset compute relies on the local shard index and it has no
+#         # problem when strided sharding is not present. To correctly compute, we assume
+#         # that the ``_StridedShard.split_factor`` field encodes how many partitions
+#         # each local tensor will be further split into when sharding on higher mesh
+#         # dimensions. However, this number is only correct if the DTensor is not
+#         # sharded after the strided sharding completes. For example,
+#         # [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] is the placements
+#         # where the DTensor's dim-0 is first sharded on device mesh dim-0, then on
+#         # device mesh dim-2, and last on mesh dim-1. We define the
+#         # "_StridedShard(0, split_factor=2), Shard(0)" part as the strided sharding
+#         # part because strided sharding happens on mesh dim-1 and it was caused by
+#         # the fact that sharding on dim-2 occurred ahead. In this case, there's no
+#         # further sharding after this strided sharding part and ``split_factor``
+#         # correctly encodes the number. Another example is
+#         # [_StridedShard(0, split_factor=2), Shard(0), Shard(0)] where the DTensor's
+#         # dim-0 is first sharded on mesh dim-1, then on mesh dim-0, and last on mesh
+#         # dim-2. This violates our assumption that no further sharding shall occur
+#         # after the strided sharding part and ``split_factor`` won't correctly
+#         # encode the number of further split. So far, the only case where _StridedShard
+#         # placement would appear is FSDP2 + TP on 2D mesh and the above case could only
+#         # happen on mesh of 3 or more dimensions.
+#         # TODO: change this function to correctly address this.
+#         # TODO: this logic can be applied to contiguous sharding as well
+#         strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
+#         if strided_sharding:
+#             # TODO(whc): Fix this for uneven padding case
+#             #  - local_shapes should not include padding
+
+#             strided_part_seen = [False] * len(global_shape)
+#             strided_part_end = [False] * len(global_shape)
+
+#             for idx, placement in enumerate(placements):
+#                 mesh_dim_size = mesh.size(idx)
+#                 if isinstance(placement, Shard):
+#                     shard_dim = placement.dim
+
+#                     if strided_part_end[shard_dim]:
+#                         raise NotImplementedError(
+#                             f"Strided sharding does not allow Shard() to appear after "
+#                             f"the strided part has ended. {placement} at idx {idx} in "
+#                             f"{placements} violates this assumption."
+#                         )
+
+#                     if strided_part_seen[shard_dim]:
+#                         logger.warning(f"ending strided part on {idx=} {shard_dim=}")
+#                         strided_part_end[shard_dim] = True
+
+#                     if isinstance(placement, _StridedShard):
+#                         strided_part_seen[shard_dim] = True
+#                         shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
+#                             num_shards_by_tensor_dim[shard_dim]
+#                             // (placement.split_factor * mesh_dim_size)
+#                         )
+#                         logger.warning(f"Starting strided part on {idx=} {shard_dim=}, {shard_idx_stride_by_mesh_dim[shard_dim][idx]=} ")
+#                     else:
+#                         num_shards_by_tensor_dim[shard_dim] //= mesh_dim_size
+#                         shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
+#                             num_shards_by_tensor_dim[shard_dim]
+#                         )
+#                         logger.warning(f"non-strided part on {idx=} {shard_dim=}, {shard_idx_stride_by_mesh_dim[shard_dim][idx]=} ")
+
+#             shard_idx = [
+#                 sum([x * y for x, y in zip(shard_idx_stride, my_coordinate)])
+#                 for shard_dim, shard_idx_stride in enumerate(
+#                     shard_idx_stride_by_mesh_dim
+#                 )
+#             ]
+#             logger.warning(f"{my_coordinate=} {shard_idx_stride_by_mesh_dim=} {shard_idx=}")
+#             global_offset = [x * y for x, y in zip(local_shape, shard_idx)]
+#             logger.warning(f"{local_shape=} {global_offset=}")
 
         return tuple(local_shape), tuple(global_offset)
 

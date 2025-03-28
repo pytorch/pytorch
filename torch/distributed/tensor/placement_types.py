@@ -117,6 +117,11 @@ class Shard(Placement):
     ) -> tuple[int, int]:
         """
         returns the local shard size and offset on a given tensor dim
+
+        # TODO(whc)
+         - `size_on_dim` arg has a pretty confusing name, would 'global_dim_size' be better?
+         - `local_shard_size_on_dim` could be renamed to `local_shard_size`?
+         - why do we have 'return_offset` bool? if we always return a tuple anyway, why not always return the real offset?
         """
         # Compute the chunk size inline with ``torch.chunk``
         if size_on_dim % num_chunks == 0:

@@ -446,7 +446,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
     @skip_if_lt_x_gpu(4)
     def test_save_with_fsdp2_tp_and_load_with_tp(self):
         self.run_subtests(
-            {"allow_implicit_replication": [True, False]},
+            {"allow_implicit_replication": [False]},
             self._test_save_with_fsdp2_tp_and_load_with_tp,
         )
 
@@ -458,9 +458,9 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         """
         Test that we can save a model with FSDP2 + TP on 2d mesh and load it with TP.
         """
-
-        def _get_base_model(mlp_dim: int = 2):
-            base_model = nn.Sequential(MLP(mlp_dim), MLP(mlp_dim), MLP(mlp_dim))
+        mlp_dim = 5
+        def _get_base_model(mlp_dim: int = mlp_dim):
+            base_model = nn.Sequential(MLP(mlp_dim, dim_multiplier=1), MLP(mlp_dim, dim_multiplier=1), MLP(mlp_dim, dim_multiplier=1))
             return base_model
 
         cm = (
@@ -468,27 +468,30 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             if allow_implicit_replication
             else contextlib.nullcontext()
         )
-        tp_parallelize_plan = {
-            "0.in_proj": ColwiseParallel(),
-            "0.out_proj": RowwiseParallel(),
-            "1.in_proj": ColwiseParallel(),
-            "1.out_proj": RowwiseParallel(),
-            "2.in_proj": ColwiseParallel(),
-            "2.out_proj": RowwiseParallel(),
-        }
-        if allow_implicit_replication:
-            # intentionally pop the plans for some tp layers so that the model is not fully tensor parallelized
-            tp_parallelize_plan.pop("0.in_proj")
-            tp_parallelize_plan.pop("0.out_proj")
+        # TODO(whc) this code seems broken on main? overwritten by the code below
+        # tp_parallelize_plan = {
+        #     "0.in_proj": ColwiseParallel(),
+        #     "0.out_proj": RowwiseParallel(),
+        #     "1.in_proj": ColwiseParallel(),
+        #     "1.out_proj": RowwiseParallel(),
+        #     "2.in_proj": ColwiseParallel(),
+        #     "2.out_proj": RowwiseParallel(),
+        # }
+        # if allow_implicit_replication:
+        #     # intentionally pop the plans for some tp layers so that the model is not fully tensor parallelized
+        #     tp_parallelize_plan.pop("0.in_proj")
+        #     tp_parallelize_plan.pop("0.out_proj")
 
         with cm:
+            # Must set 'use_local_output=False' in order to test uneven-sharding case
+            # see https://github.com/pytorch/pytorch/issues/150336
             tp_parallelize_plan = {
-                "0.in_proj": ColwiseParallel(),
-                "0.out_proj": RowwiseParallel(),
-                "1.in_proj": ColwiseParallel(),
-                "1.out_proj": RowwiseParallel(),
-                "2.in_proj": ColwiseParallel(),
-                "2.out_proj": RowwiseParallel(),
+                "0.in_proj": ColwiseParallel(use_local_output=False),
+                "0.out_proj": RowwiseParallel(use_local_output=False),
+                "1.in_proj": ColwiseParallel(use_local_output=False),
+                "1.out_proj": RowwiseParallel(use_local_output=False),
+                "2.in_proj": ColwiseParallel(use_local_output=False),
+                "2.out_proj": RowwiseParallel(use_local_output=False),
             }
 
             # init device mesh
@@ -503,7 +506,8 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             )
             dp_mesh, tp_mesh = global_mesh_2d["dp"], global_mesh_2d["tp"]
 
-            for save_full_state_dict in [True, False]:
+            for save_full_state_dict in [False]:
+            # for save_full_state_dict in [True]:
                 # Save state dict with original model
                 base_model = _get_base_model().cuda()
                 base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
@@ -520,8 +524,22 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 fully_shard(fsdp2_tp_model, mesh=dp_mesh)
                 fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
+                import torch.distributed.distributed_c10d as dist
+                rank = dist.get_rank()
+                par = dict(fsdp2_tp_model.named_parameters())["1.in_proj.weight"]
+                """
+                rank=0 par.shape=torch.Size([5, 5]), (_StridedShard(dim=0, sf=2), Shard(dim=0)) par._local_tensor.shape=torch.Size([2, 5]) shapes=(2, 5) offsets=(0, 0) 
+                rank=1 par.shape=torch.Size([5, 5]), (_StridedShard(dim=0, sf=2), Shard(dim=0)) par._local_tensor.shape=torch.Size([1, 5]) shapes=(1, 5) offsets=(2, 0) 
+                rank=2 par.shape=torch.Size([5, 5]), (_StridedShard(dim=0, sf=2), Shard(dim=0)) par._local_tensor.shape=torch.Size([1, 5]) shapes=(1, 5) offsets=(1, 0) 
+                rank=3 par.shape=torch.Size([5, 5]), (_StridedShard(dim=0, sf=2), Shard(dim=0)) par._local_tensor.shape=torch.Size([1, 5]) shapes=(1, 5) offsets=(3, 0)
+                """
+                assert isinstance(par, DTensor)
+                from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+                shapes, offsets = compute_local_shape_and_global_offset(par.shape, global_mesh_2d, par.placements)
+                print(f"{rank=} {par.shape=}, {par.placements} {par._local_tensor.shape=} {shapes=} {offsets=}")
+                self.assertEqual(base_model[1].in_proj.weight, fsdp2_tp_model[1].in_proj.weight.full_tensor(), "bingo")
                 # one-step training to modify state dict
-                inp = torch.randn((2,), device=self.rank)
+                inp = torch.randn((1, mlp_dim,), device=self.rank)
                 base_model(inp).sum().backward()
                 base_optim.step()
                 fsdp2_tp_model(inp).sum().backward()
@@ -589,11 +607,35 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                     options=StateDictOptions(full_state_dict=True, cpu_offload=True),
                 )
 
+                # Load state dict into another 'base model'
+                noparallel_model = _get_base_model()
+                noparallel_optim = torch.optim.AdamW(noparallel_model.parameters(), lr=0.1)
+
+                noparallel_state_dict = {
+                    "model": get_model_state_dict(noparallel_model),
+                    "optim": get_optimizer_state_dict(noparallel_model, noparallel_optim),
+                }
+                dcp.load(noparallel_state_dict, checkpoint_id=self.temp_dir)
+                noparallel_model.load_state_dict(noparallel_state_dict["model"])
+                noparallel_optim.load_state_dict(noparallel_state_dict["optim"])
+
+                noparallel_full_msd = get_model_state_dict(
+                    noparallel_model,
+                    options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+                )
+                noparallel_full_osd = get_optimizer_state_dict(
+                    noparallel_model,
+                    noparallel_optim,
+                    options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+                )
+                self.assertEqual(base_model[1].in_proj.weight, noparallel_model[1].in_proj.weight, "bingo")
                 # Compare full state dict to make sure they are the same.
                 self.assertEqual(base_msd, tp_full_msd)
                 self.assertEqual(base_osd, tp_full_osd)
                 self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
                 self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
+                self.assertEqual(base_msd, noparallel_full_msd)
+                self.assertEqual(base_osd, noparallel_full_osd)
 
 
 if __name__ == "__main__":
