@@ -261,9 +261,6 @@ test_failures = {
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-        ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
-    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -386,8 +383,9 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
+                ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
+            ),
         }
     )
 
