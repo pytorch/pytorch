@@ -747,7 +747,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 )
 
 
-class TestFullyShardShardPlacementFnMultiProcess(FSDPTestMultiThread):
+class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
