@@ -1121,7 +1121,7 @@ class TestCudaMultiGPU(TestCase):
         self.assertTrue(a.grad.sum().item() == 4 * size)
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 3, "GPU count is less than 3")
     def test_streaming_backwards_device_transfer_2(self):
         class Func(torch.autograd.Function):
             @staticmethod
@@ -1140,7 +1140,7 @@ class TestCudaMultiGPU(TestCase):
         a = torch.tensor(
             [1.0, 2.0, 3.0], device=torch.device("cuda:0"), requires_grad=True
         )
-        grad_ref = torch.tensor([0.1000, 0.1000, 0.1000], device="cuda:0")
+        grad_ref = torch.tensor([0.1, 0.1, 0.1], device="cuda:0")
         out1, out2 = Func.apply(a)
         out1_1 = out1 + 1
         # [backward grad accumulation] case 4
@@ -1151,7 +1151,7 @@ class TestCudaMultiGPU(TestCase):
         torch.cuda.synchronize(device=torch.device("cuda:1"))
         torch.cuda.synchronize(device=torch.device("cuda:2"))
         out2_1.sum().backward()
-        self.assertTrue(a.grad, grad_ref)
+        self.assertEqual(a.grad, grad_ref)
 
         b = torch.tensor(
             [1.0, 2.0, 3.0], device=torch.device("cuda:0"), requires_grad=True
@@ -1164,17 +1164,17 @@ class TestCudaMultiGPU(TestCase):
         # [backward grad accumulation] case 3
         # ToCopyBackward node: producer stream is on device0, consumer stream is on device1
         # var is on device1
-        out1_1 = out1.to("xpu:0")
+        out1_1 = out1.to("cuda:0")
         # [backward grad accumulation] case 5
         # ToCopyBackward node: producer stream is on device0, consumer stream is on device1
         # var is on device2
-        out2_1 = out2.to("xpu:0")
+        out2_1 = out2.to("cuda:0")
         res = out1_1 + out2_1
         torch.cuda.synchronize(device=torch.device("cuda:0"))
         torch.cuda.synchronize(device=torch.device("cuda:1"))
         torch.cuda.synchronize(device=torch.device("cuda:2"))
         res.sum().backward()
-        self.assertTrue(b.grad, grad_ref)
+        self.assertEqual(b.grad, grad_ref)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
