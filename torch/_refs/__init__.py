@@ -3014,7 +3014,11 @@ def expand(a: Tensor, *shape) -> Tensor:
             lambda: f"expand: attempting to expand a dimension of length {x}!",
         )
 
-        shape_[offset_idx] = requested_length if guard_or_true(requested_length != -1) else x
+        if guard_or_true(requested_length != -1):
+            shape_[offset_idx] = requested_length
+            torch._check(requested_length >= 0)
+        else:
+            shape_[offset_idx] = x
 
     # At this point shape must be valid
     utils.validate_shape(shape_)

@@ -4197,23 +4197,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
         )
 
-        class cf_nomemo(torch.nn.Module):
-            def forward(self, x, y, fixes):
-                i = y[0].item()
-                eval(fixes)
-                return x.unsqueeze(1).expand(-1, i)
-
-        retry_export(
-            cf_nomemo(),
-            (torch.randn(8), torch.tensor([2])),
-            fixes=[
-                # Could not guard on data-dependent expression Eq(u0, 1)
-                "torch._check(i != 1)",
-                # Could not guard on data-dependent expression Ne(u0, -1)
-                "torch._check(i != (-1))",
-            ],
-        )
-
         class cf_changevar(torch.nn.Module):
             def forward(self, x, fixes):
                 i = x.item()
