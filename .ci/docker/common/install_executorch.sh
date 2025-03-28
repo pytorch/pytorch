@@ -37,8 +37,7 @@ install_conda_dependencies() {
 
 install_pip_dependencies() {
   pushd executorch
-  # Remove CMAKE_POLICY_VERSION_MINIMUM when cmake 4.0.0 is more supported
-  as_jenkins CMAKE_POLICY_VERSION_MINIMUM=3.5 bash install_executorch.sh
+  as_jenkins bash install_executorch.sh
 
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
   # numba and scipy version used in PyTorch CI
