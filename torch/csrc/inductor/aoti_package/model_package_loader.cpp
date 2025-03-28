@@ -1,7 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
 #include <c10/util/error.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -63,6 +62,7 @@ const std::string k_separator = "\\";
 #else
 const std::string k_separator = "/";
 #endif
+
 } // namespace
 
 namespace torch::inductor {
@@ -187,7 +187,7 @@ bool recursive_mkdir(const std::string& dir) {
   }
 
   // Find folder separator and check if we are at the top
-  auto pos = dir.find_last_of(k_separator);
+  auto pos = dir.find_last_of("/\\");
   if (pos == std::string::npos) {
     return false;
   }
@@ -372,7 +372,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
-  std::string const_directory = "data" + k_separator + "constants";
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
@@ -390,30 +389,14 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += " ";
 
     // Only compile files in the specified model directory
-    if (c10::starts_with(filename_str, model_directory) ||
-        c10::starts_with(filename_str, const_directory)) {
+    if (filename_str.length() >= model_directory.length() &&
+        filename_str.substr(0, model_directory.length()) == model_directory) {
       std::string output_path_str = temp_dir_;
-
-      if (c10::starts_with(filename_str, model_directory)) {
-        output_path_str += k_separator;
-        output_path_str += filename_str;
-      } else { // startsWith(filename_str, const_directory)
-        // Extract constants to the same directory as the rest of the files
-        // to be consistent with internal implementation
-        size_t lastSlash = filename_str.find_last_of(k_separator);
-        std::string filename = filename_str;
-        if (lastSlash != std::string::npos) {
-          filename = filename_str.substr(lastSlash + 1);
-        }
-        output_path_str +=
-            k_separator + model_directory + k_separator + filename;
-      }
-
-      LOG(INFO) << "Extract file: " << filename_str << " to "
-                << output_path_str;
+      output_path_str += k_separator;
+      output_path_str += filename_str;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+      size_t parent_path_idx = output_path_str.find_last_of("/\\");
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
             "Failed to find parent path in " + output_path_str);
