@@ -7,12 +7,8 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import is_gpu
-from torch.testing._internal.common_device_type import (
-    get_desired_device_type_test_bases,
-)
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
 try:
@@ -39,20 +35,32 @@ except unittest.SkipTest:
     raise
 
 
-_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
-RUN_GPU = (
-    HAS_GPU
-    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
-    and not TEST_WITH_ASAN
-)
-
-
 class GpuWrapperTemplate:
     pass
 
 
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
+
+    def test_aoti_debug_printer_works_on_constants(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def test_fn():
+            inp = torch.randn(batch_size, seq_length, hidden_size, device=self.device)
+            weight = torch.randn(hidden_size, hidden_size, device=self.device)
+            matmul_output = inp @ weight
+            torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+            return True
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "aot_inductor.debug_intermediate_value_printer": "2",
+            }
+        )(test_fn)
+        comp()
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):

@@ -969,7 +969,7 @@ class TestGradTransform(TestCase):
                 expected = f"{repr(x)}"
                 level = 0
                 for op in op_list:
-                    level += 1
+                    level += 1  # noqa: SIM113
                     if op == grad:
                         expected = f"GradTrackingTensor(lvl={level}, value={expected})"
                     elif op == vmap:
@@ -3260,6 +3260,18 @@ class TestHelpers(TestCase):
 
         out = A.apply(x, y)
         out.backward()
+
+    def test_debug_unwrap(self):
+        stuff = []
+
+        def f(x):
+            stuff.append(torch.func.debug_unwrap(x))
+            return x.sin()
+
+        x = torch.randn(2, 3)
+        _ = vmap(vmap(f))(x)
+        self.assertEqual(stuff[0], x)
+        self.assertTrue(stuff[0] is x)
 
     def test_reductify_leaf(self, device):
         reductify_leaf = torch._functorch.autograd_function.reductify_leaf

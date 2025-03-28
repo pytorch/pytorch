@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
 
+from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_impls import (
@@ -42,13 +43,17 @@ from torch._export.utils import (
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _fakify_params_buffers,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
+    _override_graph_signature_for_temp_registered_constants,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
+    _register_constants_as_buffers,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
+    placeholder_naming_pass,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -349,7 +354,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
     decompose_custom_triton_ops,
 ):
-    from torch._export.utils import _fakify_params_buffers
+    from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
         _disable_custom_triton_op_functional_decomposition,
@@ -370,7 +375,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
-        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+        wrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
 
         from torch._functorch._aot_autograd.subclass_parametrization import (
             unwrap_tensor_subclass_parameters,
@@ -385,7 +393,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # This is fine because run_decompositions is supposed to specialize to post-autograd
         # graph where the subclass desugaring is supposed to happen.
         unwrap_tensor_subclass_parameters(mod)
-        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+        unwrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
 
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
@@ -416,6 +427,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # and overwrite the new graph signature using the previous program.
         _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
 
+        # When we have a module with constant attributes, AotDispatcher doesn't actually
+        # wrap them as functional tensors, because dynamo would have already made it buffer.
+        # In non-strict case, however, AotDispatcher can intercept constants, causing it to not
+        # functionalize the operators that are operating on constant tensors. Since dynamo already
+        # wraps constants as buffers, we temporarily register the constants as buffers and undo this
+        # operation after AOTDispatcher is done.
+        temp_registered_constants = _register_constants_as_buffers(
+            mod, ep.state_dict, ep.graph_signature.non_persistent_buffers
+        )
+
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
@@ -442,12 +463,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 else:
                     retracing_args.append(node.meta["val"])
 
+        tx = TracingContext(fake_mode)
+
         with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
         ), _enable_graph_inputs_of_type_nn_module(
             ep.example_inputs
+        ), tracing(
+            tx
         ):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
@@ -476,28 +501,53 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
                     _check_autograd_state=False,
+                    _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
 
                 # aten_export_artifact.constants contains only fake script objects, we need to map them back
                 aten_export_artifact.constants = {
-                    fqn: map_fake_to_real[obj]
-                    if isinstance(obj, FakeScriptObject)
-                    else obj
+                    fqn: (
+                        map_fake_to_real[obj]
+                        if isinstance(obj, FakeScriptObject)
+                        else obj
+                    )
                     for fqn, obj in aten_export_artifact.constants.items()
                 }
 
-        gm = aten_export_artifact.gm
-        new_graph_signature = aten_export_artifact.sig
+                gm = aten_export_artifact.gm
+                new_graph_signature = aten_export_artifact.sig
 
-        _populate_param_buffer_metadata_to_new_gm(
-            params_buffers_to_node_meta, gm, new_graph_signature
-        )
+                # In the previous step, we assume constants as buffers for AOTDispatcher to
+                # functianalize properly, so undo that here
+                new_graph_signature = (
+                    _override_graph_signature_for_temp_registered_constants(
+                        new_graph_signature, temp_registered_constants
+                    )
+                )
 
-        # overwrite signature for non-persistent buffers
-        new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
-            ep.graph_signature, new_graph_signature
-        )
+                _populate_param_buffer_metadata_to_new_gm(
+                    params_buffers_to_node_meta, gm, new_graph_signature
+                )
+
+                # overwrite signature for non-persistent buffers
+                new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
+                    ep.graph_signature, new_graph_signature
+                )
+
+                constants = _materialize_and_lift_constants(
+                    gm, new_graph_signature, new_fake_constant_attrs
+                )
+
+                placeholder_naming_pass(
+                    gm,
+                    new_graph_signature,
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    constants,
+                )
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
@@ -514,14 +564,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the state dict of ep.module but ep.module only stores params
         # buffers that participate in forward. If we undo this behaviour,
         # it would break some downstream users.
-        for name, p in unwrapped_params.items():
-            if name not in wrapped_params:
+        for name, p in unwrapped_params_buffers.items():
+            if name not in wrapped_params_buffers:
                 ep.state_dict[name] = p
 
-        for name, p in wrapped_params.items():
-            assert name in ep.state_dict
-            if name not in unwrapped_params:
-                ep.state_dict.pop(name)
+        for name, p in wrapped_params_buffers.items():
+            # Buffers can be persistent/non-persistent
+            if name not in ep.state_dict:
+                assert not isinstance(p, torch.nn.Parameter)
+
+            if name in ep.state_dict:
+                if name not in unwrapped_params_buffers:
+                    ep.state_dict.pop(name)
 
         return gm, new_graph_signature, ep.state_dict
 
@@ -1026,6 +1080,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def example_inputs(self, value):
         # This is allowed
+
+        if value is None:
+            self._example_inputs = value
+            return
+
         if not (
             isinstance(value, tuple)
             and len(value) == 2
@@ -1249,10 +1308,11 @@ class ExportedProgram:
         graph_module = self.graph_module.print_readable(
             print_output=False, colored=False
         ).replace("\n", "\n    ")
+        graph_signature = str(self.graph_signature).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {self.graph_signature}\n"
+            f"Graph signature: {graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string
@@ -1476,7 +1536,13 @@ class ExportedProgram:
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
+        self,
+        graph_module,
+        graph_signature,
+        *,
+        state_dict=None,
+        constants=None,
+        verifiers=None,
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
@@ -1486,7 +1552,7 @@ class ExportedProgram:
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            constants=self.constants,
+            constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
