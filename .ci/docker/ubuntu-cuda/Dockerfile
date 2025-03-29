@@ -100,18 +100,21 @@ COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN bash ./install_triton.sh
 
-FROM base as final
-COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
-RUN rm -rf /opt/triton
-
+FROM base as halide-builder
 ARG HALIDE
 # Build and install halide
 COPY ./common/install_halide.sh install_halide.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/halide.txt halide.txt
-RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
-RUN rm install_halide.sh common_utils.sh halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; else mkdir /opt/halide; fi
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
+
+COPY --from=halide-builder /opt/conda/envs/* /opt/conda/envs/
+RUN chown -R jenkins:jenkins /opt/conda
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh

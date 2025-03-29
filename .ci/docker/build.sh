@@ -574,3 +574,11 @@ elif [ "$HAS_TRITON" = "yes" ]; then
   echo "expecting triton to not be installed, but it is"
   exit 1
 fi
+
+if [ -n "$HALIDE" ]; then
+  if !(drun python -c "import halide" > /dev/null 2>&1); then
+    echo "HALIDE=$HALIDE, but:"
+    drun python -c "import halide"
+    exit 1
+  fi
+fi

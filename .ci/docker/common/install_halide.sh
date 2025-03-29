@@ -1,6 +1,7 @@
 #!/bin/bash
 set -ex
 
+mkdir /opt/halide
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 COMMIT=$(get_pinned_commit halide)
@@ -10,6 +11,8 @@ test -n "$COMMIT"
 test -n "$ANACONDA_PYTHON_VERSION"
 eval "$(conda shell.bash hook)"
 conda activate py_$ANACONDA_PYTHON_VERSION
+
+export CMAKE_POLICY_VERSION_MINIMUM=3.10
 
 if [ -n "${UBUNTU_VERSION}" ];then
     apt update
@@ -38,9 +41,12 @@ pip_install -r requirements.txt
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
 cmake --build build
 test -e ${CONDA_PREFIX}/lib/python3 || ln -s python${ANACONDA_PYTHON_VERSION} ${CONDA_PREFIX}/lib/python3
-cmake --install build --prefix ${CONDA_PREFIX}
+cmake --install build --prefix /opt/halide
 chown -R jenkins ${CONDA_PREFIX}
 popd
 rm -rf Halide llvm-build llvm-project llvm-install
 
 python -c "import halide"  # check for errors
+
+# Restore cmake version for pytorch build.  Remove when cmake 4.0.0 is more supported
+pip_install cmake==3.31.6
