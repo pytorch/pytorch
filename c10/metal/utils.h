@@ -92,9 +92,9 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> max(T a, T b) {
-  return ::metal::max(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T> && ::metal::is_integral_v<U>, T> max(T a, U b) {
+  return ::metal::max(a, static_cast<T>(b));
 }
 
 template <typename T>
