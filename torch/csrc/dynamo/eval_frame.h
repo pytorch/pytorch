@@ -51,7 +51,8 @@ PyObject* dynamo_eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     const char* trace_annotation,
-    int throw_flag);
+    int throw_flag,
+    PyObject* f_globals);
 
 #ifdef __cplusplus
 

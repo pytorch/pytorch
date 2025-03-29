@@ -234,26 +234,38 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
+
+    def _make_aot_autograd_cache_entry(compiled_fw, time_taken_ns: int):
+        return AOTAutogradCacheEntry(
+            compiled_fw=compiled_fw,
+            compiled_bw=None,
+            aot_joint_graph_str=None,
+            aot_forward_graph_str=aot_forward_graph_str,
+            aot_backward_graph_str=None,
+            runtime_metadata=fw_metadata,
+            dispatch_wrappers=wrappers,
+            maybe_subclass_meta=maybe_subclass_meta,
+            num_fw_outs_saved_for_bw=None,
+            indices_of_inps_to_detach=[],
+            forward_time_taken_ns=time_taken_ns,
+            backward_time_taken_ns=0,
+        )
+
     if cache_info is not None:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
-            entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward(fw_key),
-                compiled_bw=None,
-                aot_joint_graph_str=None,
-                aot_forward_graph_str=aot_forward_graph_str,
-                aot_backward_graph_str=None,
-                runtime_metadata=fw_metadata,
-                dispatch_wrappers=wrappers,
-                maybe_subclass_meta=maybe_subclass_meta,
-                num_fw_outs_saved_for_bw=None,
-                indices_of_inps_to_detach=[],
-                forward_time_taken_ns=time_taken_ns,
-                backward_time_taken_ns=0,
+            entry = _make_aot_autograd_cache_entry(
+                CompiledForward(fw_key), time_taken_ns
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
             )
+
+    if aot_config.package is not None:
+        entry = _make_aot_autograd_cache_entry(None, 0)
+        graph_state = aot_config.package.current_graph_state
+        graph_state.add_aot_autograd(entry)
+        graph_state.add_aot_config(aot_config)
 
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,

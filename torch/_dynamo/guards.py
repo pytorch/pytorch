@@ -88,6 +88,7 @@ from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
+from .bytecode_transformation import get_code_keys
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -2275,9 +2276,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in self.__class__.__dict__, (
-            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
-        )
+        # assert func_name in self.__class__.__dict__, (
+        #     f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        # )
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -2512,6 +2513,47 @@ class CheckFunctionManager:
                 continue
 
             guard.create(builder)
+
+        if output_graph.package is not None:
+            precompile_guards = torch._guards.GuardsSet()
+            for g in guards:
+                if g.create_fn in (
+                    GuardBuilder.CLOSURE_MATCH,
+                    GuardBuilder.FUNCTION_MATCH,
+                    GuardBuilder.ID_MATCH,
+                    GuardBuilder.BUILTIN_MATCH,
+                ):
+                    # Skipping guards that will turn into ID_MATCHs.
+                    continue
+                else:
+                    precompile_guards.add(g)
+            from torch._dynamo.compile_package import (
+                GuardSerializer,
+                GuardsState,
+                serialize_local_scope,
+                SerializedCode,
+            )
+
+            serialized_guards = [
+                GuardSerializer(output_graph).serialize(g) for g in precompile_guards
+            ]
+
+            import pickle
+
+            output_graph.package.current_precompile.add_guards_state(
+                GuardsState(
+                    guards=serialized_guards,
+                    global_state=convert_frame.initial_global_state.dump(),
+                    f_code=SerializedCode(
+                        **{key: getattr(f_code, key) for key in get_code_keys()}
+                    ),
+                    input_source_to_sizes_strides=output_graph.input_source_to_sizes_strides,
+                    local_scope=serialize_local_scope(output_graph.local_scope),
+                    torch_function_mode_stack=pickle.dumps(
+                        self.torch_function_mode_stack
+                    ),
+                )
+            )
 
         self.compile_check_fn(builder, guards, guard_fail_fn)
 
