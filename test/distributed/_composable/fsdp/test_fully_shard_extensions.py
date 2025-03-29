@@ -23,9 +23,10 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.two_tensor import TwoTensor
 
+device_type = torch.accelerator.current_accelerator().type
 
 def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
@@ -222,7 +223,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
     def _test_all_gather_extensions_train_parity(self, reshard_after_forward: bool):
         torch.manual_seed(42)
         model = self._init_two_tensor_mlp()
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device=device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=True)
         fully_shard_fn = functools.partial(
             fully_shard, reshard_after_forward=reshard_after_forward
@@ -234,7 +235,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         check_sharded_parity(self, ref_model, model)
 
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((2, 8), device="cuda")
+        inp = torch.randn((2, 8), device=device_type)
         for iter_idx in range(10):
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
@@ -261,9 +262,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda:0")
+        return torch.device("{}:0".format(device_type))
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_all_gather_extensions_end_to_end(self):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
             self.run_subtests(
@@ -297,13 +298,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
         # Run a few iterations to check for errors
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((2, 8), device="cuda")
+        inp = torch.randn((2, 8), device=device_type)
         for _ in range(3):
             model(inp).sum().backward()
             optim.step()
             optim.zero_grad()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_all_gather_extensions_monkey_patch(self):
         tls = threading.local()
         tls.ran_pre_all_gather = False
@@ -368,14 +369,14 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
         # Run a few iterations to check for errors
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((2, 8), device="cuda")
+        inp = torch.randn((2, 8), device=device_type)
         for _ in range(3):
             model(inp).sum().backward()
             optim.step()
             optim.zero_grad()
         assert tls.ran_pre_all_gather
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_all_gather_extension_outer_size_stride(self):
         """
         NOTE: We cannot easily test the incorrect case where the user-defined
@@ -395,19 +396,19 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         fully_shard(model)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((2, 3), device="cuda")
+        inp = torch.randn((2, 3), device=device_type)
         loss = model(inp).sum()
         loss.backward()
         optim.step()
         optim.zero_grad()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and TEST_XPU, "no cuda and no xpu")
     def test_all_gather_extension_hsdp_mesh(self):
         tls = threading.local()
         replicate_size = 2
         shard_size = self.world_size // replicate_size
         mesh = init_device_mesh(
-            "cuda",
+            device_type,
             (replicate_size, shard_size),
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
@@ -456,7 +457,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                     local_param
                 )
 
-        inp = torch.randn((2, 8), device="cuda")
+        inp = torch.randn((2, 8), device=device_type)
         model(inp)
         # Check that FSDP passes only the shard mesh to the pre-all-gather
         self.assertEqual(tls.mesh.ndim, 1)

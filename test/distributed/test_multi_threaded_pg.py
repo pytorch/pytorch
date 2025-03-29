@@ -330,7 +330,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True
+            [dist.get_rank()], dtype=torch.float, device=torch.accelerator.current_accelerator(), requires_grad=True
         )
         x = MyFunc.apply(x)
         x.sum().backward()

@@ -24,7 +24,7 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    requires_nccl,
+    skip_but_pass_in_sandcastle_if,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfHpu,
-    TEST_CUDA,
     TEST_HPU,
     TestCase,
 )
@@ -61,11 +60,9 @@ from torch.testing._internal.common_utils import (
 
 DEVICE = "cuda"
 devices = ["cpu"]
-if TEST_HPU:
-    devices.append("hpu")
-    DEVICE = "hpu"
-elif TEST_CUDA:
-    devices.append("cuda")
+if torch.accelerator.is_available():
+    devices.append(torch.accelerator.current_accelerator().type)
+    DEVICE = torch.accelerator.current_accelerator().type
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -269,10 +266,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_broadcast(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         if dist.get_rank() == 0:
             tensor = torch.ones([4], device=device)
@@ -285,10 +282,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_all_reduce_eager(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         tensor = torch.ones([4], device=device)
         mesh = dt.DeviceMesh(device, torch.arange(4))
@@ -302,10 +299,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_all_reduce_coalesced_eager(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         t0 = torch.ones([4], device=device)
         t1 = torch.ones([6], device=device) + 2
@@ -317,10 +314,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_all_gather_tensor(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         # testing 1d/2d mesh
         mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
@@ -339,10 +336,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
         mesh = dt.DeviceMesh(device, torch.arange(4))
@@ -356,10 +353,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_reduce_scatter_tensor(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
 
         # testing 1d/2d mesh
         mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
@@ -380,10 +377,10 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     def test_reduce_scatter_into_tensor_coalesced(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
+        if device != "cpu":
+            if torch.accelerator.device_count() < self.world_size:
+                self.skipTest("Not enough accelerator devices")
+            torch.accelerator.set_device_index(dist.get_rank())
         tensors = [
             torch.ones([4], dtype=torch.int64, device=device),
             torch.ones([4], dtype=torch.int64, device=device) + 1,
@@ -466,7 +463,7 @@ class TestMakeFx(TestCase):
         )
 
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+BACKEND = dist.Backend.default_device_backend_map[DEVICE] if torch.accelerator.is_available() else dist.Backend.GLOO
 
 # Adding support for HCCL backend
 # To add a different backend
@@ -480,12 +477,12 @@ if TEST_HPU:
 # to add new device types to this check simply follow the same format
 # and append an elif with the conditional and appropriate device count function for your new device
 def exit_if_lt_x_accelerators(x):
-    if TEST_CUDA:
-        if torch.cuda.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
-    elif TEST_HPU:
+    if TEST_HPU:
         if torch.hpu.device_count() < x:
             sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
+    elif torch.accelerator.is_available():
+        if torch.accelerator.device_count() < x:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
 def with_comms(func=None):
@@ -494,7 +491,7 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
+        if (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL) and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
@@ -572,7 +569,10 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         self.assertEqual(y, expected)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
+        "c10d was not compiled with the accelerator backend",
+    )
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -599,7 +599,10 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
+        "c10d was not compiled with the accelerator backend",
+    )
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
@@ -811,13 +814,13 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
 
 # Update the supported devices in DEVICE
 instantiate_device_type_tests(
-    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE
+    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE
+    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE
+    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
 )
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from torch.distributed.distributed_c10d import (
     init_process_group,
     is_initialized,
     is_nccl_available,
+    is_xccl_available,
     new_group,
     ProcessGroup,
 )
@@ -25,7 +26,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfXpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -41,6 +42,12 @@ def _get_device_type(world_size):
         and is_nccl_available()
     ):
         device_type = "cuda"
+    elif (
+        torch.xpu.is_available()
+        and torch.xpu.device_count() >= world_size
+        and is_xccl_available()
+    ):
+        device_type = "xpu"
     else:
         device_type = "cpu"
     return device_type
@@ -53,6 +60,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
     os.environ["RANK"] = f"{rank}"
 
 
+@skipIfXpu
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -109,8 +117,8 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
+        if self.backend == "nccl" or self.backend == "xccl":
+            curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
@@ -169,7 +177,7 @@ class DeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        # construct a cuda device mesh
+        # construct a accelerator device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
@@ -205,8 +213,7 @@ class DeviceMeshTest(DTensorTestBase):
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
         global_tensor = funcol.all_gather_tensor(
@@ -245,7 +252,7 @@ class DeviceMeshTest(DTensorTestBase):
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
             DeviceMesh.from_group(
-                global_pg, "cuda", invalid_mesh, mesh_dim_names=("dim0", "dim1")
+                global_pg, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
@@ -265,16 +272,15 @@ class DeviceMeshTest(DTensorTestBase):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
             init_device_mesh(
-                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+                self.device_type + ":0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
     @with_comms
     def test_set_mesh_dim_group_options(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        mesh = DeviceMesh(device_type, mesh_tensor)
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
@@ -286,7 +292,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a accelerator device mesh
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
