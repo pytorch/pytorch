@@ -156,6 +156,8 @@ NVIDIA Tools Extension (NVTX)
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.enable_tensor_returns
+    nvtx.disable_tensor_returns
 
 Jiterator (beta)
 -----------------------------
