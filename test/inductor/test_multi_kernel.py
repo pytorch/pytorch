@@ -15,6 +15,7 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_S390X,
     parametrize,
     skipIfXpu,
 )
@@ -67,6 +68,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     return fn
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @config.patch(
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),

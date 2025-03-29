@@ -2015,7 +2015,6 @@ class CommonTemplate:
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
-    @xfailIfS390X  # accuracy failure
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
@@ -4961,9 +4960,11 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            buffer._version + 1
-            if k in ["m.running_mean", "m.running_var"]
-            else buffer._version
+            (
+                buffer._version + 1
+                if k in ["m.running_mean", "m.running_var"]
+                else buffer._version
+            )
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -13614,9 +13615,11 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_layer_norm_relu"
-                    if torch._dynamo.config.inline_inbuilt_nn_modules
-                    else "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

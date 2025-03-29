@@ -2,16 +2,19 @@
 
 import functools
 import logging
+import unittest
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
+from torch.testing._internal.common_utils import IS_S390X
 
 
 log = logging.getLogger(__name__)
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 class TestBench(TestCase):
     @classmethod
     def setUpClass(cls):
