@@ -317,6 +317,20 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
+# extra check for CppMicroGemmWoQSmallMDim
+def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+    return (
+        k % config.register_blocking.block_k == 0
+        and n % config.register_blocking.block_n == 0
+        and m < 16
+    )
+
+
+# For int8 WoQ GEMM with small M, use CppMicroGemmWoQSmallMDim instead of CppMicroGemmFP32Vec
+def do_not_use_fp32_gemm_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
+    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads)
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
@@ -342,6 +356,7 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_fp32_gemm_for_int8_woq,
     ),
     *generate_gemm_config(
         VecAVX2,
@@ -367,6 +382,7 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_fp32_gemm_for_int8_woq,
     ),
     *generate_gemm_config(
         VecNEON,
@@ -904,6 +920,187 @@ inline void {{kernel_name}}_transpose_b_kernel(
             options
         )
         return result
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAVX512,
+        [
+            (4, 32, 64),
+            (8, 32, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
+    ),
+)
+class CppMicroGemmWoQSmallMDim(CppMicroGemm):
+    """
+    This class generates a macro-kernel & micro-kernel (in BLIS lexicon) for small M dimension for
+    input_dtype bfloat16 and input2_dtype int8. M is less than 16.
+    K & N must be equal to block_k and block_n, respectively.
+    These values were found to deliver good performance during tuning, and are subject to change.
+    """
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    // Counter-intuitively, converting A to FP32 in the macro-kernel (instead of the micro-kernel)
+    // did not degrade performance.
+    // TODO #1: check if we can reuse the existing GEMM micro-kernel, but with prefetching.
+    // If not, check if converting elements of A inside the micro-kernel works as well.
+    // BF16 elements are converted to FP32 inside the micro-kernel one at a time.
+    // However, that approach uses less memory.
+    // TODO #2: Consider moving the following check to the new template
+    {{kernel.assert_function}}(N == {{block_n}}, "N dimension must be equal to {{block_n}}");
+    {{kernel.assert_function}}(K == {{block_k}}, "K dimension must be equal to {{block_k}}");
+    auto cvt_bf16_to_fp32 = [&](float* A_fp32, int num_rows, int m) {
+        for (int A_row = 0; A_row < num_rows; A_row++) {
+            // Convert 16 BF16 elements at a time
+            for (int vec_num = 0; vec_num < 4; vec_num++) {
+                __m512* tmp =
+                    reinterpret_cast<__m512*>(
+                        A_fp32 + 16 * vec_num + {{block_k}} * A_row
+                    );
+                at::vec::cvtbf16_fp32(
+                    *reinterpret_cast<const __m256i*>(A + 16 * vec_num + (m + A_row) * lda),
+                    *tmp
+                );
+            }
+        }
+    };
+
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        if (block_m == {{block_m}}) {
+            const int A_block_{{block_m}}_size = {{block_m}} * {{block_k}};
+            float A_block_{{block_m}}[A_block_{{block_m}}_size];
+            cvt_bf16_to_fp32(A_block_{{block_m}}, {{block_m}}, m);
+            {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                A_block_{{block_m}},
+                B,
+                C + m * ldc,
+                K,
+                {{block_k}},
+                ldb,
+                ldc,
+                prefetch
+            );
+        } else {
+            switch (block_m) {
+    {%- for b in range(block_m - 1, 0, -1) %}
+            case {{b}}:
+                {
+                const int A_block_{{b}}_size = {{b}} * {{block_k}};
+                float A_block_{{b}}[A_block_{{b}}_size];
+                cvt_bf16_to_fp32(A_block_{{b}}, {{b}}, m);
+                {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                    A_block_{{b}},
+                    B,
+                    C + m * ldc,
+                    K,
+                    {{block_k}},
+                    ldb,
+                    ldc,
+                    prefetch
+                );
+                break;
+            }
+    {%- endfor %}
+            default:
+                {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const float* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    bool prefetch
+) {
+    constexpr auto VLEN = 16;
+    constexpr auto ROWS = BLOCK_M;
+    constexpr auto COLS = BLOCK_N / VLEN;
+    __m512 va;
+    __m512 vb[COLS];
+    __m512 vc[ROWS * COLS];
+
+    auto loadc = [&](auto i) {
+        vc[i] = _mm512_set1_ps(0.0f);
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+    auto compute = [&, COLS](auto i, int k) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        if constexpr (col == 0) {
+            va = _mm512_set1_ps(A[row * lda + k]);
+        }
+        if constexpr (row == 0) {
+            // Convert VLEN int8 elements to int16, then fp16, and then apply scale
+            auto int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN));
+            vb[col] =  _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(int8_vector));
+            if C10_LIKELY(prefetch) {
+              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+            }
+        }
+        vc[i] = _mm512_fmadd_ps(va, vb[col], vc[i]);
+    };
+    // Accumulate along k
+    for (int k = 0; k < K; k++) {
+      c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    }
+    // store to C
+    auto storec = [&](auto i) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        if constexpr (accum) {
+            auto vc_old = _mm512_loadu_ps(C + row * ldc + col * VLEN);
+            vc[i] = _mm512_fmadd_ps(_mm512_set1_ps(1.0f), vc[i], vc_old);
+        }
+        _mm512_storeu_ps(C + row * ldc + col * VLEN, vc[i]);
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": self.register_blocking.block_m,
+            "block_n": self.register_blocking.block_n,
+            "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
+            **self.get_common_options(),
+        }
+        result = KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+            options
+        )
+        result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return "bool prefetch,"
+
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        assert len(kwargs) == 2
+        assert "prefetch" in kwargs
+        prefetch_val = kwargs.get("prefetch")
+        return [
+            f"{value_to_cpp(prefetch_val, 'bool')},",
+        ]
 
 
 # extra check for CppMicroGemmAMX
