@@ -3751,10 +3751,11 @@ def build_checkpoint_variable(**options):
 def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4070,6 +4071,14 @@ def is_tensor_base_attr_getter(value):
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_tensor_getset_descriptor(name):
+    try:
+        attr = inspect.getattr_static(torch.Tensor, name)
+        return type(attr) is types.GetSetDescriptorType
+    except AttributeError:
+        return False
 
 
 def is_torch_function_object(value):
