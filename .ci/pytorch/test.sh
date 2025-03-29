@@ -6,6 +6,7 @@
 
 set -ex -o pipefail
 
+
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
