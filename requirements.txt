@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-cmake==3.31.6  # Temp pin until we support 4.0.0?
+cmake
 expecttest>=0.3.0
 filelock
 fsspec
