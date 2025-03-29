@@ -877,10 +877,7 @@ class DictViewVariable(VariableTracker):
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
-        def unwrap(x):
-            return x.vt if self.kv == "keys" else x
-
-        return [unwrap(x) for x in self.view_items]
+        return self.view_items_vt
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
@@ -950,7 +947,7 @@ class DictItemsVariable(DictViewVariable):
     @property
     def view_items_vt(self):
         # Returns an iterable of the unpacked items
-        return tuple([k.vt, v] for k, v in self.view_items)
+        return [variables.TupleVariable([k.vt, v]) for k, v in self.view_items]
 
     def python_type(self):
         return dict_items
