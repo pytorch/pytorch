@@ -141,6 +141,32 @@ class AOTInductorModelContainer {
         input_handles, output_handles, stream, proxy_executor);
   }
 
+  const std::unordered_map<std::string, AtenTensorHandle> extract_constants_map(
+      bool use_inactive) const {
+    size_t n_consts = this->num_constants();
+    std::unordered_map<std::string, AtenTensorHandle> ret;
+    ret.reserve(n_consts);
+
+    std::shared_ptr<ConstantMap> extract_map = constants_map_;
+    // Essentially a XOR
+    if (use_inactive != use_secondary_) {
+      extract_map = constants_map_secondary_;
+    }
+    for (size_t idx = 0; idx < n_consts; idx++) {
+      if (this->constant_from_folded(idx)) {
+        continue;
+      }
+
+      auto it = extract_map->find(this->constant_name(idx));
+      if (it != extract_map->end()) {
+        ret.emplace(this->constant_original_fqn(idx), it->second);
+        continue;
+      }
+    }
+
+    return ret;
+  }
+
   size_t num_constants() const {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
