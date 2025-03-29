@@ -87,9 +87,6 @@ katex_prerender = True
 
 napoleon_use_ivar = True
 
-# Add custom numpydoc-style section titles
-napoleon_custom_sections = ["Basics", "Details"]
-
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 

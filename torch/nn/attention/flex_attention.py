@@ -205,8 +205,8 @@ class BlockMask:
     BlockMask is our format for representing a block-sparse attention mask.
     It is somewhat of a cross in-between BCSR and a non-sparse format.
 
-    Basics
-    ------
+    **Basics**
+
     A block-sparse mask means that instead of representing the sparsity of
     individual elements in the mask, a KV_BLOCK_SIZE x Q_BLOCK_SIZE block is
     considered sparse only if every element within that block is sparse.
@@ -239,8 +239,8 @@ class BlockMask:
     Notably, this format makes it easier to implement a reduction along the
     *rows* of the mask.
 
-    Details
-    -------
+    **Details**
+
     The basics of our format require only kv_num_blocks and kv_indices. But, we
     have up to 8 tensors on this object. This represents 4 pairs:
 
