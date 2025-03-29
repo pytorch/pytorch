@@ -20,7 +20,7 @@ from ..remote_cache import (
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
-from .triton_compat import Config
+from .triton_compat import Config, HAS_WARP_SPEC
 
 
 if TYPE_CHECKING:
@@ -207,6 +207,15 @@ class AutotuneCache:
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
         }
+        if HAS_WARP_SPEC:
+            data.update(
+                {
+                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                    "num_buffers_warp_spec": getattr(
+                        config, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
 
         if local_cache := self.local_cache:
             cache, key = local_cache
@@ -464,7 +473,25 @@ def _load_cached_autotuning(
     ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+
+        # Extract common arguments
+        config_args = {
+            "num_warps": num_warps,
+            "num_stages": num_stages,
+        }
+
+        if HAS_WARP_SPEC:
+            config_args.update(
+                {
+                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": best_config.pop(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+
+        # Create the triton_config with the appropriate arguments
+        triton_config = Config(best_config, **config_args)
         triton_config.found_by_coordesc = True
         return triton_config
 
