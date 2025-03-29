@@ -169,7 +169,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val.contains("index") &&
           serialized_arg_val["index"].is_number()) {
-        device_string += ":" + serialized_arg_val["index"].get<std::string>();
+        int device_idx = serialized_arg_val["index"].get<int>();
+        device_string += ":" + std::to_string(device_idx);
       }
 
       c10::Device device(device_string);
@@ -478,7 +479,8 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
   if (is_cpu) {
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
   } else {
-    int device_idx = -1;
+    int device_idx = 0;
+    // TODO: Get the device index
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
   }
 
