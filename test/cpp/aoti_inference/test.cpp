@@ -27,6 +27,31 @@
 
 namespace {
 
+const std::unordered_map<std::string, at::Tensor> derefTensorConstantMap(
+    torch::inductor::TensorConstantMap tensor_constant_map) {
+  std::unordered_map<std::string, at::Tensor> ret;
+  for (const auto& pair : tensor_constant_map) {
+    ret.emplace(pair.first, *(pair.second));
+  }
+  return ret;
+}
+
+bool compareConstantMap(
+    const std::unordered_map<std::string, at::Tensor>& lhs,
+    const std::unordered_map<std::string, at::Tensor>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+
+  for (const auto& pair : lhs) {
+    auto it = rhs.find(pair.first);
+    if (it == rhs.end() || !torch::allclose(pair.second, it->second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
 
@@ -205,6 +230,90 @@ void test_aoti_constants_update(
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+
+void test_aoti_extract_constants_map(const std::string& device) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path_" + device;
+  std::string inputs_attr = "inputs_" + device;
+  std::string outputs_attr = "outputs_" + device;
+  std::string weights_attr = "w_pre_" + device;
+  std::string add_attr = "w_add_" + device;
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  torch::inductor::TensorConstantMap rand_map, real_map;
+  at::Tensor rand_pre, rand_add;
+  at::Tensor w_pre, w_add;
+  at::DeviceType device_type = device == "cuda" ? at::kCUDA : at::kCPU;
+  rand_pre = at::randn({4, 4}).to(device_type);
+  rand_add = at::randn({4, 4}).to(device_type);
+  w_pre = at::Tensor(weight_tensors).to(device_type);
+  w_add = at::Tensor(add_tensors).to(device_type);
+
+  rand_map.emplace("L__self___w_pre", &rand_pre);
+  rand_map.emplace("L__self___w_add", &rand_add);
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  if (device == "cpu") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
+        model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
+  } else {
+    testing::AssertionFailure() << "unsupported device: " << device;
+  }
+
+  // By default, buffer #1 get loaded with burned in weights. Correct results.
+  auto actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // We update the weights to buffer #2 and activate it. This should still
+  // produce correct result, as it's the real constant map.
+  runner->update_inactive_constant_buffer(real_map);
+  auto extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  auto extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  auto cmp_real_map = derefTensorConstantMap(real_map);
+  auto cmp_rand_map = derefTensorConstantMap(rand_map);
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_real_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
+
+  // We update random weights to buffer #1. But do not swap in the weight yet.
+  runner->update_inactive_constant_buffer(rand_map);
+  extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_rand_map));
+
+  // We swap and activate the weight to buffer #1.
+  // Active weight now should be the new weight, while inactive should be the
+  // previous one.
+  runner->swap_constant_buffer();
+  extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_rand_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
 }
 
 void test_aoti_double_buffering(
@@ -634,6 +743,10 @@ TEST(AotInductorTest, BasicPackageLoaderTestCpu) {
   test_aoti_package_loader("cpu", false);
 }
 
+TEST(AotInductorTest, ExtractConstantsMapCpu) {
+  test_aoti_extract_constants_map("cpu");
+}
+
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda", true);
@@ -654,6 +767,10 @@ TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
 
 TEST(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
+}
+
+TEST(AotInductorTest, ExtractConstantsMapCuda) {
+  test_aoti_extract_constants_map("cuda");
 }
 
 TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {

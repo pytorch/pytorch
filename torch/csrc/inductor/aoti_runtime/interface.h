@@ -117,6 +117,12 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     size_t idx,
     int32_t* dtype);
 
+// Extract the constants that is being used in the container.
+AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
