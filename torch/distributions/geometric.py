@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -12,6 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _Number
 
 
 __all__ = ["Geometric"]
@@ -42,6 +41,7 @@ class Geometric(Distribution):
         probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
@@ -55,7 +55,7 @@ class Geometric(Distribution):
         else:
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, Number):
+        if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()

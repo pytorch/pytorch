@@ -3,7 +3,6 @@
 import inspect
 import io
 from tempfile import TemporaryFileName
-from typing import Dict, List
 
 import torch
 import torch.utils.bundled_inputs
@@ -248,7 +247,7 @@ class TestLiteScriptModule(TestCase):
                 self.foo = Foo()
 
             def forward(self):
-                my_list: List[Foo] = [self.foo]
+                my_list: list[Foo] = [self.foo]
                 return my_list
 
         script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
@@ -272,7 +271,7 @@ class TestLiteScriptModule(TestCase):
                 self.foo = Foo()
 
             def forward(self):
-                my_dict: Dict[int, Foo] = {1: self.foo}
+                my_dict: dict[int, Foo] = {1: self.foo}
                 return my_dict
 
         script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
@@ -356,7 +355,7 @@ class TestLiteScriptModule(TestCase):
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ft = FooTest2()
@@ -556,9 +555,9 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Dict[int, torch.Tensor],
-                y: Dict[int, torch.Tensor],
-                z: Dict[int, torch.Tensor],
+                x: dict[int, torch.Tensor],
+                y: dict[int, torch.Tensor],
+                z: dict[int, torch.Tensor],
             ):
                 return x
 

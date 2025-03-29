@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.fx
@@ -24,12 +24,12 @@ class TensorMetadata(NamedTuple):
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     memory_format: Optional[torch.memory_format]
 
     # Quantization metadata
     is_quantized: bool
-    qparams: Dict[str, Any]
+    qparams: dict[str, Any]
 
 
 def _extract_tensor_metadata(
@@ -57,7 +57,7 @@ def _extract_tensor_metadata(
                 break
 
     is_quantized = result.is_quantized
-    qparams: Dict[str, Any] = {}
+    qparams: dict[str, Any] = {}
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
@@ -176,7 +176,7 @@ class ShapeProp(torch.fx.Interpreter):
         except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
-                f"ShapeProp error for: node={n.format_node()} with " f"meta={n.meta}"
+                f"ShapeProp error for: node={n.format_node()} with meta={n.meta}"
             ) from e
 
         found_tensor = False

@@ -1841,6 +1841,21 @@ class TestDistributions(DistributionsTestCase):
             torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64),
         )
 
+    def test_multinomial_sequential_draw(self):
+        # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
+        torch.manual_seed(0xDE0B6B3A764007E8)
+        prob = torch.ones(26)
+        dups_mult = 0
+        perm_counts_mult = {}
+        for _ in range(300_000):
+            p = tuple(torch.multinomial(prob, prob.numel(), replacement=False).tolist())
+            if p in perm_counts_mult:
+                dups_mult += 1
+                perm_counts_mult[p] += 1
+            else:
+                perm_counts_mult[p] = 1
+        self.assertLess(dups_mult, 10)
+
     @set_default_dtype(torch.double)
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)

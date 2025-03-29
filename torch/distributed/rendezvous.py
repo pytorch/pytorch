@@ -9,15 +9,16 @@ except ImportError as e:
 import numbers
 import os
 import sys
+from collections.abc import Iterator
 from datetime import timedelta
-from typing import Callable, Dict, Iterator, Optional
+from typing import Callable, Optional
 
 from torch.distributed import FileStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers: Dict[str, Callable[..., Iterator[tuple[Store, int, int]]]] = {}
+_rendezvous_handlers: dict[str, Callable[..., Iterator[tuple[Store, int, int]]]] = {}
 
 __all__ = ["register_rendezvous_handler", "rendezvous"]
 
@@ -54,16 +55,19 @@ def register_rendezvous_handler(scheme, handler):
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
-def _query_to_dict(query: str) -> Dict[str, str]:
+def _query_to_dict(query: str) -> dict[str, str]:
     return {
         pair[0]: pair[1]
         for pair in (pair.split("=") for pair in filter(None, query.split("&")))
     }
 
 
-def _get_use_libuv_from_query_dict(query_dict: Dict[str, str]) -> bool:
+def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
     # libuv is the default backend for TCPStore. To enable the non-libuv backend,
     # user can explicitly specify ``use_libuv=0`` in the URL parameter.
+    if sys.platform == "win32":
+        #  PyTorch is built without libuv support on windows, so default to 0
+        return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
     return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
 
@@ -79,9 +83,9 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         world_size = world_size_opt
     if rank != -1 or world_size != -1 or world_size_opt is None:
         query_dict = _query_to_dict(result.query)
-        assert (
-            "rank" not in query_dict and "world_size" not in query_dict
-        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
+        assert "rank" not in query_dict and "world_size" not in query_dict, (
+            f"The url: {url} has node-specific arguments(rank, world_size) already."
+        )
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:

@@ -51,8 +51,7 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
     : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  RNNImplBase<Derived>::reset();
 }
 
 template <typename Derived>
@@ -793,8 +792,7 @@ namespace detail {
 template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(const RNNCellOptionsBase& options_)
     : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  RNNCellImplBase<Derived>::reset();
 }
 
 template <typename Derived>

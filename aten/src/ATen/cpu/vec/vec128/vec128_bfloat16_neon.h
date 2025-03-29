@@ -274,7 +274,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     Vectorized<c10::BFloat16> vec(
         at_vreinterpretq_bf16_u16(
             vbslq_u16(
-                at_vreinterpretq_u16_bf16(mask),
+                mask,
                 at_vreinterpretq_u16_bf16(b.values),
                 at_vreinterpretq_u16_bf16(a.values))));
 

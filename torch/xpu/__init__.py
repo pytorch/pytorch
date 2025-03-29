@@ -9,7 +9,7 @@ This package is lazily initialized, so you can always import it, and use
 import threading
 import traceback
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._C
@@ -23,13 +23,13 @@ from .streams import Event, Stream
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -216,7 +216,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -418,9 +418,9 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def get_arch_list() -> List[str]:
+def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:

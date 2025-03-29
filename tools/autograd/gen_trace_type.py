@@ -381,9 +381,9 @@ def format_postrecord_trace(f: NativeFunction) -> str:
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
-        return f'auto {f.func.returns[0].name or "result"}'
+        return f"auto {f.func.returns[0].name or 'result'}"
     names = cpp.return_names(f)
-    return f'auto [{", ".join(names)}]'
+    return f"auto [{', '.join(names)}]"
 
 
 def get_return_value(f: NativeFunction) -> str:
@@ -391,7 +391,7 @@ def get_return_value(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
         return names[0]
     if f.func.kind() == SchemaKind.out:
-        return f'std::forward_as_tuple({", ".join(names)})'
+        return f"std::forward_as_tuple({', '.join(names)})"
     else:
         moved = ", ".join(f"std::move({name})" for name in names)
         return f"std::make_tuple({moved})"
@@ -474,7 +474,7 @@ def method_definition(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )

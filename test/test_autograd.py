@@ -1151,7 +1151,6 @@ class TestAutograd(TestCase):
 
         # Incorrect case: grad_outputs wrong size
         out, tmp_edge = fn(x)
-        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
         with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
             torch.autograd.grad(
                 tmp_edge, (x,), grad_outputs=torch.tensor([1.0, 2.0, 3.0, 4.0])
@@ -1165,6 +1164,32 @@ class TestAutograd(TestCase):
                 tmp_edge,
                 (x,),
                 grad_outputs=torch.rand_like(tmp_grad, dtype=torch.complex64),
+            )
+
+        # Run with .backward() and compare with .grad()
+        out, tmp_edge = fn(x)
+        torch.autograd.backward(tmp_edge, retain_graph=True)
+        (x_grad_ref,) = torch.autograd.grad(tmp_edge, (x,), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # Pass a tuple of GradientEdges
+        x.grad = None
+        torch.autograd.backward((tmp_edge,), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # Mixing GradientEdge and Tensors
+        out1, tmp_edge1 = fn(x)
+        out2, tmp_edge2 = fn(x)
+        (x_grad_ref,) = torch.autograd.grad((tmp_edge1, out2), (x,), retain_graph=True)
+        x.grad = None
+        torch.autograd.backward((tmp_edge1, out2), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # .backward(): wrong shape
+        out, tmp_edge = fn(x)
+        with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
+            torch.autograd.backward(
+                tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
 
     def test_grad_nonleaf(self):
@@ -4774,10 +4799,18 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         # version counter doesn't change inside of the context manager
         self.assertEqual(2, x._version)
 
-        torch._C._autograd._unsafe_set_version_counter(x, 0)
+        torch._C._autograd._unsafe_set_version_counter((x,), (0,))
         self.assertEqual(0, x._version)
         with self.assertRaisesRegex(RuntimeError, "Cannot set"):
-            torch._C._autograd._unsafe_set_version_counter(x, -1)
+            torch._C._autograd._unsafe_set_version_counter((x,), (-1,))
+
+        y = torch.ones(2, requires_grad=True).clone()
+        with torch.autograd._unsafe_preserve_version_counter((x, y)):
+            x.mul_(2)
+            y.mul_(3)
+        # version counter doesn't change inside of the context manager
+        self.assertEqual(0, x._version)
+        self.assertEqual(0, y._version)
 
     def test_current_node(self):
         pr = []
@@ -8058,7 +8091,7 @@ for shape in [(1,), ()]:
         view_a = a.unbind()[0]
         with self.assertRaisesRegex(
             RuntimeError,
-            "This view is the output of a function that returns " "multiple views.",
+            "This view is the output of a function that returns multiple views.",
         ):
             view_a.copy_(b)
 
@@ -8592,6 +8625,26 @@ for shape in [(1,), ()]:
                     _, out_tangent = fwAD.unpack_dual(out_dual)
                     self.assertTrue(out_dual is x_dual)
                     self.assertTrue(out_tangent is x_tangent)
+
+    def test_custom_function_mark_output_view_of_intermediate(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                out = inp.clone().view_as(inp)
+                ctx.mark_dirty(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0], requires_grad=True)
+        a_clone = a.clone()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "received a tensor that was not an input."
+        ):
+            Func.apply(a_clone)
 
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
@@ -12464,6 +12517,18 @@ class TestAllowMutationOnSaved(TestCase):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
 
+    def test_inplace_foreach(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors():
+            a = [
+                torch.tensor(1.0, requires_grad=True),
+                torch.tensor(1.0, requires_grad=True),
+            ]
+            b = torch._foreach_exp(a)
+            torch._foreach_add_(b, 1)
+            (b[0] + b[1]).backward()
+
+        self.assertEqual([a[0].grad, a[1].grad], torch._foreach_exp(a))
+
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
@@ -12602,6 +12667,9 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(func_out.requires_grad)
         self.assertTrue(func_out.is_leaf)
 
+    @skipIfTorchDynamo(
+        "exception from ill-formed graph module is not propagated with eager_noexcept"
+    )
     def test_inference_mode_inf_tensor_in_normal_mode_inplace_op(self):
         def run_test(fn):
             for requires_grad in (False, True):

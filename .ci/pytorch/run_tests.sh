@@ -40,7 +40,7 @@ retry () {
 if [[ "$#" != 3 ]]; then
   if [[ -z "${DESIRED_PYTHON:-}" || -z "${DESIRED_CUDA:-}" || -z "${PACKAGE_TYPE:-}" ]]; then
     echo "USAGE: run_tests.sh  PACKAGE_TYPE  DESIRED_PYTHON  DESIRED_CUDA"
-    echo "The env variable PACKAGE_TYPE must be set to 'conda' or 'manywheel' or 'libtorch'"
+    echo "The env variable PACKAGE_TYPE must be set to 'manywheel' or 'libtorch'"
     echo "The env variable DESIRED_PYTHON must be set like '2.7mu' or '3.6m' etc"
     echo "The env variable DESIRED_CUDA must be set like 'cpu' or 'cu80' etc"
     exit 1

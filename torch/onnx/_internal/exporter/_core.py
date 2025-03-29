@@ -12,7 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Literal, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Literal
 
 import onnxscript
 import onnxscript.evaluator
@@ -27,8 +28,10 @@ from torch.onnx._internal.exporter import (
     _analysis,
     _building,
     _capture_strategies,
+    _constants,
     _dispatching,
     _errors,
+    _flags,
     _fx_passes,
     _ir_passes,
     _onnx_program,
@@ -44,9 +47,6 @@ if typing.TYPE_CHECKING:
 
     import numpy.typing as npt
 
-
-# ir_version used for the ONNX file. See https://github.com/onnx/onnx/blob/main/docs/IR.md#onnx-versioning
-_ONNX_IR_VERSION = 10
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
@@ -95,9 +95,6 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     - If there is an internal error during ONNX conversion, debug the error and summit a PR to PyTorch.
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
-
-# Domain used for functions translated from subgraphs
-_LOCAL_FUNCTION_DOMAIN: str = "pkg.torch.__subgraph__"
 
 logger = logging.getLogger(__name__)
 # The current tracer that is being used to trace the operators,
@@ -204,27 +201,33 @@ def _set_shape_type(
     | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
-    # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
-        # FIXME: Consider shape for complex values
         dims = []
         for dim in meta_val.shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
                 dims.append(str(dim.node))
-        value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
-        if complex_to_float:
-            if meta_val.dtype == torch.complex64:
-                value.dtype = ir.DataType.FLOAT
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
-            elif meta_val.dtype == torch.complex128:
-                value.dtype = ir.DataType.DOUBLE
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
+
+        # If the dtype is set already (e.g. by the onnx_symbolic ops),
+        # we don't need to set it again.
+        #
+        # When a user specifies complex in onnx_symbolic, we consider that to
+        # be the intention even though non of the ONNX ops deals with complex values.
+        # In this case, we don't change the dtype or the shape of the tensor.
+        if value.dtype is None:
+            value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
+            if complex_to_float:
+                if meta_val.dtype == torch.complex64:
+                    value.dtype = ir.DataType.FLOAT
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
+                elif meta_val.dtype == torch.complex128:
+                    value.dtype = ir.DataType.DOUBLE
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -323,9 +326,9 @@ def _handle_getitem_node(
     assert len(node.all_input_nodes) == 1
     source = node.all_input_nodes[0]
     source_outputs = node_name_to_values[source.name]
-    assert isinstance(
-        source_outputs, Sequence
-    ), f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    assert isinstance(source_outputs, Sequence), (
+        f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    )
     index = typing.cast(int, node.args[1])
     value = source_outputs[index]
     # Save the getitem value to the values mapping to in case
@@ -644,15 +647,18 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    output_value_name = node.args[0][0].name  # type: ignore[index,union-attr]
-    assert isinstance(
-        output_value_name, str
-    ), f"Bug: Expected {output_value_name!r} to be a string"
-    values = node_name_to_values[output_value_name]
-    if isinstance(values, Sequence):
-        graph_like.outputs.extend(values)
-        return
-    graph_like.outputs.append(values)
+    # node.args[0] can be a tuple with more than one elements. This happens when,
+    # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
+    for output in node.args[0]:  # type: ignore[index,union-attr]
+        output_value_name = output.name  # type: ignore[union-attr]
+        assert isinstance(output_value_name, str), (
+            f"Bug: Expected {output_value_name!r} to be a string"
+        )
+        values = node_name_to_values[output_value_name]
+        if isinstance(values, Sequence):
+            graph_like.outputs.extend(values)
+            return
+        graph_like.outputs.append(values)
 
 
 def _translate_fx_graph(
@@ -750,9 +756,9 @@ def _get_inputs_and_attributes(
         return inputs, {}, [], [node.name]  # type: ignore[return-value]
 
     # The target should be an ATen operator now
-    assert hasattr(
-        node.target, "_schema"
-    ), f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    assert hasattr(node.target, "_schema"), (
+        f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    )
     node_schema: torch.FunctionSchema = node.target._schema
 
     # This function assumes the order of arguments in FX op is the
@@ -964,7 +970,7 @@ def _exported_program_to_onnx_program(
                 ),
             },
         ),
-        ir_version=_ONNX_IR_VERSION,
+        ir_version=_constants.ONNX_IR_VERSION,
         producer_name="pytorch",
         producer_version=torch.__version__,
     )
@@ -994,7 +1000,7 @@ def _exported_program_to_onnx_program(
             function_name = name.replace(".", "__")
             # Inputs and outputs will be created within _translate_fx_graph
             func = ir.Function(
-                domain=_LOCAL_FUNCTION_DOMAIN,
+                domain=_constants.LOCAL_FUNCTION_DOMAIN,
                 name=function_name,
                 graph=ir.Graph((), (), nodes=()),
                 attributes=(),
@@ -1046,9 +1052,9 @@ def _exported_program_to_onnx_program(
         persistent = spec.persistent
         value = values[value_name]
 
-        assert not isinstance(
-            value, Sequence
-        ), f"Input '{value_name}' should not be a sequence. This is unexpected."
+        assert not isinstance(value, Sequence), (
+            f"Input '{value_name}' should not be a sequence. This is unexpected."
+        )
 
         value.metadata_props["pkg.torch.export.graph_signature.InputSpec.kind"] = (
             input_kind.name
@@ -1164,6 +1170,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
+@_flags.set_onnx_exporting_flag
 def export(
     model: torch.nn.Module
     | torch.export.ExportedProgram
@@ -1224,6 +1231,7 @@ def export(
     failed_results: list[_capture_strategies.Result] = []
 
     program: torch.export.ExportedProgram | None = None
+    capture_strategy: str | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -1249,16 +1257,20 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrategy:
                 export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
+                export_status.torch_export_draft_export = result.success
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
-            if result.exported_program is not None:
+            if result.exception is not None:
+                failed_results.append(result)
+            if result.success:
+                assert result.exported_program is not None
                 program = result.exported_program
                 break
-            else:
-                failed_results.append(result)
 
         assert result is not None
+        capture_strategy = result.strategy
         if result.exported_program is None:
             # If all strategies fail, produce an error report and raise the first error
             profile_result = _maybe_stop_profiler_and_get_result(profiler)
@@ -1372,6 +1384,8 @@ def export(
         onnx_program = _exported_program_to_onnx_program(
             decomposed_program, registry=registry
         )
+        # Record the strategy used for getting the exported program for unit test assertions
+        onnx_program._capture_strategy = capture_strategy
 
         # Run the ONNX passes
         if input_names:
@@ -1399,7 +1413,7 @@ def export(
                 _reporting.create_onnx_export_report(
                     report_path,
                     f"{_format_exceptions_for_all_strategies(failed_results)}\n\n{_format_exception(e)}",
-                    program,
+                    decomposed_program,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),

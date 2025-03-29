@@ -15,7 +15,6 @@ runs:
           -e BINARY_ENV_FILE \
           -e BUILD_ENVIRONMENT \
           -e DESIRED_CUDA \
-          -e DESIRED_DEVTOOLSET \
           -e DESIRED_PYTHON \
           -e GITHUB_ACTIONS \
           -e GPU_ARCH_TYPE \

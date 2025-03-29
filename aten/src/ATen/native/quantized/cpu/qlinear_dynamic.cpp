@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/ACLUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/PackedParams.h>
@@ -67,8 +68,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
           std::to_string(K));
 
   // Calculate statistics for quantization of the input Tensor
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min, x_max;
+  float x_min = std::numeric_limits<float>::quiet_NaN(), x_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
@@ -274,18 +274,14 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  float x_min = 0;
+  float x_max = 0;
   if (input.numel() > 0) {
     x_min = input_contig.min().item<float>();
     x_max = input_contig.max().item<float>();
   } else {
     // On empty input, no output data will be generated,
     // so use arbitrary qparams.
-    x_min = 0;
-    x_max = 0;
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
@@ -702,6 +698,135 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   primitive.execute(ideep::stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
+
+#if AT_MKLDNN_ACL_ENABLED()
+
+template <bool ReluFused>
+at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
+    at::Tensor input,
+    bool reduce_range) {
+  // Dynamic: fp32 * int8 -> fp32
+  using at::Tensor;
+
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "The dimension of input tensor should be larger than or equal to 2");
+  TORCH_CHECK(
+      input.scalar_type() == c10::ScalarType::Float,
+      "qlinear_dynamic (ACL): data type of input should be float.");
+
+  auto input_contig = input.contiguous();
+  const int64_t dim = input.dim();
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+  auto input_dims = input_reshaped.sizes().vec();
+
+  int64_t m = input_dims[0];
+  auto key = std::make_tuple(
+      m, /* M */
+      ReluFused, /* FUSE_RELU */
+      static_cast<int64_t>(at::get_num_threads()), /* NUM_THREADS */
+      1, /* INPUT_SCALE */
+      0, /* INPUT_OFFSET */
+      1, /* OUTPUT_SCALE */
+      0, /* OUTPUT_OFFSET */
+      true /* SIGNED_INPUT */
+  );
+  auto acl_gemm =
+      get_acl_quant_matmul<at::native::acl_utils::DynamicQuantMatmul>(key);
+
+  if (acl_gemm) {
+    // Find quantization parameters
+    float x_max = 0, x_min = 0;
+
+#ifdef USE_FBGEMM
+    // Use FBGEMM's FindMinMax if available since it's faster
+    fbgemm::FindMinMax(
+        /*m=*/input_contig.data_ptr<float>(),
+        /*min=*/&x_min,
+        /*max=*/&x_max,
+        /*len=*/input.numel());
+#else
+    if (input_contig.numel() > 0) {
+      auto [t_min, t_max] = at::aminmax(input_contig);
+      x_max = t_max.item<float>();
+      x_min = t_min.item<float>();
+    }
+#endif
+
+    auto q_params = quant_utils::ChooseQuantizationParams(
+        /*min=*/x_min,
+        /*max=*/x_max,
+        /*qmin=*/std::numeric_limits<int8_t>::min(),
+        /*qmax=*/std::numeric_limits<int8_t>::max(),
+        /*preserve_sparsity=*/false,
+        /*force_scale_power_of_two=*/false,
+        /*reduce_range=*/reduce_range);
+
+    acl_gemm->src_tensor.allocator()->import_memory(
+        (float*)input_contig.data_ptr());
+
+    acl_gemm->src_q_tensor.info()->set_quantization_info(
+        arm_compute::QuantizationInfo(
+            q_params.scale, q_params.zero_point, true));
+
+    // quantize src tensor: fp32 -> s8
+    acl_gemm->quant.run();
+
+    // allocation for fp32 out tensor
+    auto output = at::empty({m, n_}, input.options().dtype(at::kFloat));
+    if (output.numel() == 0)
+      return output;
+
+    // We set the offset to "-zero_point" for the GEMM, but to "zero_point" for
+    // the quantization layer This is a known inconsistency in ACL.
+    acl_gemm->src_q_tensor.info()->set_quantization_info(
+        arm_compute::QuantizationInfo(
+            q_params.scale, -q_params.zero_point, true));
+
+    acl_gemm->dst_tensor.allocator()->import_memory((float*)output.data_ptr());
+
+    // s8 src, s8 wei -> f32 dst
+    acl_gemm->gemm.run();
+
+    if (acl_gemm->relu.has_value()) {
+      acl_gemm->relu->run();
+    }
+
+    // this will not free memory, it will just tell ACL that we're no longer
+    // using the pointer
+    acl_gemm->src_tensor.allocator()->free();
+    acl_gemm->dst_tensor.allocator()->free();
+
+    auto out_sizes = input.sizes().vec();
+    out_sizes.back() = n_;
+    if (output.sizes().vec() == out_sizes)
+      return output;
+    return output.reshape(out_sizes);
+  }
+
+  // fallback to oneDNN in the unlikely scinario that ACL's validation fails
+  if (ReluFused) {
+    return PackedLinearWeightsOnednn::apply_dynamic_relu(input, reduce_range);
+  } else {
+    return PackedLinearWeightsOnednn::apply_dynamic(input, reduce_range);
+  }
+}
+
+at::Tensor PackedLinearWeightsACL::apply_dynamic(
+    at::Tensor input,
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/false>(
+      std::move(input), reduce_range);
+}
+
+at::Tensor PackedLinearWeightsACL::apply_dynamic_relu(
+    at::Tensor input,
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input), reduce_range);
+}
+
+#endif // #if AT_MKLDNN_ACL_ENABLED()
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {

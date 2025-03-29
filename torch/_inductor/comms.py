@@ -7,7 +7,7 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -42,7 +42,7 @@ def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -52,8 +52,8 @@ def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
 
 
 def reorder_compute_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
         Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes
@@ -71,11 +71,11 @@ def reorder_compute_for_overlap(
 
 
 def _schedule_for_comm(
-    snodes: List[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode],
     raise_comms: bool,
     sink_waits: bool,
     reorder_for_overlap: bool,
-) -> List[BaseSchedulerNode]:
+) -> list[BaseSchedulerNode]:
     """
     Schedule `snodes` for various comm optimization objectives.
 
@@ -149,13 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, OrderedSet[str]] = {
+    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
         snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
         for snode in snodes
     }
 
-    ready: List[Runnable] = []
-    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
+    ready: list[Runnable] = []
+    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -219,15 +219,14 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
     return scheduled
 
 
 def decide_global_ordering_of_comms(
-    nodes: List[BaseSchedulerNode], name_to_buf, name_to_fused_node
-) -> List[BaseSchedulerNode]:
+    nodes: list[BaseSchedulerNode], name_to_buf, name_to_fused_node
+) -> list[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
@@ -303,8 +302,8 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     order = snodes
 
     for p in config.reorder_for_compute_comm_overlap_passes:
@@ -354,9 +353,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
         ):
-            assert (
-                node.args[0].op == "placeholder"
-            ), f"""\
+            assert node.args[0].op == "placeholder", f"""\
 Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
 """
             graph_input = node.args[0]
@@ -408,9 +405,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that
         if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
             fsdp_copy_node = node
             unsharded_param = node.args[0]
-            assert (
-                unsharded_param.op == "placeholder"
-            ), f"""
+            assert unsharded_param.op == "placeholder", f"""
 Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
 Offending node: {unsharded_param}. Graph: {graph}
 """
@@ -653,10 +648,10 @@ def get_op_idx(snode):
 
 
 def enforce_comm_ordering_for_fsdp(
-    snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: Dict[str, BaseSchedulerNode],
-) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
+    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
