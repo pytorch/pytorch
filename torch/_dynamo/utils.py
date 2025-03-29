@@ -94,7 +94,14 @@ from torch.utils.hooks import RemovableHandle
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Iterator, KeysView, ValuesView
+    from collections.abc import (
+        Generator,
+        ItemsView,
+        Iterable,
+        Iterator,
+        KeysView,
+        ValuesView,
+    )
 
 
 try:
@@ -2389,6 +2396,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
+dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
