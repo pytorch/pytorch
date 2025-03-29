@@ -440,6 +440,7 @@ Example::
 .. autoclass:: torch.utils.data.WeightedRandomSampler
 .. autoclass:: torch.utils.data.BatchSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
+.. autoclass:: torch.utils.data.distributed.DistributedWeightedRandomSampler
 
 
 .. These modules are documented as part of torch/data listing them here for

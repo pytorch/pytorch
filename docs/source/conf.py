@@ -3315,6 +3315,8 @@ coverage_ignore_classes = [
     "ConcatDataset",
     # torch.utils.data.distributed
     "DistributedSampler",
+    # torch.utils.data.distributed
+    "DistributedWeightedRandomSampler",
     # torch.utils.dlpack
     "DLDeviceType",
     # torch.utils.file_baton
