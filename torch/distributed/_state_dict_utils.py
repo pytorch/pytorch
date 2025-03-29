@@ -409,9 +409,9 @@ def _create_cpu_state_dict(
 
                 def unpin_memory(t):
                     succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
-                    assert succ == 0, (
-                        f"Unpinning shared memory failed with error-code: {succ}"
-                    )
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
 
                 weakref.finalize(t, unpin_memory, t)
                 succ = int(
@@ -421,9 +421,9 @@ def _create_cpu_state_dict(
                         1,  # lines up with 'cudaHostRegisterPortable'
                     )
                 )
-                assert succ == 0, (
-                    f"Pinning shared memory failed with error-code: {succ}"
-                )
+                assert (
+                    succ == 0
+                ), f"Pinning shared memory failed with error-code: {succ}"
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
@@ -653,8 +653,10 @@ def _broadcast_state_dict(
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
             if cpu_offload:
                 for key in keys:
-                    if key in local_state_dict or not strict:
+                    if key in local_state_dict:
                         local_state_dict[key] = local_state_dict[key].cpu()
+                    elif strict and key in full_state_dict:
+                        full_state_dict.pop(key)
             keys.clear()
 
     if strict:
