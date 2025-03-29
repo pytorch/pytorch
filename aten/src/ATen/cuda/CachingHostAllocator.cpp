@@ -185,21 +185,6 @@ struct CUDACachingHostAllocatorImpl
     }
   }
 
-  void registerPages(const void* ptr, size_t size) {
-    AT_CUDA_CHECK(
-        cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
-
-    // If host and device pointer don't match, give a warning and exit
-    void* devptr = nullptr;
-    AT_CUDA_CHECK(cudaHostGetDevicePointer(&devptr, (void*)ptr, 0));
-    TORCH_CHECK(
-        (void*)devptr == (void*)ptr,
-        "Host and device pointer dont match with cudaHostRegister. "
-        "Please dont use this feature by setting "
-        "PYTORCH_CUDA_ALLOC_CONF=use_cuda_host_register:False (default)",
-        "");
-  }
-
   void allocWithCudaHostRegister(void** ptr, size_t roundSize) {
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
@@ -249,7 +234,8 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
-    registerPages(*ptr, roundSize);
+    AT_CUDA_CHECK(
+        cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
   }
 };
 
