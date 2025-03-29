@@ -212,9 +212,9 @@ def hardswish(self: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
-        self < -3,
+        self <= -3,
         0.0,
-        torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
+        torch.where(self < 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
 
@@ -1491,6 +1491,8 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     out = alpha * torch.mv(mat1, vec)
     if beta == 0:
         return out
+    if out.numel() == 0:  # handle empty matrix
+        return beta * self
     return out + beta * self
 
 

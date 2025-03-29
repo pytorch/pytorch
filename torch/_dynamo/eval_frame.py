@@ -56,13 +56,14 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
+    set_code_exec_strategy,
     set_eval_frame,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
-    skip_code,
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -71,6 +72,10 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
 )
 from torch.fx import GraphModule
+from torch.fx.experimental._dynamism import (
+    clone_and_convert_to_meta,
+    track_dynamism_across_examples,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -83,7 +88,13 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
+from .exc import (
+    CondOpArgsMismatchError,
+    ShortenTraceback,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
@@ -151,20 +162,34 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
+_EXAMPLE_INPUTS: Optional[dict[str, list[Any]]] = None
+
+
+def get_example_inputs(key) -> list[Any]:
+    global _EXAMPLE_INPUTS
+    if _EXAMPLE_INPUTS is None:
+        _EXAMPLE_INPUTS = {}
+
+    if key not in _EXAMPLE_INPUTS:
+        _EXAMPLE_INPUTS[key] = []
+
+    return _EXAMPLE_INPUTS[key]
+
 
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
-            hooks = Hooks()
-            callback = convert_frame.catch_errors_wrapper(
-                convert_frame.convert_frame(  # type: ignore[arg-type]
-                    get_compiler_fn(_stance.backend),
-                    hooks,
-                ),
-                hooks,
-            )
+            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
+        return callback
+    elif _stance.stance == "eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
+        return callback
+    elif _stance.stance == "aot_eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -187,6 +212,51 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _create_wrapped_callback(compiler_fn, dynamism=None):
+    hooks = Hooks()
+    return convert_frame.catch_errors_wrapper(
+        convert_frame.convert_frame(  # type: ignore[arg-type]
+            compiler_fn,
+            hooks,
+        ),
+        hooks,
+    )
+
+
+def _get_or_add_example_inputs(frame):
+    key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+    example_inputs = get_example_inputs(key)
+
+    if len(example_inputs) < 2:
+        example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+    return example_inputs
+
+
+def _create_delayed_compile_callback(callback, stance):
+    def callback_fn(*args, **kwargs):
+        frame = args[0]
+        example_inputs = _get_or_add_example_inputs(frame)
+
+        if len(example_inputs) == 1:
+            if stance == "eager_then_compile":
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.DEFAULT, FrameAction.DEFAULT
+                    )
+                )
+            elif stance == "aot_eager_then_compile":
+                aot_eager_fn = get_compiler_fn("aot_eager")
+                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+
+        dynamism = track_dynamism_across_examples(example_inputs)
+        code_context.get_context(frame.f_code)["dynamism"] = dynamism
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
+
+    return callback_fn
 
 
 def _is_skip_guard_eval_unsafe_stance():
@@ -253,9 +323,12 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and (
-            trace_rules.check(self._orig_mod.forward)
-            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+        elif config.wrap_top_frame or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and (
+                trace_rules.check(self._orig_mod.forward)
+                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -583,6 +656,15 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
+                except Unsupported as e:
+                    if config.verbose:
+                        raise
+                    # strip internal tracebacks from causes
+                    cur_exn: BaseException = e
+                    while cur_exn.__cause__ is not None:
+                        cur_exn.__cause__.with_traceback(None)
+                        cur_exn = cur_exn.__cause__
+                    raise e.with_traceback(None) from e.__cause__
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -683,12 +765,15 @@ class OptimizeContext(_TorchDynamoContext):
         )
 
         if config.compiled_autograd:
+            _dynamic = self._dynamic
+            if _dynamic is None:
+                _dynamic = not torch._dynamo.config.assume_static_by_default
 
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=self._dynamic
+                    compiler_fn, dynamic=_dynamic
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -822,9 +907,14 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
+        3,
+        13,
+        3,
+    ):
         raise RuntimeError(
-            "torch.compile is not supported on Python built with GIL disabled"
+            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
+            "Please use Python 3.13.3+."
         )
 
 
@@ -1886,3 +1976,9 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
+
+
+def skip_code(code: types.CodeType):
+    set_code_exec_strategy(
+        code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+    )

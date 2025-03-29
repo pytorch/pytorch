@@ -196,9 +196,25 @@ class SymNode:
         return self._hint is not None
 
     def require_hint(self, fallback=None):
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
         if self._hint is None:
             if fallback is not None:
-                return fallback
+                # Say we have some expr like 2*u0 + s0
+                # The hint will be None, since the expr contains at least 1 unbacked.
+                # We will:
+                # - replace every backed free symbol with its corresponding hint
+                # - replace every unbacked free symbol with the fallback
+                # - regenerate the expression with those symbol replacements
+                # Note: this is not really complete either, since right now
+                # this logic does not take into account any value ranges
+                # for the unbacked symints, we may need to beef it up at some point.
+                unbacked_symbols = free_unbacked_symbols(self.expr)
+                replacements = {
+                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    for s in self.expr.free_symbols
+                }
+                return self.expr.xreplace(replacements)
             # NB: we expect this to raise
             return self.shape_env.size_hint(self.expr)
         return self._hint
@@ -490,13 +506,14 @@ class SymNode:
         # NB: Only for integers!
         return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
+    def evaluate(self, size_oblivious=False):
+        return self.shape_env.evaluate_sym_node(self, size_oblivious)
+
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.evaluate()
         try:
             return int(r)
         except Exception:
@@ -506,9 +523,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.evaluate()
         try:
             return float(r)
         except Exception:
@@ -518,9 +533,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.evaluate()
         try:
             return bool(r)
         except Exception:
@@ -572,13 +585,7 @@ class SymNode:
         """
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr,
-            self.hint,
-            fx_node=self.fx_node,
-            size_oblivious=True,
-            expr_sym_node_id=id(self),
-        )
+        r = self.evaluate(size_oblivious=True)
         try:
             return bool(r)
         except Exception:
@@ -1265,7 +1272,17 @@ def _make_node_magic(method, func):
 
                 def get_id(sym_node) -> Optional[int]:
                     # We don't want to return an ID if the input is a constant
-                    return None if sym_node.constant is not None else id(sym_node)
+                    import sympy
+
+                    if sym_node.constant is not None:
+                        return None
+                    elif id(sym_node) == id(result):
+                        return None
+                    elif isinstance(sym_node.expr, (sympy.Integer, sympy.Float)):
+                        return None
+                    elif sym_node.expr in (sympy.true, sympy.false):
+                        return None
+                    return id(sym_node)
 
                 dtrace_structured(
                     "expression_created",
