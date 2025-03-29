@@ -102,8 +102,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
+        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -142,7 +143,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "cpp",
         )
         with debug_printer_manager:
-            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            code.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -898,7 +899,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -938,7 +939,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
-    def generate_return(self, output_refs: list[str]):
+    def _generate_return_helper(self, code: IndentedBuffer, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
@@ -946,8 +947,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # RAIIAtenTensorHandle first.  This prevents situations where the code for the
         # rvalue tensor references tensor handles whose contents are modified below.
         output_refs = [
-            self.create_tmp_raii_handle_var_if_needed(o, self.wrapper_call)
-            for o in output_refs
+            self.create_tmp_raii_handle_var_if_needed(o, code) for o in output_refs
         ]
 
         for idx, output in enumerate(output_refs):
@@ -964,26 +964,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
                 output_tensor = self.codegen_scalar_to_tensor(output)
-                self.wrapper_call.writeline(
-                    f"output_handles[{idx}] = {output_tensor}.release();"
-                )
+                code.writeline(f"output_handles[{idx}] = {output_tensor}.release();")
                 continue
 
             if is_constant_buffer:
                 # See NOTE(return_constant) above.
-                self.wrapper_call.writeline(
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
-                )
+                code.writeline(f"aoti_torch_clone({output}, &output_handles[{idx}]);")
             else:
                 if output in output2idx:
                     src_idx = output2idx[output]
-                    self.wrapper_call.writeline(
+                    code.writeline(
                         f"output_handles[{idx}] = output_handles[{src_idx}];"
                     )
                 else:
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = {output}.release();"
-                    )
+                    code.writeline(f"output_handles[{idx}] = {output}.release();")
 
             if output not in output2idx:
                 output2idx[output] = idx
@@ -1092,6 +1086,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_c_shim_extern_kernel_call(
         self,
+        code: IndentedBuffer,
         kernel: str,
         args: list[str],
         device: str,
@@ -1109,12 +1104,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
+            code.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
 
     def generate_c_shim_extern_kernel_alloc(
-        self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
+        self, code: IndentedBuffer, extern_kernel: ir.ExternKernelAlloc, args: list[str]
     ) -> None:
         # registered output buffer name
         name = extern_kernel.name
@@ -1125,26 +1120,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
         if not is_inplace:
-            self.writeline(f"AtenTensorHandle {output_handle_name};")
+            code.writeline(f"AtenTensorHandle {output_handle_name};")
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            code, extern_kernel.get_kernel_name(), args, device
         )
 
         if not is_inplace:
-            self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+            code.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(
+        self, code: IndentedBuffer, extern_kernel, args
+    ):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
-            self.generate_c_shim_fallback_kernel(extern_kernel, args)
+            self.generate_c_shim_fallback_kernel(code, extern_kernel, args)
         else:
-            self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
+            self.generate_c_shim_extern_kernel_alloc(code, extern_kernel, args)
 
     def generate_c_shim_fallback_kernel(
-        self, fallback_kernel: ir.FallbackKernel, args: list[str]
+        self, code: IndentedBuffer, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
         output_args = []
         output_raii_handles = []
@@ -1158,18 +1155,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     assert output.indices[0][1] == idx, (
                         f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                     )
-                self.writeline(f"AtenTensorHandle {output_handle_name};")
+                code.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
                     f"RAIIAtenTensorHandle {name}({output_handle_name});"
                 )
             elif isinstance(output, int):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"int64_t {output_name} = {output};")
+                code.writeline(f"int64_t {output_name} = {output};")
                 output_args.append(f"&{output_name}")
             elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {cexpr(output)};")
+                code.writeline(f"auto {output_name} = {cexpr(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1178,18 +1175,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
+            code,
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
         )
         for raii_handle in output_raii_handles:
-            self.writeline(raii_handle)
+            code.writeline(raii_handle)
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
-        self.generate_c_shim_fallback_kernel(fallback_kernel, args)
-
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_out_helper(
         self,
+        code: IndentedBuffer,
         kernel: str,
         out: str,
         out_view: Optional[str],
@@ -1198,12 +1194,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
-            self.writeline(f"auto {out_name} = {out_view};")
+            code.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(code, kernel, args, device)
 
     def generate_scatter_fallback(
         self,
@@ -1633,7 +1629,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
-    def codegen_multi_output(self, name, value):
+    def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
         pass

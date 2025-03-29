@@ -10,6 +10,7 @@ import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
@@ -29,6 +30,8 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
 )
+
+from typing import Callable, Any
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -142,6 +145,28 @@ def requires_cuda_with_enough_memory(min_mem_required):
             return fn
 
     return inner
+
+def call_many(func: Callable[Any, None], ref, actual) -> None:
+    """
+    Calls a function on program output(s). Supports sequences via pytree.
+    """
+    def flatten_tensors(tensors):
+        flat, spec = pytree.tree_flatten(tensors)
+        return flat
+
+    ref_tensors = flatten_tensors(ref)
+    actual_tensors = flatten_tensors(actual)
+    for ref, actual in zip(ref_tensors, actual_tensors):
+        func(ref, actual)
+
+def allclose_many(test: TestCase, ref, actual, **kwargs) -> None:
+    """
+    Calls torch.allclose on all output(s).
+    """
+    def assert_func(x, y):
+        test.assertTrue(torch.allclose(x, y, **kwargs))
+
+    call_many(assert_func, ref, actual)
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
