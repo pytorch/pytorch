@@ -92,9 +92,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> max(T a, T b) {
-  return ::metal::max(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+max(T a, U b) {
+  return ::metal::max(a, static_cast<T>(b));
 }
 
 template <typename T>
@@ -102,9 +103,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> min(T a, T b) {
-  return ::metal::min(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+min(T a, U b) {
+  return ::metal::min(a, static_cast<T>(b));
 }
 
 #if __METAL_VERSION__ >= 310
