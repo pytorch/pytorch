@@ -680,7 +680,9 @@ class MetalKernel(SIMDKernel):
             if self.inside_reduction:
                 reduction_dim = next(t for t in self.range_trees if t.is_reduction)
                 threadgroup_size = min(reduction_dim.numel, self.max_threadgroup_size)
-                code.writeline(f"[[max_total_threads_per_threadgroup({threadgroup_size})]]")
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
