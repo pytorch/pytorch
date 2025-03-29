@@ -1482,7 +1482,8 @@ test_executorch() {
   bash examples/models/llama3_2_vision/install_requirements.sh
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
-  bash .ci/scripts/setup-linux.sh --build-tool cmake
+  # Remove CMAKE_POLICY_VERSION_MINIMUM=3.5 when 4.0.0 is supported
+  CMAKE_POLICY_VERSION_MINIMUM=3.5 bash .ci/scripts/setup-linux.sh --build-tool cmake
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
