@@ -824,7 +824,9 @@ class PythonWrapperCodegen(CodeGen):
     def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()
-        self.args_to_buffers: dict[str, ir.Buffer] = {}
+        self.args_to_buffers: dict[
+            str, Union[None, ir.TensorBox, ir.Buffer, ir.TorchBindObject]
+        ] = {}
         self.imports = IndentedBuffer()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()

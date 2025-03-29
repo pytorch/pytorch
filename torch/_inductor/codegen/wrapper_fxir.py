@@ -222,10 +222,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             else:
                 raise NotImplementedError(f"Unrecognized output node: {node}")
 
-        output_refs = tuple(
+        output_refs = [
             codegen_output(node).get_name()
             for idx, node in enumerate(V.graph.graph_outputs)
-        )
+        ]
         self.writeline(OutputLine(self, output_refs))
 
     def _generate(self, is_inference):
