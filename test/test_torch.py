@@ -10844,7 +10844,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 str(w[0].message)
             )
 
-            y = math.pow(x, 3)  # calling it again does not result in a second warning
+            _ = math.pow(x, 3)  # calling it again does not result in a second warning
             self.assertEqual(len(w), 1)
 
 # The following block extends TestTorch with negative dim wrapping tests
