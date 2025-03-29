@@ -166,7 +166,8 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
               "For roundups, the intervals have to be power of 2 ");
 
           size_t index = 63 - llvm::countLeadingZeros(val1_long);
-          index = std::clamp(index, size_t{0}, roundup_power2_divisions_.size() - 1);
+          index = std::clamp(
+              index, size_t{0}, roundup_power2_divisions_.size() - 1);
 
           if (first_value) {
             std::fill(
