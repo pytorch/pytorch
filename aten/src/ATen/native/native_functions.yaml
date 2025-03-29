@@ -11497,6 +11497,20 @@
   dispatch:
     CompositeExplicitAutograd: _foreach_copy
 
+- func: _foreach_fill.Scalar(Tensor[] self, Scalar value) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_fill_scalar_kernel
+
+- func: _foreach_fill_.Scalar(Tensor(a!)[] self, Scalar value) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_fill_scalar_kernel_slow_
+    CUDA: foreach_tensor_fill_scalar_kernel_cuda_
+  autogen: _foreach_fill.Scalar_out
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
