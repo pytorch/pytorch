@@ -12,6 +12,11 @@
 #include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#include <cuda/barrier>
+#include <cuda/ptx>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -75,7 +80,7 @@ inline std::tuple<dim3, dim3> getCatGridRocm(unsigned int max_elements_per_tenso
 template<typename T>
 inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_tensor,
   ptrdiff_t nTensors) {
-  constexpr unsigned int threads_per_block = 128;
+  constexpr unsigned int threads_per_block =  512;
   constexpr unsigned int min_aligned_vec_per_thread = 1;
   constexpr unsigned int max_tb_per_sm = 32;
 
@@ -284,6 +289,347 @@ __global__ void CatArrayBatchedCopy_aligned16_contig(
     }
 }
 
+template <typename T, int chunk_size, int stage_num>
+struct SMEM {
+  alignas(16) T in_stage[stage_num][chunk_size];
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  alignas(16) ::cuda::barrier<::cuda::thread_scope_block> bar[stage_num];
+  #endif
+};
+
+template <typename = void>
+__device__ static inline bool elect_sync(const std::uint32_t& membermask) {
+  std::uint32_t is_elected;
+  asm volatile(
+    "{\n\t .reg .pred P_OUT; \n\t"
+    "elect.sync _|P_OUT, %1;\n\t"
+    "selp.b32 %0, 1, 0, P_OUT; \n"
+    "}"
+    : "=r"(is_elected)
+    : "r"(membermask)
+    :);
+  return static_cast<bool>(is_elected);
+}
+
+template <typename ITYPE, typename IndexType, int inputsNum>
+struct Parameters {
+  int lengths[inputsNum];
+  const ITYPE* data[inputsNum];
+  IndexType nElements[inputsNum];
+  int buffer_len = 0;
+  int Dims[inputsNum];
+  IndexType dimSize_total = 0;
+  IndexType src_start[inputsNum];
+  uint16_t f2D = 0;
+  uint16_t each_length[inputsNum];
+  IndexType total_len = 0;
+  uint8_t repeats = 0;
+};
+
+template <typename T, typename ITYPE, typename IndexType, int batch_size, int stride_size, int inputsNum, int block_dim>
+__device__ void initial_parameters(
+  CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+  Parameters<ITYPE, IndexType, inputsNum> &cal_parameters,
+  int scalar_t_num){
+  #pragma unroll
+  for(int i=0; i<inputsNum; i++){
+    cal_parameters.dimSize_total += inputs.dimSize[i];
+    cal_parameters.nElements[i] = inputs.nElements[i]/scalar_t_num;
+    cal_parameters.Dims[i] = inputs.dimSize[i]/scalar_t_num;
+    cal_parameters.data[i] = reinterpret_cast<const ITYPE*>(inputs.input[i]);
+    cal_parameters.f2D += cal_parameters.Dims[i];
+    cal_parameters.total_len += cal_parameters.nElements[i];
+  }
+
+  cal_parameters.dimSize_total /= scalar_t_num;
+  cal_parameters.repeats = blockDim.x / cal_parameters.dimSize_total;
+  int num_loads = block_dim / cal_parameters.dimSize_total;
+  cal_parameters.f2D -= cal_parameters.Dims[inputsNum - 1];
+
+  #pragma unroll
+  for(int i=0; i<inputsNum; i++){
+    cal_parameters.lengths[i] = min(num_loads * cal_parameters.Dims[i], cal_parameters.nElements[i]);
+    cal_parameters.buffer_len += cal_parameters.lengths[i];
+    cal_parameters.each_length[i] = cal_parameters.repeats * cal_parameters.Dims[i];
+  }
+}
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+using ArrivalToken = ::cuda::barrier<::cuda::thread_scope_block>::arrival_token;
+
+template <typename T, typename ITYPE, typename IndexType, int inputsNum, int block_dim, int num_stages>
+__device__ void TMA_load(
+  int stage,
+  Parameters<ITYPE, IndexType, inputsNum> &cal_parameters,
+  SMEM<ITYPE, block_dim, num_stages> &smem,
+  ArrivalToken (&token)[num_stages]){
+
+  int acc_length = 0, acc_length_bytes = 0;
+  if(cal_parameters.src_start[0] < cal_parameters.nElements[0]){
+    #pragma unroll
+    for(int i = 0; i < inputsNum; i++){
+      IndexType length = cal_parameters.src_start[i] + cal_parameters.lengths[i] < cal_parameters.nElements[i] ? cal_parameters.lengths[i] : cal_parameters.nElements[i] - cal_parameters.src_start[i];
+      IndexType length_bytes = length * sizeof(ITYPE);
+      ::cuda::ptx::cp_async_bulk(
+            ::cuda::ptx::space_cluster,
+            ::cuda::ptx::space_global,
+            &smem.in_stage[stage][acc_length],
+            &cal_parameters.data[i][cal_parameters.src_start[i]],
+            length_bytes,
+            (uint64_t*)&smem.bar[stage]);
+      acc_length += cal_parameters.lengths[i];
+      acc_length_bytes += length_bytes;
+    }
+    token[stage]= ::cuda::ptx::mbarrier_arrive_expect_tx(
+      ::cuda::ptx::sem_release,
+      ::cuda::ptx::scope_cta,
+      ::cuda::ptx::space_shared,
+      (uint64_t*)&smem.bar[stage],
+      acc_length_bytes);
+  }
+}
+#endif
+
+template<typename ITYPE, typename IndexType, int inputsNum>
+__device__ uint16_t cal_index(
+  Parameters<ITYPE, IndexType, inputsNum> cal_parameters,
+  uint16_t mod,
+  uint16_t pos_r){
+  uint16_t in_index;
+  if(inputsNum == 2)
+    in_index = mod < cal_parameters.Dims[0] ? (pos_r*cal_parameters.Dims[0] + mod) : (cal_parameters.lengths[0] + pos_r * cal_parameters.Dims[1] + mod - cal_parameters.Dims[0]);
+  else if (inputsNum == 3)
+    in_index = mod < cal_parameters.Dims[0] ? (pos_r*cal_parameters.Dims[0] + mod) : ((mod < cal_parameters.f2D) ? (cal_parameters.lengths[0] + pos_r * cal_parameters.Dims[1] + mod - cal_parameters.Dims[0]) : (cal_parameters.lengths[0] + cal_parameters.lengths[1] + pos_r * cal_parameters.Dims[2] + mod - cal_parameters.f2D));
+  return in_index;
+}
+
+//TMA - generic kernel
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int num_stages=1, int block_dim=128>
+__global__ void CatArrayBatchedCopy_contig_TMA(
+    T* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
+    IndexType dimStride) {
+
+    IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
+    IndexType nElements = inputs.nElements[blockIdx.y];
+
+    using ITYPE = typename std::conditional<sizeof(T) == 2, __half2,
+    typename std::conditional<std::is_same<T, float>::value, float4,
+        typename std::conditional<std::is_same<T, int>::value, int4, T>::type>::type>::type;
+
+    int scalar_t_num = 1;
+    if(sizeof(T)==2){
+      scalar_t_num = 2;
+    }else if(std::is_same<T, int>::value or std::is_same<T, float>::value){
+      scalar_t_num = 4;
+    }
+
+    if(tid >= nElements) return;
+    IndexType offset = inputs.offset[blockIdx.y];
+    IndexType dimSize = inputs.dimSize[blockIdx.y];
+    IndexType dataOffset = offset * dimStride / scalar_t_num;
+
+    IndexType smem_stride = gridDim.x * block_dim;
+
+    extern __shared__ char dynamic_smem[];
+
+    using SMEM_T = SMEM<ITYPE, block_dim, num_stages>;
+    SMEM_T &smem = reinterpret_cast<SMEM_T&>(dynamic_smem);
+    ITYPE *output_vec = reinterpret_cast<ITYPE*>(output);
+
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    ::cuda::barrier<::cuda::thread_scope_block>::arrival_token token[num_stages];
+    #endif
+
+    const ITYPE* data = reinterpret_cast<const ITYPE*>(inputs.input[blockIdx.y]);
+    IndexType h2_nElements = nElements/scalar_t_num;
+    bool elected = elect_sync(~0);
+
+    if (threadIdx.x < 32 && elected) {
+      #pragma unroll
+      for (int stage = 0; stage < num_stages; ++stage) {
+        IndexType src_start = smem_stride * stage + blockIdx.x * block_dim;
+        if(src_start < h2_nElements){
+          IndexType length = src_start + block_dim < h2_nElements ? block_dim : h2_nElements - src_start;
+          const ITYPE* src = &data[src_start];
+          IndexType length_bytes = length * sizeof(ITYPE);
+
+          #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+          init(&smem.bar[stage], 1);
+          ::cuda::ptx::fence_proxy_async(::cuda::ptx::space_shared);
+          ::cuda::ptx::cp_async_bulk(
+                  ::cuda::ptx::space_cluster,
+                  ::cuda::ptx::space_global,
+                  &smem.in_stage[stage],
+                  src,
+                  length_bytes,
+                  (uint64_t*)&smem.bar[stage]);
+          token[stage] = ::cuda::ptx::mbarrier_arrive_expect_tx(
+                  ::cuda::ptx::sem_release,
+                  ::cuda::ptx::scope_cta,
+                  ::cuda::ptx::space_shared,
+                  (uint64_t*)&smem.bar[stage],
+                  length_bytes);
+          #endif
+        }
+      }
+    }
+    int stage = 0;
+    for (int idx = (blockIdx.x * block_dim); idx < h2_nElements; idx += smem_stride) {
+      bool elected = elect_sync(~0);
+      if(threadIdx.x < 32 && elected){
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        smem.bar[stage].wait(::cuda::std::move(token[stage]));
+        #endif
+      }
+      __syncthreads();
+
+      IndexType idx_global = idx + threadIdx.x;
+      for(int out_num = 0; out_num < block_dim; out_num += blockDim.x){
+        if (idx_global < h2_nElements) {
+          IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
+                                                        os.tensorStride, dimSize, concatDim, idx_global * scalar_t_num);
+
+          output_vec[dataOffset + elementOffset/scalar_t_num] = smem.in_stage[stage][out_num + threadIdx.x];
+        }
+        idx_global += blockDim.x;
+      }
+      IndexType src_start = smem_stride * num_stages + idx;
+      __syncthreads();
+
+      elected = elect_sync(~0);
+      if(threadIdx.x < 32 && elected && src_start < h2_nElements){
+        IndexType length = src_start + block_dim < h2_nElements ? block_dim : h2_nElements - src_start;
+        const ITYPE* src = &data[src_start];
+        IndexType length_bytes = length * sizeof(ITYPE);
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        ::cuda::ptx::cp_async_bulk(
+                ::cuda::ptx::space_cluster,
+                ::cuda::ptx::space_global,
+                &smem.in_stage[stage],
+                src,
+                length_bytes,
+                (uint64_t*)&smem.bar[stage]);
+        token[stage] = ::cuda::ptx::mbarrier_arrive_expect_tx(
+                ::cuda::ptx::sem_release,
+                ::cuda::ptx::scope_cta,
+                ::cuda::ptx::space_shared,
+                (uint64_t*)&smem.bar[stage],
+                length_bytes);
+        #endif
+      }
+      stage = (stage + 1) % num_stages;
+  }
+}
+
+//TMA specialized kernel for 2 and 3 input cases
+//It could have around 2x speedup vs the general version
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int inputsNum = 2, int num_stages=1, int block_dim=128>
+__global__ void CatArrayBatchedCopy_contig_TMA_fast(
+    T* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
+    IndexType dimStride) {
+    IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
+    IndexType nElements = inputs.nElements[blockIdx.y];
+
+    using ITYPE = typename std::conditional<sizeof(T) == 2, __half2,
+    typename std::conditional<std::is_same<T, float>::value, float4,
+        typename std::conditional<std::is_same<T, int>::value, int4, T>::type>::type>::type;
+
+    int scalar_t_num = 1;
+    if(sizeof(T)==2){
+      scalar_t_num = 2;
+    }else if(std::is_same<T, int>::value or std::is_same<T, float>::value){
+      scalar_t_num = 4;
+    }
+
+    if(tid >= nElements) return;
+
+    extern __shared__ char dynamic_smem[];
+
+    using SMEM_T = SMEM<ITYPE, block_dim, num_stages>;
+    SMEM_T &smem = reinterpret_cast<SMEM_T&>(dynamic_smem);
+    ITYPE *output_vec = reinterpret_cast<ITYPE*>(output);
+
+    Parameters<ITYPE, IndexType, inputsNum> cal_parameters;
+    initial_parameters<T, ITYPE, IndexType, batch_size, stride_size, inputsNum, block_dim>(inputs, cal_parameters, scalar_t_num);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    ArrivalToken token[num_stages];
+    #endif
+    uint16_t wok_threads = cal_parameters.repeats * cal_parameters.dimSize_total;
+    uint16_t pos_r = threadIdx.x / cal_parameters.dimSize_total;
+    uint16_t mod = threadIdx.x % cal_parameters.dimSize_total;
+    IndexType smem_stride = gridDim.x * cal_parameters.buffer_len;
+
+    bool elected = elect_sync(~0);
+    if (threadIdx.x < 32 && elected) {
+      #pragma unroll
+      for (int stage = 0; stage < num_stages; ++stage) {
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        init(&smem.bar[stage], 1);
+        ::cuda::ptx::fence_proxy_async(::cuda::ptx::space_shared);
+        #endif
+        #pragma unroll
+        for(int i = 0; i < inputsNum; i++){
+          cal_parameters.src_start[i] = gridDim.x * cal_parameters.lengths[i] * stage + blockIdx.x * cal_parameters.lengths[i];
+        }
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        TMA_load<T, ITYPE, IndexType, inputsNum, block_dim, num_stages>(stage, cal_parameters, smem, token);
+        #endif
+      }
+    }
+    int stage = 0;
+
+    #pragma unroll
+    for(int i=0; i<inputsNum; i++){
+      cal_parameters.src_start[i] = gridDim.x * cal_parameters.lengths[i] * (num_stages - 1) + blockIdx.x * cal_parameters.lengths[i];
+    }
+
+    uint16_t in_index = cal_index<ITYPE, IndexType, inputsNum>(cal_parameters, mod, pos_r);
+    IndexType idx_global = blockIdx.x * cal_parameters.buffer_len;
+
+    while(idx_global < cal_parameters.total_len) {
+      bool elected = elect_sync(~0);
+      if(threadIdx.x < 32 && elected){
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        smem.bar[stage].wait(::cuda::std::move(token[stage]));
+        #endif
+      }
+      __syncthreads();
+
+      uint16_t tmp_index = in_index;
+      #pragma unroll
+      for(int tid = threadIdx.x; tid < cal_parameters.buffer_len; tid += wok_threads){
+        if (threadIdx.x < wok_threads && idx_global +tid < cal_parameters.total_len) {
+          output_vec[idx_global + tid] = smem.in_stage[stage][tmp_index];
+          if(inputsNum == 2){
+            tmp_index += mod < cal_parameters.Dims[0] ? cal_parameters.each_length[0] : cal_parameters.each_length[1];
+          }else if(inputsNum == 3){
+            tmp_index += mod < cal_parameters.Dims[0] ? cal_parameters.each_length[0] : ((mod < cal_parameters.f2D) ? cal_parameters.each_length[1] : cal_parameters.each_length[2]);
+          }
+        }
+      }
+      idx_global += smem_stride;
+      __syncthreads();
+
+      #pragma unroll
+      for(int i=0; i<inputsNum; i++){
+        cal_parameters.src_start[i] += gridDim.x * cal_parameters.lengths[i];
+      }
+      elected = elect_sync(~0);
+      if(threadIdx.x < 32 && elected){
+        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        TMA_load<T, ITYPE, IndexType, inputsNum, block_dim, num_stages>(stage, cal_parameters, smem, token);
+        #endif
+      }
+      stage = (stage + 1) % num_stages;
+  }
+}
+
 template <typename scalar_t, int batch_size, int stride_size>
 void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -378,15 +724,21 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     if (max_elements_per_tensor == 0)
       continue;
 
+    dim3 applyBlock, catGrid;
+    const int prop_major = at::cuda::getCurrentDeviceProperties()->major;
+
 #ifdef USE_ROCM
     // always base grid size on max_elements_per_tensor
     auto [catGrid, applyBlock] = getCatGridRocm<scalar_t>(
           max_elements_per_tensor, batchCounter);
 #else
-    dim3 applyBlock, catGrid;
     if (isContig && sizeof(scalar_t) > 2) {
+      int ntensors = batchCounter;
+      if(prop_major >= 9 && batchCounter > 1 && batchCounter < 4){
+        ntensors = 1;
+      }
       std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
-          max_elements_per_tensor, batchCounter);
+          max_elements_per_tensor, ntensors);
     } else {
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);
@@ -405,19 +757,39 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       }
     }
     // Template Declarations for dim = 1, 2, 3, 4
-#define HANDLE_CASE(DIMS) \
-    if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
-      CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-    } else if (isContig) {\
-      CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-    } else {\
-      CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+  #define HANDLE_CASE(DIMS) \
+    if (prop_major >= 9) { \
+      if (isContig && isAligned && sizeof(scalar_t) >= 2 && sizeof(scalar_t) <= 8 && batchCounter == 2) {\
+        CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 2, 2, 4096><<<\
+        catGrid, applyBlock, 49152, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      } else if (isContig && isAligned && sizeof(scalar_t) >= 2 && sizeof(scalar_t) <= 8 && batchCounter == 3) {\
+        CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 3, 2, 4096><<<\
+        catGrid, applyBlock, 49152, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      } else if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
+        CatArrayBatchedCopy_contig_TMA<scalar_t, unsigned int, DIMS, batch_size, stride_size,2,1024><<<\
+        catGrid, applyBlock, 49152, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      }else {\
+        CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      }\
+    }else{\
+      if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
+        CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      } else if (isContig) {\
+        CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      } else {\
+        CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+      }\
     }\
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
