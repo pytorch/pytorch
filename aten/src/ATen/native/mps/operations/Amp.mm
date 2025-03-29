@@ -18,6 +18,7 @@
 
 namespace at::native {
 namespace mps {
+namespace {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
@@ -89,6 +90,7 @@ static void _amp_update_scale_mps_impl(Tensor& self,
     [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
   });
 }
+} // namespace
 } // namespace mps
 
 void _amp_foreach_non_finite_check_and_unscale_mps_(at::TensorList self,
@@ -133,7 +135,8 @@ void _amp_foreach_non_finite_check_and_unscale_mps_(at::TensorList self,
     }
   }
 
-  std::string kernel_name = "ampNonFiniteCheckAndUnscale_" + mps::scalarToMetalTypeString(tensor_lists[0][0]);
+  std::string kernel_name =
+      "ampNonFiniteCheckAndUnscale_" + mps::scalarToMetalTypeString(tensor_lists[0][0].scalar_type());
   mps::multi_tensor_apply<1>(kernel_name, tensor_lists, found_inf, inv_scale);
 }
 
