@@ -23,7 +23,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/arange.h>
+#include <ATen/ops/linspace.h>
 #include <ATen/ops/argsort_native.h>
 #include <ATen/ops/broadcast_tensors.h>
 #include <ATen/ops/empty.h>
@@ -102,7 +102,7 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
+  auto idx_dim = at::linspace(0, dim_size - 1, dim_size, indices.options());
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
   idx_dim_sizes[dim] = dim_size;
@@ -953,7 +953,29 @@ TORCH_IMPL_FUNC(sort_stable_out)
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
+
+    c10::MaybeOwned<Tensor> indices_tmp;
+    auto dtype_indices = at::ScalarType::Long;
+    const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
+    if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
+      dtype_indices = at::ScalarType::Byte;
+    } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
+      dtype_indices = at::ScalarType::UInt16;
+    } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
+      dtype_indices = at::ScalarType::UInt32;
+    }
+
+    if (dtype_indices == at::ScalarType::Long) {
+      indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
+    } else {
+      indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(dtype_indices));
+    }
+
+    sort_stub(self.device().type(), self, values, *indices_tmp, dim, descending, stable.value_or(false));
+
+    if (!indices_tmp->is_same(indices)) {
+      indices.copy_(*indices_tmp);
+    }
   }
 }
 
