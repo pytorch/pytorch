@@ -13,6 +13,7 @@
 #include <ATen/cpu/vec/sve/vec_double.h>
 #include <ATen/cpu/vec/sve/vec_int.h>
 #include <ATen/cpu/vec/sve/vec_qint.h>
+#include <ATen/cpu/vec/sve/vec_bfloat16.h>
 #endif
 
 
@@ -30,33 +31,29 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_SVE)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template<>
-inline Vectorized<float> cast<float, double>(const Vectorized<double>& src) {
-  return svreinterpret_f32_f64(src);
-}
-
-template<>
-inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
-  return svreinterpret_f64_f32(src);
-}
-
-#define DEFINE_FLOAT_INT_CAST(int_t, int_bit, float_t, float_bit)                \
+#define DEFINE_SVE_CAST(t1_t, t1_prefix, t2_t, t2_prefix)                \
 template<>                                                                       \
-inline  Vectorized<int_t> cast<int_t, float_t>(const Vectorized<float_t>& src) { \
-  return svreinterpret_s##int_bit##_f##float_bit(src);                           \
+inline  Vectorized<t1_t> cast<t1_t, t2_t>(const Vectorized<t2_t>& src) { \
+  return svreinterpret_##t1_prefix##_##t2_prefix(src);                           \
 }                                                                                \
 template<>                                                                       \
-inline Vectorized<float_t> cast<float_t, int_t>(const Vectorized<int_t>& src) {  \
-  return svreinterpret_f##float_bit##_s##int_bit(src);                           \
+inline Vectorized<t2_t> cast<t2_t, t1_t>(const Vectorized<t1_t>& src) {  \
+  return svreinterpret_##t2_prefix##_##t1_prefix(src);                           \
 }
 
-DEFINE_FLOAT_INT_CAST(int64_t, 64, double, 64)
-DEFINE_FLOAT_INT_CAST(int32_t, 32, double, 64)
-DEFINE_FLOAT_INT_CAST(int16_t, 16, double, 64)
-DEFINE_FLOAT_INT_CAST(int64_t, 64, float, 32)
-DEFINE_FLOAT_INT_CAST(int32_t, 32, float, 32)
-DEFINE_FLOAT_INT_CAST(int16_t, 16, float, 32)
+DEFINE_SVE_CAST(int64_t, s64, double, f64)
+DEFINE_SVE_CAST(int32_t, s32, double, f64)
+DEFINE_SVE_CAST(int16_t, s16, double, f64)
+DEFINE_SVE_CAST(int64_t, s64, float, f32)
+DEFINE_SVE_CAST(int32_t, s32, float, f32)
+DEFINE_SVE_CAST(int16_t, s16, float, f32)
+DEFINE_SVE_CAST(float, f32, double, f64)
+
+#ifdef __ARM_FEATURE_BF16
+DEFINE_SVE_CAST(int64_t, s64, c10::BFloat16, bf16)
+DEFINE_SVE_CAST(int32_t, s32, c10::BFloat16, bf16)
+DEFINE_SVE_CAST(int16_t, s16, c10::BFloat16, bf16)
+#endif // __ARM_FEATURE_BF16
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -143,6 +140,21 @@ inline interleave2<float>(const Vectorized<float>& a, const Vectorized<float>& b
                         Vectorized<float>(svzip2_f32(a, b)));
 }
 
+#ifdef __ARM_FEATURE_BF16
+template <>
+std::pair<Vectorized<c10::BFloat16>, Vectorized<c10::BFloat16>>
+inline interleave2<c10::BFloat16>(const Vectorized<c10::BFloat16>& a, const Vectorized<c10::BFloat16>& b) {
+  // inputs:
+  //   a = {a0, a1, a2, a3, a4, a5, a6, a7}
+  //   b = {b0, b1, b2, b3, b4, b5, b6, b7}
+  // group cols crossing lanes:
+  //   return {a0, b0, a1, b1, a2, b2, a3, b3}
+  //          {a4, b4, a5, b5, a6, b6, a7, b7}
+  return std::make_pair(Vectorized<c10::BFloat16>(svzip1_bf16(a, b)),
+                        Vectorized<c10::BFloat16>(svzip2_bf16(a, b)));
+}
+#endif  // __ARM_FEATURE_BF16
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DEINTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
@@ -170,6 +182,21 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
   return std::make_pair(Vectorized<float>(svuzp1_f32(a, b)),
                         Vectorized<float>(svuzp2_f32(a, b)));
 }
+
+#ifdef __ARM_FEATURE_BF16
+template <>
+std::pair<Vectorized<c10::BFloat16>, Vectorized<c10::BFloat16>>
+inline deinterleave2<c10::BFloat16>(const Vectorized<c10::BFloat16>& a, const Vectorized<c10::BFloat16>& b) {
+  // inputs:
+  //   a = {a0, b0, a1, b1, a2, b2, a3, b3}
+  //   b = {a4, b4, a5, b5, a6, b6, a7, b7}
+  // swap lanes:
+  //   return {a0, a1, a2, a3, a4, a5, a6, a7}
+  //          {b0, b1, b2, b3, b4, b5, b6, b7}
+  return std::make_pair(Vectorized<c10::BFloat16>(svuzp1_bf16((svbfloat16_t) a, (svbfloat16_t) b)),
+                        Vectorized<c10::BFloat16>(svuzp2_bf16((svbfloat16_t) a, (svbfloat16_t) b)));
+}
+#endif // __ARM_FEATURE_BF16
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
