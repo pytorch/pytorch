@@ -679,7 +679,9 @@ class MetalKernel(SIMDKernel):
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
             if self.inside_reduction:
-                total_reduction_size = math.prod(t.numel for t in self.range_trees if t.is_reduction)
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
                 threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
