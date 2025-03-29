@@ -422,13 +422,7 @@ endif()
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 if(BLAS_FOUND)
-  if($ENV{TH_BINARY_BUILD})
-    message(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
-    list(APPEND ATen_CPU_DEPENDENCY_LIBS
-      "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-  else($ENV{TH_BINARY_BUILD})
-    list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-  endif($ENV{TH_BINARY_BUILD})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
 endif(BLAS_FOUND)
 
 if(LAPACK_FOUND)
@@ -614,8 +608,7 @@ endif()
       if($ENV{TH_BINARY_BUILD})
         # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
         # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-          "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
       endif($ENV{TH_BINARY_BUILD})
     endif(MSVC)
   endif(USE_MAGMA)
