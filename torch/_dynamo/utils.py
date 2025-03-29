@@ -4072,6 +4072,14 @@ def is_tensor_base_attr_getter(value):
     )
 
 
+def is_tensor_getset_descriptor(name):
+    try:
+        attr = inspect.getattr_static(torch.Tensor, name)
+        return type(attr) is types.GetSetDescriptorType
+    except AttributeError:
+        return False
+
+
 def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
