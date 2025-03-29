@@ -37,6 +37,11 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
+try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
+
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -938,3 +943,22 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
+
+
+class EasyDictVariable(ConstDictVariable):
+    def __init__(self, items: dict[VariableTracker, VariableTracker], **kwargs) -> None:
+        super().__init__(items, user_cls=edict, **kwargs)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, "__setitem__", args, kwargs)
+        elif name == "__getattr__":
+            return super().call_method(tx, "__getitem__", args, kwargs)
+        else:
+            return super().call_method(tx, name, args, kwargs)
