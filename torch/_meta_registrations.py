@@ -7222,6 +7222,24 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     return res
 
 
+@register_meta(aten._assert_tensor_metadata)
+def assert_tensor_metadata(
+    t, sizes=None, strides=None, dtype=None, device=None, layout=None
+) -> None:
+    # We don't want to check the device because when fake-tensor tracing the
+    # device is always 'meta'
+    if sizes is not None:
+        assert t.size() == sizes, f"Tensor sizes mismatch, {t.size()} vs. {sizes}"
+    if strides is not None:
+        assert t.stride() == strides, (
+            f"Tensor strides mismatch, {t.stride()} vs. {strides}"
+        )
+    if dtype is not None:
+        assert t.dtype == dtype, f"Tensor dtype mismatch, {t.dtype} vs. {dtype}"
+    if layout is not None:
+        assert t.layout == layout, f"Tensor layout mismatch, {t.layout()} vs. {layout}"
+
+
 @register_meta(aten.embedding)
 @out_wrapper()
 def embedding(
