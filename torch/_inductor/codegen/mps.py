@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
@@ -677,6 +678,14 @@ class MetalKernel(SIMDKernel):
             )
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
+            if self.inside_reduction:
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
+                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
