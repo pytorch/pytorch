@@ -26,7 +26,6 @@ DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(sgn)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(logical_not)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isinf)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isposinf)
-DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isneginf)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isnan)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(relu)
 DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(silu)
@@ -130,7 +129,6 @@ Tensor& NestedTensor_logical_not_(Tensor& self){
   buffer.logical_not_();
   return self;
 }
-
 
 Tensor& NestedTensor_relu_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
