@@ -68,7 +68,7 @@ int threadgroup_argmax(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   int rc = 0;
-  for (int idx = 1; idx < size; ++idx) {
+  for (unsigned idx = 1; idx < size; ++idx) {
     if (data[idx] > data[rc]) {
       rc = idx;
     }
@@ -81,7 +81,7 @@ int threadgroup_argmin(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   int rc = 0;
-  for (int idx = 1; idx < size; ++idx) {
+  for (unsigned idx = 1; idx < size; ++idx) {
     if (data[idx] < data[rc]) {
       rc = idx;
     }
