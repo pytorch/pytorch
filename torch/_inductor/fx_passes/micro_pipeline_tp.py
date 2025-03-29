@@ -230,6 +230,10 @@ class _ReduceScatterMatch:
         if output_node is not None:
             output_node.replace_input_with(self.reduce_scatter_node, new_node)
 
+            # Assert that now the reduce scatter node has only one user (the wait_tensor) and it's not
+            # saved for backward anymore.
+            assert len(self.reduce_scatter_node.users) == 1, "Reduce scatter node has multiple users, this is not expected"
+
     def erase(self) -> None:
         for node in reversed(self.match.nodes):
             if len(node.users) == 0:
