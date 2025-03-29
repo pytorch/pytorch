@@ -598,6 +598,7 @@ def dynamo_timed(
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -674,13 +675,23 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    cx_managers: list[typing.Any] = [
+        torch.profiler.record_function(f"{key} (dynamo_timed)")
+    ]
+    wait_counter_name = key
+    if waitcounter_name_override:
+        wait_counter_name = waitcounter_name_override
+
+    if log_waitcounter:
+        cx_managers.append(
+            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
+        )
+
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            if log_waitcounter:
-                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
-                    yield
-            else:
-                yield
+        with contextlib.ExitStack() as stack:
+            for cx in cx_managers:
+                stack.enter_context(cx)
+            yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
