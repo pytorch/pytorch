@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import json
+import math
 import os
+import tempfile
 import unittest
 from typing import Callable, Optional
 
@@ -26,6 +29,7 @@ from torch._inductor.select_algorithm import (
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -40,20 +44,19 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    get_kernel_launch,
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_GPU,
+)
 
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
-
-def _get_func_call() -> str:
-    return "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
-
-
-def _get_kernel_launch() -> str:
-    return "launchKernel(" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -463,6 +466,107 @@ class TestMaxAutotune(TestCase):
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @fresh_inductor_cache()
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
+    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("carveout", (None, 0, 27))
+    @parametrize("op", ("mm", "scaled_mm"))
+    def test_honor_sm_carveout_with_triton_tma(self, carveout, op: str):
+        def mm_func(a, b):
+            return torch.mm(a, b)
+
+        def scaled_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+        ):
+            return torch._scaled_mm(a, b, scale_a, scale_b, out_dtype=torch.bfloat16)
+
+        # Create large matrices to ensure we use all possible sms
+        size = 2560
+        a = torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+        b = (
+            torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+            .transpose(0, 1)
+            .contiguous()
+            .transpose(0, 1)
+        )
+        scale_a = torch.tensor(1, dtype=torch.float32, device="cuda")
+        scale_b = torch.tensor(1, dtype=torch.float32, device="cuda")
+
+        args = (
+            (a.to(torch.float8_e4m3fn), b.to(torch.float8_e4m3fn), scale_a, scale_b)
+            if op == "scaled_mm"
+            else (a, b)
+        )
+        func = scaled_mm if op == "scaled_mm" else mm_func
+
+        # Set the specified carveout value
+        torch._C._set_sm_carveout_experimental(carveout)
+        if carveout is None:
+            self.assertIsNone(torch._C._get_sm_carveout_experimental())
+        else:
+            self.assertEqual(torch._C._get_sm_carveout_experimental(), carveout)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "tma",
+            }
+        ):
+            compiled_mm = torch.compile(func, mode="max-autotune-no-cudagraphs")
+            compiled_mm(*args)  # Warm-up compilation
+
+            with tempfile.NamedTemporaryFile() as f:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CUDA]
+                ) as prof:
+                    # Run with the specified carveout
+                    compiled_mm(*args)
+
+                # Export trace and analyze results
+                prof.export_chrome_trace(f.name)
+
+                # Extract grid sizes from the trace events for TMA kernels
+                kernel_name = "triton_tem_fused"
+                kernel_events = [
+                    {
+                        "grid": evt.get("args", {}).get("grid", []),
+                        "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
+                    }
+                    for evt in json.load(open(f.name))["traceEvents"]
+                    if evt.get("cat", "") == "kernel"
+                    and kernel_name in evt.get("name", "").lower()
+                ]
+
+                # We should have exactly 1 kernel event for this run
+                self.assertEqual(
+                    len(kernel_events),
+                    1,
+                    f"Expected exactly 1 kernel event, but got {len(kernel_events)}",
+                )
+
+                # Check that grid size matches expected values based on carveout
+                expected_grid_size = None
+                max_grid_size = torch.cuda.get_device_properties(
+                    "cuda"
+                ).multi_processor_count
+                careveout = 0 if carveout is None else carveout
+                expected_grid_size = max_grid_size - careveout
+
+                self.assertEqual(
+                    kernel_events[0]["grid_size"],
+                    expected_grid_size,
+                    f"Grid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
+                )
+
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
         """
@@ -792,8 +896,8 @@ class TestMaxAutotune(TestCase):
 
         # mm kernel, and cos kernel
         count = 2 if using_triton_mm else 1
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), count, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -805,8 +909,8 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -821,6 +925,9 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
@@ -1206,21 +1313,21 @@ class TestPrologueFusion(TestCase):
         )
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(),
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(),
             num_kernels,
             exactly=True,
         ).run(code_str)
 
         if num_allocs is not None:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "empty_strided", num_allocs, exactly=True
             ).run(code_str)
 
         # skip the deallocation check when using cpp_wrapper; most deallocations happen
         # outside of our control via RAIIAtenTensorHandle
         if num_deallocs is not None and not config.cpp_wrapper:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
@@ -1360,8 +1467,8 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
         self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
 
@@ -1370,8 +1477,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
@@ -1394,8 +1501,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
@@ -1538,21 +1645,32 @@ class TestPrologueFusion(TestCase):
     @skipIfXpu
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
-    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
-    def test_prologue_masked_load(self, sizes):
-        M, K, N = sizes
-
+    def test_prologue_masked_load(self):
         def foo(x, y):
-            return x @ y
+            return x @ y.T
 
         x = torch.rand([250, 245], device=GPU_TYPE)
-        y = torch.rand([245, 128], device=GPU_TYPE)
+        y = torch.rand([245, 128], device=GPU_TYPE).T.contiguous()
 
         # we should not attempt prologue fusion if it turns an aligned load
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_masked_numeric(self):
+        # correctly detect upcast inside the cat mask, dont fuse
+        def foo(a, b, y):
+            return torch.cat([a, (b * 4)]) @ y.T
+
+        a = torch.rand([220, 245], device=GPU_TYPE, dtype=torch.float16)
+        b = torch.rand([20, 245], device=GPU_TYPE, dtype=torch.float16)
+        y = torch.rand([245, 128], device=GPU_TYPE, dtype=torch.float16).T.contiguous()
+
+        out, code = run_and_get_code(torch.compile(foo), a, b, y)
+
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+        self.assertEqual(out, foo(a, b, y), atol=0.05, rtol=0.05)
 
 
 if __name__ == "__main__":

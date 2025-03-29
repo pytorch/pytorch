@@ -414,7 +414,7 @@ class Op:
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
         self.time_created_ns = event["time_created_ns"]
-        self.collective_frames = event["frames"]
+        self.collective_frames = event.get("frames", [])
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:

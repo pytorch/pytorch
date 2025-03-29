@@ -1,6 +1,5 @@
 # Owner(s): ["module: pytree"]
 
-import collections
 import enum
 import inspect
 import os
@@ -21,7 +20,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
-    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -405,7 +403,9 @@ class TestGenericPytree(TestCase):
                 (
                     py_pytree,
                     lambda deq: py_pytree.TreeSpec(
-                        deque, deq.maxlen, [py_pytree.LeafSpec() for _ in deq]
+                        deque,
+                        deq.maxlen,
+                        [py_pytree.LeafSpec() for _ in deq],
                     ),
                 ),
                 name="py",
@@ -1180,7 +1180,9 @@ if "optree" in sys.modules:
         self.assertEqual(point.y, torch.tensor(2))
 
     def test_constant(self):
-        @dataclass
+        # Either use `frozen=True` or `unsafe_hash=True` so we have a
+        # non-default `__hash__`.
+        @dataclass(unsafe_hash=True)
         class Config:
             norm: str
 
@@ -1190,6 +1192,33 @@ if "optree" in sys.modules:
         elements, spec = py_pytree.tree_flatten(config)
         self.assertEqual(elements, [])
         self.assertEqual(spec.context.value, config)
+
+    def test_constant_default_eq_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+            self.assertIn(msg, str(e))
+
+    def test_constant_default_hash_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+            def __eq__(self, other):
+                return self.norm == other.norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
+            self.assertIn(msg, str(e))
 
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
@@ -1213,7 +1242,6 @@ if "optree" in sys.modules:
         from_one_tree = py_pytree.tree_map(lambda a: a + 2, tree1)
         self.assertEqual(from_two_trees, from_one_tree)
 
-    @skipIfTorchDynamo("dynamo pytree tracing doesn't work here")
     def test_tree_flatten_with_path_is_leaf(self):
         leaf_dict = {"foo": [(3)]}
         pytree = (["hello", [1, 2], leaf_dict],)
@@ -1302,7 +1330,6 @@ if "optree" in sys.modules:
             ],
         )
 
-    @skipIfTorchDynamo("AssertionError in dynamo")
     def test_flatten_flatten_with_key_consistency(self):
         """Check that flatten and flatten_with_key produces consistent leaves/context."""
         reg = py_pytree.SUPPORTED_NODES
@@ -1311,7 +1338,7 @@ if "optree" in sys.modules:
             list: [1, 2, 3],
             tuple: (1, 2, 3),
             dict: {"foo": 1, "bar": 2},
-            namedtuple: collections.namedtuple("ANamedTuple", ["x", "y"])(1, 2),
+            namedtuple: namedtuple("ANamedTuple", ["x", "y"])(1, 2),
             OrderedDict: OrderedDict([("foo", 1), ("bar", 2)]),
             defaultdict: defaultdict(int, {"foo": 1, "bar": 2}),
             deque: deque([1, 2, 3]),

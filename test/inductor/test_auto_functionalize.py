@@ -1708,7 +1708,9 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             self.assertNotEqual(id(output), id(input))
 
     def test_inference_mode_view(self):
-        @torch.library.custom_op("mylib::foo", mutates_args={"workspace"})
+        @torch.library.custom_op(
+            "test_inference_mode_view::foo", mutates_args={"workspace"}
+        )
         def foo(x: torch.Tensor, workspace: torch.Tensor) -> torch.Tensor:
             return x.clone()
 

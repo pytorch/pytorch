@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -40,13 +41,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import (
-    CeilDiv,
-    FloorDiv,
-    Identity,
-    IntTrueDiv,
-    ModularIndexing,
-)
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -57,6 +52,7 @@ from .ir import (
     IndexingConstant,
     IRNode,
     is_triton,
+    OnlineSoftmaxReduction,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -72,6 +68,7 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
@@ -1903,6 +1900,9 @@ def fallback_handler(kernel, add_to_fallback_set=True):
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
+    # This lets us detect that a lowering is a fallback handler.
+    handler._is_fallback_handler = True  # type: ignore[attr-defined]
+
     return handler
 
 
@@ -1915,7 +1915,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1926,10 +1926,28 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None):
             return False
         _warn_complex_not_supported()
         return True
+
+    if t.dtype == torch.float8_e8m0fnu:
+        if not node:
+            return True
+
+        # allow bitcast, views, memory movement, but not arithmetic
+        # TODO: delete once triton adds native support
+        return not (
+            isinstance(parent.target, torch._ops.OpOverload)
+            and parent.target
+            in (
+                aten.view.dtype,
+                aten.cat.default,
+                aten._scaled_mm.default,
+            )
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
+        )
+
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -1957,10 +1975,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent):
+                if unsupported_output_tensor(meta, parent, node):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent):
+                if unsupported_input_tensor(meta, parent, node):
                     return True
 
         return False
@@ -2773,6 +2791,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -4287,14 +4315,22 @@ def constant_boundary_condition(
     return load
 
 
-def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None):
+    if dilation is None:
+        dilation = [1] * len(padding)
+
     x_out = FloorDiv(
-        x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
+        x + 2 * padding[i] - dilation[i] * (kernel_size[i] - 1) + (stride[i] - 1),
+        stride[i],
     )
 
     if ceil_mode:
         x_alt = FloorDiv(
-            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
+            x
+            + 2 * padding[i]
+            - dilation[i] * (kernel_size[i] - 1)
+            + 2 * (stride[i] - 1),
+            stride[i],
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
@@ -4309,10 +4345,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+def should_fallback_max_pool2d_with_indices(kernel_size):
     kernel_size = pad_listlike(kernel_size, 2)
     window_size = kernel_size[0] * kernel_size[1]
-    return (window_size > 25) or any(d > 1 for d in dilation)
+    return window_size > 25
 
 
 def max_pool2d_checks(
@@ -4337,11 +4373,90 @@ def max_pool2d_checks(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
-    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size)
     if assert_fallback is not None:
         assert use_fallback == assert_fallback
 
     return kernel_size, stride, padding, dilation, use_fallback
+
+
+def _max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    x.realize_hint()
+    *batch, h, w = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(
+        h, 0, kernel_size, stride, padding, ceil_mode, dilation=dilation
+    )
+    w_out, ceil_mode2 = pooling_size(
+        w, 1, kernel_size, stride, padding, ceil_mode, dilation=dilation
+    )
+
+    dtype = x.dtype
+    min_value = (
+        False
+        if dtype is torch.bool
+        else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
+    )
+
+    new_size = list(batch) + [h_out, w_out]
+    if (
+        padding[0]
+        or padding[1]
+        or ceil_mode1
+        or ceil_mode2
+        or (dilation[0] > 1)
+        or (dilation[1] > 1)
+    ):
+        x_loader = constant_boundary_condition(x, min_value, dim=2)
+    else:
+        x_loader = x.make_loader()
+
+    dim = 2
+
+    def fn_inner(idx, reduction_idx):
+        prefix = idx[:-dim]
+        bh = idx[-dim:]
+        ih = [
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
+            for i in range(dim)
+        ]
+        return x_loader([*prefix, *ih])
+
+    result = Reduction.create(
+        reduction_type="max",
+        input_node=x,
+        device=x.get_device(),
+        dst_dtype=dtype,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
+        ranges=new_size,
+        reduction_ranges=kernel_size,
+    )
+    offsets = Reduction.create(
+        reduction_type="argmax",
+        input_node=x,
+        device=x.get_device(),
+        dst_dtype=torch.int64,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
+        ranges=new_size,
+        reduction_ranges=kernel_size,
+    )
+    if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        result.realize()
+    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        offsets.realize()
+
+    return result, offsets
 
 
 @register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
@@ -4355,73 +4470,31 @@ def _low_memory_max_pool2d_with_offsets(
 ):
     # assert we are not on a fallback path, the inductor decomp should have guaranteed this
     kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
-        x, kernel_size, stride, padding, dilation, assert_fallback=False
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        assert_fallback=False,
     )
 
-    x.realize_hint()
-    *batch, h, w = x.get_size()
-
-    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
-
-    dtype = x.dtype
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
-    )
-
-    new_size = list(batch) + [h_out, w_out]
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition(x, min_value, dim=2)
-    else:
-        x_loader = x.make_loader()
-
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-        maxval = None
-        maxindex = None
-        for h_inc, w_inc in itertools.product(
-            range(kernel_size[0]), range(kernel_size[1])
-        ):
-            ih = bh * stride[0] + h_inc - padding[0]
-            iw = bw * stride[1] + w_inc - padding[1]
-            val = x_loader([*prefix, ih, iw])
-            if return_index:
-                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    out = Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
-        ranges=new_size,
-    )
-    offsets = Pointwise.create(
-        device=x.get_device(),
-        dtype=torch.int8,
-        inner_fn=functools.partial(fn, return_index=True),
-        ranges=new_size,
-    )
-    return out, offsets
+    with config.patch(unroll_reductions_threshold=25):
+        result, offsets = _max_pool2d_with_offsets(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
+        return result, to_dtype(offsets, torch.int8)
 
 
 @register_lowering(
     prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
 )
 def _low_memory_max_pool2d_offsets_to_indices(
-    offsets, kernel_width, input_width, stride, padding
+    offsets, kernel_width, input_width, stride, padding, dilation
 ):
     # TODO: Generalize to other max pooling flavors, and arbitrary dim
 
@@ -4431,8 +4504,8 @@ def _low_memory_max_pool2d_offsets_to_indices(
         w_in = ops.index_expr(input_width, torch.int64)
         hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
         wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
-        ih = hbase + h_inc
-        iw = wbase + w_inc
+        ih = hbase + h_inc * ops.constant(dilation[0], torch.int64)
+        iw = wbase + w_inc * ops.constant(dilation[1], torch.int64)
         return ih * w_in + iw
 
     def offsets_to_indices(idx):
@@ -4452,8 +4525,29 @@ def _low_memory_max_pool2d_offsets_to_indices(
     return indices
 
 
-# Fallback selected when we do not decompose to the low-memory path.
-make_fallback(aten.max_pool2d_with_indices)
+# Fallback when we do not decompose to the low-memory path.
+@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
+def max_pool2d_with_indices(
+    x,
+    kernel_size,
+    stride=None,
+    padding=0,
+    dilation=1,
+    ceil_mode=False,
+):
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation
+    )
+
+    out, offsets = _max_pool2d_with_offsets(
+        x, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    indices = _low_memory_max_pool2d_offsets_to_indices(
+        offsets, kernel_size[-1], x.shape[-1], stride, padding, dilation
+    )
+
+    return out, indices
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -4909,23 +5003,21 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
         sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
-        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.trunc((i_expr + sample) * alpha_expr) - ops.trunc(
-            sample * alpha_expr
+        diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
+        out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
+        alpha = ops.truediv(
+            ops.to_dtype(diff, torch.float64), ops.to_dtype(out_sz_expr, torch.float64)
         )
+        alpha = ops.where(ops.eq(out_sz_expr, 0), 0, alpha)
+        seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
-
-        mask = ops.lt(
-            i_expr,
-            ops.index_expr(out_sz - 1, torch.int64),
-        )
-        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
+        mask = ops.lt(i_expr, out_sz_expr)
+        return ops.where(mask, seq_i, diff)
 
     return load
 
@@ -5188,7 +5280,8 @@ def _avg_poolnd(
         else:
 
             def fn(idx):
-                return ops.truediv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
+                # C style integer division as done in native/cpu/AvgPoolKernel.cpp
+                return ops.truncdiv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
 
     else:
 
@@ -5205,7 +5298,10 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            if dtype.is_floating_point:
+                return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            # C style integer division as done in native/cpu/AvgPoolKernel.cpp
+            return ops.truncdiv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -6769,8 +6865,18 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
+    def _map_output(out: Any):
+        if isinstance(out, TensorBox):
+            return out
+        elif isinstance(out, ir.StorageBox):
+            return TensorBox(out)
+        elif isinstance(out, ir.MultiOutput):
+            return TensorBox.create(out)
+        else:
+            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
+
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    return list(map(TensorBox.create, result))
+    return list(map(_map_output, result))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
@@ -6863,7 +6969,9 @@ def with_effects(token, op, *args, **kwargs):
         return (effectful_kernel,)
 
     result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    if not isinstance(result, (list, tuple)):
+    # See [NOTE: with_effects return type]
+    # Only return `result` if it is a tuple, not list.
+    if not isinstance(result, tuple):
         return (effectful_kernel, result)
     else:
         return (effectful_kernel, *result)
@@ -6873,6 +6981,61 @@ from .comm_lowering import register_comm_lowerings
 
 
 register_comm_lowerings()
+
+
+@register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
+def prepare_softmax_online(x, dim):
+    """
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    """
+    kwargs = _make_reduction_inner(
+        x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
+    )
+
+    reduction_ranges = kwargs["reduction_ranges"]
+    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+    hint, num_split = ir.Reduction.num_splits(
+        **kwargs,
+        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
+        reduction_numel=rnumel,
+    )
+
+    if (
+        num_split == 1
+        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+    ):
+        max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
+            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+        )
+        return max_tensor, sum_tensor
+    else:
+        # Note: [Split online_softmax_reduce]
+        # We don't split reduction for online_softmax_reduce for now.
+        # On one hand, supporting split reduction makes things complex since
+        # the splitted out reuctions requires 2 inputs rather than one.
+        # On the other hand, during training the online_softmax_reduce should
+        # usually don't requires a split due to large batch size
+        # (more specifically batch size times sequence length).
+        # We should support split reduction if we find legit use cases to
+        # motivate the work.
+        #
+        # TODO: does inference need split online_softmax_reduce?
+
+        warnings.warn(
+            textwrap.dedent(
+                """
+            Online softmax is disabled on the fly since Inductor decides to
+            split the reduction. Cut an issue to PyTorch if this is an
+            important use case and you want to speed it up with online
+            softmax.
+            """
+            )
+        )
+        amax = reduce_amax(x, dim, keepdims=True)
+        exp = lowerings[aten.exp](sub(x, amax))
+        xsum = sum_(exp, dim, keepdims=True)
+        return amax, xsum
+
 
 # populate lowerings defined in kernel/*
 from . import kernel
