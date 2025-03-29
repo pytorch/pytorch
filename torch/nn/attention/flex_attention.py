@@ -12,9 +12,9 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
-from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
+from torch._prims_common import DeviceLikeType
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
@@ -780,7 +780,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -805,6 +805,8 @@ def create_mask(
     n = torch.arange(0, KV_LEN, device=device)
     mod_type = _get_mod_type(mod_fn)
 
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
@@ -827,7 +829,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
