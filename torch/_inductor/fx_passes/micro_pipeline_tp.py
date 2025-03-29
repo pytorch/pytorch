@@ -1071,7 +1071,6 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             "async TP found no matching all-gather/reduce-scatter patterns for fusion"
         )
 
-    torch.distributed.breakpoint()
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
 
