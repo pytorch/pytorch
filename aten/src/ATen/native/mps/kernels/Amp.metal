@@ -1,31 +1,75 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#define kmaxThreadGroups 32
+#define kmaxTensors 32
+#define kChunkSize 65536
+
+template <typename T>
+struct AmpNonFiniteCheckAndUnscaleArgs {
+  metal::array<device T*, kmaxTensors> data;
+};
+
+struct MetadataArguments {
+  uint numels[kmaxTensors];
+  uint threadgroup_to_tensor[kmaxThreadGroups];
+  uint threadgroup_to_chunk[kmaxThreadGroups];
+};
+
 template <typename T>
 kernel void ampNonFiniteCheckAndUnscale(
+    constant AmpNonFiniteCheckAndUnscaleArgs<T>& pointerArgs [[buffer(0)]],
+    constant MetadataArguments& metadata [[buffer(1)]],
+    device float* foundInf [[buffer(2)]],
+    constant T& invScale [[buffer(3)]],
+    uint3 local_tid [[thread_position_in_threadgroup]],
+    uint3 tgSize [[threads_per_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint threadGroupSize = tgSize.x;
+  uint tensor_index = metadata.threadgroup_to_tensor[group_id.x];
+  uint chunk = metadata.threadgroup_to_chunk[group_id.x];
+  uint numel = metadata.numels[tensor_index];
+
+  uint offset = chunk * kChunkSize;
+  uint chunk_size =
+      ((offset + kChunkSize) > numel) ? (numel - offset) : kChunkSize;
+
+  device T* data = pointerArgs.data[tensor_index];
+
+  for (uint i = local_tid.x; i < chunk_size; i += threadGroupSize) {
+    uint index = offset + i;
+    T val = data[index];
+    if (!isfinite(val)) {
+      device atomic_float* flag = (device atomic_float*)foundInf;
+      atomic_store_explicit(flag, 1.0f, memory_order_relaxed);
+    }
+    data[index] = (invScale == static_cast<T>(1.0) ? val : val * invScale);
+  }
+}
+
+template <typename T>
+kernel void ampNonFiniteCheckAndUnscaleSingle(
     device T* data [[buffer(0)]],
-    device T* foundInf [[buffer(1)]],
+    device float* foundInf [[buffer(1)]],
     constant T& invScale [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= numel) {
+  if (tid >= numel)
     return;
-  }
-  T val = data[tid];
 
+  T val = data[tid];
   if (!isfinite(val)) {
     device atomic_float* flag = (device atomic_float*)foundInf;
-    atomic_store_explicit(flag, 1, memory_order_relaxed);
+    atomic_store_explicit(flag, 1.0f, memory_order_relaxed);
   }
-
-  data[tid] = (invScale == 1.0f ? val : val * invScale);
+  data[tid] = (invScale == T(1.0) ? val : val * invScale);
 }
 
 template <typename T>
 kernel void ampUpdateScale(
     device T* scale [[buffer(0)]],
     device int* growth_tracker [[buffer(1)]],
-    device T* foundInf [[buffer(2)]],
+    device float* foundInf [[buffer(2)]],
     constant T& scaleGrowthFactor [[buffer(3)]],
     constant T& scaleBackoffFactor [[buffer(4)]],
     constant uint& growthInterval [[buffer(5)]],
@@ -34,15 +78,13 @@ kernel void ampUpdateScale(
     return;
   }
 
-  int flag = (int)(foundInf[0]);
-
-  if (flag != 0) {
+  if (foundInf[0] != 0.0f) {
     *scale = *scale * scaleBackoffFactor;
     *growth_tracker = 0;
   } else {
     int g = *growth_tracker;
     g += 1;
-    if (uint(g) >= growthInterval) {
+    if (static_cast<uint>(g) >= growthInterval) {
       *scale = *scale * scaleGrowthFactor;
       g = 0;
     }
@@ -53,18 +95,31 @@ kernel void ampUpdateScale(
 #define INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE(DTYPE)                  \
   template [[host_name("ampNonFiniteCheckAndUnscale_" #DTYPE)]] kernel void \
   ampNonFiniteCheckAndUnscale<DTYPE>(                                       \
-      device DTYPE * data [[buffer(0)]],                                    \
-      device DTYPE * foundInf [[buffer(1)]],                                \
-      constant DTYPE & invScale [[buffer(2)]],                              \
-      constant uint & numel [[buffer(3)]],                                  \
-      uint tid [[thread_position_in_grid]])
+      constant AmpNonFiniteCheckAndUnscaleArgs<DTYPE> &                     \
+          pointerArgs [[buffer(0)]],                                        \
+      constant MetadataArguments & metadata [[buffer(1)]],                  \
+      device float* foundInf [[buffer(2)]],                                 \
+      constant DTYPE& invScale [[buffer(3)]],                               \
+      uint3 local_tid [[thread_position_in_threadgroup]],                   \
+      uint3 tgSize [[threads_per_threadgroup]],                             \
+      uint3 group_id [[threadgroup_position_in_grid]])
+
+#define INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE_SINGLE(DTYPE)            \
+  template                                                                   \
+      [[host_name("ampNonFiniteCheckAndUnscaleSingle_" #DTYPE)]] kernel void \
+      ampNonFiniteCheckAndUnscaleSingle<DTYPE>(                              \
+          device DTYPE * data [[buffer(0)]],                                 \
+          device float* foundInf [[buffer(1)]],                              \
+          constant DTYPE& invScale [[buffer(2)]],                            \
+          constant uint& numel [[buffer(3)]],                                \
+          uint tid [[thread_position_in_grid]])
 
 #define INSTANTIATE_AMP_UPDATE_SCALE(DTYPE)                    \
   template [[host_name("ampUpdateScale_" #DTYPE)]] kernel void \
   ampUpdateScale<DTYPE>(                                       \
       device DTYPE * scale [[buffer(0)]],                      \
       device int* growth_tracker [[buffer(1)]],                \
-      device DTYPE* foundInf [[buffer(2)]],                    \
+      device float* foundInf [[buffer(2)]],                    \
       constant DTYPE& scaleGrowthFactor [[buffer(3)]],         \
       constant DTYPE& scaleBackoffFactor [[buffer(4)]],        \
       constant uint& growthInterval [[buffer(5)]],             \
@@ -80,4 +135,10 @@ INSTANTIATE_AMP_UPDATE_SCALE(float);
 INSTANTIATE_AMP_UPDATE_SCALE(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_AMP_UPDATE_SCALE(bfloat);
+#endif
+
+INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE_SINGLE(float);
+INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE_SINGLE(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE_SINGLE(bfloat);
 #endif

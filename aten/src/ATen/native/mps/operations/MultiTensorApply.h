@@ -116,7 +116,7 @@ struct FusedSgdEncodingFunctor<false> {
   }
 };
 
-std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname);
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname);
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_name,
                                                    std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -152,7 +152,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
@@ -249,6 +249,90 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
       }
 
       getMPSProfiler().endProfileKernel(fusedOptimizerPSO);
+    }
+  });
+}
+
+template <int depth, typename... ArgTypes>
+void multi_tensor_apply(const std::string& kernel_name,
+                        std::vector<std::vector<at::Tensor>>& tensor_lists,
+                        ArgTypes... args) {
+  const auto num_tensors = tensor_lists[0].size();
+  if (num_tensors == 0)
+    return;
+
+  TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists must match depth.");
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto [pipeline, function] = getCPLState(kernel_name);
+      [computeEncoder setComputePipelineState:pipeline];
+
+      id<MTLArgumentEncoder> argumentEncoder = [function newArgumentEncoderWithBufferIndex:0];
+      id<MTLBuffer> tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
+      [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
+
+      int tensor_loc = 0;
+      int threadgroup_loc = 0;
+      MetadataArguments metadata_arguments;
+      std::memset(&metadata_arguments, 0, sizeof(metadata_arguments));
+
+      for (size_t t = 0; t < num_tensors; t++) {
+        if (tensor_lists[0][t].numel() == 0)
+          continue;
+
+        for (int d = 0; d < depth; d++) {
+          mtl_setBuffer(argumentEncoder, tensor_lists[d][t], d * kmaxTensors + tensor_loc);
+          [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][t])
+                                usage:(MTLResourceUsageRead | MTLResourceUsageWrite)];
+        }
+
+        metadata_arguments.numels[tensor_loc] = tensor_lists[0][t].numel();
+        int currentTensorIndex = tensor_loc;
+        tensor_loc++;
+
+        const auto numel = tensor_lists[0][t].numel();
+        const auto chunks = numel / kChunkSize + ((numel % kChunkSize) ? 1 : 0);
+
+        for (uint chunk = 0; chunk < chunks; chunk++) {
+          metadata_arguments.threadgroup_to_tensor[threadgroup_loc] = currentTensorIndex;
+          metadata_arguments.threadgroup_to_chunk[threadgroup_loc] = chunk;
+          threadgroup_loc++;
+
+          const bool tensor_full = (tensor_loc == kmaxTensors && chunk == chunks - 1);
+          const bool tg_full = (threadgroup_loc == kmaxThreadGroups);
+
+          if (tensor_full || tg_full) {
+            mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, args...);
+
+            MTLSize gridSize = MTLSizeMake(threadgroup_loc, 1, 1);
+            uint32_t maxThreads = [pipeline maxTotalThreadsPerThreadgroup];
+            MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreads, static_cast<uint32_t>(64)), 1, 1);
+            [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+            threadgroup_loc = 0;
+            if (chunk == chunks - 1) {
+              tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
+              [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
+            } else {
+              metadata_arguments.numels[0] = metadata_arguments.numels[currentTensorIndex];
+              tensor_loc = 1;
+            }
+          }
+        }
+      }
+
+      if (threadgroup_loc != 0) {
+        mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, args...);
+        MTLSize gridSize = MTLSizeMake(threadgroup_loc, 1, 1);
+        uint32_t maxThreads = [pipeline maxTotalThreadsPerThreadgroup];
+        MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreads, static_cast<uint32_t>(64)), 1, 1);
+        [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+      }
     }
   });
 }

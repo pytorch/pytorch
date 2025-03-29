@@ -74,7 +74,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/FusedOptimizerOps_metallib.h>
 #endif
 
-std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname) {
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
   return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
 }
 

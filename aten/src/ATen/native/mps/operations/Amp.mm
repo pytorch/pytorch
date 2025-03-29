@@ -2,9 +2,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 // For MTLLanguageVersion_3_1
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/MultiTensorApply.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -22,47 +24,42 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Amp_metallib.h>
 #endif
 
-static void _amp_foreach_non_finite_check_and_unscale_mps_impl(TensorList self,
-                                                               at::Tensor& found_inf,
-                                                               const at::Tensor& inv_scale) {
-  found_inf.fill_(0);
+static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scaled_grad,
+                                                              at::Tensor& found_inf,
+                                                              const at::Tensor& inv_scale) {
   float inv_scale_val = inv_scale.item<float>();
-
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto ampPipelineState =
-      lib.getPipelineStateForFunc("ampNonFiniteCheckAndUnscale_" + mps::scalarToMetalTypeString(self[0]));
+      lib.getPipelineStateForFunc("ampNonFiniteCheckAndUnscaleSingle_" + mps::scalarToMetalTypeString(scaled_grad));
 
-  MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
+  const uint32_t threadsPerThreadgroup = 256;
+  uint32_t numel = static_cast<uint32_t>(scaled_grad.numel());
+  uint32_t numThreadgroups = (numel + threadsPerThreadgroup - 1) / threadsPerThreadgroup;
+  MTLSize threadGroupSize = MTLSizeMake(threadsPerThreadgroup, 1, 1);
+  MTLSize gridSize = MTLSizeMake(numThreadgroups * threadsPerThreadgroup, 1, 1);
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     auto computeEncoder = stream->commandEncoder();
-
-    for (auto& scaled_grad : self) {
-      TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
-      if (scaled_grad.numel() == 0) {
-        continue;
-      }
-
-      id<MTLBuffer> data_buffer = getMTLBufferStorage(scaled_grad);
-      id<MTLBuffer> found_inf_buffer = getMTLBufferStorage(found_inf);
-
-      uint32_t numel = static_cast<uint32_t>(scaled_grad.numel());
-
-      uint32_t numThreadgroups = (numel + threadGroupSize.width - 1) / threadGroupSize.width;
-      MTLSize gridSize = MTLSizeMake(numThreadgroups * threadGroupSize.width, 1, 1);
-      [computeEncoder setComputePipelineState:ampPipelineState];
-      mtl_setArgs(computeEncoder, data_buffer, found_inf_buffer, inv_scale_val, numel);
-      [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+    TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
+    if (scaled_grad.numel() == 0) {
+      return;
     }
+
+    id<MTLBuffer> data_buffer = getMTLBufferStorage(scaled_grad);
+    id<MTLBuffer> found_inf_buffer = getMTLBufferStorage(found_inf);
+
+    [computeEncoder setComputePipelineState:ampPipelineState];
+    mtl_setArgs(computeEncoder, data_buffer, found_inf_buffer, inv_scale_val, numel);
+    [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
   });
 }
 
 static void _amp_update_scale_mps_impl(Tensor& self,
                                        Tensor& growth_tracker,
                                        const Tensor& found_inf,
-                                       double scale_growth_factor,
-                                       double scale_backoff_factor,
+                                       float scale_growth_factor,
+                                       float scale_backoff_factor,
                                        int64_t growth_interval) {
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -94,10 +91,50 @@ static void _amp_update_scale_mps_impl(Tensor& self,
 }
 } // namespace mps
 
-void _amp_foreach_non_finite_check_and_unscale_mps_(TensorList self,
+void _amp_foreach_non_finite_check_and_unscale_mps_(at::TensorList self,
                                                     at::Tensor& found_inf,
                                                     const at::Tensor& inv_scale) {
-  mps::_amp_foreach_non_finite_check_and_unscale_mps_impl(self, found_inf, inv_scale);
+  if (self.size() == 0) {
+    return;
+  }
+  TORCH_CHECK(inv_scale.is_mps(), "inv_scale must be a MPS tensor.");
+  TORCH_CHECK(found_inf.is_mps(), "found_inf must be a MPS tensor.");
+  TORCH_CHECK(inv_scale.numel() == 1, "inv_scale must be a 1-element tensor.");
+  TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
+  TORCH_CHECK(inv_scale.scalar_type() == at::ScalarType::Float, "inv_scale must be a float tensor.");
+  TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
+  // Ensures client code (GradScaler) filtered scaled_grads by API restrictions.
+  check_foreach_api_restrictions(self);
+
+  // Prepare a vector of tensor lists.
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  if (can_use_fast_route(self)) {
+    TORCH_CHECK(self[0].is_mps(), "scaled_grads must be MPS tensors.");
+    tensor_lists.emplace_back(self.vec());
+  } else {
+    tensor_lists.resize(1);
+    tensor_lists[0].reserve(self.size());
+    auto expected_device = self[0].device();
+    const auto expected_dtype = self[0].scalar_type();
+    for (const at::Tensor& t : self) {
+      // Ensure that GradScaler has filtered by device, layout, and dtype.
+      TORCH_CHECK(t.is_mps(), "one of scaled_grads was not a MPS tensor.");
+      TORCH_CHECK(t.device() == expected_device, "scaled_grads must be on the same device.");
+      TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
+      if (!t.is_non_overlapping_and_dense() || t.scalar_type() != expected_dtype) {
+        // Fall back to the single-tensor implementation
+        mps::_amp_non_finite_check_and_unscale_mps_single_impl(const_cast<at::Tensor&>(t), found_inf, inv_scale);
+      } else {
+        tensor_lists[0].push_back(t);
+      }
+    }
+    if (tensor_lists[0].empty()) {
+      return;
+    }
+  }
+
+  std::string kernel_name = "ampNonFiniteCheckAndUnscale_" + mps::scalarToMetalTypeString(tensor_lists[0][0]);
+  mps::multi_tensor_apply<1>(kernel_name, tensor_lists, found_inf, inv_scale);
 }
 
 Tensor& _amp_update_scale_mps_(Tensor& self,
