@@ -128,6 +128,37 @@ def get_tolerances(
         return default_tolerances(*inputs)
 
 
+def _make_bitwise_mismatch_msg(
+    *,
+    default_identifier: str,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    extra: Optional[str] = None,
+    first_mismatch_idx: Optional[int] = None,
+):
+    """Makes a mismatch error message for bitwise values.
+
+    Args:
+        default_identifier (str): Default description of the compared values, e.g. "Tensor-likes".
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional identifier that overrides
+            ``default_identifier``. Can be passed as callable in which case it will be called with
+            ``default_identifier`` to create the description at runtime.
+        extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
+        first_mismatch_idx (Optional[int]): the index of the first mismatch.
+    """
+    if identifier is None:
+        identifier = default_identifier
+    elif callable(identifier):
+        identifier = identifier(default_identifier)
+
+    msg = f"{identifier} are not 'equal'!\n\n"
+
+    if extra:
+        msg += f"{extra.strip()}\n"
+    if first_mismatch_idx is not None:
+        msg += f"The first mismatched element is at index {first_mismatch_idx}.\n"
+    return msg.strip()
+
+
 def _make_mismatch_msg(
     *,
     default_identifier: str,
@@ -263,6 +294,15 @@ def make_tensor_mismatch_msg(
         f"Mismatched elements: {total_mismatches} / {number_of_elements} "
         f"({total_mismatches / number_of_elements:.1%})"
     )
+    if actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+        # skip checking for max_abs_diff and max_rel_diff for float8-like values
+        first_mismatch_idx = torch.nonzero(~matches, as_tuple=False)[0].item()
+        return _make_bitwise_mismatch_msg(
+            default_identifier="Tensor-likes",
+            identifier=identifier,
+            extra=extra,
+            first_mismatch_idx=int(first_mismatch_idx),
+        )
 
     actual_flat = actual.flatten()
     expected_flat = expected.flatten()
@@ -824,6 +864,14 @@ class TensorLikePair(Pair):
         elif actual.layout == torch.jagged:
             actual, expected = actual.values(), expected.values()
             compare_fn = self._compare_regular_values_close
+        elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+            # intercept rtol and atol for bitwise comparison in low dimensional floats
+            def bitwise_comp(actual, expected, rtol=0.0, atol=0.0, equal_nan=False):
+                return self._compare_regular_values_close(
+                    actual, expected, rtol=0.0, atol=0.0, equal_nan=equal_nan
+                )
+
+            compare_fn = bitwise_comp
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -1288,6 +1336,9 @@ def assert_close(
     If ``actual`` and ``expected`` are quantized, they are considered close if they have the same
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
     definition above.
+
+    If ``actual`` and ``expected`` are small floating point dtypes, they are compared bitwise. In other words,
+    ``rtol`` and ``atol`` are set to zero.
 
     ``actual`` and ``expected`` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which
     :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. Except for Python scalars the input types
