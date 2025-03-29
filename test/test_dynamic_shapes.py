@@ -1335,13 +1335,15 @@ class f(torch.nn.Module):
         @torch.compile(dynamic=True, fullgraph=True)
         def f(a, b):
             if guard_size_oblivious(a.size(0) == 1):
-                return b*10
+                return b * 10
             else:
-                return b*20
- 
+                return b * 20
+
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
             # always go to the true branch.
-            self.assertEqual(f(torch.tensor([1]),  torch.tensor([1])), torch.tensor([20]))
+            self.assertEqual(
+                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+            )
 
 
 @skipIfTorchDynamo(
