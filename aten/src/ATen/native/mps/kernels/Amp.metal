@@ -7,7 +7,7 @@ using namespace metal;
 
 template <typename T>
 struct AmpNonFiniteCheckAndUnscaleArgs {
-  metal::array<device T*, kmaxTensors> data;
+  metal::array<device T*, kmaxTensors> data [[id(0)]];
 };
 
 struct MetadataArguments {
