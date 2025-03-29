@@ -11,6 +11,7 @@ from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch._inductor.codegen import common as codegen_common
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
@@ -222,3 +223,7 @@ def clone_preserve_strides_offset(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
+
+def has_cpp_wrapper_for_device(device: str) -> bool:
+    codegen_common.init_backend_registration()
+    return codegen_common.get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
