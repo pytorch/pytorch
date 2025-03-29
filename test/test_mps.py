@@ -1119,8 +1119,7 @@ class TestAutocastMPS(TestCase):
             scaler_mps.update()
 
             for p_cpu, p_mps in zip(model_cpu.parameters(), model_mps.parameters()):
-                self.assertEqual(p_mps.cpu(), p_cpu, rtol=rtol, atol=atol,
-                                msg=f"Parameter {p_cpu} (CPU) != {p_mps.cpu()} (MPS)")
+                self.assertEqual(p_mps.cpu(), p_cpu, rtol=rtol, atol=atol, msg=f"Parameter {p_cpu} (CPU) != {p_mps.cpu()} (MPS)")
 
         # smol model
         model_cpu = nn.Linear(10, 5).to('cpu')
