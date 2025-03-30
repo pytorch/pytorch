@@ -352,7 +352,6 @@ Tensor mkldnn_linear_pointwise_binary(
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
-  auto aprop_kind = ideep::prop_kind::forward_inference;
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
