@@ -1,3 +1,7 @@
+# Specify a minimum Policy Version to pass submodule builds with CMake-4+
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+  set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE STRING "")
+endif()
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
@@ -20,10 +24,6 @@ cmake_policy(SET CMP0092 NEW)
 # Prohibit in-source builds
 if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
   message(FATAL_ERROR "In-source build are not supported")
-endif()
-# Specify a minimum Policy Version to pass submodule builds with CMake-4+
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-  set(CMAKE_POLICY_VERSION_MINIMUM "3.5")
 endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
