@@ -4149,6 +4149,10 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
+    )
     def test_group_norm_large_input(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -4177,6 +4181,33 @@ class CPUReproTests(TestCase):
                 )
                 # check for parallel reduction.
                 self.assertEqual(metrics.parallel_reduction_count, 1)
+
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
+    )
+    def test_group_norm_large_size(self):
+        # https://github.com/pytorch/pytorch/issues/141541
+        # We are using the chunk size of 4096 for cascade summation,
+        # the reduction size of this test case exceeded it.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gn = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.gn(x)
+
+        for dynamic in [True, False]:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn(1, 32, 128, 128, 128)
+            with torch.no_grad():
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual = compiled_m(x)
+                self.assertEqual(expected, actual)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
