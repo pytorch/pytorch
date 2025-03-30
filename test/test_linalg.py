@@ -5782,6 +5782,18 @@ class TestLinalg(TestCase):
         with torch.no_grad():
             torch.matmul(a, b, out=c)
 
+    @dtypes(torch.float, torch.complex64)
+    def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
+        a = torch.empty((2, 3), device=device, dtype=dtype, requires_grad=True)
+        b = torch.empty((3, 4), device=device, dtype=dtype, requires_grad=True)
+        c = torch.empty((2, 4), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(RuntimeError, "functions with out=... arguments don't support automatic differentiation"):
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+
+        with torch.no_grad():
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
