@@ -11,7 +11,10 @@ namespace at::native::mps {
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Amp_metallib.h>
+// workaround to not include lib twice
+#define lib _ignored_lib_name_for_fused
 #include <ATen/native/mps/FusedOptimizerOps_metallib.h>
+#undef lib
 #endif
 
 inline std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
