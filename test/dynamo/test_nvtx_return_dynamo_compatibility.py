@@ -116,7 +116,7 @@ class NVTXTensorReturnsTests(torch._dynamo.test_case.TestCase):
         try:
             # Create and compile the module without forcing full graph
             module = self.NVTXModule()
-            compiled_module = torch.compile(module, fullgraph=False)
+            compiled_module = torch.compile(module, fullgraph=True)
 
             # Create input data
             x = torch.randn(3, 3)
