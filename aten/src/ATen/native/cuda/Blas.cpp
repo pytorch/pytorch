@@ -18,6 +18,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
+#include <ATen/native/cuda/GroupMM.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1554,6 +1555,38 @@ bool use_fast_accum) {
 #endif
 
 }
+
+Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b, 
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias, 
+std::optional<c10::ScalarType> out_dtype) {
+#ifndef USE_ROCM
+
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+
+  TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
+
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
+  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
+  at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+  return out;
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#endif
+}
+
 
 
 } // namespace at::native
