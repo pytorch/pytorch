@@ -1,6 +1,7 @@
 from torch.fx import Node
-from .utils import get_fake_tensor_from_node_arg, get_nodes_with_chunking_meta, format_node_with_chunking_meta, get_args_of_node_type, has_any_chunking_meta, get_first_chunking_meta, get_scale_by_from_metas
-from .core import get_chunking_meta, set_chunking_meta, copy_chunking_meta, set_chunking_meta_if_none, CantChunk
+from .utils import get_fake_tensor_from_node_arg, get_nodes_with_chunking_meta, format_node_with_chunking_meta, get_args_of_node_type, has_any_chunking_meta, get_first_chunking_meta, get_scale_by_from_metas, get_node_is_scalar, is_chunked_by_dim
+from .core import get_chunking_meta, set_chunking_meta, copy_chunking_meta, set_chunking_meta_if_none, CantChunk, ChunkingMeta, has_nop_chunking_meta
+from .propagate_scale_by import propagate_scale_by
 import torch
 import logging
 from queue import Queue
@@ -10,6 +11,34 @@ import functools
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+"""
+NOTE [Why we need both fwd and bwd chunking metadata propagation?]
+The starting point of chunking is we found a op that creates a much larger output
+than input. We attach chunking medadata upon the op and propagate it forward.
+
+But for backward rules like NLLLossBackward, we do a scatter upon a zero matrix. That
+zero matrix is created by torch.full. We only know we should chunk that tensor
+by propagating chunking metadata backward.
+"""
+
+"""
+NOTE [Why we need a separate pass to propagate ChunkingMeta.scale_by?]
+
+ChunkingMeta.scale_by only need to be propagate forward from the tangent placeholder nodes.
+If we do this together with propgating other metadata, we can not fully control the propagating
+order and end up with cases like:
+    out = aten.sub(lhs, rhs)
+where `lhs` has scale_by set, while `rhs` and `out` don't.
+For sub op, we could propagate `scale_by` to `rhs` and `out` since that's the only way to make sense. But overall this is unsafe since maybe this is a case that chunking does not make sense and we should bail out.
+Another example is, we can not really propagate `scale_by` backward for aten.mul since we don't know which of the input should have this `scale_by` metadata.
+
+But it's safer that we only propagate `scale_by` metadata in the topological order.
+
+Have the `scale_by` handled in a separate pass also makes the fwd/bwd
+chunking metadata propagation much simpler. We don't need special rules
+for mul/div/where etc due to the special handling of scale_by: https://gist.github.com/shunting314/324e57881f168009784991300acab852
+"""
 
 # Rules to propagate chunking metadata from inputs to the current node
 # or from the current node back to its inputs
@@ -23,6 +52,8 @@ def _register_propagate_rule(aten_op, handler):
     @functools.wraps(handler)
     def wrapper(node):
         fwd_bwd_status = handler(node)
+        if isinstance(fwd_bwd_status, PropagateStatus):
+            return fwd_bwd_status
         assert isinstance(fwd_bwd_status, (list, tuple)) and len(fwd_bwd_status) == 2
         fwd_status, bwd_status = fwd_bwd_status
         log.debug("Chunking metadata propagation for %s: Fwd status %s, bwd status %s", node, fwd_status, bwd_status)
@@ -44,14 +75,15 @@ class PropagateStatus(Enum):
     SUCCEED_WITH_CHANGE = 1
     FAIL = 2
 
+def _is_success(*statuslist):
+    return not any(status == PropagateStatus.FAIL for status in statuslist)
+
 def _enqueue(queue, item):
     """
     Have a function to make it easier to do debugging log in a central place
     """
     queue.put(item)
     log.debug(f"Enqueue: {item}")
-    if str(item) == "primals_3":
-        breakpoint()
 
 def can_reach_amplified_node(graph, amplifier_node, is_fwd):
     """
@@ -66,7 +98,10 @@ def can_reach_amplified_node(graph, amplifier_node, is_fwd):
         if node.op == "output":
             # output node does not have a meta['val']
             reach = False
-        elif get_fake_tensor_from_node_arg(node).numel() == target_numel:
+
+        # for the back propagation, we should continue propagate if we can
+        # reach a tangent node
+        elif get_fake_tensor_from_node_arg(node).numel() == target_numel or (not is_fwd and node.op == "placeholder" and "tangent" in node.target):
             reach = True
         else:
             neighbors = node.users if is_fwd else get_args_of_node_type(node)
@@ -91,13 +126,13 @@ def propagate(amplifier_node: Node):
     while not queue.empty():
         propagate_single_node(queue, fwd_filter, bwd_filter, queue.get())
 
+    nodes_with_chunking_meta = get_nodes_with_chunking_meta(graph)
+    propagate_scale_by(nodes_with_chunking_meta)
+
     if log.isEnabledFor(logging.DEBUG):
         print("All nodes with chunking metadata set:")
-        nodes_with_chunking_meta = get_nodes_with_chunking_meta(graph)
         for node in nodes_with_chunking_meta:
             format_node_with_chunking_meta(node)
-
-    breakpoint()
 
 def propagate_single_node(queue, fwd_filter, bwd_filter, node):
     log.debug(f"Propagate_single_node: {node.format_node()}")
@@ -127,11 +162,9 @@ def propagate_single_node(queue, fwd_filter, bwd_filter, node):
             # don't propagate back thru a placeholder node
             if arg.op == "placeholder":
                 if "tangent" in arg.target:
+                    # we have a separate pass to propagate scale_by information fwd.
                     set_chunking_meta(arg, scale_by=arg)
-                    # TODO: this needs to be propagated fwd
-                continue
-
-            if bwd_filter[arg]:
+            elif bwd_filter[arg]:
                 _enqueue(queue, arg)
 
         # propagate to user nodes
@@ -153,8 +186,15 @@ def propagate_addmm(addmm_node):
             return PropagateStatus.SUCCEED_NO_CHANGE
 
         # only input is chunked
-        if get_chunking_meta(bias_node) is None and get_chunking_meta(weight_node) is None and get_chunking_meta(input_node) is not None:
-            return _bool_to_status(copy_chunking_meta(addmm_node, input_node))
+        if has_nop_chunking_meta(bias_node) and has_nop_chunking_meta(weight_node) and is_chunked_by_dim(input_node, 0):
+            # set a nop chunking metadata on bias_node & weight_node
+            # to make it easier that they should be a part of the chunking
+            # subgraph. (i.e. we pass in them as placeholder node)
+            return _bool_to_status(
+                copy_chunking_meta(addmm_node, input_node) |
+                set_chunking_meta(bias_node) |
+                set_chunking_meta(weight_node)
+            )
         return PropagateStatus.FAIL
 
     def propagate_addmm_bwd():
@@ -164,7 +204,11 @@ def propagate_addmm(addmm_node):
         if meta.chunk_by_dim(0):
             # if the output is chunked by the batch dimension, then
             # bias and input should as well
-            changed = set_chunking_meta(input_node, meta)
+            changed = (
+                set_chunking_meta(input_node, meta) |
+                set_chunking_meta(bias_node) |
+                set_chunking_meta(weight_node)
+            )
             return _bool_to_status(changed)
 
         return PropagateStatus.FAIL
@@ -180,14 +224,16 @@ def propagate_mm(mm_node):
     def fwd():
         out_meta = get_chunking_meta(mm_node)
         # only lhs is chunked
-        if lhs_meta is not None and rhs_meta is None:
-            return _bool_to_status(copy_chunking_meta(mm_node, lhs_meta))
+        if not has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
+            return _bool_to_status(
+                copy_chunking_meta(mm_node, lhs_meta) |
+                set_chunking_meta(rhs_node)
+            )
 
         # both lhs and rhs are chunked at the reduction dimension
         if lhs_meta is not None and rhs_meta is not None and lhs_meta.chunk_dim == 1 and rhs_meta.chunk_dim == 0:
             # The output is not chunked, but need to be sum'ed up!
-            scale_by = get_scale_by_from_metas(lhs_meta, rhs_meta)
-            return _bool_to_status(set_chunking_meta(mm_node, scale_by=scale_by, chunk_dim=None, need_sum=True))
+            return _bool_to_status(set_chunking_meta(mm_node, chunk_dim=None, need_sum=True))
 
         return PropagateStatus.FAIL
 
@@ -199,11 +245,13 @@ def propagate_mm(mm_node):
         # first dim of 2D output is chunked
         ft = get_fake_tensor_from_node_arg(mm_node)
         if ft.ndim == 2 and out_meta.chunk_dim == 0:
-            assert rhs_meta is None
-            return _bool_to_status(copy_chunking_meta(lhs_node, mm_node))
+            assert ChunkingMeta.is_nop(rhs_meta)
+            return _bool_to_status(
+                copy_chunking_meta(lhs_node, mm_node) |
+                set_chunking_meta(rhs_node)
+            )
 
         if out_meta.need_sum:
-            assert out_meta.scale_by is None # TODO handle this case
             changed = set_chunking_meta(lhs_node, chunk_dim=1) | set_chunking_meta(rhs_node, chunk_dim=0)
             return _bool_to_status(changed)
 
@@ -219,27 +267,39 @@ def propagate_mm(mm_node):
     aten.squeeze.dim,
     aten.gather.default,
     aten.neg.default,
-    aten.mul.Tensor,
     aten.scatter.value,
+    aten.div.Tensor,
+    aten.mul.Tensor,
+    aten.where.self,
 ])
 def propagate_general_copy_metadata(out_node):
     node_args = get_args_of_node_type(out_node)
+    node_is_scalar = get_node_is_scalar(node_args)
+
+    scalar_args = [node for node in node_args if node_is_scalar[node]]
+    non_scalar_args = [node for node in node_args if not node_is_scalar[node]]
+
+    # This general rule only allow scalar tensors without chunking meta
+    if scalar_args and not all(
+        ChunkingMeta.is_nop(get_chunking_meta(arg)) for arg in scalar_args
+    ):
+        return PropagateStatus.FAIL
 
     def propagate_fwd():
         if len(node_args) == 0:
             return PropagateStatus.FAIL
 
-        first_meta = get_first_chunking_meta(*node_args)
+        first_meta = get_first_chunking_meta(*non_scalar_args)
         if first_meta is None:
             return _bool_to_status(False)
 
-        changed = set_chunking_meta_if_none(node_args, first_meta)
+        changed = set_chunking_meta_if_none(non_scalar_args, first_meta)
 
-        src_meta = get_chunking_meta(node_args[0])
+        src_meta = get_chunking_meta(non_scalar_args[0])
         if src_meta is None:
             return PropagateStatus.FAIL
 
-        for other_node in node_args[1:]:
+        for other_node in non_scalar_args[1:]:
             other_meta = get_chunking_meta(other_node)
             if other_meta != src_meta:
                 return PropagateStatus.FAIL
@@ -251,7 +311,17 @@ def propagate_general_copy_metadata(out_node):
         if not (meta := get_chunking_meta(out_node)):
             return PropagateStatus.SUCCEED_NO_CHANGE
 
-        changed = any(copy_chunking_meta(node, meta) for node in node_args)
+        # apply any to a list to avoid short-curcuit
+        changed = any([copy_chunking_meta(node, meta) for node in node_args if not node_is_scalar[node]])
+
+        # [NOTE: NOP Chunking metadata]
+        # For scalar node arguments, we add a nop ChunkingMeta so the
+        # propagation continues. This is mainly needed to reach the point
+        # where we attach chunking metadata to tangents that need to be
+        # included in the chunking subgraph.
+        # This is different to having a None ChunkingMeta
+        changed |= any([set_chunking_meta(node) for node in node_args if node_is_scalar[node] and get_chunking_meta(node) is None])
+
         return _bool_to_status(changed)
 
     return propagate_fwd(), propagate_bwd()

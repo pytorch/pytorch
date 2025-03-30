@@ -102,3 +102,23 @@ def get_scale_by_from_metas(*metas):
         raise CantChunk("Multiple scale_by")
 
     return scale_by_list[0] if len(scale_by_list) == 1 else None
+
+def get_scale_by_from_node(node):
+    from .core import get_chunking_meta
+    meta = get_chunking_meta(node)
+    return meta.scale_by if meta is not None else None
+
+def get_node_is_scalar(nodes):
+    """
+    Returns a dict map a node to 'is_scalar'.
+    """
+    node_is_scalar = {}
+    for node in nodes:
+        ft = get_fake_tensor_from_node_arg(node)
+        node_is_scalar[node] = ft.numel() == 1
+    return node_is_scalar
+
+def is_chunked_by_dim(node, dim):
+    from .core import get_chunking_meta
+    meta = get_chunking_meta(node)
+    return meta and meta.chunk_by_dim(dim)

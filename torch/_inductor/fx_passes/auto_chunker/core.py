@@ -34,11 +34,25 @@ class ChunkingMeta:
     # in that case is the tangent node itself.
     need_sum: bool = False
 
-    def copy(self):
-        return ChunkingMeta(**self.__dict__)
+    def copy(self, **kwargs):
+        meta = ChunkingMeta(**self.__dict__)
+        for k, v in kwargs.items():
+            setattr(meta, k, v)
+        return meta
+
+    @staticmethod
+    def equal(lhs_meta, rhs_meta, skip_scale_by=False):
+        if skip_scale_by:
+            lhs_meta = lhs_meta.copy(scale_by=None)
+            rhs_meta = rhs_meta.copy(scale_by=None)
+        return lhs_meta == rhs_meta
 
     def chunk_by_dim(self, dim: int):
         return self.chunk_dim == dim
+
+    @staticmethod
+    def is_nop(meta):
+        return meta is None or meta == ChunkingMeta()
 
 def set_chunking_meta(node, meta=None, **kwargs):
     """
@@ -56,6 +70,19 @@ def set_chunking_meta(node, meta=None, **kwargs):
     old_meta = get_chunking_meta(node)
     node.meta["chunking"] = meta
     return old_meta is None or old_meta != meta
+
+def update_chunking_meta(node, **kwargs):
+    """
+    Unlike set_chunking_mete, this function keeps the existing chunking
+    metadata if it's not overriden.
+    """
+    meta = get_chunking_meta(node)
+    if meta is None:
+        meta = ChunkingMeta()
+    for k, v in kwargs.items():
+        setattr(meta, k, v)
+
+    node.meta["chunking"] = meta
 
 def set_chunking_meta_if_none(nodes, meta):
     changed = False
@@ -78,6 +105,12 @@ def copy_chunking_meta(dst_node, src_node):
 
 def get_chunking_meta(node):
     return node.meta.get("chunking")
+
+def has_nop_chunking_meta(node):
+    return ChunkingMeta.is_nop(get_chunking_meta(node))
+
+def get_chunking_metas(nodes):
+    return [get_chunking_meta(node) for node in nodes]
 
 eligible_amplifier_node = {
     aten.mm.default,
