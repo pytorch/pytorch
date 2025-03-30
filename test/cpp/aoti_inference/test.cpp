@@ -439,7 +439,6 @@ void test_aoti_double_buffering_with_tensor_constants() {
 
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
-  size_t allocated, reserved, active;
 
   std::string data_path =
       (std::filesystem::path(
@@ -490,7 +489,11 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
   c10::cuda::CUDACachingAllocator::DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchActive = stats.active_bytes[0].current;
+  size_t initTorchReserved = stats.reserved_bytes[0].current;
   // This should contain one set of weight (128MB) loaded from .so
+  size_t torchActive1, torchActive2;
+  size_t torchReserved1, torchReserved2;
   size_t initMemory = 0;
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
@@ -511,18 +514,30 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   // (64MB).
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ true);
+    stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+    torchActive1 = stats.active_bytes[0].current;
+    torchReserved1 = stats.reserved_bytes[0].current;
     size_t constFoldMemory = 0;
     cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
     if (cudaStatus != cudaSuccess) {
       throw std::runtime_error("cudaMemGetInfo failed!");
     }
-    ASSERT_EQ(initMemory - DATASIZE - FOLDEDDATASIZE, constFoldMemory);
+    ASSERT_EQ(
+        initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
+        constFoldMemory);
+    ASSERT_EQ(torchActive1 - initTorchActive, FOLDEDDATASIZE);
   }
 
   // We swap and free the inactive buffer. (Use #2 and free #1)
-  // Note that buffer #1 do not include folded-const
+  // Note that buffer #1 does not include folded-const
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive1 = stats.active_bytes[0].current;
+  torchReserved1 = stats.reserved_bytes[0].current;
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive2 = stats.active_bytes[0].current;
+  torchReserved2 = stats.reserved_bytes[0].current;
   size_t postFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&postFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
@@ -530,60 +545,76 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
   // We should only have one set of buffer (#2), available memory should equal
   // initial memory minus the folded constants.
-  ASSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
+  ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), postFreeMemory);
+  // Buffer #1 does not include folded-consts
+  ASSERT_EQ(torchActive2 - torchActive1, 0);
 
   // We update random weights to buffer #1 and run const fold.
   // We will have 2 full set of data plus 2 set of const-folded data.
   runner->update_inactive_constant_buffer(rand_map);
   runner->run_const_fold(/* use_inactive = */ true);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive1 = stats.active_bytes[0].current;
+  torchReserved1 = stats.reserved_bytes[0].current;
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory - DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(
+      initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
+      updateMemory1);
+  ASSERT_EQ(torchActive1 - initTorchActive, 2 * FOLDEDDATASIZE);
 
   // We directly free the buffer #1. This would free the DATASIZE weight.
   // If folded constant exists, it will not directly free the cudaMalloc, but
   // decrease the active buffer in CachingAllocator instead.
-  size_t active1, active2;
-  size_t allocated1, allocated2;
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
-  active1 = stats.active_bytes[0].current;
-  allocated1 = stats.allocated_bytes[0].current;
+  torchActive1 = stats.active_bytes[0].current;
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
-  active2 = stats.active_bytes[0].current;
-  allocated2 = stats.allocated_bytes[0].current;
-  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
-  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
+  torchActive2 = stats.active_bytes[0].current;
+  torchReserved2 = stats.reserved_bytes[0].current;
+  ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, torchActive1 - torchActive2);
 
   // Free buffer #1 again, since #1 is freed, nothing should change.
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive1 = stats.active_bytes[0].current;
   runner->free_inactive_constant_buffer();
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive2 = stats.active_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
-  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
+  ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), updateMemory1);
+  ASSERT_EQ(torchActive1 - torchActive2, 0);
 
   // Swap and free #2, no data should exist in memory now.
-  // However, the folded constants still occupies the CUDA memory in
+  // However, the folded constants might still occupies the CUDA memory in
   // CachedAllocator.
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchActive1 = stats.active_bytes[0].current;
+  torchReserved1 = stats.reserved_bytes[0].current;
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
-  active2 = stats.active_bytes[0].current;
+  torchActive2 = stats.active_bytes[0].current;
+  torchReserved2 = stats.reserved_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory + DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
-  ASSERT_EQ(2 * FOLDEDDATASIZE, active1 - active2);
+  ASSERT_EQ(
+      initMemory + DATASIZE - (torchReserved2 - initTorchReserved),
+      updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, torchActive1 - torchActive2);
+  ASSERT_EQ(0, torchActive2 - initTorchActive);
 }
 
 class ThreadPool {
