@@ -865,6 +865,8 @@ class FakeTensor(Tensor):
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
             aten._foreach_copy.default,
+            # this is a inplace fill, so the other side's device doesn't matter.
+            aten.fill_.Tensor,
         )
 
         def check_cpu_device(device: torch.device) -> bool:
