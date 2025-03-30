@@ -10835,7 +10835,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             warnings.simplefilter("always")
 
             x = torch.tensor(2.0, requires_grad=True)
-            y = math.pow(x, 3)  # calling this results in a warning
+            math.pow(x, 3)  # calling this results in a warning
 
             self.assertEqual(len(w), 1)
             self.assertTrue(issubclass(w[0].category, UserWarning))
