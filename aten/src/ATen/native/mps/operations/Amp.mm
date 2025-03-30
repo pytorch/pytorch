@@ -19,11 +19,6 @@
 namespace at::native {
 namespace mps {
 namespace {
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/Amp_metallib.h>
-#endif
 
 static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scaled_grad,
                                                               at::Tensor& found_inf,
