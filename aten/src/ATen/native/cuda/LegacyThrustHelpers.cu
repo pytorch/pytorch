@@ -87,7 +87,7 @@ void embedding_dense_backward_cuda_scan<int64_t>(Tensor &sorted_indices, Tensor 
 
 template<typename index_t>
 int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets) {
-  auto stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   const ptrdiff_t numel = sorted_indices.numel();
