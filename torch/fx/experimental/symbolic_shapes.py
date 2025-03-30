@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sympy
+from sympy import Add, S
+
 
 """
 ``torch.fx.experimental.symbolic_shapes`` provides interfaces for interacting with
@@ -102,9 +105,6 @@ InputList = list
 DimList = list
 
 log = logging.getLogger(__name__)
-
-import sympy
-from sympy import Add, S
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -232,7 +232,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[Union[SymInt, int], int],
+    tup: tuple[Union[SymInt, int], int]
 ) -> tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
@@ -1296,7 +1296,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
 ) -> Union[bool, int, float]:
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -1926,7 +1926,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2162,7 +2162,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool],
+    symbool: Union[bool, torch.SymBool]
 ) -> Union[int, torch.SymInt]:
     if isinstance(symbool, bool):
         return 1 if symbool else 0
@@ -7325,15 +7325,21 @@ class _PythonMsgPrinter(PythonPrinter):
         return self.src_map[sym.name][0]
 
 
-def _is_non_negative_check(condition_str: str) -> Optional[str]:
+def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
     """
-    Check if a condition string is checking for non-negative values (>= 0).
-    Returns the variable name if it's a non-negative check, None otherwise.
+    Check if a condition (SymPy expression) is checking for non-negative values (>= 0).
+    Returns the variable name if it's a non-negative check (>= 0), None otherwise.
     """
-    # Pattern to match expressions like "x >= 0", "x.shape[0] >= 0", etc.
-    pattern = r"([a-zA-Z0-9_\.\[\]]+)\s*>=\s*0"
-    match = re.match(pattern, condition_str.strip())
-    return match.group(1) if match else None
+    if isinstance(cond, sympy.Rel):
+        if cond.rel_op == ">=":
+            left = cond.lhs
+            right = cond.rhs
+            if right == 0:
+                if isinstance(left, (sympy.Symbol, sympy.Mul, sympy.Add)):
+                    return (
+                        str(left) if not isinstance(left, sympy.Symbol) else left.name
+                    )
+    return None
 
 
 def _suggest_torch_checks(
@@ -7349,24 +7355,27 @@ def _suggest_torch_checks(
     msg = e.args[0]
     msg += "\nTo fix the error, insert one of the following checks before this call:"
 
-    cond_str = printer.doprint(cond)
     not_cond_str = printer.doprint(sympy.Not(cond))
-    var_name = _is_non_negative_check(cond_str)
+    var_name = _is_non_negative_check(cond)
 
     # suggested fixes to resolve `cond` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
     suggested_fixes = []
 
     if var_name:
-        # For non-negative checks, suggest check_is_size instead of _check(u>=0)
         suggested_fixes = [
-            f"torch._check_is_size({var_name})",
+            f"You can add either: torch._check_is_size({var_name}) or torch._check({var_name}>=0)"
+            f" Note: torch._check_is_size({var_name}) will get you data dependent errors that"
+            + " happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning,"
+            + " but semantics could deviate slightly."
+            + " See documentation on guard_size_oblivious for more details:"
+            + " https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html",
             f"torch._check({not_cond_str})",
         ]
     else:
         suggested_fixes = [
             f"torch._check({printer.doprint(cond)})",
-            f"torch._check({printer.doprint(sympy.Not(cond))})",
+            f"torch._check({not_cond_str})",
         ]
 
     for i, fix in enumerate(suggested_fixes):
