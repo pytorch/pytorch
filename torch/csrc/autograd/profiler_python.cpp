@@ -293,7 +293,8 @@ class ValueCache {
         /*end_time_ns=*/std::numeric_limits<c10::time_t>::min(),
         python_tid,
         caller.frame_state_,
-        load<C>(callsite.value_)};
+        load<C>(callsite.value_),
+        0};
   }
 
   std::optional<TensorMetadata> recordIfTensor(py::handle p);
@@ -667,6 +668,7 @@ struct ThreadLocalResults {
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> exit_times_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> c_exit_times_;
+  AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> gil_wait_times_;
 };
 
 // ============================================================================
@@ -735,6 +737,18 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
   return out;
 }
 
+static PyObject* dummy_python_function(PyObject* self, PyObject* args)
+{
+    return Py_None;
+}
+static PyMethodDef dummy_function_def = {
+  "GIL_RELEASE",
+  dummy_python_function,
+  METH_VARARGS,
+  ""
+};
+static PyObject* dummy_gil_release_func;
+
 PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     : queue_(queue),
 
@@ -799,6 +813,16 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
+
+  // Create synthetic C functions to represent thread activity
+  PyObject* module_name = PyUnicode_FromString("mymodule");
+  TORCH_INTERNAL_ASSERT(module_name != NULL);
+  PyObject* module = PyModule_NewObject(module_name);
+  TORCH_INTERNAL_ASSERT(module != NULL);
+  dummy_gil_release_func = PyCFunction_NewEx(&dummy_function_def, module, module_name);
+  TORCH_INTERNAL_ASSERT(dummy_gil_release_func != NULL);
+  auto res = PyObject_SetAttrString(module, dummy_function_def.ml_name, dummy_gil_release_func);
+  TORCH_INTERNAL_ASSERT(res == 0);
 }
 
 void PythonTracer::stop() {
@@ -910,6 +934,7 @@ struct Exit {
   }
 
   c10::time_t t_;
+  int64_t w_;
   size_t python_tid_;
 };
 
@@ -926,7 +951,7 @@ class PostProcess {
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);
 
       addExits<EventType::PyCall>(tls[python_tid].exit_times_, python_tid);
-      addExits<EventType::PyCCall>(tls[python_tid].c_exit_times_, python_tid);
+      addExits<EventType::PyCCall>(tls[python_tid].c_exit_times_, tls[python_tid].gil_wait_times_, python_tid);
     }
   }
 
@@ -959,7 +984,20 @@ class PostProcess {
       AppendOnlyList<c10::approx_time_t, N>& exits,
       size_t python_tid) {
     for (const auto i : exits) {
-      get_state<E>().exits_.push({time_converter_(i), python_tid});
+      get_state<E>().exits_.push({time_converter_(i), 0, python_tid});
+    }
+  }
+
+  template <EventType E, size_t N>
+  void addExits(
+      AppendOnlyList<c10::approx_time_t, N>& exits,
+      AppendOnlyList<int64_t, N>& gil_waits,
+      size_t python_tid) {
+    auto it = gil_waits.begin();
+    for (const auto i : exits) {
+      TORCH_INTERNAL_ASSERT(it != gil_waits.end());
+      get_state<E>().exits_.push({time_converter_(i), *it, python_tid});
+      ++it;
     }
   }
 
@@ -982,9 +1020,10 @@ class PostProcess {
       std::vector<std::shared_ptr<Result>>& out) {
     using stack_t = std::vector<std::shared_ptr<Result>>;
     const auto initial_size = out.size();
-    auto pop = [](stack_t& stack, c10::time_t t) {
+    auto pop = [](stack_t& stack, c10::time_t t, int64_t g) {
       TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
       std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      std::get<ExtraFields<E>>(stack.back()->extra_fields_).gil_wait_us_ = g;
       stack.pop_back();
     };
 
@@ -999,7 +1038,7 @@ class PostProcess {
           auto& exit = state.exits_.top();
           auto& tstack = stacks[exit.python_tid_];
           if (!tstack.empty()) {
-            pop(tstack, exit.t_);
+            pop(tstack, exit.t_, exit.w_);
           }
           state.exits_.pop();
         }
@@ -1016,7 +1055,7 @@ class PostProcess {
     // Handle events which were still running when profiling ended.
     for (auto& i : stacks) {
       while (!i.second.empty()) {
-        pop(i.second, end_time_);
+        pop(i.second, end_time_, 0);
       }
     }
 
@@ -1130,7 +1169,26 @@ int PythonTracer::pyProfileFn(
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
       local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+      local_results.gil_wait_times_.emplace_back(0);
       break;
+
+#ifdef PyTrace_THREAD_SAVE
+    case PyTrace_THREAD_SAVE:
+    case PyTrace_THREAD_RELEASE:
+    case PyTrace_THREAD_PREEMPT:
+    case PyTrace_LOCK_RELEASE:
+      local_results.active_tracer_->recordCCall(local_results, frame, dummy_gil_release_func);
+      break;
+
+    case PyTrace_THREAD_RESTORE:
+    case PyTrace_THREAD_ACQUIRE:
+    case PyTrace_THREAD_RESUME:
+    case PyTrace_LOCK_ACQUIRE:
+      local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyLong_Check(arg));
+      local_results.gil_wait_times_.emplace_back(PyLong_AsLong(arg));
+      break;
+#endif
   }
   return 0;
 }

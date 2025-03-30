@@ -11,6 +11,7 @@ from functools import partial
 from typing import Any, Callable, Optional
 from typing_extensions import Self
 from warnings import warn
+import gc
 
 import torch
 import torch.autograd.profiler as prof
@@ -730,6 +731,7 @@ class profile(_KinetoProfile):
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
+        self.gc_rec_fn: Optional[prof.record_function] = None
 
         self.action_map: dict[
             tuple[ProfilerAction, Optional[ProfilerAction]], list[Any]
@@ -813,11 +815,22 @@ class profile(_KinetoProfile):
                 "ProfilerStep#" + str(self.step_num)
             )
             self.step_rec_fn.__enter__()
+        gc.callbacks.append(self.gc_hook)
 
     def stop(self):
+        if self.gc_hook in gc.callbacks:
+            gc.callbacks.remove(self.gc_hook)
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._transit_action(self.current_action, None)
+
+    def gc_hook(self, phase, info):
+        if phase == 'start':
+            self.gc_rec_fn = prof.record_function("GC")
+            self.gc_rec_fn.__enter__()
+        elif self.gc_rec_fn is not None:
+            self.gc_rec_fn.__exit__(None, None, None)
+            self.gc_rec_fn = None
 
     def step(self):
         """

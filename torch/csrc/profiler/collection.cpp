@@ -611,7 +611,8 @@ std::string Result::name() const {
       ATTRIBUTE(Allocation, std::string("[memory]")),
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
-      ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
+      ATTRIBUTE(PyCCall, std::string(e.function_name_.str()).compare("<built-in function GIL_RELEASE>") ?
+        std::string(e.function_name_.str()) : std::string("GIL_RELEASE")),
       [](const auto& e) -> std::string { return e.name_; }));
 }
 
