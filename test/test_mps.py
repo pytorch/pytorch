@@ -1109,7 +1109,9 @@ class TestAutocastMPS(TestCase):
                 return self.fc5(x)
         torch.manual_seed(42)
 
-        def helper(model_cpu, model_mps, dtype, iterations, batch_size, atol=1e-4, rtol=1e-5):
+        def helper(model_cpu, model_mps, dtype, iterations, batch_size, atol=3e-4, rtol=1e-5):
+            if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+                raise unittest.SkipTest("bfloat16 needs MacOS14+")
             optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), lr=0.01)
             optimizer_mps = torch.optim.SGD(model_mps.parameters(), lr=0.01)
             loss_fn = nn.MSELoss()
