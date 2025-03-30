@@ -13,11 +13,11 @@ constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 constexpr size_t kPinnedMaxRegisterThreads = 128;
 } // anonymous namespace
 
-AllocatorConfig::AllocatorConfig(c10::DeviceType t) : device_type_(t) {
-  roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
+AllocatorConfig::AllocatorConfig() {
+  da_roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
-size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
+size_t AllocatorConfig::da_roundup_power2_divisions(size_t size) {
   size_t log_size = (63 - llvm::countLeadingZeros(size));
 
   // Our intervals start at 1MB and end at 64GB
@@ -31,7 +31,7 @@ size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
 
   auto index = (log_size > interval_start) ? (log_size - interval_start) : 0ul;
   index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
-  return roundup_power2_divisions_[index];
+  return da_roundup_power2_divisions_[index];
 }
 
 void AllocatorConfig::lexArgs(
@@ -66,7 +66,7 @@ void AllocatorConfig::consumeToken(
       c);
 }
 
-size_t AllocatorConfig::parseMaxSplitSize(
+size_t AllocatorConfig::daParseMaxSplitSize(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -81,14 +81,14 @@ size_t AllocatorConfig::parseMaxSplitSize(
         "CachingAllocator option max_split_size_mb too small, must be >= ",
         min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
-    max_split_size_ = val_env * kMB;
+    da_max_split_size_ = val_env * kMB;
   } else {
     TORCH_CHECK(false, "Error, expecting max_split_size_mb value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parseMaxNonSplitRoundingSize(
+size_t AllocatorConfig::daParseMaxNonSplitRoundingSize(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -103,14 +103,14 @@ size_t AllocatorConfig::parseMaxNonSplitRoundingSize(
         "CachingAllocator option max_non_split_rounding_mb too small, must be >= ",
         min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
-    max_non_split_rounding_size_ = val_env * kMB;
+    da_max_non_split_rounding_size_ = val_env * kMB;
   } else {
     TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parseGarbageCollectionThreshold(
+size_t AllocatorConfig::daParseGarbageCollectionThreshold(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -120,14 +120,14 @@ size_t AllocatorConfig::parseGarbageCollectionThreshold(
     TORCH_CHECK(
         val_env > 0 && val_env < 1.0,
         "garbage_collect_threshold is invalid, set it in (0.0, 1.0)");
-    garbage_collection_threshold_ = val_env;
+    da_garbage_collection_threshold_ = val_env;
   } else {
     TORCH_CHECK(false, "Error, expecting garbage_collection_threshold value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parseRoundUpPower2Divisions(
+size_t AllocatorConfig::daParseRoundUpPower2Divisions(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -154,10 +154,10 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
         if (std::string_view(val1) == ">") {
           std::fill(
               std::next(
-                  roundup_power2_divisions_.begin(),
+                  da_roundup_power2_divisions_.begin(),
                   static_cast<std::vector<unsigned long>::difference_type>(
                       last_index)),
-              roundup_power2_divisions_.end(),
+              da_roundup_power2_divisions_.end(),
               val2);
         } else {
           size_t val1_long = stoul(val1);
@@ -167,20 +167,20 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
 
           size_t index = 63 - llvm::countLeadingZeros(val1_long);
           index = std::clamp(
-              index, size_t{0}, roundup_power2_divisions_.size() - 1);
+              index, size_t{0}, da_roundup_power2_divisions_.size() - 1);
 
           if (first_value) {
             std::fill(
-                roundup_power2_divisions_.begin(),
+                da_roundup_power2_divisions_.begin(),
                 std::next(
-                    roundup_power2_divisions_.begin(),
+                    da_roundup_power2_divisions_.begin(),
                     static_cast<std::vector<unsigned long>::difference_type>(
                         index)),
                 val2);
             first_value = false;
           }
-          if (index < roundup_power2_divisions_.size()) {
-            roundup_power2_divisions_[index] = val2;
+          if (index < da_roundup_power2_divisions_.size()) {
+            da_roundup_power2_divisions_[index] = val2;
           }
           last_index = index;
         }
@@ -195,8 +195,8 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
           llvm::isPowerOf2_64(val1),
           "For roundups, the divisons has to be power of 2 ");
       std::fill(
-          roundup_power2_divisions_.begin(),
-          roundup_power2_divisions_.end(),
+          da_roundup_power2_divisions_.begin(),
+          da_roundup_power2_divisions_.end(),
           val1);
     }
   } else {
@@ -205,26 +205,36 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
   return i;
 }
 
-size_t AllocatorConfig::parseAllocatorBackendConfig(
+size_t AllocatorConfig::daParseUseAsyncAllocator(
     const std::vector<std::string>& config,
     size_t i) {
-  std::string backend_name =
-      c10::DeviceTypeName(device_type_, true) + "MallocAsync";
   consumeToken(config, ++i, ':');
 
   if (++i < config.size()) {
     TORCH_CHECK(
-        ((config[i] == "native") || (config[i] == backend_name)),
-        "Unknown allocator backend, options are native and ",
-        backend_name);
-    used_async_allocator_ = (config[i] == backend_name);
+        ((config[i] == "native") || (config[i] == "async"
+#ifdef USE_CUDA
+            || (config[i] == "cudaMallocAsync"
+#endif
+#ifdef USE_ROCM
+  // Ease burden on ROCm users by allowing either cuda or hip tokens.
+  // cuda token is broken up to prevent hipify matching it.
+#define PYTORCH_TOKEN1 \
+  "cud"                \
+  "aMallocAsync"
+#define PYTORCH_TOKEN2 "hipMallocAsync"
+            || (config[i] == PYTORCH_TOKEN1 || config[i] == PYTORCH_TOKEN2
+#endif
+        )),
+        "Unknown allocator backend, options are native and async");
+    da_use_async_allocator_ = (config[i] == "async");
   } else {
     TORCH_CHECK(false, "Error parsing allocator backend value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parsePinnedUseHostRegister(
+size_t AllocatorConfig::haParseUseHostRegister(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -235,14 +245,14 @@ size_t AllocatorConfig::parsePinnedUseHostRegister(
         (config[i] == "True" || config[i] == "False"),
         "Expected a single True/False argument for ",
         env_name);
-    pinned_use_host_register_ = (config[i] == "True");
+    ha_use_host_register_ = (config[i] == "True");
   } else {
     TORCH_CHECK(false, "Error, expecting ", env_name, " value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parsePinnedNumRegisterThreads(
+size_t AllocatorConfig::haParseNumRegisterThreads(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -258,14 +268,14 @@ size_t AllocatorConfig::parsePinnedNumRegisterThreads(
         val_env <= kPinnedMaxRegisterThreads,
         "Number of register threads should be less than or equal to ",
         kPinnedMaxRegisterThreads);
-    pinned_num_register_threads_ = val_env;
+    ha_num_register_threads_ = val_env;
   } else {
     TORCH_CHECK(false, "Error, expecting pinned_num_register_threads value");
   }
   return i;
 }
 
-size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
+size_t AllocatorConfig::haParseUseBackgroundThreads(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
@@ -273,7 +283,7 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
     TORCH_CHECK(
         (config[i] == "True" || config[i] == "False"),
         "Expected a single True/False argument for pinned_use_background_threads");
-    pinned_use_background_threads_ = (config[i] == "True");
+    ha_use_background_threads_ = (config[i] == "True");
   } else {
     TORCH_CHECK(false, "Error, expecting pinned_use_background_threads value");
   }
@@ -282,9 +292,9 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
 
 void AllocatorConfig::parseArgs(const char* env) {
   // If empty, set the default values
-  max_split_size_ = std::numeric_limits<size_t>::max();
-  roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
-  garbage_collection_threshold_ = 0;
+  da_max_split_size_ = std::numeric_limits<size_t>::max();
+  da_roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
+  da_garbage_collection_threshold_ = 0;
   bool used_native_specific_option = false;
 
   if (env == nullptr) {
@@ -324,7 +334,7 @@ void AllocatorConfig::parseArgs(const char* env) {
                std::string_view(config[i]) == "False"),
           "Expected a single True/False argument for expandable_segments");
       config_item_view = config[i];
-      expandable_segments_ = (config_item_view == "True");
+      da_use_expandable_segments_ = (config_item_view == "True");
     } else if (
         config_item_view ==
         ("release_lock_on_" + c10::DeviceTypeName(device_type_, true) +
@@ -363,7 +373,7 @@ void AllocatorConfig::parseArgs(const char* env) {
     }
   }
 
-  if (used_async_allocator_ && used_native_specific_option) {
+  if (da_use_async_allocator_ && used_native_specific_option) {
     TORCH_WARN(
         "backend:",
         device_type_,
