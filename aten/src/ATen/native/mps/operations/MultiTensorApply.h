@@ -299,12 +299,14 @@ void multi_tensor_apply(const std::string& kernel_name,
         if (tensor_lists[0][t].numel() == 0)
           continue;
 
+        // bind each tensor in this list to the correct slots across depths
         for (int d = 0; d < depth; d++) {
           mtl_setBuffer(argumentEncoder, tensor_lists[d][t], d * kmaxTensors + tensor_loc);
           [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][t])
                                 usage:(MTLResourceUsageRead | MTLResourceUsageWrite)];
         }
 
+        // save number of elements for this tensor
         metadata_arguments.numels[tensor_loc] = tensor_lists[0][t].numel();
         int currentTensorIndex = tensor_loc;
         tensor_loc++;
@@ -312,29 +314,47 @@ void multi_tensor_apply(const std::string& kernel_name,
         const auto numel = tensor_lists[0][t].numel();
         const auto chunks = numel / kChunkSize + ((numel % kChunkSize) ? 1 : 0);
 
+        // process tensor in chunks based on max chunk size
         for (uint chunk = 0; chunk < chunks; chunk++) {
           metadata_arguments.threadgroup_to_tensor[threadgroup_loc] = currentTensorIndex;
           metadata_arguments.threadgroup_to_chunk[threadgroup_loc] = chunk;
           threadgroup_loc++;
 
-          const bool tensor_full = (tensor_loc == kmaxTensors && chunk == chunks - 1);
-          const bool tg_full = (threadgroup_loc == kmaxThreadGroups);
+          // dispatch when we've filled the threadgroup array or finished the chunks
+          const bool dispatch_now = (threadgroup_loc == kmaxThreadGroups) || (chunk == chunks - 1);
+          if (dispatch_now) {
+            // check for a partial dispatch (i.e. more chunks remain for the current tensor)
+            bool partial = (chunk != chunks - 1);
+            uint carried_numels = 0;
+            if (partial) {
+              carried_numels = metadata_arguments.numels[currentTensorIndex];
+            }
 
-          if (tensor_full || tg_full) {
             mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, args...);
-
             MTLSize gridSize = MTLSizeMake(threadgroup_loc, 1, 1);
             uint32_t maxThreads = [pipeline maxTotalThreadsPerThreadgroup];
-            MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreads, static_cast<uint32_t>(64)), 1, 1);
+            MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreads, (uint32_t)64), 1, 1);
             [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
+            // prepare for the next batch: reset threadgroup count and create a new buffer
             threadgroup_loc = 0;
-            if (chunk == chunks - 1) {
-              tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
-              [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
-            } else {
-              metadata_arguments.numels[0] = metadata_arguments.numels[currentTensorIndex];
+            tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
+            [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
+
+            if (partial) {
+              // for a partial dispatch, rebind the partially processed tensor to slot 0
+              // so that its metadata is in the correct location
+              for (int d = 0; d < depth; d++) {
+                mtl_setBuffer(argumentEncoder, tensor_lists[d][t], d * kmaxTensors + 0);
+                [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][t])
+                                      usage:(MTLResourceUsageRead | MTLResourceUsageWrite)];
+              }
+              metadata_arguments.numels[0] = carried_numels;
+              // the currently processed tensor now lives at index 0
+              currentTensorIndex = 0;
               tensor_loc = 1;
+            } else {
+              tensor_loc = 0;
             }
           }
         }

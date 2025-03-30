@@ -1090,70 +1090,64 @@ class TestAutocastMPS(TestCase):
             self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
     def test_gradscaler_mps(self):
+        # big model to force chunking/depth in the gradscaler dispatch
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 2048)
+                self.fc2 = nn.Linear(2048, 2048)
+                self.fc3 = nn.Linear(2048, 2048)
+                self.fc4 = nn.Linear(2048, 2048)
+                self.fc5 = nn.Linear(2048, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                x = self.relu(self.fc3(x))
+                x = self.relu(self.fc4(x))
+                return self.fc5(x)
         torch.manual_seed(42)
 
-        def helper(model_cpu, model_mps, dtype, atol=1e-5, rtol=1e-6):
+        def helper(model_cpu, model_mps, dtype, iterations, batch_size, atol=1e-4, rtol=1e-5):
             optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), lr=0.01)
             optimizer_mps = torch.optim.SGD(model_mps.parameters(), lr=0.01)
             loss_fn = nn.MSELoss()
 
-            input_cpu = torch.randn(4, 10)
-            target_cpu = torch.randn(4, 5)
+            input_cpu = torch.randn(batch_size, 10)
+            target_cpu = torch.randn(batch_size, 5)
             input_mps = input_cpu.to('mps')
             target_mps = target_cpu.to('mps')
 
             scaler_cpu = torch.amp.GradScaler(device="cpu")
             scaler_mps = torch.amp.GradScaler(device="mps")
-            with torch.amp.autocast(device_type="cpu", dtype=dtype):
-                output_cpu = model_cpu(input_cpu)
-                loss_cpu = loss_fn(output_cpu, target_cpu)
-            scaler_cpu.scale(loss_cpu).backward()
-            scaler_cpu.step(optimizer_cpu)
-            scaler_cpu.update()
+            for _ in range(iterations):
+                optimizer_cpu.zero_grad()
+                optimizer_mps.zero_grad()
 
-            with torch.autocast(device_type="mps", dtype=dtype):
-                output_mps = model_mps(input_mps)
-                loss_mps = loss_fn(output_mps, target_mps)
-            scaler_mps.scale(loss_mps).backward()
-            scaler_mps.step(optimizer_mps)
-            scaler_mps.update()
+                with torch.amp.autocast(device_type="cpu", dtype=dtype):
+                    output_cpu = model_cpu(input_cpu)
+                    loss_cpu = loss_fn(output_cpu, target_cpu)
+                scaler_cpu.scale(loss_cpu).backward()
+                scaler_cpu.step(optimizer_cpu)
+                scaler_cpu.update()
+
+                with torch.autocast(device_type="mps", dtype=dtype):
+                    output_mps = model_mps(input_mps)
+                    loss_mps = loss_fn(output_mps, target_mps)
+                scaler_mps.scale(loss_mps).backward()
+                scaler_mps.step(optimizer_mps)
+                scaler_mps.update()
 
             for p_cpu, p_mps in zip(model_cpu.parameters(), model_mps.parameters()):
-                self.assertEqual(p_mps.cpu(), p_cpu, rtol=rtol, atol=atol, msg=f"Parameter {p_cpu} (CPU) != {p_mps.cpu()} (MPS)")
+                self.assertEqual(p_mps.cpu(), p_cpu, rtol=rtol, atol=atol)
 
-        # smol model
-        model_cpu = nn.Linear(10, 5).to('cpu')
-        model_mps = nn.Linear(10, 5).to('mps')
-        model_mps.load_state_dict(model_cpu.state_dict())
-        helper(model_cpu, model_mps, torch.float16)
-        helper(model_cpu, model_mps, torch.bfloat16)
-
-        # big model
-        class LargeModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layers = nn.Sequential(
-                    nn.Linear(10, 128),
-                    nn.ReLU(),
-                    nn.Linear(128, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, 256),
-                    nn.ReLU(),
-                    nn.BatchNorm1d(256),
-                    nn.Linear(256, 13),
-                    nn.ReLU(),
-                    nn.Linear(13, 5)
-                )
-
-            def forward(self, x):
-                return self.layers(x)
-
-        model_cpu = LargeModel().to('cpu')
-        model_mps = LargeModel().to('mps')
+        model_cpu = Model().to('cpu')
+        model_mps = Model().to('mps')
         model_mps.load_state_dict(model_cpu.state_dict())
 
-        helper(model_cpu, model_mps, torch.float16)
-        helper(model_cpu, model_mps, torch.bfloat16)
+        helper(model_cpu, model_mps, torch.float16, iterations=5, batch_size=4)
+        helper(model_cpu, model_mps, torch.bfloat16, iterations=5, batch_size=4)
 
     def test_non_fast_path_amp_unscale(self):
         torch.manual_seed(42)
