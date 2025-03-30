@@ -68,14 +68,4 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  maximize);
 }
 
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/FusedOptimizerOps_metallib.h>
-#endif
-
-std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
-  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
-}
-
 } // namespace at::native::mps

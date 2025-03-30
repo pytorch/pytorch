@@ -7,6 +7,17 @@ static_assert(sizeof(bool) == 1);
 
 namespace at::native::mps {
 
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Amp_metallib.h>
+#include <ATen/native/mps/FusedOptimizerOps_metallib.h>
+#endif
+
+inline std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
+  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
+}
+
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kmaxThreadGroups = 32;
 static constexpr int64_t kmaxTensors = 32;
