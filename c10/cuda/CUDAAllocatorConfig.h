@@ -1,14 +1,8 @@
 #pragma once
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-
-#include <atomic>
-#include <cstddef>
-#include <cstdlib>
-#include <mutex>
-#include <string>
-#include <vector>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -16,38 +10,37 @@ namespace c10::cuda::CUDACachingAllocator {
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
   static size_t max_split_size() {
-    return instance().m_max_split_size;
+    return c10::CachingAllocator::AllocatorConfig::instance().max_split_size();
   }
   static double garbage_collection_threshold() {
-    return instance().m_garbage_collection_threshold;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .garbage_collection_threshold();
   }
 
   static bool expandable_segments() {
-#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
-    if (instance().m_expandable_segments) {
-      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
-    }
-    return false;
-#else
-    return instance().m_expandable_segments;
-#endif
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .use_expandable_segments();
   }
 
   static bool release_lock_on_cudamalloc() {
-    return instance().m_release_lock_on_cudamalloc;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .use_release_lock_on_device_malloc();
   }
 
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
-    return instance().m_pinned_use_cuda_host_register;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .pinned_use_device_host_register();
   }
 
   static size_t pinned_num_register_threads() {
-    return instance().m_pinned_num_register_threads;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .pinned_num_register_threads();
   }
 
   static bool pinned_use_background_threads() {
-    return instance().m_pinned_use_background_threads;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .pinned_use_background_threads();
   }
 
   static size_t pinned_max_register_threads() {
@@ -64,17 +57,18 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static size_t roundup_power2_divisions(size_t size);
 
   static std::vector<size_t> roundup_power2_divisions() {
-    return instance().m_roundup_power2_divisions;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .roundup_power2_divisions();
   }
 
   static size_t max_non_split_rounding_size() {
-    return instance().m_max_non_split_rounding_size;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .max_non_split_rounding_size();
   }
 
   static std::string last_allocator_settings() {
-    std::lock_guard<std::mutex> lock(
-        instance().m_last_allocator_settings_mutex);
-    return instance().m_last_allocator_settings;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .last_allocator_settings();
   }
 
   static CUDAAllocatorConfig& instance() {
@@ -96,51 +90,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
   void parseArgs(const char* env);
 
  private:
-  CUDAAllocatorConfig();
-
-  static void lexArgs(const char* env, std::vector<std::string>& config);
-  static void consumeToken(
-      const std::vector<std::string>& config,
-      size_t i,
-      const char c);
-  size_t parseMaxSplitSize(const std::vector<std::string>& config, size_t i);
-  size_t parseMaxNonSplitRoundingSize(
-      const std::vector<std::string>& config,
-      size_t i);
-  size_t parseGarbageCollectionThreshold(
-      const std::vector<std::string>& config,
-      size_t i);
-  size_t parseRoundUpPower2Divisions(
-      const std::vector<std::string>& config,
-      size_t i);
-  size_t parseAllocatorConfig(
-      const std::vector<std::string>& config,
-      size_t i,
-      bool& used_cudaMallocAsync);
-  size_t parsePinnedUseCudaHostRegister(
-      const std::vector<std::string>& config,
-      size_t i);
-  size_t parsePinnedNumRegisterThreads(
-      const std::vector<std::string>& config,
-      size_t i);
-  size_t parsePinnedUseBackgroundThreads(
-      const std::vector<std::string>& config,
-      size_t i);
-
-  std::atomic<size_t> m_max_split_size;
-  std::atomic<size_t> m_max_non_split_rounding_size;
-  std::vector<size_t> m_roundup_power2_divisions;
-  std::atomic<double> m_garbage_collection_threshold;
-  std::atomic<size_t> m_pinned_num_register_threads;
-  std::atomic<bool> m_expandable_segments;
-  std::atomic<bool> m_release_lock_on_cudamalloc;
-  std::atomic<bool> m_pinned_use_cuda_host_register;
-  std::atomic<bool> m_pinned_use_background_threads;
-  std::string m_last_allocator_settings;
-  std::mutex m_last_allocator_settings_mutex;
+  CUDAAllocatorConfig() = default;
 };
 
-// General caching allocator utilities
+// Keep this for backwards compatibility
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 } // namespace c10::cuda::CUDACachingAllocator
