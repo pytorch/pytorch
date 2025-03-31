@@ -2736,6 +2736,17 @@ class RelaxedBooleanPair(BooleanPair):
         ):
             self._inputs_not_supported()
 
+        # Check if the object is a Thrift enum by checking its metaclass
+        def is_thrift_enum(obj):
+            type_module = type(obj).__module__
+            return type(type(obj)).__name__ == "EnumMeta" and (
+                type_module.endswith(".types") or type_module.endswith(".thrift_enums")
+            )
+
+            # Because Thrift Enums have changed to have a base class of int, check if actual or expected are of type thrift enum and call inputs_not_supported.
+            if is_thrift_enum(actual) or is_thrift_enum(expected):
+                self._inputs_not_supported()
+
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
     def _to_bool(self, bool_like, *, id):
