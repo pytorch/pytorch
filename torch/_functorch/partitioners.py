@@ -1191,6 +1191,7 @@ def solve_min_cut(
         # ancestor of this node to the backwards path through this node that
         # doesn't go through any saved value. If this node is saved, then that
         # condition is not possible.
+
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
         return True
 
