@@ -75,8 +75,8 @@ def try_import_cutlass() -> bool:
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
-    # TODO(mlazos): epilogue visitor tree currently livers in python/cutlass,
-    # but will be moved to python/cutlass_library in the future
+    # TODO(mlazos): epilogue visitor tree currently lives in python/cutlass,
+    # but will be moved to python/cutlass_library in the future (later 2025)
     def path_join(path0, path1):
         return os.path.abspath(os.path.join(path0, path1))
 
