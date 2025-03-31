@@ -1103,9 +1103,8 @@ if "optree" in sys.modules:
             serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point1",
         )
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point1, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(Point1(1, 2))
+        self.assertIs(spec.type, namedtuple)
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
         self.assertEqual(spec, roundtrip_spec)
 
@@ -1118,18 +1117,28 @@ if "optree" in sys.modules:
             serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point2",
         )
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point2, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        spec = py_pytree.tree_structure(Point2(1, 2))
+        self.assertIs(spec.type, namedtuple)
+        roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
+        self.assertEqual(spec, roundtrip_spec)
+
+        class Point3(Point2):
+            pass
+
+        py_pytree._register_namedtuple(
+            Point3,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point3",
         )
+
+        spec = py_pytree.tree_structure(Point3(1, 2))
+        self.assertIs(spec.type, namedtuple)
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
         self.assertEqual(spec, roundtrip_spec)
 
     def test_pytree_serialize_namedtuple_bad(self):
         DummyType = namedtuple("DummyType", ["x", "y"])
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, DummyType, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
 
         with self.assertRaisesRegex(
             NotImplementedError, "Please register using `_register_namedtuple`"
@@ -1148,9 +1157,7 @@ if "optree" in sys.modules:
             lambda xs, _: DummyType(*xs),
         )
 
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
         with self.assertRaisesRegex(
             NotImplementedError, "No registered serialization name"
         ):
@@ -1170,9 +1177,7 @@ if "optree" in sys.modules:
             to_dumpable_context=lambda context: "moo",
             from_dumpable_context=lambda dumpable_context: None,
         )
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
         serialized_spec = py_pytree.treespec_dumps(spec, 1)
         self.assertIn("moo", serialized_spec)
         roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
@@ -1210,9 +1215,7 @@ if "optree" in sys.modules:
             from_dumpable_context=lambda dumpable_context: None,
         )
 
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
 
         with self.assertRaisesRegex(
             TypeError, "Object of type type is not JSON serializable"
@@ -1223,9 +1226,7 @@ if "optree" in sys.modules:
         import json
 
         Point = namedtuple("Point", ["x", "y"])
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(Point(1, 2))
         py_pytree._register_namedtuple(
             Point,
             serialized_type_name="test_pytree.test_pytree_serialize_bad_protocol.Point",
