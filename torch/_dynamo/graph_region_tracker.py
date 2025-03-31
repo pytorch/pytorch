@@ -337,7 +337,6 @@ def fully_expand_region_group(
             debug_log("--------------------")
             debug_log("considering adding: %s, cur_node: %s", node, current_node)
             debug_log("previously claimed nodes: %s", node in seen_nodes)
-            debug_log("%s", seen_nodes)
             if node:
                 debug_log("is_identical: %s", is_identical_fn(node, current_node))
                 add_node &= (
