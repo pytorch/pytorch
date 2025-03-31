@@ -248,6 +248,13 @@ if torch._C._has_mkldnn:
             computation_call,
             CallFunction(aten.mul, computation_call, KeywordArg("negative_slope")),
         )
+    
+    def _pow_fusion(computation_call):
+        return CallFunction(
+            aten.pow.Tensor_Scalar,
+            computation_call,
+            KeywordArg("exponent"),
+        )
 
     def _hardtanh_fusion(computation_call):
         return CallFunction(
@@ -367,6 +374,53 @@ if torch._C._has_mkldnn:
                     out,
                     L[aten.mul](out, negative_slope),
                 )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
+                return out
+
+        return fn
+
+    def _register_pow_fusion_lowering(pattern, computation_op, lowp_dtype=None):
+        @register_lowering_pattern(
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+        )
+        def fn(match, *args, **kwargs):
+            exponent = kwargs.get("exponent")
+            if isinstance(exponent, ir.TensorBox):
+                matched = False
+            else:  # inp is a Number
+                matched = True
+            if lowp_dtype:
+                dtype1 = kwargs.get("to_float")
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
+            computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
+            if matched:
+                computation_args = computation_args[:-3] + [
+                    "pow",
+                    [1.0, exponent],
+                    "",
+                ]
+                return L[computation_op](*computation_args)
+            else:
+                # computation_args += ["none", [], ""]
+                out = L[computation_op](*computation_args)
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=torch.float)
+                out = L[aten.pow.Tensro_Scalar](out, exponent)
+                # out = L[aten.where](
+                #     L[aten.gt](out, 0),
+                #     out,
+                #     L[aten.mul](out, negative_slope),
+                # )
                 if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
@@ -725,6 +779,9 @@ if torch._C._has_mkldnn:
                         UnaryAttr("tanh"): [
                             _combined_fusion(u, aten.tanh) for u in call_user1
                         ],
+                        UnaryAttr("abs"): [
+                            _combined_fusion(u, aten.abs) for u in call_user1
+                        ]
                     }
                 )
 
@@ -746,8 +803,15 @@ if torch._C._has_mkldnn:
                 _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
+            _pow_patterns = [
+                _unary_fusion_pattern(_pow_fusion, call_fn, 1, lowp_dtype) for call_fn in computation_call_fns
+            ]
             for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
                 _register_leaky_relu_fusion_lowering(
+                    pattern, computation_op, lowp_dtype
+                )
+            for pattern, computation_op in zip(_pow_patterns, computation_ops):
+                _register_pow_fusion_lowering(
                     pattern, computation_op, lowp_dtype
                 )
             hardtanh_patterns = [

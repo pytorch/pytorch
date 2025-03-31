@@ -31,7 +31,12 @@ onednn::Attr unary_attr_with_arg(
       gelu_type = attr.kind_with_gelu_tanh;
     }
     return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, gelu_type);
-  } else if (unary == "hardsigmoid") {
+  } else if(unary == "abs") {
+    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_abs);
+  } else if(unary == "pow") {
+    auto beta = scalars[1].get().toOptional<at::Scalar>().value().to<float>();
+    return attr.append_post_eltwise(1.0f, 1.0f, beta, attr.kind_with_pow); 
+  }else if (unary == "hardsigmoid") {
     return attr.append_post_eltwise(
         1.0f, 1.0f / 6.f, 1.0f / 2.0f, attr.kind_with_hardsigmoid);
   }
@@ -39,7 +44,7 @@ onednn::Attr unary_attr_with_arg(
       unary == "none",
       "Unary attr ",
       unary,
-      "is not supported for conv/linear post unary fusion");
+      " is not supported for conv/linear post unary fusion");
   return attr;
 }
 
