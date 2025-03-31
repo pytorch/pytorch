@@ -1113,6 +1113,81 @@ User code traceback:
 """,
         )
 
+    def test_disable_message(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def outer(fn, x):
+            return fn(x)
+
+        @torch.compiler.disable
+        def f(x):
+            return x + 1
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(f, torch.randn(3)),
+            """\
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable`. Message: None
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
+        )
+
+        @torch.compiler.disable(msg="test message")
+        def g(x):
+            return x + 2
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(g, torch.randn(3)),
+            """\
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable`. Message: test message
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
+        )
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 3
+
+        mod = Mod()
+        mod.compile()
+        mod = torch.compiler.disable(mod, msg="test message 2")
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(mod, torch.randn(3)),
+            """\
+Unsupported function call (delayed)
+  Explanation: Dynamo determined that a graph break should occur when calling `L['fn']`. Reason: Optimized `nn.Module` is wrapped with `torch.compiler.disable()`. Message: test message 2
+
+
+  Developer debug context: source: LocalSource(local_name='fn', is_input=True, dynamism=None, is_derefed_cell_contents=False)
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
