@@ -13,6 +13,7 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
@@ -25,6 +26,31 @@
 #define STRINGIZE(x) STR_VALUE(x)
 
 namespace {
+
+const std::unordered_map<std::string, at::Tensor> derefTensorConstantMap(
+    torch::inductor::TensorConstantMap tensor_constant_map) {
+  std::unordered_map<std::string, at::Tensor> ret;
+  for (const auto& pair : tensor_constant_map) {
+    ret.emplace(pair.first, *(pair.second));
+  }
+  return ret;
+}
+
+bool compareConstantMap(
+    const std::unordered_map<std::string, at::Tensor>& lhs,
+    const std::unordered_map<std::string, at::Tensor>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+
+  for (const auto& pair : lhs) {
+    auto it = rhs.find(pair.first);
+    if (it == rhs.end() || !torch::allclose(pair.second, it->second)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
@@ -206,6 +232,90 @@ void test_aoti_constants_update(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+void test_aoti_extract_constants_map(const std::string& device) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path_" + device;
+  std::string inputs_attr = "inputs_" + device;
+  std::string outputs_attr = "outputs_" + device;
+  std::string weights_attr = "w_pre_" + device;
+  std::string add_attr = "w_add_" + device;
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  torch::inductor::TensorConstantMap rand_map, real_map;
+  at::Tensor rand_pre, rand_add;
+  at::Tensor w_pre, w_add;
+  at::DeviceType device_type = device == "cuda" ? at::kCUDA : at::kCPU;
+  rand_pre = at::randn({4, 4}).to(device_type);
+  rand_add = at::randn({4, 4}).to(device_type);
+  w_pre = at::Tensor(weight_tensors).to(device_type);
+  w_add = at::Tensor(add_tensors).to(device_type);
+
+  rand_map.emplace("L__self___w_pre", &rand_pre);
+  rand_map.emplace("L__self___w_add", &rand_add);
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  if (device == "cpu") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
+        model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
+  } else {
+    testing::AssertionFailure() << "unsupported device: " << device;
+  }
+
+  // By default, buffer #1 get loaded with burned in weights. Correct results.
+  auto actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // We update the weights to buffer #2 and activate it. This should still
+  // produce correct result, as it's the real constant map.
+  runner->update_inactive_constant_buffer(real_map);
+  auto extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  auto extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  auto cmp_real_map = derefTensorConstantMap(real_map);
+  auto cmp_rand_map = derefTensorConstantMap(rand_map);
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_real_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
+
+  // We update random weights to buffer #1. But do not swap in the weight yet.
+  runner->update_inactive_constant_buffer(rand_map);
+  extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_rand_map));
+
+  // We swap and activate the weight to buffer #1.
+  // Active weight now should be the new weight, while inactive should be the
+  // previous one.
+  runner->swap_constant_buffer();
+  extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_rand_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
+}
+
 void test_aoti_double_buffering(
     const std::string& device,
     bool use_runtime_constant_folding) {
@@ -327,8 +437,9 @@ void test_aoti_double_buffering_with_tensor_constants() {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
-void test_aoti_free_buffer() {
+void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
+  size_t allocated, reserved, active;
 
   std::string data_path =
       (std::filesystem::path(
@@ -336,11 +447,16 @@ void test_aoti_free_buffer() {
            .string();
 
   // Memory information variable
-  cudaError_t cudaStatus;
   size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+  size_t FOLDEDDATASIZE = use_runtime_constant_folding
+      ? 64 * 1024 * 1024
+      : 0; // We have 64MB of folded data.
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
   std::string path_attr = "model_so_path";
+  if (use_runtime_constant_folding) {
+    path_attr += std::string("_use_runtime_constant_folding");
+  }
   std::string inputs_attr = "inputs";
   std::string outputs_attr = "outputs";
   std::string weights_attr = "w_pre";
@@ -365,7 +481,16 @@ void test_aoti_free_buffer() {
   runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
 
-  // We extract the initial memory here.
+  // We extract the memory information starting from here.
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
@@ -382,7 +507,20 @@ void test_aoti_free_buffer() {
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
+  // Call run, this should run const_fold and create the folded constant in #2
+  // (64MB).
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ true);
+    size_t constFoldMemory = 0;
+    cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
+    if (cudaStatus != cudaSuccess) {
+      throw std::runtime_error("cudaMemGetInfo failed!");
+    }
+    ASSERT_EQ(initMemory - DATASIZE - FOLDEDDATASIZE, constFoldMemory);
+  }
+
   // We swap and free the inactive buffer. (Use #2 and free #1)
+  // Note that buffer #1 do not include folded-const
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
   size_t postFreeMemory = 0;
@@ -390,26 +528,39 @@ void test_aoti_free_buffer() {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  // We should only have one set of buffer (#2), memory used should equal
-  // initial memory.
-  ASSERT_EQ(initMemory, postFreeMemory);
+  // We should only have one set of buffer (#2), available memory should equal
+  // initial memory minus the folded constants.
+  ASSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
 
-  // We update random weights to buffer #1.
+  // We update random weights to buffer #1 and run const fold.
+  // We will have 2 full set of data plus 2 set of const-folded data.
   runner->update_inactive_constant_buffer(rand_map);
+  runner->run_const_fold(/* use_inactive = */ true);
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory - DATASIZE, updateMemory1);
+  ASSERT_EQ(initMemory - DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
 
-  // Test if we directly free the buffer #1.
+  // We directly free the buffer #1. This would free the DATASIZE weight.
+  // If folded constant exists, it will not directly free the cudaMalloc, but
+  // decrease the active buffer in CachingAllocator instead.
+  size_t active1, active2;
+  size_t allocated1, allocated2;
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  active1 = stats.active_bytes[0].current;
+  allocated1 = stats.allocated_bytes[0].current;
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory, updateMemory1);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  active2 = stats.active_bytes[0].current;
+  allocated2 = stats.allocated_bytes[0].current;
+  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
 
   // Free buffer #1 again, since #1 is freed, nothing should change.
   runner->free_inactive_constant_buffer();
@@ -417,7 +568,22 @@ void test_aoti_free_buffer() {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory, updateMemory1);
+  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
+
+  // Swap and free #2, no data should exist in memory now.
+  // However, the folded constants still occupies the CUDA memory in
+  // CachedAllocator.
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  active2 = stats.active_bytes[0].current;
+  cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory + DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(2 * FOLDEDDATASIZE, active1 - active2);
 }
 
 class ThreadPool {
@@ -577,6 +743,10 @@ TEST(AotInductorTest, BasicPackageLoaderTestCpu) {
   test_aoti_package_loader("cpu", false);
 }
 
+TEST(AotInductorTest, ExtractConstantsMapCpu) {
+  test_aoti_extract_constants_map("cpu");
+}
+
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda", true);
@@ -599,6 +769,10 @@ TEST(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
 }
 
+TEST(AotInductorTest, ExtractConstantsMapCuda) {
+  test_aoti_extract_constants_map("cuda");
+}
+
 TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", true);
 }
@@ -612,7 +786,11 @@ TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
 }
 
 TEST(AotInductorTest, FreeInactiveConstantBufferCuda) {
-  test_aoti_free_buffer();
+  test_aoti_free_buffer(false);
+}
+
+TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
+  test_aoti_free_buffer(true);
 }
 
 TEST(AotInductorTest, MultiStreamTestCuda) {

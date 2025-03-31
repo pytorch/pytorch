@@ -15,6 +15,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ from .utils import (
     GraphPartitionMap,
     IndentedBuffer,
     is_collective,
+    is_cudagraph_unsafe_op,
     is_gpu,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
@@ -73,7 +75,9 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType = list["BaseSchedulerNode"]
+PartitionType: TypeAlias = list["BaseSchedulerNode"]
+T = TypeVar("T")
+P = ParamSpec("P")
 
 
 @dataclasses.dataclass
@@ -990,7 +994,7 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
-        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
+        recompute_sizes_body_func: Optional[Callable[P, T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
         self._sizes, body = self.node.simplify_and_reorder(
@@ -2157,8 +2161,6 @@ class Scheduler:
         Create dependency edges between nodes, handling aliasing and
         mutation properly.
         """
-
-        T = TypeVar("T")
 
         class DedupList(Generic[T]):
             """
@@ -3459,24 +3461,6 @@ class Scheduler:
             why("prologue fusion will not increase amount of bytes read in kernel")
             return False
 
-        # we want to avoid attempting to fuse predictably unprofitable prologues
-        # such as increasing the unaligned reads or writes.
-        # TODO - would be nice to generalize this, however, we would need more explicit
-        # knowledge of memory access patterns in the TritonTemplate in order to know
-        # the stride order to check alignment.
-        origins = tuple(
-            e.target
-            for n in prologue_node.get_nodes()
-            if n.node is not None
-            for e in n.node.get_origins()
-            if e.op == "call_function"
-        )
-        if origins == (torch.ops.aten.constant_pad_nd.default,):
-            why(
-                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
-            )
-            return False
-
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
@@ -3981,6 +3965,9 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
+        if is_cudagraph_unsafe_op(node.node):
+            return True
+
         return False
 
     def get_name_to_nodes(
@@ -4409,7 +4396,11 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device is not None and self.get_backend(device).ready_to_flush():
+                if (
+                    device is not None
+                    and device.type != "meta"
+                    and self.get_backend(device).ready_to_flush()
+                ):
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):

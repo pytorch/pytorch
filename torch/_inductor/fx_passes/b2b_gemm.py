@@ -12,6 +12,7 @@ from ..ir import (
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
+    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -514,7 +515,7 @@ def build_subgraph_buffer(
 
 def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
-) -> TensorBox:
+) -> TensorBox | ShapeAsConstantBuffer:
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
@@ -540,8 +541,11 @@ def tuned_b2b_gemm(
         A.get_dtype(),
         [A.shape[0], C.shape[1]],  # type: ignore[index]
     )
+    placeholders = [
+        create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())
+    ]
     subgraph_buffer = build_subgraph_buffer(
-        [create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())],
+        placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
     choices: list[TritonTemplateCaller] = []
