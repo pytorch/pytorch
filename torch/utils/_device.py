@@ -24,7 +24,6 @@ def _device_constructors():
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
         torch.full,
-        torch.fill,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
@@ -47,7 +46,6 @@ def _device_constructors():
         torch.sparse_bsc_tensor,
         torch.tril_indices,
         torch.triu_indices,
-        torch.vander,
         torch.zeros,
         torch.asarray,
         # weird ones
