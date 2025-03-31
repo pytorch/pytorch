@@ -3916,7 +3916,7 @@ Please use `add.register_fake` to add an fake impl.""",
         t = torch.randn(2, 2)
         t_refcount = sys.getrefcount(t)
         test_fn(t, a=t)
-        assert sys.getrefcount(t) == t_refcount
+        self.assertEqual(sys.getrefcount(t), t_refcount)
 
         self.assertTrue(
             test_fn(
