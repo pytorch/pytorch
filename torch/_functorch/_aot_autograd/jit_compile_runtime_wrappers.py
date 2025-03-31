@@ -888,9 +888,12 @@ def aot_dispatch_autograd(
 
             # TODO XXX: Note about handling saved_tensors_hooks
             hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-            # TODO XXX: Set compilation guards on hooks py objects,
+            # TODO XXX: compilation guards on hooks py objects,
             # to recompile if previous hooks changed
-            if hooks:
+            if (
+                not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+                and hooks
+            ):
                 pack_hook, unpack_hook = hooks
 
                 def log_graph(gm, graph_name, structured_log_tag):
