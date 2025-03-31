@@ -335,7 +335,7 @@ def type_matches(signature_type: Any, argument_type: Any):
 @compatibility(is_backward_compatible=False)
 def normalize_function(
     target: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     arg_types: Optional[tuple[Any]] = None,
     kwarg_types: Optional[dict[str, Any]] = None,

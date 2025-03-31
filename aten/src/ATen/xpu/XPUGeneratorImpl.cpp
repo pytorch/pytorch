@@ -13,22 +13,24 @@ namespace {
  * Each generator is lazily initialized the first time generator is
  * requested for a device.
  */
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 std::deque<c10::once_flag> xpu_gens_init_flag;
 std::vector<Generator> default_gens_xpu;
 
 void initXPUGenVector() {
-  num_gpus = device_count();
-  xpu_gens_init_flag.resize(num_gpus);
-  default_gens_xpu.resize(num_gpus);
+  static bool init_flag [[maybe_unused]] = []() {
+    num_gpus = device_count();
+    xpu_gens_init_flag.resize(num_gpus);
+    default_gens_xpu.resize(num_gpus);
+    return true;
+  }();
 }
 
 } // anonymous namespace
 
 // Get the default generator with a random seed for a specific xpu device.
 const Generator& getDefaultXPUGenerator(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUGenVector);
+  initXPUGenVector();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
@@ -42,7 +44,7 @@ const Generator& getDefaultXPUGenerator(DeviceIndex device) {
 
 // Create a generator with a fixed seed for a specific xpu device.
 Generator createXPUGenerator(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUGenVector);
+  initXPUGenVector();
   if (device == -1) {
     device = c10::xpu::current_device();
   }

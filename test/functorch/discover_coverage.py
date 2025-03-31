@@ -44,7 +44,7 @@ def get_public_overridable_apis(pytorch_root="/raid/rzou/pt/debug-cpu"):
             if line.startswith(".. autofunction::")
         ]
         lines = api_lines1 + api_lines2
-        lines = [line[7:] if line.startswith("Tensor.") else line for line in lines]
+        lines = [line.removeprefix("Tensor.") for line in lines]
         lines = [line for line in lines if hasattr(module, line)]
         for line in lines:
             api = getattr(module, line)
