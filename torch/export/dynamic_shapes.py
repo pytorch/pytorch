@@ -56,6 +56,9 @@ class _DimHintType(Enum):
 @dataclasses.dataclass
 class _DimHint:
     type: _DimHintType
+    min: Optional[int] = None
+    max: Optional[int] = None
+    _factory: Optional[bool] = True
 
     @staticmethod
     def AUTO():
@@ -68,6 +71,14 @@ class _DimHint:
     @staticmethod
     def STATIC():
         return _DimHint(_DimHintType.STATIC)
+
+    def __call__(self, min=None, max=None) -> "_DimHint":
+        if not self._factory:
+            raise TypeError(f"'{type(self)}' object is not callable")
+        assert min is None or min >= 0, "min must be non-negative"
+        assert max is None or max >= 0, "max must be non-negative"
+        assert min is None or max is None or min <= max, "min must be <= max"
+        return _DimHint(self.type, min=min, max=max, _factory=False)
 
 
 class Dim:
