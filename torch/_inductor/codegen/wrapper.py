@@ -1047,7 +1047,9 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
-        return [x.codegen_reference(self) for x in self.get_graph_outputs()]
+        return [
+            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+        ]
 
     def mark_output_type(self) -> None:
         return
