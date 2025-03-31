@@ -310,11 +310,11 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
-    def _wait_all_gather_streams_on_event(self, event: torch.Event):
+    def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]):
         # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
             self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream"):
+        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
@@ -414,11 +414,11 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            if self.comm_ctx.reduce_scatter_state is not None:
+            if self.comm_ctx.reduce_scatter_state is not None and self.comm_ctx.reduce_scatter_state.event is not None:
                 self.device_handle.current_stream().wait_event(
                     self.comm_ctx.reduce_scatter_state.event
                 )
-                self.comm_ctx.reduce_scatter_state = None
+            self.comm_ctx.reduce_scatter_state = None
             all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
             all_reduce_stream: torch.cuda.Stream
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
@@ -485,9 +485,9 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if self._all_reduce_state is not None:
+        if self._all_reduce_state is not None and self._all_reduce_state.event is not None:
             self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-            self._all_reduce_state = None
+        self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
