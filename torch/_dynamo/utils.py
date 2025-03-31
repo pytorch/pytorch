@@ -3137,7 +3137,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with (
+            tx.fake_mode,
+            enable_python_dispatcher(),
+            torch.compiler.set_stance("force_eager"),
+        ):
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

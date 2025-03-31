@@ -656,6 +656,10 @@ def _create_aot_dispatcher_function(
         python_dispatcher_mode
     ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(), (
         collectives_ctx
+    ), torch.compiler.set_stance(
+        "force_eager"
+    ), patch.object(
+        torch._dynamo.config, "error_on_nested_fx_trace", False
     ):
         from torch._library.fake_class_registry import (
             FakeScriptObject,
