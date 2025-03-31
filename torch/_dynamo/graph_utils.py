@@ -1,6 +1,32 @@
 from collections import deque
+from typing import Any
 
 from torch.fx import Graph, Node
+from torch.utils._pytree import tree_flatten
+
+
+# flattens with support for slices
+# Note: a better way to do this would
+# be register/unregister slices as pytree nodes
+# but there is no unregister API in the pytorch
+# pytree impl
+def _flatten_args_kwargs(args: Any) -> list[Node]:
+    fully_flattened = []
+
+    def flatten(args: Any) -> None:
+        flattened, _ = tree_flatten(args)
+        for arg in flattened:
+            if isinstance(arg, slice):
+                start = arg.start
+                stop = arg.stop
+                step = arg.step
+                flatten((start, stop, step))
+            else:
+                fully_flattened.append(arg)
+
+    flatten(args)
+
+    return fully_flattened
 
 
 def _detect_cycles(graph: Graph) -> str:
