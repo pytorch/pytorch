@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 
+import itertools
 import os
 from unittest import skipIf
 
