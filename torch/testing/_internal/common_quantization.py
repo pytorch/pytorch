@@ -195,10 +195,8 @@ def accuracy(output, target, topk=(1,)):
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_batches):
     model.train()
-    cnt = 0
-    for image, target in data_loader:
+    for cnt, (image, target) in enumerate(data_loader, start=1):
         print('.', end='')
-        cnt += 1
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)

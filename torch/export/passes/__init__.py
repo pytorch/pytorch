@@ -1,4 +1,4 @@
-from typing import Dict, Union
+from typing import Union
 
 import torch
 import torch.utils._pytree as pytree

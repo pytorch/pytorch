@@ -22,12 +22,13 @@ TEST_DT_PLUS_30S = TEST_DT_BASE + timedelta(seconds=30)
 TEST_DT_PLUS_40S = TEST_DT_BASE + timedelta(seconds=40)
 
 # timestamps from January 1, 2022 12:00:00
-TEST_TS_BASE = TEST_DT_BASE.timestamp()
-TEST_TS_PLUS_5S = TEST_DT_PLUS_5S.timestamp()
-TEST_TS_PLUS_10S = TEST_DT_PLUS_10S.timestamp()
-TEST_TS_PLUS_15S = TEST_DT_PLUS_15S.timestamp()
-TEST_TS_PLUS_30S = TEST_DT_PLUS_30S.timestamp()
-TEST_TS_PLUS_40S = TEST_DT_PLUS_40S.timestamp()
+TEST_TS_BASE = int(TEST_DT_BASE.timestamp())
+TEST_TS_PLUS_5S = int(TEST_DT_PLUS_5S.timestamp())
+TEST_TS_PLUS_10S = int(TEST_DT_PLUS_10S.timestamp())
+TEST_TS_PLUS_15S = int(TEST_DT_PLUS_15S.timestamp())
+TEST_TS_PLUS_30S = int(TEST_DT_PLUS_30S.timestamp())
+TEST_TS_PLUS_40S = int(TEST_DT_PLUS_40S.timestamp())
+
 
 # test cmd names
 PYTEST1_NAME = "python test1.py"
@@ -95,12 +96,12 @@ class TestSegmentGenerator(unittest.TestCase):
         test_gap_dt1 = TEST_DT_PLUS_30S + timedelta(seconds=80)
         test_gap_dt2 = TEST_DT_PLUS_30S + timedelta(seconds=85)
         record_gap_1 = UtilizationRecord(
-            timestamp=test_gap_dt1.timestamp(),
+            timestamp=int(test_gap_dt1.timestamp()),
             cmd_names=[PYTEST1_NAME],
             level="PYTHON_CMD",
         )
         record_gap_2 = UtilizationRecord(
-            timestamp=test_gap_dt2.timestamp(),
+            timestamp=int(test_gap_dt2.timestamp()),
             cmd_names=[PYTEST1_NAME],
             level="PYTHON_CMD",
         )
@@ -193,3 +194,12 @@ def get_base_test_records() -> list[UtilizationRecord]:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def getTimestampStr(timestamp: float) -> str:
+    return f"{timestamp:.0f}"
+
+
+def getCurrentTimestampStr() -> str:
+    timestamp_now = datetime.now().timestamp()
+    return getTimestampStr(timestamp_now)

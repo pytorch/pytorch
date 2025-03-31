@@ -14,8 +14,7 @@ namespace torch::nn {
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
     TransformerEncoderLayerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerEncoderLayerImpl::reset();
 }
 
 void TransformerEncoderLayerImpl::reset() {
@@ -91,8 +90,7 @@ Tensor TransformerEncoderLayerImpl::forward(
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
     TransformerDecoderLayerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerDecoderLayerImpl::reset();
 }
 
 void TransformerDecoderLayerImpl::reset() {
@@ -214,8 +212,7 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
 TransformerEncoderImpl::TransformerEncoderImpl(
     TransformerEncoderOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerEncoderImpl::reset();
 }
 
 void TransformerEncoderImpl::reset() {
@@ -280,8 +277,7 @@ Tensor TransformerEncoderImpl::forward(
 TransformerDecoderImpl::TransformerDecoderImpl(
     TransformerDecoderOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerDecoderImpl::reset();
 }
 
 void TransformerDecoderImpl::reset() {
@@ -359,8 +355,7 @@ Tensor TransformerDecoderImpl::forward(
 // =======================================TransformerImpl================================
 TransformerImpl::TransformerImpl(TransformerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerImpl::reset();
 }
 
 void TransformerImpl::reset() {

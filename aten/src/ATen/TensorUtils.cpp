@@ -327,7 +327,7 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // see overloads of computeStride() below.
 //
 template <typename ResultVec, typename NewShapeVec, typename Numel>
-inline std::optional<ResultVec> computeStride_impl(
+inline static std::optional<ResultVec> computeStride_impl(
     const NewShapeVec& oldshape,
     const NewShapeVec& oldstride,
     const NewShapeVec& newshape,

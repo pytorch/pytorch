@@ -1,9 +1,19 @@
+"""
+This module implements graph deduplication functionality for TorchDynamo's optimization pipeline.
+Graph deduplication identifies identical subgraphs in the computational graph and merges them
+to reduce redundancy and improve performance. The process involves analyzing regions of the graph,
+identifying structurally equivalent regions, and replacing them with a single shared implementation.
+This optimization is particularly effective for models with repeated patterns or similar computational
+structures across different parts of the network.
+"""
+
 import logging
 import operator
 from collections.abc import Iterable
 from typing import Any
 
 import torch.fx
+from torch._dynamo import config
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
@@ -144,6 +154,9 @@ def _replace_region_with_subgraph(
         # Erase in reverse topological order
         for node in reversed(region):
             graph.erase_node(node)
+
+    if config.graph_deduplication_lint:
+        graph.lint()
 
 
 def _get_external_inputs(

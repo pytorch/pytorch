@@ -1,5 +1,6 @@
 # Owner(s): ["module: __torch_function__"]
 
+import sys
 import torch
 import numpy as np
 import inspect
@@ -9,6 +10,7 @@ import pickle
 import collections
 import unittest
 import contextlib
+import os
 
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
 from torch.overrides import (
@@ -28,6 +30,14 @@ from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
+
+if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
+    # This test is not supported on ARM
+    print(
+        "Skipping due to failing when cuda build runs on non cuda machine, "
+        + "see https://github.com/pytorch/pytorch/pull/150059 for example"
+    )
+    sys.exit()
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -689,7 +699,7 @@ def generate_tensor_like_override_tests(cls):
                 return torch.float32
             elif arg_type == "c10::string_view":
                 return ""
-            elif arg_type == "std::string_view":
+            elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":
                 # TODO: generate actual SymbolicInt
@@ -706,8 +716,7 @@ def generate_tensor_like_override_tests(cls):
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg["simple_type"]
-                if t.endswith("?"):
-                    t = t[:-1]
+                t = t.removesuffix("?")
                 if t == "Tensor" and is_method and arg["name"] == "self":
                     # See "Note: properties and __get__"
                     func = func.__get__(instance_gen())
