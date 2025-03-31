@@ -1301,18 +1301,10 @@ def sym_or(x: Union[bool, SymBool], *others: Union[bool, SymBool]) -> Union[bool
     if len(others) == 0:
         return x
     assert isinstance(x, (bool, SymBool))
-    if isinstance(x, bool):
-        shape_env = torch._guards.detect_fake_mode().shape_env
-        x = shape_env.create_symboolnode(x)
-    else:
-        shape_env = x.node.shape_env
-    node = x.node
     for y in others:
         assert isinstance(y, (bool, SymBool))
-        if isinstance(y, bool):
-            y = shape_env.create_symboolnode(y)
-        node = node.sym_or(y.node)
-    return SymBool(node)
+        x = operator.or_(x, y)
+    return x
 
 
 def guard_scalar(
