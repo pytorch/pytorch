@@ -1,9 +1,10 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/utils/env.h>
 
 #include <gtest/gtest.h>
 
 TEST(AllocatorConfigTest, allocator_config_test) {
-  const char* env_orig = getenv("PYTORCH_ALLOC_CONF");
+  auto env_orig = c10::utils::get_env("PYTORCH_ALLOC_CONF");
 
   std::string env =
       "max_split_size_mb:40,"
@@ -16,7 +17,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "pinned_use_device_host_register:True,"
       "parsePinnedNumRegisterThreads:8,"
       "pinned_use_background_threads:True";
-  setenv("PYTORCH_ALLOC_CONF", env.c_str(), 1);
+  c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
   c10::CachingAllocator::AllocatorConfig& config =
       c10::CachingAllocator::AllocatorConfig::instance();
   EXPECT_EQ(config.last_allocator_settings(), env);
@@ -82,8 +83,8 @@ TEST(AllocatorConfigTest, allocator_config_test) {
 
   // Reset the environment variable to its original value
   if (env_orig) {
-    setenv("PYTORCH_ALLOC_CONF", env_orig, 1);
+    c10::utils::set_env("PYTORCH_ALLOC_CONF", env_orig->c_str());
   } else {
-    unsetenv("PYTORCH_ALLOC_CONF");
+    c10::utils::set_env("PYTORCH_ALLOC_CONF", "");
   }
 }
