@@ -79,6 +79,8 @@ class C10_API AllocatorConfig {
     return pinned_num_register_threads_;
   }
 
+  size_t pinned_max_register_threads();
+
   bool pinned_use_background_threads() {
     return pinned_use_background_threads_;
   }
