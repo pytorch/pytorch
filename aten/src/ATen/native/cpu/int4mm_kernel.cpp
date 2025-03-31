@@ -995,7 +995,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
       dst_f32 += 1;
     }
   }
-};
+}
 
 static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     size_t m,

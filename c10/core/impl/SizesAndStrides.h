@@ -29,7 +29,6 @@ class C10_API SizesAndStrides {
   using strides_iterator = int64_t*;
   using strides_const_iterator = const int64_t*;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   SizesAndStrides() {
     size_at_unchecked(0) = 0;
     stride_at_unchecked(0) = 1;
@@ -42,7 +41,6 @@ class C10_API SizesAndStrides {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   SizesAndStrides(const SizesAndStrides& rhs) : size_(rhs.size_) {
     if (C10_LIKELY(rhs.isInline())) {
       copyDataInline(rhs);

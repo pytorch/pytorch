@@ -53,7 +53,7 @@ runs:
         if [ -f 'usage_log.txt' ]; then
             zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt'
         fi
-        if find "test/test-reports" -name "*.log" 2>/dev/null | grep -q .; then
+        if find "test/test-reports" -name "*.log" 2>/dev/null | stdbuf -o0 grep -q .; then
             zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log'
         fi
 

@@ -4,7 +4,7 @@ import math
 import os
 import weakref
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
@@ -1124,7 +1124,7 @@ def _int_bsr_dense_addmm(
     right_alpha: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     skip_checks: bool = False,
-    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     meta: Optional[dict] = None,
 ):
     if out is None and dense.dtype is torch.int8:
@@ -1165,7 +1165,7 @@ def bsr_dense_addmm(
     right_alpha: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     skip_checks: bool = False,
-    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     meta: Optional[dict] = None,
 ):
     """Compute
@@ -1647,7 +1647,7 @@ if has_triton():
         alpha=1.0,
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     ):
         f_name = "sampled_addmm"
 
@@ -1731,7 +1731,7 @@ if has_triton():
         *,
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
         meta: Optional[dict] = None,
     ):
         f_name = "bsr_dense_mm"

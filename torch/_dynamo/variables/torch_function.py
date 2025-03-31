@@ -1,11 +1,40 @@
 # mypy: ignore-errors
 
+"""TorchDynamo support for __torch_function__ tensor subclasses.
+
+This module implements support for tensor subclasses with __torch_function__ overrides.
+A tensor subclass instance is represented as a TensorWithTFOverrideVariable, which handles
+dispatching __torch_function__ on attribute accesses, method calls, and torch API calls.
+
+Unsupported features:
+- Triggering __torch_function__ on tensor subclass non-tensor custom attributes
+- Graph breaking on mutating guardable tensor properties within a __torch_function__ context
+  (can cause excessive recompiles in certain cases)
+- Matching exact eager behavior of ignoring __torch_function__ objects in non-tensor
+  argument positions of Torch API calls
+
+Supported features:
+- Static method implementations of __torch_function__ on custom objects (triggers on torch
+  API calls with the object as any argument)
+- Triggering __torch_function__ on torch API calls with tensor subclass arguments
+- __torch_function__ calls on base tensor attribute access and method calls for tensor
+  subclass instances
+- Matches dispatch ordering behavior of eager __torch_function__ with subclass/object
+  arguments in any position
+
+See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
+for more information on the design.
+
+To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses
+in torch/_dynamo/config.py
+"""
+
 import collections
 import contextlib
 import functools
 import inspect
 import operator
-from typing import Deque, Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -42,27 +71,6 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-
-# [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
-# At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
-# __torch_function__ on attribute accesses, method calls, and torch API calls.
-# The following is not supported:
-# - triggering __torch_function__ on tensor subclass non-tensor custom attributes
-# - graph breaking on mutating guardable tensor properties within a __torch_function__ context, this can cause
-# excessive recompiles in certain degenerate cases
-# - Matching the exact eager behavior of *ignoring* __torch_function__ objects in non-tensor argument positions of Torch API calls
-
-# The following is supported:
-# - static method impls of __torch_function__ on custom objects; this will trigger on torch API calls with the object as
-# any argument
-# - triggering __torch_function__ on torch API calls with tensor subclass arguments
-# - __torch_function__ calls on base tensor attribute access and method calls for tensor subclass instances
-# - matches the dispatch ordering behavior of eager __torch_function__ with subclass/object argumnents in any argument position
-
-# See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
-# for more information on the design.
-
-# To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
 bin_ops = [
     operator.pow,
@@ -253,7 +261,9 @@ class SymbolicTorchFunctionState:
 
         TorchFunctionModeStackVariable.reset()
 
-        self.mode_stack: Deque[TorchFunctionModeVariable] = collections.deque()
+        self.mode_stack: collections.deque[TorchFunctionModeVariable] = (
+            collections.deque()
+        )
 
         for i, val in enumerate(py_stack):
             self.mode_stack.append(
@@ -506,16 +516,22 @@ def call_torch_function(
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
-def build_torch_function_fn(tx: "InstructionTranslator", value, source):
+def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
     from types import FunctionType
 
-    func = value.__torch_function__.__func__
+    # If we reach here, the target `__torch_function__` should have been
+    # annotated with `@classmethod`, so accessing it always yield a bound
+    # method, and the actual `__torch_function__` impl is inside the bound
+    # `__func__`.
+    func = cls_or_obj.__torch_function__.__func__
 
     if not isinstance(func, FunctionType):
         unimplemented("Builtin/C++ torch function implementations NYI")
 
-    source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.build(tx, func, source)
+    func_source = None
+    if source:
+        func_source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
+    return VariableTracker.build(tx, func, func_source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -573,14 +589,21 @@ class TensorWithTFOverrideVariable(TensorVariable):
         super().__init__(*args, **kwargs)
 
     @classmethod
-    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+    def from_tensor_var(cls, tx, tensor_var, class_type, cls_source):
+        # [Note: __torch_function__] coerce `tensor_var` into a
+        # TensorWithTFOverrideVariable. In eager, this is just a type change.
+        # This isn't sound if a __torch_function__ tensor subclass defines a
+        # constructor, but if only a __torch_function__ impl is defined, this is
+        # okay to call.  It is up to the user whether this is correct behavior
+        # or not.
         import torch
 
         kwargs = dict(tensor_var.__dict__)
-        assert (
-            kwargs.pop("class_type") is torch.Tensor
-        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
-        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+        assert kwargs.pop("class_type") is torch.Tensor, (
+            "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        )
+        torch_fn_var = build_torch_function_fn(tx, class_type, cls_source)
+        var = cls(torch_function_fn=torch_fn_var, class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
 
@@ -657,8 +680,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.

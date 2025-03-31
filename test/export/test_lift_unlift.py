@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: export"]
-import unittest
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch._export.passes.lift_constants_pass import (
@@ -18,15 +17,8 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.export.graph_signature import CustomObjArgument
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 class GraphBuilder:
@@ -34,9 +26,9 @@ class GraphBuilder:
         self.graph = torch.fx.Graph()
         self.nodes = {}
         self.values = {}
-        self.nn_module_stack_key: Dict[str, int] = {}
+        self.nn_module_stack_key: dict[str, int] = {}
         self.latest_id = 0
-        self.input_to_kind: Dict[torch.fx.Node, InputKind] = {}
+        self.input_to_kind: dict[torch.fx.Node, InputKind] = {}
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
@@ -87,7 +79,7 @@ class GraphBuilder:
 
     def create_nn_module_stack(
         self, module_fqn: str
-    ) -> OrderedDict[int, Tuple[str, type]]:
+    ) -> OrderedDict[int, tuple[str, type]]:
         cur_name = ""
         nn_module_stack = OrderedDict()
         for atom in module_fqn.split("."):
@@ -146,18 +138,7 @@ class GraphBuilder:
 
 class TestLift(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
 
     def test_lift_basic(self):
         builder = GraphBuilder()
@@ -379,18 +360,7 @@ class TestLift(TestCase):
 
 class ConstantAttrMapTest(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
 
     def test_dict_api(self):
         constant_attr_map = ConstantAttrMap()
