@@ -209,11 +209,6 @@ class CudaBuild(BinaryBuild):
 
 
 @dataclass
-class StableCudaBuild(CudaBuild):
-    is_stable: bool = True
-
-
-@dataclass
 class RocmBuild(BinaryBuild):
     accelerator_type: str = "rocm"
     tests_on: str = "linux.rocm.gpu"
@@ -223,8 +218,7 @@ class RocmBuild(BinaryBuild):
 class XpuBuild(BinaryBuild):
     accelerator_type: str = "xpu"
     accelerator_version: str = ""
-    builds_on: str = "linux.s390x"
-    tests_on: str = "linux.s390x"
+    tests_on: str = "linux.xpu.gpu"
 
 
 MANYWHEEL_CPU_BUILDS: list[CpuBuild] = [
