@@ -1342,15 +1342,13 @@ class InstructionTranslatorBase(
                 raise
             except RuntimeError as e:
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
+                    readable_graph = torch.fx.GraphModule(
+                        self.output.nn_modules, self.output.graph
+                    ).print_readable(
+                        print_output=False, include_stride=True, include_device=True
                     )
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
+                    raise
 
                 raise
             except Exception as e:
@@ -2763,9 +2761,11 @@ class InstructionTranslatorBase(
         if val.exc_type is StopIteration:  # type: ignore[attr-defined]
             new_val = variables.BuiltinVariable(RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
-                [],
+                [ConstantVariable("generator raised StopIteration")],
                 {},
             )
+            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):

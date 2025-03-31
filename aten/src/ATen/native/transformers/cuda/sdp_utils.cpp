@@ -412,7 +412,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
-  constexpr auto head_dim_limit = 128;
+  auto head_dim_limit = 128;
+  if (cudnn_version >= 90501) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if ((dprops->major == 9 || dprops->major == 10) && !dprops->minor) {
+      head_dim_limit = 256;
+    }
+  }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
       TORCH_WARN("head_dim should be no more than ", head_dim_limit);
@@ -638,7 +644,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   constexpr auto dense_constraints =
       c10::array_of<bool (*)(sdp_params const&, bool)>(
-      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>
+      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
+      check_batch_size_and_num_heads_dense<true /*enable_gqa*/>
   );
 
   if (has_only_dense_inputs(params)) {
