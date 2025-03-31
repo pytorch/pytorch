@@ -7,7 +7,6 @@ import itertools
 import logging
 import textwrap
 import traceback
-import typing
 from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
@@ -20,11 +19,13 @@ from typing import (
     Literal,
     Optional,
     overload,
+    SupportsFloat,
+    SupportsInt,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, Self, TypeAlias
+from typing_extensions import assert_never, Never, ParamSpec, Self, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -125,6 +126,7 @@ except ImportError:
     has_triton = False
 
 
+_P = ParamSpec("_P")
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _V = TypeVar("_V")
@@ -1165,7 +1167,7 @@ class Reduction(Loops):
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
-        inner_fn: Callable[..., OpsValue],
+        inner_fn: Callable[_P, OpsValue],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         reduction_type: Union[ReductionType, Literal["scan"]],
@@ -1395,10 +1397,10 @@ class Reduction(Loops):
                 if dst_dtype == torch.bool:
                     return bool(val)
                 elif dst_dtype.is_floating_point:
-                    assert isinstance(val, typing.SupportsFloat), type(val)
+                    assert isinstance(val, SupportsFloat), type(val)
                     return float(val)
                 else:
-                    assert isinstance(val, typing.SupportsInt), type(val)
+                    assert isinstance(val, SupportsInt), type(val)
                     return int(val)
 
             rtypes_to_inits = {
@@ -3966,7 +3968,8 @@ class MutationLayoutSHOULDREMOVE(Layout):
             src = node.data
 
         src.realize()
-        assert hasattr(src, "data") and isinstance(src.data.layout, FlexibleLayout)
+        assert hasattr(src, "data"), src
+        assert isinstance(src.data.layout, FlexibleLayout), type(src.data.layout)
         src.data.layout = MutationLayoutSHOULDREMOVE(dst)
         return src.data
 
@@ -4571,8 +4574,20 @@ class TemplateBuffer(OperationBuffer):
 
         for inp in self.inputs:
             assert isinstance(inp, (Buffer, ReinterpretView)), type(inp)
-            assert isinstance(inp.layout, Layout), type(inp.layout)
-            indexer = inp.layout.make_indexer()
+            layout = inp.layout
+            assert isinstance(layout, Layout), type(layout)
+
+            # we dont know what the iteration order is of the template,
+            # so we just want to make a single, contiguous dependency
+            if not layout.is_contiguous():
+                layout = FixedLayout(
+                    device=layout.device,
+                    dtype=layout.dtype,
+                    size=layout.size,
+                    stride=FlexibleLayout.contiguous_strides(layout.size),
+                    offset=layout.offset,
+                )
+            indexer = layout.make_indexer()
 
             def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> None:
                 assert len(rindex) == 0
@@ -4612,7 +4627,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        make_kernel_render: Optional[Callable[..., Any]],
+        make_kernel_render: Optional[Callable[_P, _T]],
         mutated_inputs: Optional[Iterable[IRNode]] = None,
         allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
@@ -4795,7 +4810,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        make_kernel_render: Callable[..., Any],
+        make_kernel_render: Callable[_P, _T],
         workspace_size: int,
         template: CUDATemplate,
     ) -> None:
@@ -4813,7 +4828,7 @@ class CppTemplateBuffer(TemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        make_kernel_render: Callable[..., Any],
+        make_kernel_render: Callable[_P, _T],
         template: CUDATemplate,
         choice: Any,
     ) -> None:
@@ -5305,8 +5320,8 @@ class ExternKernel(InputsKernel):
                 non_tensor_args.append(arg)
 
         def unflatten_args(
-            new_tensor_args: Sequence[Any], new_non_tensor_args: Sequence[Any]
-        ) -> tuple[list[Any], dict[str, Any]]:
+            new_tensor_args: Sequence[_T], new_non_tensor_args: Sequence[_T]
+        ) -> tuple[list[_T], dict[str, _T]]:
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)

@@ -4837,7 +4837,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
-        "all_to_all", // collective name
+        "all_to_allv", // collective name
         inputTensor.numel(), // inNelems
         outputTensor.numel(), // outNelems
         inputTensor.scalar_type(), // dType
@@ -4933,9 +4933,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
-  std::vector<int64_t> inSplitSizes;
-  std::vector<int64_t> outSplitSizes;
-  int64_t total_numel = 0;
+  int64_t input_total_numel = 0;
+  int64_t output_total_numel = 0;
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
@@ -4945,9 +4944,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
         "Tensors must be on the same device")
-    inSplitSizes.push_back(inputTensors[r].numel());
-    outSplitSizes.push_back(outputTensors[r].numel());
-    total_numel += inputTensors[r].numel();
+    input_total_numel += inputTensors[r].numel();
+    output_total_numel += outputTensors[r].numel();
   }
 
   RECORD_PARAM_COMMS_DATA(
@@ -4959,11 +4957,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       outputTensors, // outputTensors
       rank_, // rank
       "all_to_all", // collective name
-      total_numel, // inNelems
-      total_numel, // outNelems
+      input_total_numel, // inNelems
+      output_total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
-      inSplitSizes, // inSplitSizes
-      outSplitSizes, // outSplitSizes
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize
