@@ -438,7 +438,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
 
 at::Tensor one_shot_all_reduce_out_impl(
     const at::Tensor& input,
-    const c10::optional<at::Tensor>& local_input,
+    const std::optional<at::Tensor>& local_input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
@@ -611,8 +611,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      st_vec<alignment>(
-          output_ptr + remote_start + i, tmp[step]);
+      st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
@@ -661,7 +660,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
 
 at::Tensor two_shot_all_reduce_impl(
     at::Tensor input,
-    c10::optional<at::Tensor> output,
+    std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(
