@@ -2503,9 +2503,20 @@ class TestSDPACudaOnly(NNTestCase):
         v_shape = SdpaShape(batch, num_heads, 2, head_dim_v)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
+        cudnn_version = torch.backends.cudnn.version()
         # test that we do not dispatch to cuDNN for an unsupported case
-        actual = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        if cudnn_version < 90800:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                    actual = torch.nn.functional.scaled_dot_product_attention(
+                        query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        else:
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 query.contiguous().to(torch.float32),
