@@ -405,6 +405,7 @@ def mps_ops_modifier(ops):
         'constant_pad_nd',
         'cos',
         'cosh',
+        'cov',
         'count_nonzero',
         'diff',
         'div',
@@ -655,7 +656,6 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
@@ -713,6 +713,7 @@ def mps_ops_modifier(ops):
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.chebyshev_polynomial_t': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.chebyshev_polynomial_u': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # entr does not support boolean types
         'special.entr': [torch.bool],
@@ -12455,8 +12456,16 @@ MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 def transform_opinfo_sample_to_mps(sample):
     """Transforms opinfo.core.SampleInput from CPU to MPS"""
-    mps_sample = sample.transform(
-        lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+    def transform_sample(x):
+        if not isinstance(x, torch.Tensor):
+            return x
+        requires_grad = x.requires_grad
+        conjugated = x.is_conj()
+        rc = x.detach()
+        rc = rc.to("mps") if not conjugated else x.conj().to("mps").conj()
+        return rc.requires_grad_(x.requires_grad)
+
+    mps_sample = sample.transform(transform_sample)
 
     # Transform kwargs `device="cpu"` to `device="mps"`
     if mps_sample.kwargs.get("device", "") == "cpu":
@@ -12575,12 +12584,14 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
+        include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
 
         def get_samples():
             return op.sample_inputs(
                 device,
                 dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                include_conjugated_inputs=include_conjugated_inputs,
                 # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
                 set_seed=False,
             )
@@ -12601,8 +12612,10 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            cpu_out = op(*cpu_args, **cpu_kwargs)
-            mps_out = op(*mps_args, **mps_kwargs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                cpu_out = op(*cpu_args, **cpu_kwargs)
+                mps_out = op(*mps_args, **mps_kwargs)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12649,8 +12662,10 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            cpu_out = op(*cpu_args, **cpu_kwargs)
-            mps_out = op(*mps_args, **mps_kwargs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                cpu_out = op(*cpu_args, **cpu_kwargs)
+                mps_out = op(*mps_args, **mps_kwargs)
 
             if op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
