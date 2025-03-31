@@ -59,16 +59,17 @@ namespace at::native {
 
 enum class CPUCapability {
   DEFAULT = 0,
+#ifdef HAVE_ARM_BF16_CPU_DEFINITION
+  ARM_BF16 = 1,
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  SVE256 = 1,
+#endif
 #if defined(HAVE_VSX_CPU_DEFINITION)
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
-#elif defined(HAVE_SVE256_BF16_CPU_DEFINITION)
-  SVE256 = 1,
-  SVE256_BF16 = 1,
-#elif defined(HAVE_SVE256_CPU_DEFINITION)
-  SVE256 = 1,
-#else
+#elif !defined(HAVE_ARM_BF16_CPU_DEFINITION) && !defined(HAVE_SVE256_CPU_DEFINITION)
   AVX2 = 1,
   AVX512 = 2,
 #endif

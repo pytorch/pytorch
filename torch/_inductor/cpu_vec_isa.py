@@ -187,17 +187,12 @@ class VecSVE256(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
-@dataclasses.dataclass
-class VecSVE256_BF16(VecSVE256):
-    _macro = [
-        "CPU_CAPABILITY_SVE",
-        "CPU_CAPABILITY_SVE256",
-        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-        "__ARM_FEATURE_BF16",
-    ]
-    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+# Add the necessary flags to enable bf16 on an Arm ISA
+def enable_arm_bf16(isa: VecISA):
+    isa._macro.append("__ARM_FEATURE_BF16")
+    _arch_flags = isa._arch_flags.split(" ")
+    _arch_flags[0] += "+bf16"
+    isa._arch_flags = " ".join(_arch_flags)
 
 
 @dataclasses.dataclass
@@ -351,7 +346,6 @@ supported_vec_isa_list = [
     VecAVX2(),
     VecNEON(),
     VecSVE256(),
-    VecSVE256_BF16(),
 ]
 
 
@@ -413,9 +407,9 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.backends.cpu.get_cpu_capability() == "SVE256_BF16":
-            isa_list.append(VecSVE256_BF16())
-        elif torch.backends.cpu.get_cpu_capability() == "SVE256":
+        if torch.backends.cpu.get_cpu_capability() == "SVE256":
+            if torch.backends.cpu.get_cpu_capability() == "ARM_BF16":
+                enable_arm_bf16(VecSVE256)
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
