@@ -22,7 +22,7 @@ struct InternedStringsTable {
   ska::flat_hash_map<PyObject*, at::Dimname> py_interned_string_to_dimname_;
 };
 
-InternedStringsTable kPyInternedStringToDimname;
+static InternedStringsTable kPyInternedStringToDimname;
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 InternedStringsTable::~InternedStringsTable() {

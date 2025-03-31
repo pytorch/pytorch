@@ -4,9 +4,10 @@ import inspect
 import logging
 import math
 import operator
+from collections.abc import Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -24,13 +25,13 @@ aten = torch.ops.aten
 logger: logging.Logger = logging.getLogger("comm_fusion")
 
 
-def move_block_after(block: List[fx.Node], target_node: fx.Node) -> None:
+def move_block_after(block: list[fx.Node], target_node: fx.Node) -> None:
     for node in block:
         target_node.append(node)
         target_node = node
 
 
-def move_block_before(block: List[fx.Node], target_node: fx.Node) -> None:
+def move_block_before(block: list[fx.Node], target_node: fx.Node) -> None:
     for node in block:
         target_node.prepend(node)
         target_node = node
@@ -39,8 +40,8 @@ def move_block_before(block: List[fx.Node], target_node: fx.Node) -> None:
 def call_function(
     graph: fx.Graph,
     target: Union[str, Callable[..., Any]],
-    args: Optional[Tuple[fx.node.Argument, ...]] = None,
-    kwargs: Optional[Dict[str, fx.node.Argument]] = None,
+    args: Optional[tuple[fx.node.Argument, ...]] = None,
+    kwargs: Optional[dict[str, fx.node.Argument]] = None,
 ) -> fx.Node:
     # We accept target as a str to avoid typing error as the type of
     # a node.target is Union[str, Callable[..., Any]].
@@ -61,10 +62,10 @@ def call_function(
 
 @dataclass(unsafe_hash=True)
 class CommBlock:
-    shape: Union[torch.Size, List[torch.Size]]
-    node_list: List[fx.Node]
-    inputs: List[fx.Node]
-    wait_nodes: List[fx.Node]
+    shape: Union[torch.Size, list[torch.Size]]
+    node_list: list[fx.Node]
+    inputs: list[fx.Node]
+    wait_nodes: list[fx.Node]
     comm_node: fx.Node
     outputs: OrderedSet[fx.Node]
 
@@ -127,7 +128,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
                 break
 
     tensor_meta = input_nodes[0].meta["tensor_meta"]
-    shape: Union[torch.Size, List[torch.Size]]
+    shape: Union[torch.Size, list[torch.Size]]
     if isinstance(tensor_meta, TensorMetadata):
         shape = tensor_meta.shape
     elif isinstance(tensor_meta, (list, tuple)):
@@ -148,9 +149,9 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
 
 def get_all_comm_blocks(
     graph: fx.Graph,
-    comm_ops: Tuple[torch._ops.OpOverload, ...],
+    comm_ops: tuple[torch._ops.OpOverload, ...],
     comm_filter: Optional[Callable[..., bool]] = None,
-) -> List[CommBlock]:
+) -> list[CommBlock]:
     if comm_filter is None:
 
         def always_true(comm_block: CommBlock) -> bool:
@@ -171,7 +172,7 @@ def get_all_comm_blocks(
 def _fuse_allreduce_by_concat(
     graph: fx.Graph,
     last_input_node: fx.Node,
-    all_input_nodes: List[fx.Node],
+    all_input_nodes: list[fx.Node],
     last_comm_block: CommBlock,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce using concat."""
@@ -229,7 +230,7 @@ def _fuse_allreduce_by_concat(
 def _fuse_with_coalesced_op(
     graph: fx.Graph,
     last_input_node: fx.Node,
-    all_input_nodes: List[fx.Node],
+    all_input_nodes: list[fx.Node],
     last_comm_block: CommBlock,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce by coalesced."""
@@ -277,7 +278,7 @@ def _fuse_with_coalesced_op(
         shape=[
             tm.shape
             for tm in cast(
-                List[TensorMetadata], fused_comm_node.meta.get("tensor_meta")
+                list[TensorMetadata], fused_comm_node.meta.get("tensor_meta")
             )
         ],
         node_list=[fused_comm_node] + getitem_nodes + wait_nodes,
@@ -291,8 +292,8 @@ def _fuse_with_coalesced_op(
 def _scatter_fused_allreduce_waits(
     graph: fx.Graph,
     fused_comm_block: CommBlock,
-    orig_comm_blocks: List[CommBlock],
-    node_indices: Dict[fx.Node, int],
+    orig_comm_blocks: list[CommBlock],
+    node_indices: dict[fx.Node, int],
     split_and_reshape: bool = True,
 ) -> None:
     """
@@ -321,7 +322,7 @@ def _scatter_fused_allreduce_waits(
                 aten.split,
                 (
                     fused_wait_node,
-                    [math.prod(cast(List[int], cb.shape)) for cb in orig_comm_blocks],
+                    [math.prod(cast(list[int], cb.shape)) for cb in orig_comm_blocks],
                 ),
             )
         with graph.inserting_after(split_node):
@@ -376,8 +377,8 @@ def _scatter_fused_allreduce_waits(
 
 def _fuse_allreduce(
     graph: fx.Graph,
-    comm_blocks: List[CommBlock],
-    node_indices: Dict[fx.Node, int],
+    comm_blocks: list[CommBlock],
+    node_indices: dict[fx.Node, int],
     use_concat: bool,
 ) -> CommBlock:
     """Given a list of allreduce CommBlock, fuse the CommBlocks into one CommBlock."""
@@ -422,8 +423,8 @@ def _fuse_allreduce(
 
 
 def _bucket_size_fusion(
-    graph: fx.Graph, comm_blocks: List[CommBlock], bucket_size_mb: int
-) -> Generator[List[CommBlock], None, None]:
+    graph: fx.Graph, comm_blocks: list[CommBlock], bucket_size_mb: int
+) -> Generator[list[CommBlock], None, None]:
     MB = 1024**2
     bucket_size = 1 * MB
     bucket_cap_size = bucket_size_mb * MB
@@ -544,9 +545,9 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
         # Find the earliest/first user -- target_node.
-        assert (
-            len(allreduce.outputs) >= 1
-        ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        assert len(allreduce.outputs) >= 1, (
+            f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        )
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31
@@ -567,7 +568,7 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
 
 
 def fuse_ddp_communication(
-    graph: fx.Graph, passes: List[Union[Callable[..., None], str]], bucket_size_mb: int
+    graph: fx.Graph, passes: list[Union[Callable[..., None], str]], bucket_size_mb: int
 ) -> None:
     for i, pa in enumerate(passes):
         with GraphTransformObserver(

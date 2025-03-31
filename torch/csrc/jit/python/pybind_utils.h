@@ -65,7 +65,7 @@ TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
 // See also torch::should_allow_numbers_as_tensors
-class ToIValueAllowNumbersAsTensors {
+class TORCH_PYTHON_API ToIValueAllowNumbersAsTensors {
   bool old_;
 
  public:
@@ -691,7 +691,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
     if (auto mod = as_module(object)) {
       // if obj is already a ScriptModule, just return its ivalue
       auto ptr = mod.value()._ivalue();
-      // explict copy semantics for strong ownership of the resource.
+      // explicit copy semantics for strong ownership of the resource.
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }

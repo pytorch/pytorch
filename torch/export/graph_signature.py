@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import dataclasses
+from collections.abc import Collection, Mapping
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import is_fake
@@ -110,6 +111,11 @@ class InputSpec:
             ),
         ), f"got {type(self.arg)}"
 
+    def __str__(self):
+        target = "" if self.target is None else f" target='{self.target}'"
+        persistent = "" if self.persistent is None else f" persistent={self.persistent}"
+        return f"{str(self.arg.name)}: {str(self.kind.name)}{target}{persistent}"
+
 
 class OutputKind(Enum):
     USER_OUTPUT = auto()
@@ -141,11 +147,15 @@ class OutputSpec:
             ),
         ), self.arg
 
+    def __str__(self):
+        target = "" if self.target is None else f" target='{self.target}'"
+        return f"{str(self.arg.name)}: {str(self.kind.name)}{target}"
+
 
 @dataclasses.dataclass
 class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
+    gradients_to_parameters: dict[str, str]
+    gradients_to_user_inputs: dict[str, str]
     loss_output: str
 
 
@@ -221,8 +231,8 @@ class ExportGraphSignature:
         )
     """
 
-    input_specs: List[InputSpec]
-    output_specs: List[OutputSpec]
+    input_specs: list[InputSpec]
+    output_specs: list[OutputSpec]
 
     # A list of parameters uniquely identified by mangled fully qualified name
     @property
@@ -276,7 +286,7 @@ class ExportGraphSignature:
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_inputs: List[Union[int, float, bool, None, str]] = []
+        user_inputs: list[Union[int, float, bool, None, str]] = []
         for s in self.input_specs:
             if s.kind != InputKind.USER_INPUT:
                 continue
@@ -302,7 +312,7 @@ class ExportGraphSignature:
     # For joint-graph purposes, will include the loss output.
     @property
     def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_outputs: List[Union[int, float, bool, None, str]] = []
+        user_outputs: list[Union[int, float, bool, None, str]] = []
         for s in self.output_specs:
             if s.kind not in [
                 OutputKind.USER_OUTPUT,
@@ -393,8 +403,8 @@ class ExportGraphSignature:
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
         loss_output = None
-        gradients_to_parameters: Dict[str, str] = {}
-        gradients_to_user_inputs: Dict[str, str] = {}
+        gradients_to_parameters: dict[str, str] = {}
+        gradients_to_user_inputs: dict[str, str] = {}
         for spec in self.output_specs:
             if spec.kind == OutputKind.LOSS_OUTPUT:
                 assert loss_output is None
@@ -486,6 +496,11 @@ class ExportGraphSignature:
 
         return _
 
+    def __str__(self):
+        input_specs = "\n".join(str(s) for s in self.input_specs)
+        output_specs = "\n".join(str(s) for s in self.output_specs)
+        return f"\n# inputs\n{input_specs}\n\n# outputs\n{output_specs}\n"
+
 
 def _immutable_dict(items):
     """
@@ -537,7 +552,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
 def _convert_to_export_graph_signature(
     graph_signature: "GraphSignature",
     gm: "torch.fx.GraphModule",
-    non_persistent_buffers: Set[str],
+    non_persistent_buffers: set[str],
 ) -> "ExportGraphSignature":
     from torch.utils import _pytree as pytree
 

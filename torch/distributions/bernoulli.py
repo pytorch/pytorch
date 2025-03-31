@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -12,6 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _Number
 
 
 __all__ = ["Bernoulli"]
@@ -36,6 +35,7 @@ class Bernoulli(ExponentialFamily):
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
@@ -47,10 +47,10 @@ class Bernoulli(ExponentialFamily):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -76,29 +76,29 @@ class Bernoulli(ExponentialFamily):
         return self._param.new(*args, **kwargs)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.probs
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         mode = (self.probs >= 0.5).to(self.probs)
         mode[self.probs == 0.5] = nan
         return mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
@@ -125,7 +125,7 @@ class Bernoulli(ExponentialFamily):
         return values
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (torch.logit(self.probs),)
 
     def _log_normalizer(self, x):

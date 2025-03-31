@@ -10,8 +10,8 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -46,6 +46,21 @@ public:
   }
   operator svfloat32_t() const {
     return values;
+  }
+  template <uint64_t mask>
+  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+    // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
+    __at_align__ int32_t flag_arr[size()];
+    for (int i = 0; i < size(); i++) {
+        flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
+    }
+    // Load the flag array into an SVE int32 vector.
+    svint32_t int_mask = svld1_s32(svptrue_b32(), flag_arr);
+    // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
+    svbool_t blend_mask = svcmpne_n_s32(svptrue_b32(), int_mask, 0);
+    // Use svsel to select elements from b where the predicate is true, else from a.
+    svfloat32_t result = svsel_f32(blend_mask, b.values, a.values);
+    return Vectorized<float>(result);
   }
   static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
                               const Vectorized<float>& mask_) {
@@ -570,4 +585,4 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

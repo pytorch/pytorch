@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -13,7 +13,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -45,6 +45,7 @@ class ContinuousBernoulli(ExponentialFamily):
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
     https://arxiv.org/abs/1907.06845
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.unit_interval
     _mean_carrier_measure = 0
@@ -52,13 +53,13 @@ class ContinuousBernoulli(ExponentialFamily):
 
     def __init__(
         self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
-    ):
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
@@ -67,7 +68,7 @@ class ContinuousBernoulli(ExponentialFamily):
                     raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -127,7 +128,7 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), log_norm, taylor)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         cut_probs = self._cut_probs()
         mus = cut_probs / (2.0 * cut_probs - 1.0) + 1.0 / (
             torch.log1p(-cut_probs) - torch.log(cut_probs)
@@ -137,11 +138,11 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), mus, taylor)
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return torch.sqrt(self.variance)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         cut_probs = self._cut_probs()
         vars = cut_probs * (cut_probs - 1.0) / torch.pow(
             1.0 - 2.0 * cut_probs, 2
@@ -151,15 +152,15 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), vars, taylor)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return clamp_probs(logits_to_probs(self.logits, is_binary=True))
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
@@ -168,7 +169,7 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)
@@ -220,7 +221,7 @@ class ContinuousBernoulli(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (self.logits,)
 
     def _log_normalizer(self, x):

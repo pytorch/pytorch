@@ -2,8 +2,8 @@
 
 import collections
 import warnings
+from collections.abc import Sequence
 from functools import partial, wraps
-from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt

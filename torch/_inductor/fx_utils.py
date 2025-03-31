@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Optional
 
 import sympy
 
@@ -24,9 +24,9 @@ from .virtualized import V
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(
-    pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
+    pattern: tuple[type[torch.nn.modules.Module], Callable[..., Any]],
     node: torch.fx.node.Node,
-    modules: Dict[str, torch.nn.modules.Module],
+    modules: dict[str, torch.nn.modules.Module],
 ) -> bool:
     if len(node.args) == 0:
         return False
@@ -86,7 +86,7 @@ class FakeTensorUpdater:
         return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
-        existing_storages: DefaultDict[Optional[int], int] = defaultdict(int)
+        existing_storages: defaultdict[Optional[int], int] = defaultdict(int)
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
@@ -105,9 +105,9 @@ class FakeTensorUpdater:
             if new is None:
                 return old is None
             if not isinstance(new, torch.Tensor):
-                assert isinstance(
-                    new, (torch.SymInt, torch.SymBool, torch.SymFloat)
-                ), f"Unknown type {type(new)} in {self.graph}"
+                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
+                    f"Unknown type {type(new)} in {self.graph}"
+                )
                 return (
                     new.node.shape_env._maybe_evaluate_static(
                         sympy.Eq(new.node.expr, old.node.expr)
@@ -208,7 +208,7 @@ def get_fake(x):
     return x
 
 
-def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, Any]]:
+def get_fake_args_kwargs(x: torch.fx.Node) -> tuple[bool, tuple[Any], dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """

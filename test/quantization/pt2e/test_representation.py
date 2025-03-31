@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
@@ -24,10 +24,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
     def _test_representation(
         self,
         model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         quantizer: Quantizer,
-        ref_node_occurrence: Dict[ns, int],
-        non_ref_node_occurrence: Dict[ns, int],
+        ref_node_occurrence: dict[ns, int],
+        non_ref_node_occurrence: dict[ns, int],
         fixed_output_tol: Optional[float] = None,
         output_scale_idx: int = 2,
     ) -> torch.nn.Module:
