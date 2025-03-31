@@ -34,7 +34,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Iterable,
     NamedTuple,
     NoReturn,
     Optional,
@@ -1297,7 +1296,9 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 
-def sym_or(x: Union[bool, SymBool], *others: Union[bool, SymBool]) -> Union[bool, SymBool]:
+def sym_or(
+    x: Union[bool, SymBool], *others: Union[bool, SymBool]
+) -> Union[bool, SymBool]:
     if len(others) == 0:
         return x
     assert isinstance(x, (bool, SymBool))
