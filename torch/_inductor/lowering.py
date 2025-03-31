@@ -1927,6 +1927,9 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         _warn_complex_not_supported()
         return True
 
+    if t.is_meta:
+        return True
+
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
             return True
@@ -3572,7 +3575,7 @@ def _unsafe_index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1235
 # and
 # https://github.com/pytorch/torchdynamo/issues/1863
-@register_lowering(aten.index_put)
+@register_lowering(aten.index_put, type_promotion_kind=None)
 def index_put(x, indices, values, accumulate=False):
     return index_put_impl_(
         clone(x), indices, values, accumulate, check=True, may_realize=False
