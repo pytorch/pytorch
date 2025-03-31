@@ -75,28 +75,46 @@ def try_import_cutlass() -> bool:
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
-    cutlass_py_full_path = os.path.abspath(
-        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
-    )
-    tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(cache_dir(), "torch_cutlass_library")
-    )
-    dst_link = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
+    # TODO(mlazos): epilogue visitor tree currently livers in python/cutlass,
+    # but will be moved to python/cutlass_library in the future
+    def path_join(path0, path1):
+        return os.path.abspath(os.path.join(path0, path1))
 
-    if os.path.isdir(cutlass_py_full_path):
-        if tmp_cutlass_py_full_path not in sys.path:
-            if os.path.exists(dst_link):
-                assert os.path.islink(dst_link), (
-                    f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
-                )
-                assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
-                    cutlass_py_full_path
-                ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
-            else:
-                os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
-                os.symlink(cutlass_py_full_path, dst_link)
-            sys.path.append(tmp_cutlass_py_full_path)
+    # contains both cutlass and cutlass_library
+    # we need cutlass for eVT
+    cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+
+    cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
+    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+
+    tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
+
+    dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+
+    if os.path.isdir(cutlass_python_path):
+        if tmp_cutlass_full_path not in sys.path:
+
+            def link_and_append(dst_link, src_path, parent_dir):
+                if os.path.exists(dst_link):
+                    assert os.path.islink(dst_link), (
+                        f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                    )
+                    assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                        src_path,
+                    ), f"Symlink at {dst_link} does not point to {src_path}"
+                else:
+                    os.makedirs(parent_dir, exist_ok=True)
+                    os.symlink(src_path, dst_link)
+                sys.path.append(parent_dir)
+
+            link_and_append(
+                dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
+            )
+            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+
         try:
+            import cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -110,7 +128,7 @@ def try_import_cutlass() -> bool:
     else:
         log.debug(
             "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
-            cutlass_py_full_path,
+            cutlass_python_path,
         )
     return False
 
