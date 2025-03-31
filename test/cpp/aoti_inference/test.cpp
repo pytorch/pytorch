@@ -437,6 +437,95 @@ void test_aoti_double_buffering_with_tensor_constants() {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+void test_aoti_user_managed_buffer() {
+  torch::NoGradGuard no_grad;
+  size_t allocated, reserved, active;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+
+  // Memory information variable
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  std::string weights_attr = "w_pre";
+  std::string add_attr = "w_add";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  torch::inductor::TensorConstantMap rand_map, real_map;
+  at::Tensor rand_pre, rand_add;
+  at::Tensor w_pre, w_add;
+  rand_pre = at::randn({4, 4}).to(at::kCUDA);
+  rand_add = at::randn({4, 4}).to(at::kCUDA);
+  w_pre = at::Tensor(weight_tensors).to(at::kCUDA);
+  w_add = at::Tensor(add_tensors).to(at::kCUDA);
+
+  rand_map.emplace("L__self___w_pre", &rand_pre);
+  rand_map.emplace("L__self___w_add", &rand_add);
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // We extract the memory information starting from here.
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  // This should contain one set of weight (128MB) loaded from .so
+  size_t initMemory = 0;
+  size_t totalMemory = 0;
+  size_t preFreeMemory = 0;
+  cudaStatus = cudaMemGetInfo(&preFreeMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  // At this point, no memory should be consumed since we freed them all.
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+  runner->swap_constant_buffer();
+  cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
+
+  // We update inactive buffer, but with user_managed = True. This shouldn't add
+  // any memory consumption.
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ false,
+      /*validate_full_updates = */ true,
+      /*user_managed*/ true);
+  size_t updateMemory = 0;
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory, updateMemory);
+
+  // Make sure the output is correct with user managed buffer.
+  auto actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
 
@@ -790,6 +879,10 @@ TEST(AotInductorTest, BasicScriptTestCuda) {
 
 TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
   test_aoti_package_loader("cuda", false);
+}
+
+TEST(AotInductorTest, UpdateUserManagedConstantsCuda) {
+  test_aoti_user_managed_buffer();
 }
 
 TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
