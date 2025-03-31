@@ -17,7 +17,9 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 static int intraNodeCommIdx = 0;
+#endif
 
 /**
  * Query the nvlink connection among devices.
@@ -59,7 +61,7 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   }
   LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
-};
+}
 
 IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,

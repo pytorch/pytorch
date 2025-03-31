@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -54,13 +54,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     _DEFAULT_ALG_ID: int = 0
-    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
+    _DTYPE_SHAPE_CONSTRAINTS: dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
     _FORCE_CUTLASS: bool = False
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
     BACKEND: str
-    SPARSE_DISPATCH: Dict[Callable, Callable]
+    SPARSE_DISPATCH: dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
     meta: Optional[torch.Tensor]
@@ -161,7 +161,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     def __tensor_flatten__(
         self,
-    ) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
+    ) -> tuple[list[str], tuple[torch.Size, bool, int, bool]]:
         inner_tensors = list(
             filter(lambda x: getattr(self, x) is not None, self.__slots__)
         )
@@ -177,7 +177,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def __tensor_unflatten__(
         cls,
         inner_tensors,
-        tensor_meta: Tuple[torch.Size, bool, int, bool],
+        tensor_meta: tuple[torch.Size, bool, int, bool],
         outer_size,
         outer_stride,
     ) -> torch.Tensor:

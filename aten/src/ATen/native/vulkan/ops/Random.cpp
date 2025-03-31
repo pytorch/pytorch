@@ -70,7 +70,7 @@ static Tensor rand_like(
   // numbers from a uniform distribution on the interval [0,1). To match the CPU
   // implementation, we simplify the range to [0,1] and tolerate the small
   // chance of 1 being sampled.
-  return input_arg.clone().detach().uniform_(0.0, 1.0);
+  return input_arg.detach().clone().uniform_(0.0, 1.0);
 }
 
 static Tensor& normal_(
@@ -129,7 +129,7 @@ static Tensor randn_like(
     const std::optional<c10::MemoryFormat> /* not implemented */) {
   // Returns a tensor with the same size as input that is filled with random
   // numbers from a normal distribution with mean 0 and standard deviation 1.
-  return input_arg.clone().detach().normal_(0.0, 1.0);
+  return input_arg.detach().clone().normal_(0.0, 1.0);
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {

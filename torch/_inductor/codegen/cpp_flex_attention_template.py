@@ -2,7 +2,7 @@
 import contextlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -17,6 +17,7 @@ from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp_template import CppTemplate
+from .cpp_utils import GemmBlocking
 
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ static inline scalar_t* {{kernel_name}}_conditional_data_ptr(scalar_t* ptr, scal
 }
 
 template <typename scalar_t,
-          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
+          typename std::enable_if_t<c10::is_reduced_floating_point_v<scalar_t>, int> = 0>
 static inline scalar_t* {{kernel_name}}_conditional_data_ptr(float* ptr, scalar_t* ptr2) {
   return ptr2;
 }
@@ -193,102 +194,10 @@ inline void {{kernel_name}}_copy_value_with_pad(
 
   }
 }
-// Transpose a [2, 32] matrix to [32, 2]
-// Note: the output leading dimension should be 2,
-// that is, the output must be contiguous
-static inline void {{kernel_name}}_transpose_pad_2x32_block(
-    const uint16_t* src,
-    uint16_t* dst,
-    int64_t ld_src,
-    int krem = 2,
-    int nrem = 32) {
-#if defined(CPU_CAPABILITY_AVX512)
-  __m512i r0, r1;
-  __m512i d0, d1;
-  // load
-  if (nrem < 32) {
-    __mmask32 mask_krem_v = (1LL << nrem) - 1;
-    r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
-    // if krem is not 2, pad with zeros
-    if (krem == 2) {
-      r1 = _mm512_maskz_loadu_epi16(mask_krem_v, src + ld_src);
-    } else {
-      r1 = _mm512_setzero_si512();
-    }
-  } else {
-    r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
-    if (krem == 2) {
-      r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
-    } else {
-      r1 = _mm512_setzero_si512();
-    }
-  }
-  // transpose
-  d0 = _mm512_unpacklo_epi16(r0, r1);
-  d1 = _mm512_unpackhi_epi16(r0, r1);
-  r0 = _mm512_shuffle_i32x4(d0, d1, 0x88);
-  r1 = _mm512_shuffle_i32x4(d0, d1, 0xdd);
-  d0 = _mm512_shuffle_i32x4(r0, r1, 0x88);
-  d1 = _mm512_shuffle_i32x4(r0, r1, 0xdd);
+"""
 
-  // store
-  if (nrem < 16) {
-    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
-    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
-  } else if (nrem == 16) {
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-  } else if (nrem < 32) {
-    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-    _mm512_mask_storeu_epi16(
-        reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
-  } else {
-    // normal store
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
-  }
-#else
-TORCH_CHECK(false, "transpose_pad_2x32_block is only supported when avx512 is supported")
-#endif
-}
-
-// To use AMX to accelerate GEMM,
-// reorder the memory format [K, N] -> [K/2, N, 2]
-// Note: If K % 2 != 0, pad K implicitly
-static inline void {{kernel_name}}_pack_vnni2(
-    const uint16_t* src,
-    uint16_t* dst,
-    int64_t ld_src,
-    int64_t K,
-    int64_t N) {
-#if defined(CPU_CAPABILITY_AVX512)
-  int64_t bk = 0;
-  int64_t _K = K / 2 * 2;
-  int64_t _N = N / 32 * 32;
-  for (; bk < _K; bk += 2) {
-    int64_t bn = 0;
-    for (; bn < _N; bn += 32) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src);
-    }
-    int64_t nrem = N - bn;
-    if (nrem > 0) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 2, nrem);
-    }
-  }
-  if (K % 2 == 1) {
-    int64_t bn = 0;
-    for (; bn < _N; bn += 32) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1);
-    }
-    int64_t nrem = N - bn;
-    if (nrem > 0) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1, nrem);
-    }
-  }
-#else
-TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
-#endif
-}
+MICRO_GEMM_TEMPLATE = r"""
+GEMM_DEFINE
 """
 
 ALLOCATE_BUFFER = r"""
@@ -304,6 +213,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/Context.h>
+{{template.codegen_micro_gemm(kernel.kernel_name)}}
 {{template.codegen_softmax_fusion(kernel.kernel_name)}}
 {{template.codegen_brgemm_pack_function(kernel.kernel_name)}}
 {%- set kernel_args = {"query": query, "key": key, "value": value,
@@ -313,6 +223,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
+  {{ kernel.maybe_codegen_profile() }}
   int64_t kvBlockSize = {{kvBlockSize}};
   kvBlockSize = kvBlockSize>{{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}}
                                                     : kvBlockSize;
@@ -320,7 +231,7 @@ extern "C"
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
-  constexpr bool is_reduced_type = std::is_reduced_floating_point_v<scalar_t>;
+  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
@@ -424,7 +335,6 @@ extern "C"
       need_pack = gemm_size_per_thread / pack_size >= 4;
     }
   }
-
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
@@ -453,37 +363,37 @@ extern "C"
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
   {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
 
-  // Reorder K, V and transpose K
-  at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
-    int ompIdx = at::get_thread_num();
-    int64_t i = 0, j = 0, l = 0, n = 0;
-    scalar_t* transpose_ptr = need_pack? transpose_buffer_ptr + ompIdx * kvSplitSize * headSize : nullptr;
-    at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
-    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-      n = l * kvSplitSize;
-      int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
-      auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
-      auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
-      auto kv_block_num = n / cur_kvSplitSize;
-      auto kv_block_offset = n - kv_block_num * cur_kvSplitSize;
-      // getting kv indices by [BS, Head, 1, kv_block_num]
-      auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
-      auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
-      auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
-                              j_kvi * kviStrideH + kv_block_num;
-      auto k_addr =
-            k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
-      auto v_addr =
-            v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-      if (use_kv_indice) {
-          k_addr =
-              k_data + i_kv * kStrideB + j_kv * kStrideH +
-              (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * kStrideN;
-          v_addr =
-              v_data + i_kv * vStrideB + j_kv * vStrideH +
-              (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * vStrideN;
-      }
-      if (need_pack) {
+  if (need_pack) {
+    // Pack K, V
+    at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
+      int ompIdx = at::get_thread_num();
+      int64_t i = 0, j = 0, l = 0, n = 0;
+      scalar_t* transpose_ptr = transpose_buffer_ptr + ompIdx * kvSplitSize * headSize;
+      at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
+      for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+        n = l * kvSplitSize;
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+        auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
+        auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
+        auto kv_block_num = n / cur_kvSplitSize;
+        auto kv_block_offset = n - kv_block_num * cur_kvSplitSize;
+        // getting kv indices by [BS, Head, 1, kv_block_num]
+        auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+        auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                                j_kvi * kviStrideH + kv_block_num;
+        auto k_addr =
+              k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+        auto v_addr =
+              v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+        if (use_kv_indice) {
+            k_addr =
+                k_data + i_kv * kStrideB + j_kv * kStrideH +
+                (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * kStrideN;
+            v_addr =
+                v_data + i_kv * vStrideB + j_kv * vStrideH +
+                (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * vStrideN;
+        }
         // transpose [cur_kvSplitSize, headSize] -> [headSize, cur_kvSplitSize]
         at::native::utils::transpose<uint16_t>(
           cur_kvSplitSize,
@@ -495,7 +405,7 @@ extern "C"
           /* ld_dst */ cur_kvSplitSize);
 
         // Pack [headSize, cur_kvSplitSize]
-        {{kernel.kernel_name}}_pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
           /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
                   j * eheadSize * kvSize + n * eheadSize),
@@ -504,7 +414,7 @@ extern "C"
           /* N */ cur_kvSplitSize);
 
         // Pack [cur_kvSplitSize, headSize_v]
-        {{kernel.kernel_name}}_pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(v_addr),
           /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
                   i * num_head * kv_padding_size * headSize_v +
@@ -512,23 +422,11 @@ extern "C"
           /* ld_src */ vStrideN,
           /* K */ cur_kvSplitSize,
           /* N */ headSize_v);
-      } else {
-        using trans_t = std::conditional_t<std::is_same_v<scalar_t, at::BFloat16>, uint16_t, float>;
-        at::native::utils::transpose<trans_t>(
-          cur_kvSplitSize,
-          headSize,
-          /* src_ptr */
-          reinterpret_cast<const trans_t*>(k_addr),
-          /* ld_src */ kStrideN,
-          /* dst */ reinterpret_cast<trans_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
-                  j * eheadSize * kvSize + n * eheadSize),
-          /* ld_dst */ cur_kvSplitSize);
+      // Move to the next query
+      at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
       }
-    // Move to the next query
-    at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
-    }
-  });
-
+    });
+  }
   // Attention loop below
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -583,22 +481,26 @@ extern "C"
         auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
                                 j_kvi * kviStrideH + kv_block_num;
         if (!need_pack) {
-          auto k_addr_t = key_reorder_ptr + i * num_head * eheadSize * kvSize +
-                  j * eheadSize * kvSize + n * eheadSize;
-          // TODO: use the micro-gemm template instead of brgemm API
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              cur_kvSplitSize,
-              eheadSize,
-              qStrideM,
-              cur_kvSplitSize,
-              cur_kvSplitSize,
-              false,
+          auto k_addr =
+              k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+          if (use_kv_indice) {
+              k_addr =
+                  k_data + i_kv * kStrideB + j_kv * kStrideH +
+                  (*kv_logical_data * kvBlockSize + kv_block_offset) * kStrideN;
+          }
+
+          {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
               q_data + i * qStrideB + j * qStrideH +
                   m * qStrideM,
-              k_addr_t,
+              k_addr,
               qk_data,
-              need_pack);
+              cur_qSplitSize,
+              cur_kvSplitSize,
+              headSize,
+              qStrideM,
+              kStrideN,
+              cur_kvSplitSize);
+
         } else {
           at::native::cpublas::brgemm(
               cur_qSplitSize,
@@ -620,53 +522,45 @@ extern "C"
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
 {%- if score_mod and mask_mod %}
-        // TODO: vectorization optimization for below score and mask codegen functions
-        // apply score mod function
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
-            std::vector<int64_t> b_idx = {i};
-            std::vector<int64_t> h_idx = {j};
-            std::vector<int64_t> q_idx = {m+row};
-            int64_t phisical_kv_idx = n+col;
+        // TODO: reduce the number of calls of q_idx and kv_idx initialization
+        std::vector<int64_t> q_idx(cur_qSplitSize);
+        for (int64_t i = 0; i < cur_qSplitSize; ++i) {
+            q_idx[i] = m + i;
+        }
+
+        std::vector<int64_t> kv_idx(cur_kvSplitSize);
+        for (int64_t i = 0; i < cur_kvSplitSize; ++i) {
             if (use_kv_indice) {
-                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
+                kv_idx[i] = *kv_logical_data * kvBlockSize + i;
+            } else {
+                kv_idx[i] = n + i;
             }
-            std::vector<int64_t> kv_idx = {phisical_kv_idx};
-            accum_t* in_ptr0 = qk_data + row * cur_kvSplitSize + col;
-            auto in_ptr1 = b_idx.data();
-            auto in_ptr2 = h_idx.data();
-            auto in_ptr3 = q_idx.data();
-            auto in_ptr4 = kv_idx.data();
+        }
+
+        std::vector<int64_t> b_idx = {i};
+        std::vector<int64_t> h_idx = {j};
+
+        accum_t* in_ptr0 = qk_data;
+
+        auto in_ptr1 = b_idx.data();
+        auto in_ptr2 = h_idx.data();
+        auto in_ptr3 = q_idx.data();
+        auto in_ptr4 = kv_idx.data();
+
+        // apply score mod function
+        {
             {{ template.generate_other_buffer("score_others", 0, "len_score_other", kernel.args) }}
             accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
-            {{ template.modification(score_mod, score_buf_name, score_buf_idx) }}
-          }
+            {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
         }
+
         // Apply block mask, fill unused with -inf
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
-            std::vector<int64_t> b_idx = {i};
-            std::vector<int64_t> h_idx = {j};
-            std::vector<int64_t> q_idx = {m+row};
-            int64_t phisical_kv_idx = n+col;
-            if (use_kv_indice) {
-                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
-            }
-            std::vector<int64_t> kv_idx = {phisical_kv_idx};
-            accum_t* qk_block = qk_data + row * cur_kvSplitSize + col;
-            auto in_ptr1 = b_idx.data();
-            auto in_ptr2 = h_idx.data();
-            auto in_ptr3 = q_idx.data();
-            auto in_ptr4 = kv_idx.data();
+        {
             {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
-            std::vector<int64_t> temp = {0};
-            int64_t* out_ptr{{mask_buf_idx}} = temp.data();
-            {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx) }}
-            *qk_block = *out_ptr{{mask_buf_idx}} != 0
-                            ? *qk_block
-                            : -std::numeric_limits<accum_t>::infinity();
-          }
+            accum_t* out_ptr{{mask_buf_idx}} = in_ptr0;
+            {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx)|indent(12, false) }}
         }
+
 {%- endif %}
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
@@ -791,8 +685,9 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_score_other,
         len_mask_other,
         kernel_input_name_to_buffer,
+        block_vars,
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16]
+        assert layout.dtype in [torch.float, torch.bfloat16, torch.float16]
         super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
@@ -823,6 +718,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_score_other = len_score_other
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
+        self.block_vars = block_vars
         self.extra_sizevars = list(
             OrderedSet(
                 val
@@ -934,13 +830,14 @@ class CppFlexAttentionTemplate(CppTemplate):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-
-        var_sizes = tuple([])  # type: ignore[var-annotated]  # noqa: C409
-        output_index = 0
+        var_sizes = tuple(subgraph_buffer.get_size())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes)
         }
+
+        dst_layout = subgraph_buffer.get_layout()
+        output_index = dst_layout.make_indexer()([*var_ranges.keys()])
 
         def fn(*args):
             V.ops.store(
@@ -962,14 +859,33 @@ class CppFlexAttentionTemplate(CppTemplate):
         assert all(
             mem.buffer_name in kernel_group.args.input_buffers
             for mem in body.memory_usage[MemoryUsageType.LOAD]
-        ), "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
+        ), (
+            "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
+        )
 
         bodies.append(body)
         var_sizes_list.append((var_sizes, ()))
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
         kernel_group.finalize_kernel(cpp_kernel_proxy, [])
-        return kernel_group.loops_code.getvalue()
+        output_code = kernel_group.loops_code.getvalue()
+
+        var_q_symbol, var_kv_symbol = self.block_vars
+        # See [Note] Handle the case where the split sizes are not statically known.
+        # We don't know the value of qBlockSize and rkvBlockSize during compilation time
+        # thus we've represented them by symbols.
+        # We change the symbol strings back to "cur_qSplitSize" and "cur_kvSplitSize"
+        # in the generated code thus they'll be filled with the real value during runtime.
+        if var_q_symbol in kernel_group.args.sizevars:
+            output_code = output_code.replace(
+                kernel_group.args.sizevars[var_q_symbol], "cur_qSplitSize"
+            )
+        if var_kv_symbol in kernel_group.args.sizevars:
+            output_code = output_code.replace(
+                kernel_group.args.sizevars[var_kv_symbol], "cur_kvSplitSize"
+            )
+
+        return output_code
 
     @staticmethod
     def add_choices(
@@ -986,6 +902,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_score_other,
         len_mask_other,
         kernel_input_name_to_buffer,
+        block_vars,
     ):
         def preprocessor(input_nodes, layout):
             return input_nodes, layout
@@ -1009,6 +926,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             len_score_other=len_score_other,
             len_mask_other=len_mask_other,
             kernel_input_name_to_buffer=kernel_input_name_to_buffer,
+            block_vars=block_vars,
         )
         template.maybe_append_choice(choices)
         return template
@@ -1020,7 +938,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
@@ -1037,6 +955,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         query = kernel.permute(self.input_nodes[0], [0, 2, 1, 3])
         key = kernel.permute(self.input_nodes[1], [0, 2, 1, 3])
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
+        self.accumulate_dtype = torch.float
+        self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
         buf_out = TensorBox.create(self.output_node)
@@ -1054,8 +974,8 @@ class CppFlexAttentionTemplate(CppTemplate):
             score_mod_other_buffers=self.score_mod_other_buffers,
             mask_mod_other_buffers=self.mask_mod_other_buffers,
             scale=self.scale,
-            accumulate_dtype=torch.float,
-            query_dtype=query.layout.dtype,
+            accumulate_dtype=self.accumulate_dtype,
+            query_dtype=self.input_dtype,
             kvBlockSize=self.kv_block_size,
             template=self,
             output=buf_out,
@@ -1095,3 +1015,33 @@ class CppFlexAttentionTemplate(CppTemplate):
                 buffer_size=buffer_size,
             )
         )
+
+    def micro_gemm_define(self, kernel_name: str):
+        from torch._inductor.codegen.cpp_gemm_template import (
+            CppTemplateKernel,
+            parallel_num_threads,
+        )
+        from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
+        from torch._inductor.virtualized import V
+
+        micro_gemm = CppMicroGemmFP32Vec(
+            kernel_name + "_kernel_micro_gemm",
+            self.input_dtype,
+            self.input_dtype,
+            self.accumulate_dtype,
+            self.accumulate_dtype,
+            GemmBlocking(1, 16, 1),
+            1,
+            True,
+            True,
+        )
+
+        with V.set_graph_handler(V.graph):
+            kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
+            code = micro_gemm.codegen_define(kernel)
+        return code
+
+    def codegen_micro_gemm(self, kernel_name: str):
+        micro_gemm = self.micro_gemm_define(kernel_name)
+        GEMM_SOURCE_CODE = MICRO_GEMM_TEMPLATE.replace("GEMM_DEFINE", micro_gemm)
+        return self._template_from_string(GEMM_SOURCE_CODE).render()

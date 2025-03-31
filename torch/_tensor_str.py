@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from torch import inf
@@ -95,7 +95,7 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 
-def get_printoptions() -> Dict[str, Any]:
+def get_printoptions() -> dict[str, Any]:
     r"""Gets the current options for printing, as a dictionary that
     can be passed as ``**kwargs`` to set_printoptions().
     """
@@ -142,6 +142,14 @@ class _Formatter:
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
+            if tensor.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+                # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
+                # to print it, we choose to display the uint8 representation here for
+                # convenience of being able to print a tensor.
+                # TODO(#146647): extend this to other dtypes without casts defined, such
+                # as the bits, uint1..7 and int1..7 dtypes.
+                tensor_view = tensor_view.view(torch.uint8)
+
             nonzero_finite_vals = torch.masked_select(
                 tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0)
             )
@@ -150,7 +158,17 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
+            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+                # float8_e8m0fnu is special and does not define arithmetic ops,
+                # and printing code further in this file assumes the existence
+                # of various arithmetic ops to figure out what to print. We hack
+                # and convert to float here to make printing work correctly.
+                # TODO(#113663): also add the other float8 dtypes here after arithmetic
+                # support for them is removed
+                nonzero_finite_vals = nonzero_finite_vals.float()
+
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+
             nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
             nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
             nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
@@ -247,6 +265,14 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
                 return real_str + "+" + imag_str
         else:
             return formatter1.format(val)
+
+    if self.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+        # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
+        # to print it, we choose to display the uint8 representation here for
+        # convenience of being able to print a tensor.
+        # TODO(#146647): extend this to other dtypes without casts defined, such
+        # as the bits, uint1..7 and int1..7 dtypes.
+        self = self.view(torch.uint8)
 
     if summarize and not PRINT_OPTS.edgeitems:
         # Deal with edge case that negative zero is zero
@@ -684,14 +710,10 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
-            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
-            f"{indented_value_repr}\n"
-            f")"
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )
     if torch._C._functorch.is_gradtrackingtensor(tensor):
-        return (
-            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
-        )
+        return f"GradTrackingTensor(lvl={level}, value=\n{indented_value_repr}\n)"
     if torch._C._functorch.is_functionaltensor(tensor):
         return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
 

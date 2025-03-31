@@ -159,18 +159,26 @@ void DebugInfoWriter::write(const std::string& trace) {
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+    LOG(ERROR) << "Error opening file for writing Flight Recorder debug info: "
                << filename_;
     return;
   }
 
-  file.write(trace.data(), static_cast<std::streamsize>(trace.size()));
-  if (!file) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
+  if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
+    const auto bad = file.bad();
+    LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
+               << filename_ << " bad bit: " << bad;
     return;
   }
-  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
+
+  // Flush the buffer to ensure data is written to the file
+  file.flush();
+  if (file.bad()) {
+    LOG(ERROR) << "Error flushing Flight Recorder debug info: " << filename_;
+    return;
+  }
+
+  LOG(INFO) << "Finished writing Flight Recorder debug info to " << filename_;
 }
 
 DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
@@ -195,10 +203,12 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
 }
 
 void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      hasWriterRegistered_.load() == false,
-      "debugInfoWriter already registered");
+  if (hasWriterRegistered_.load()) {
+    TORCH_WARN_ONCE(
+        "DebugInfoWriter has already been registered, and since we need the writer to stay "
+        "outside ProcessGroup, user needs to ensure that this extra registration is indeed needed. "
+        "And we will only use the last registered writer.");
+  }
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
 }

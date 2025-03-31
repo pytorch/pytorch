@@ -30,6 +30,6 @@ if __name__ == "__main__":
     def work2():
         sum = 0
         for _ in range(100000000):
-            sum += 1
+            sum += 1  # noqa: SIM113
 
     work2()

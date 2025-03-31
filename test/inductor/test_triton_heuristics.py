@@ -2,10 +2,18 @@
 
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 import torch
+from torch._dynamo.testing import rand_strided
+from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_cuda_with_enough_memory,
+)
 
 
 try:
@@ -28,6 +36,7 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
+    template,
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -93,7 +102,8 @@ class TestTritonHeuristics(TestCase):
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
 
-    def _get_cos_kernel_caching_autotuner_args(self):
+    @staticmethod
+    def _get_cos_kernel_caching_autotuner_args():
         @triton.jit
         def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
             xnumel = 16
@@ -177,6 +187,110 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+
+    @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
+    def test_template_function_ws(self):
+        triton_meta = {"device": MagicMock()}
+        num_stages = 2
+        num_warps = 4
+        num_consumer_groups = 3
+        num_buffers_warp_spec = 5
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.cached_autotune"
+        ) as mock_cached_autotune:
+            template(
+                num_stages=num_stages,
+                num_warps=num_warps,
+                triton_meta=triton_meta,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )
+            mock_cached_autotune.assert_called_once()
+            configs = mock_cached_autotune.call_args[0][1]
+            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
+            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+
+class TestArgumentCloneAndRestore(TestCase):
+    # Our tensor is large enough. If a unexpected copy happens, the
+    # peak memory increase should be larger than tolerance and the test
+    # will fail.
+    MEM_TOLERANCE = int(256 * 1e6)
+
+    def _create_caching_autotuner(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["optimize_mem"] = True
+        args["mutated_arg_names"] = ["in_ptr0"]
+        autotuner = CachingAutotuner(**args)
+        return autotuner
+
+    def _create_tensor(self, pad=1, with_offset=False):
+        """
+        Create a GPU tensor of about 1GB size.
+        """
+        M = 2
+        N = 2**29 // 4
+        out = rand_strided((M, N), (N + pad, 1), device=GPU_TYPE)
+        if with_offset:
+            out = out[:, 1:]
+        return out
+
+    def _do_test(self, gpu_tensor):
+        torch.cuda.reset_peak_memory_stats()
+        autotuner = self._create_caching_autotuner()
+
+        old_storage_offset = gpu_tensor.storage_offset()
+        gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
+
+        peak_mem_before = torch.cuda.max_memory_allocated()
+        cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
+        self.assertTrue(len(cpu_copies) == 1)
+
+        # Mutate the arg
+        gpu_tensor.add_(1)
+
+        # will restore gpu_tensor
+        autotuner.restore_args_from_cpu(cpu_copies)
+        self.assertTrue(gpu_tensor is not gpu_tensor_clone)
+        self.assertEqual(gpu_tensor.size(), gpu_tensor_clone.size())
+        self.assertEqual(gpu_tensor.stride(), gpu_tensor_clone.stride())
+        self.assertEqual(gpu_tensor.storage_offset(), old_storage_offset)
+
+        # Note: torch.allclose somehow allocates large amount of extra memory.
+        # Record peak memory before that.
+        peak_mem_after = torch.cuda.max_memory_allocated()
+
+        self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
+        self.assertTrue(
+            peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
+            f"{peak_mem_before=} v.s. {peak_mem_after=}",
+        )
+
+        # Avoid OOM in CI
+        self.assertTrue(peak_mem_after < 1e10)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_contiguous_args(self):
+        arg = self._create_tensor(pad=0)
+        self.assertTrue(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() == 0)
+        self._do_test(arg)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_non_contiguous_args(self):
+        arg = self._create_tensor(pad=1)
+        self.assertFalse(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() == 0)
+        self._do_test(arg)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_args_with_non_zero_offset(self):
+        arg = self._create_tensor(pad=1, with_offset=True)
+        self.assertFalse(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() > 0)
+
+        self._do_test(arg)
 
 
 if __name__ == "__main__":

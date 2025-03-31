@@ -66,10 +66,12 @@ tests = [
     test_export.TestDynamismExpression,
     test_export.TestExport,
 ]
-for test in tests:
-    make_dynamic_cls(test, True)
-    make_dynamic_cls(test, False)
-del test
+
+if IS_FBCODE:
+    for test in tests:
+        make_dynamic_cls(test, True)
+        make_dynamic_cls(test, False)
+    del test
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

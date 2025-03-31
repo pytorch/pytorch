@@ -94,7 +94,6 @@ class TestAOTInductorPackage(TestCase):
         example_inputs,
         inductor_configs=None,
         dynamic_shapes=None,
-        disable_constraint_solver=False,
         atol=None,
         rtol=None,
     ) -> AOTICompiledModel:
@@ -473,6 +472,28 @@ class TestAOTInductorPackage(TestCase):
         expected = model(test_inputs)
         output = compiled(test_inputs)
         self.assertEqual(expected, output)
+
+    def test_deepcopy_compiled_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model = Model()
+
+        compiled = compile(model, example_inputs)
+
+        copmiled_copy = copy.deepcopy(compiled)
+
+        expected = model(*example_inputs)
+        output = compiled(*example_inputs)
+        output_copy = copmiled_copy(*example_inputs)
+        self.assertEqual(expected, output)
+        self.assertEqual(expected, output_copy)
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
