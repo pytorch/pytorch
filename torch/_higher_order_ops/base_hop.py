@@ -130,7 +130,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         return ctx.wrap_tensors(out)
 
     def gen_schema(self, *args, **kwargs):
-        from torchgen.gen_schema_utils import CFunctionSchemaGen, HopArgumentInfoGen
+        from torch._library.infer_schema import CFunctionSchemaGen, HopArgumentInfoGen
 
         subgraph, *operands = args
 

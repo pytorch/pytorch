@@ -318,14 +318,15 @@ TypePtr createTupleType(std::vector<TypePtr> types) {
   return TupleType::create(types);
 }
 
-AliasInfo createAliasInfo(bool is_write) {
+AliasInfo createAliasInfo(std::string alias_group_name, bool is_write) {
   auto alias_info = AliasInfo();
   if (is_write) {
     // We need to add dummy alias info to before set after set so that the alias
     // info gets printed correctly when printing Argument. Otherwise, they're
     // ignored.
-    alias_info.addBeforeSet(Symbol::fromQualString("alias::"));
-    alias_info.addAfterSet(Symbol::fromQualString("alias::"));
+    auto group_name = "alias::" + alias_group_name;
+    alias_info.addBeforeSet(Symbol::fromQualString(group_name));
+    alias_info.addAfterSet(Symbol::fromQualString(group_name));
     alias_info.setIsWrite(is_write);
   }
   return alias_info;

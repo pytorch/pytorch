@@ -121,7 +121,7 @@ class GraphModule(torch.nn.Module):
             str(schemas[0]),
             # See Note [schema for signle return item with parenthesis] for why
             # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any subgraph, Tensor(!) arg0, Tensor(!) arg1, str scheme="nf4") -> ((Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor(a2!) arg1, str scheme="nf4") -> ((Tensor) out)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
@@ -153,7 +153,7 @@ class GraphModule(torch.nn.Module):
             str(schemas[0]),
             # See Note [schema for signle return item with parenthesis] for why
             # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any subgraph, Tensor(!) arg0, Tensor arg1, str scheme="nf4") -> ((Tensor, Tensor, Tensor, Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, str scheme="nf4") -> ((Tensor, Tensor, Tensor, Tensor) out)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
@@ -242,9 +242,12 @@ class GraphModule(torch.nn.Module):
         def f(inner, x, y):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing for HOP"
+        ):
             f(inner, x, y)
 
+        # input mutation can be supported with auto_functionalize
         f(inner2, x, y)
 
     def test_eager_call(self):
