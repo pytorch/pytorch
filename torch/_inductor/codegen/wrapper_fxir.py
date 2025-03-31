@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import operator
 import random
 import textwrap
@@ -46,10 +47,10 @@ from .wrapper import (
     Line,
     MultiOutputLine,
     NullLine,
-    OutputLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    WrapperLine,
 )
 
 
@@ -63,6 +64,11 @@ def delete(x: torch.Tensor) -> None:
 """
 Extra wrapper IR nodes for FX codegen.
 """
+
+
+@dataclasses.dataclass
+class OutputLine(WrapperLine):
+    buffers: tuple[BufferLike, ...]
 
 
 class TritonKernel:
@@ -218,10 +224,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 raise NotImplementedError(f"Unrecognized output node: {node}")
 
         output_refs = [
-            codegen_output(node).get_name()
+            codegen_output(node)
             for idx, node in enumerate(V.graph.graph_outputs)
         ]
-        self.writeline(OutputLine(self, output_refs))
+        self.writeline(OutputLine(output_refs))
 
     def _generate(self, is_inference):
         self._codegen_outputs_wrapper_ir()

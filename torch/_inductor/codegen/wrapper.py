@@ -805,11 +805,6 @@ class MultiOutputLine(WrapperLine):
         )
 
 
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -1313,7 +1308,9 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
+        debug_printer_manager.set_printer_args(
+            code.writeline, args, kernel, None, None, "extern"
+        )
         args.append(f"out={out_view if out_view else out}")
         with debug_printer_manager:
             code.writeline(f"{kernel}({', '.join(args)})")
@@ -2487,7 +2484,9 @@ class PythonWrapperCodegen(CodeGen):
 
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
+        debug_printer_manager.set_printer_args(
+            code.writeline, call_args, kernel_name, arg_types, None
+        )
         with debug_printer_manager:
             code.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
         self.write_triton_header_once()

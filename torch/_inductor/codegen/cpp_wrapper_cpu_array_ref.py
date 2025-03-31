@@ -114,6 +114,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         arg_types=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
     ):
         """
         Generates kernel call code.
@@ -140,6 +141,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
+            code.writeline,
             call_args,
             kernel_name,
             None,
