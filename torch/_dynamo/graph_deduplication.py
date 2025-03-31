@@ -15,9 +15,9 @@ from typing import Any
 import torch.fx
 from torch._dynamo import config
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
+from .graph_utils import _flatten_args_kwargs
 
 
 log = logging.getLogger(__name__)
@@ -85,30 +85,6 @@ when they are created in output_graph.
             )
 
     return output_replacements
-
-
-# flattens with support for slices
-# Note: a better way to do this would
-# be register/unregister slices as pytree nodes
-# but there is no unregister API in the pytorch
-# pytree impl
-def _flatten_args_kwargs(args: Any) -> list[Node]:
-    fully_flattened = []
-
-    def flatten(args: Any) -> None:
-        flattened, _ = tree_flatten(args)
-        for arg in flattened:
-            if isinstance(arg, slice):
-                start = arg.start
-                stop = arg.stop
-                step = arg.step
-                flatten((start, stop, step))
-            else:
-                fully_flattened.append(arg)
-
-    flatten(args)
-
-    return fully_flattened
 
 
 def _replace_region_with_subgraph(
