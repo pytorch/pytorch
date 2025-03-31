@@ -254,6 +254,100 @@ class TestMatmulCuda(TestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
+    def grouped_mm_helper(self, alist, blist, outlist):
+        for a, b, out in zip(alist, blist, outlist):
+            out_ref = torch.mm(a, b.t()) 
+            self.assertEqual(out, out_ref)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    def test_grouped_gemm_2d_2d(self, strided):
+        device = "cuda"
+        dtype=torch.bfloat16
+        m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
+        a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        out = torch._grouped_mm(a, b.t(), offs=offs,
+                                       out_dtype=torch.bfloat16)
+        offs_cpu = offs.cpu()
+        alist, blist = [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[:, start:offs_cpu[i]])
+            blist.append(b[:, start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, blist, out)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    def test_grouped_gemm_2d_3d(self, strided):
+        device = "cuda"
+        dtype=torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+        offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+
+        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                       out_dtype=torch.bfloat16)
+
+        offs_cpu = offs.cpu()
+        alist, outlist = [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[start:offs_cpu[i]])
+            outlist.append(out[start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, b, outlist)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    def test_grouped_gemm_3d_3d(self, strided):
+        device = "cuda"
+        dtype=torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+
+        out = torch._grouped_mm(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
+        self.grouped_mm_helper(a, b, out)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    def test_grouped_gemm_3d_2d(self, strided):
+        device = "cuda"
+        dtype=torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+        offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                       out_dtype=torch.bfloat16)
+
+        offs_cpu = offs.cpu()
+        blist, outlist = [], []
+        start = 0
+        for i in range(n_groups):
+            blist.append(b[start:offs_cpu[i]])
+            outlist.append(out[:, start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(a, blist, outlist)
+
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
@@ -1375,31 +1469,6 @@ class TestFP8MatmulCuda(TestCase):
             outlist.append(out[:, start:offs_cpu[i]])
             start = offs_cpu[i]
         self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
-
-    def grouped_mm_helper(self, alist, blist, outlist):
-        for a, b, out in zip(alist, blist, outlist):
-            out_ref = torch.mm(a, b.t()) 
-            self.assertEqual(out, out_ref)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
-    @parametrize("strided", [False, True])
-    def test_grouped_gemm_2d_2d(self, strided):
-        device = "cuda"
-        m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
-        a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=torch.bfloat16)[:, :k * n_groups]
-        b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=torch.bfloat16)[:, :k * n_groups]
-        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        out = torch._grouped_mm(a, b.t(), offs=offs,
-                                       out_dtype=torch.bfloat16)
-        offs_cpu = offs.cpu()
-        alist, blist = [], []
-        start = 0
-        for i in range(n_groups):
-            alist.append(a[:, start:offs_cpu[i]])
-            blist.append(b[:, start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.grouped_mm_helper(alist, blist, out)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
