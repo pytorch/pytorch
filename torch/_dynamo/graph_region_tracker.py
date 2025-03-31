@@ -27,6 +27,8 @@ import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
 
+from .graph_utils import _flatten_args_kwargs
+
 
 T = TypeVar("T")
 
@@ -253,6 +255,8 @@ class GraphRegionTracker:
         """
         topological_ranking = {node: i for i, node in enumerate(graph.nodes)}
         region_groups_with_rank = []
+        # needed to detect if replacing a region will create cycles
+        node_to_recursive_ancestors = _populate_recursive_ancestor_map(graph)
 
         # Create region groups; a region group is a group
         # of regions that are all identical. In this initial state
@@ -281,7 +285,12 @@ class GraphRegionTracker:
         # overlap.
         seen_nodes: set[Node] = set()
         for region_group in region_groups:
-            fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+            fully_expand_region_group(
+                region_group,
+                seen_nodes,
+                node_to_recursive_ancestors,
+                self._is_identical,
+            )
             # sort topologically
             for region in region_group:
                 region.sort(key=lambda n: topological_ranking[n])
@@ -297,6 +306,7 @@ class GraphRegionTracker:
 def fully_expand_region_group(
     regions: list[Region],
     seen_nodes: set[Node],
+    node_to_recursive_ancestors: dict[Node, set[Node]],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
     debug_log("--------------------------------------------------")
@@ -327,11 +337,14 @@ def fully_expand_region_group(
     # regions are only expanded if the node to add is valid
     # for ALL regions
     while current_node:
-        add_node = True
+        add_node = not _will_create_cycle(
+            current_node, regions[0], node_to_recursive_ancestors
+        )
         nodes_to_add.clear()
         nodes_to_add.append(current_node)
         nodes_to_add_set = set(nodes_to_add)
-        for region_it in region_iters[1:]:
+        for ind, region_it in enumerate(region_iters[1:]):
+            ind += 1  # compensate for the 0th region
             node = region_it.next()
 
             debug_log("--------------------")
@@ -344,6 +357,9 @@ def fully_expand_region_group(
                     and node not in nodes_to_add_set
                     and node.op != "placeholder"
                     and is_identical_fn(node, current_node)
+                    and not _will_create_cycle(
+                        node, regions[ind], node_to_recursive_ancestors
+                    )
                 )
                 nodes_to_add.append(node)
                 nodes_to_add_set.add(node)
@@ -368,3 +384,35 @@ def fully_expand_region_group(
 
     debug_log("end expand new region group: %s", regions)
     debug_log("--------------------------------------------------")
+
+
+def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[Node]]:
+    node_to_recursive_ancestors: dict[Node, set[Node]] = {}
+    for node in graph.nodes:
+        node_to_recursive_ancestors[node] = set()
+    for node in graph.nodes:
+        all_args = _flatten_args_kwargs((node.args, node.kwargs))
+        for arg in all_args:
+            if isinstance(arg, Node):
+                node_to_recursive_ancestors[node].update(
+                    node_to_recursive_ancestors[arg]
+                )
+                node_to_recursive_ancestors[node].add(node)
+    return node_to_recursive_ancestors
+
+
+def _will_create_cycle(
+    node_to_add: Node,
+    region: Region,
+    node_to_recursive_ancestors: dict[Node, set[Node]],
+) -> bool:
+    region_set: set[Node] = set(region)
+    region_ancestors: set[Node] = set(
+        tree_flatten([list(node_to_recursive_ancestors[node]) for node in region])[0]
+    )
+    external_users = [user for user in node_to_add.users if user not in region_set]
+    for user in external_users:
+        if user in region_ancestors:
+            return True
+
+    return False
