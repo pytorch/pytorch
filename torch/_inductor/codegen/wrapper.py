@@ -807,11 +807,7 @@ class MultiOutputLine(WrapperLine):
 
 @dataclasses.dataclass
 class OutputLine(WrapperLine):
-    wrapper: PythonWrapperCodegen
-    output_refs: list[str]
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_return_helper(code, self.output_refs)
+    buffers: tuple[BufferLike, ...]
 
 
 BufferName = str
@@ -1229,15 +1225,10 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.do_unindent()
 
     def generate_return(self, output_refs: list[str]) -> None:
-        self.writeline(OutputLine(self, output_refs))
-
-    def _generate_return_helper(
-        self, code: IndentedBuffer, output_refs: list[str]
-    ) -> None:
         if output_refs:
-            code.writeline("return (" + ", ".join(output_refs) + ", )")
+            self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
-            code.writeline("return ()")
+            self.wrapper_call.writeline("return ()")
 
     def generate_before_suffix(self, result: IndentedBuffer) -> None:
         return
@@ -1406,9 +1397,6 @@ class PythonWrapperCodegen(CodeGen):
             self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
-        output_refs = self.get_output_refs()
-        self.generate_return(output_refs)
-
         if config.profile_bandwidth:
             self.write_triton_header_once()
 
@@ -1436,6 +1424,7 @@ class PythonWrapperCodegen(CodeGen):
 
             self._write_multi_kernel_defs()
 
+            output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline(V.graph.device_ops.synchronize())
@@ -1454,6 +1443,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.writeline(
                     "nvtx._device_range_end(training_annotation)"
                 )
+            self.generate_return(output_refs)
 
         # Assemble the final code from sections.
         result = IndentedBuffer()

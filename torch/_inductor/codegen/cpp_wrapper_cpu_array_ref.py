@@ -358,7 +358,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
-    def _generate_return_helper(self, code: IndentedBuffer, output_refs: list[str]):
+    def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
@@ -368,29 +368,35 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         def use_thread_local_cached_output_tensor(idx, output):
             cached_output_name = f"cached_output_{next(self.cached_output_id)}"
             cache_type = "Array" if arr_iface else "Tensor"
-            code.writeline(
+            self.wrapper_call.writeline(
                 f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
                 f"{cached_output_name}({output});"
             )
             if arr_iface:
-                code.writeline(f"{cached_output_name}.copy_data_from({output});")
+                self.wrapper_call.writeline(
+                    f"{cached_output_name}.copy_data_from({output});"
+                )
                 output_entry = f"std::get<{idx}>(output_arrayref_tensors)"
                 element_type = f"std::decay_t<decltype({output_entry}.data()[0])>"
-                code.writeline(
+                self.wrapper_call.writeline(
                     f"{output_entry} = {cached_output_name}.arrayref_tensor<{element_type}>();"
                 )
             else:
-                code.writeline(f"{cached_output_name}.copy_data_from({output});")
-                code.writeline(
+                self.wrapper_call.writeline(
+                    f"{cached_output_name}.copy_data_from({output});"
+                )
+                self.wrapper_call.writeline(
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
                 )
-                code.writeline(
+                self.wrapper_call.writeline(
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
                     f"output_handles[{idx}]));"
                 )
 
         if arr_iface:
-            code.writeline("AOTInductorModelOutputs output_arrayref_tensors;")
+            self.wrapper_call.writeline(
+                "AOTInductorModelOutputs output_arrayref_tensors;"
+            )
 
         output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
@@ -407,7 +413,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
                 output_tensor = self.codegen_scalar_to_tensor(output)
-                code.writeline(f"output_handles[{idx}] = {output_tensor}.release();")
+                self.wrapper_call.writeline(
+                    f"output_handles[{idx}] = {output_tensor}.release();"
+                )
                 continue
 
             output_is_tensor_handle_expr = (
@@ -418,11 +426,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 f"std::is_same_v<std::decay_t<decltype({output})>,"
                 "ConstantHandle>"
             )
-            code.writeline(f"if constexpr ({output_is_tensor_handle_expr}) {{")
-            with code.indent():
+            self.wrapper_call.writeline(
+                f"if constexpr ({output_is_tensor_handle_expr}) {{"
+            )
+            with self.wrapper_call.indent():
                 if arr_iface:
                     cached_output_name = f"cached_output_{next(self.cached_output_id)}"
-                    code.writeline(
+                    self.wrapper_call.writeline(
                         f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                     )
                     if is_constant_buffer:
@@ -433,44 +443,48 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # assuming they are not updated at runtime Basically, we
                         # cannot release or transfer the ownership of any original
                         # constant to the user.
-                        code.writeline(f"AtenTensorHandle {cached_output_name}_tmp;")
-                        code.writeline(
+                        self.wrapper_call.writeline(
+                            f"AtenTensorHandle {cached_output_name}_tmp;"
+                        )
+                        self.wrapper_call.writeline(
                             f"aoti_torch_clone({output}, &{cached_output_name}_tmp);"
                         )
-                        code.writeline(
+                        self.wrapper_call.writeline(
                             f"{cached_output_name} = {cached_output_name}_tmp;"
                         )
                     else:
-                        code.writeline(f"{cached_output_name} = {output}.release();")
-                    code.writeline(
+                        self.wrapper_call.writeline(
+                            f"{cached_output_name} = {output}.release();"
+                        )
+                    self.wrapper_call.writeline(
                         f"convert_handle_to_arrayref_tensor({cached_output_name}, "
                         f"std::get<{idx}>(output_arrayref_tensors));"
                     )
                 else:
                     if is_constant_buffer:
                         # See NOTE(return_constant) above.
-                        code.writeline(
+                        self.wrapper_call.writeline(
                             f"aoti_torch_clone({output}, &output_handles[{idx}]);"
                         )
                     else:
                         if output in output2idx:
                             src_idx = output2idx[output]
-                            code.writeline(
+                            self.wrapper_call.writeline(
                                 f"output_handles[{idx}] = output_handles[{src_idx}];"
                             )
                         else:
-                            code.writeline(
+                            self.wrapper_call.writeline(
                                 f"output_handles[{idx}] = {output}.release();"
                             )
-            code.writeline("} else {")
-            with code.indent():
+            self.wrapper_call.writeline("} else {")
+            with self.wrapper_call.indent():
                 use_thread_local_cached_output_tensor(idx, output)
-            code.writeline("}")
+            self.wrapper_call.writeline("}")
 
             if output not in output2idx:
                 output2idx[output] = idx
         if arr_iface:
-            code.writeline("return output_arrayref_tensors;")
+            self.wrapper_call.writeline("return output_arrayref_tensors;")
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
