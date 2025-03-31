@@ -229,7 +229,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(
-        self, code: IndentedBuffer, device_idx: int, graph=None
+        self, code: IndentedBuffer, device_idx: int, graph_name: str
     ) -> str:
         name = f"stream{device_idx}"
         code.writeline(
@@ -417,6 +417,7 @@ class CppWrapperGpu(CppWrapperCpu):
         arg_types=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -459,7 +460,7 @@ class CppWrapperGpu(CppWrapperCpu):
         stream = (
             "stream"
             if V.graph.aot_mode
-            else self.write_get_raw_stream(code, device.index, V.graph)
+            else self.write_get_raw_stream(code, device.index, graph_name)
         )
 
         if triton:

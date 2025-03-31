@@ -1629,7 +1629,7 @@ class HalideKernel(SIMDKernel):
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cuda":
             stream_name = wrapper.write_get_raw_stream(
-                wrapper.wrapper_call, current_device.index, V.graph
+                wrapper.wrapper_call, current_device.index, V.graph.name
             )
             call_args.append(stream_name)
         wrapper.generate_kernel_call(

@@ -113,6 +113,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
     ):
         """
         Generates kernel call code.

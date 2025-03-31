@@ -533,6 +533,7 @@ class KernelCallLine(WrapperLine):
     triton: bool
     triton_meta: dict[str, Any]
     device: torch.device
+    graph_name: str
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._generate_kernel_call_helper(
@@ -544,6 +545,7 @@ class KernelCallLine(WrapperLine):
             raw_args=self.raw_args,
             triton_meta=self.triton_meta,
             device=self.device,
+            graph_name=self.graph_name,
         )
 
 
@@ -1164,11 +1166,11 @@ class PythonWrapperCodegen(CodeGen):
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
 
-    # this function (and below) takes a graph as input so
+    # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(
-        self, code: IndentedBuffer, device_idx: int, graph=None
+        self, code: IndentedBuffer, device_idx: int, graph_name: str
     ) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
@@ -2400,6 +2402,7 @@ class PythonWrapperCodegen(CodeGen):
                 triton=triton,
                 triton_meta=triton_meta,
                 device=device,
+                graph_name=V.graph.name,
             )
         )
 
@@ -2414,6 +2417,7 @@ class PythonWrapperCodegen(CodeGen):
         arg_types=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
     ):
         device = device or V.graph.get_current_device_or_throw()
         if not (triton or device.type != "cpu"):
@@ -2423,7 +2427,7 @@ class PythonWrapperCodegen(CodeGen):
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
         stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, code, device.index, V.graph
+            self, code, device.index, graph_name
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
