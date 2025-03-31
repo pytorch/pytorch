@@ -697,7 +697,7 @@ at::Tensor two_shot_all_reduce_(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name) {
-  return two_shot_all_reduce_impl(input, c10::nullopt, reduce_op, group_name);
+  return two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
 }
 
 at::Tensor two_shot_all_reduce_out(
