@@ -627,36 +627,52 @@ def forward_block_mn(
     m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
     n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
 
-    {{ modification(
-        subgraph_number=0,
-        output_name="post_mod_scores",
-        score="qk",
-        b="off_z",
-        h="off_h",
-        m="m",
-        n="n",
-        out="qk"
-    ) | indent_except_first(1) }}
+    # All values are valid
+    if IS_FULL_BLOCKS:
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            out="qk"
+        ) | indent_except_first(2) }}
 
-    if CHECK_BLOCK_BOUNDARY:
-        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
-
-    if not IS_FULL_BLOCKS:
+    # Partial block w/ masked values
+    else:
+        # Determine any masked out values
         {{ modification(
             subgraph_number=1,
             output_name="mask_mod_output",
-            score="qk",
             b="off_z",
             h="off_h",
             m="m",
             n="n",
         ) | indent_except_first(2) }}
 
-        if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, False)
+        # TODO explain and rationalize
+        m_masked = tl.where(mask_mod_output, m, 0)
+        n_masked = tl.where(mask_mod_output, n, 0)
+
+        # Score modded
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m_masked",
+            n="n_masked",
+            out="qk",
+        ) | indent_except_first(2) }}
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+
+    if CHECK_BLOCK_BOUNDARY:
+        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
+        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
 
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
