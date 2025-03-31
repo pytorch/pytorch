@@ -52,6 +52,13 @@ size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
   return roundup_power2_divisions_[index];
 }
 
+size_t AllocatorConfig::pinned_max_register_threads() {
+  // Based on the benchmark results, we see better allocation performance
+  // with 8 threads. However on future systems, we may need more threads
+  // and limiting this to 128 threads.
+  return kPinnedMaxRegisterThreads;
+}
+
 void AllocatorConfig::lexArgs(
     const char* env,
     std::vector<std::string>& config) {
@@ -301,13 +308,11 @@ size_t AllocatorConfig::parsePinnedNumRegisterThreads(
     TORCH_CHECK(
         llvm::isPowerOf2_64(val_env),
         "Number of register threads has to be power of 2");
-    // Based on the benchmark results, we see better allocation performance
-    // with 8 threads. However on future systems, we may need more threads
-    // and limiting this to 128 threads.
+    auto max_threads = pinned_max_register_threads();
     TORCH_CHECK(
-        val_env <= kPinnedMaxRegisterThreads,
+        val_env <= max_threads,
         "Number of register threads should be less than or equal to ",
-        kPinnedMaxRegisterThreads);
+        max_threads);
     pinned_num_register_threads_ = val_env;
   } else {
     TORCH_CHECK(false, "Error, expecting pinned_num_register_threads value");
