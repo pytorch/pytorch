@@ -439,7 +439,6 @@ void test_aoti_double_buffering_with_tensor_constants() {
 
 void test_aoti_user_managed_buffer() {
   torch::NoGradGuard no_grad;
-  size_t allocated, reserved, active;
 
   std::string data_path =
       (std::filesystem::path(
@@ -468,10 +467,10 @@ void test_aoti_user_managed_buffer() {
   torch::inductor::TensorConstantMap rand_map, real_map;
   at::Tensor rand_pre, rand_add;
   at::Tensor w_pre, w_add;
-  rand_pre = at::randn({4, 4}).to(at::kCUDA);
-  rand_add = at::randn({4, 4}).to(at::kCUDA);
-  w_pre = at::Tensor(weight_tensors).to(at::kCUDA);
-  w_add = at::Tensor(add_tensors).to(at::kCUDA);
+  rand_pre = at::randn({4096, 4096}).contiguous().to(at::kCUDA);
+  rand_add = at::randn({4096, 4096}).contiguous().to(at::kCUDA);
+  w_pre = at::Tensor(weight_tensors).contiguous().to(at::kCUDA);
+  w_add = at::Tensor(add_tensors).contiguous().to(at::kCUDA);
 
   rand_map.emplace("L__self___w_pre", &rand_pre);
   rand_map.emplace("L__self___w_add", &rand_add);
@@ -486,6 +485,10 @@ void test_aoti_user_managed_buffer() {
   int device_idx = -1;
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchReserved = stats.reserved_bytes[0].current;
+  size_t torchReserved = stats.reserved_bytes[0].current;
   if (cudaStatus != cudaSuccess || device_idx == -1) {
     throw std::runtime_error("cudaGetDevice failed!");
   }
@@ -507,13 +510,13 @@ void test_aoti_user_managed_buffer() {
   }
   ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
 
-  // We update inactive buffer, but with user_managed = True. This shouldn't add
-  // any memory consumption.
+  // We update the active buffer, but with user_managed = True. This shouldn't
+  // add any memory consumption.
   runner->update_constant_buffer(
       real_map,
       /*use_inactive = */ false,
       /*validate_full_updates = */ true,
-      /*user_managed*/ true);
+      /*user_managed = */ true);
   size_t updateMemory = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
@@ -524,6 +527,92 @@ void test_aoti_user_managed_buffer() {
   // Make sure the output is correct with user managed buffer.
   auto actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // Update with rand_map and extract the output of rand_map.
+  // We let user_managed = false for rand_map, this should increase memory
+  // consumption.
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  runner->update_constant_buffer(
+      rand_map,
+      /*use_inactive = */ true,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ false);
+  runner->swap_constant_buffer();
+  auto ref_rand_output_tensors = runner->run(input_tensors);
+  ASSERT_FALSE(
+      torch::allclose(ref_output_tensors[0], ref_rand_output_tensors[0]));
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  torchReserved = stats.reserved_bytes[0].current;
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(
+      initMemory - DATASIZE - (torchReserved - initTorchReserved),
+      updateMemory);
+
+  // Free everything.
+  runner->free_inactive_constant_buffer();
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  ASSERT_EQ(initMemory - (torchReserved - initTorchReserved), updateMemory);
+
+  // Set buffer #1 user_managed, and #2 not user managed, and compare the
+  // underlying data
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ false,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ false);
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ true,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ true);
+
+  auto extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  auto extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  auto cmp_real_map = derefTensorConstantMap(real_map);
+  // Value-wise all weights are equal
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_real_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
+  // Only when user_managed has the same underlying if set to true.
+  ASSERT_FALSE(
+      extracted_active_weight["L__self___w_pre"].data_ptr() ==
+      cmp_real_map["L__self___w_pre"].data_ptr());
+  ASSERT_TRUE(
+      extracted_inactive_weight["L__self___w_pre"].data_ptr() ==
+      cmp_real_map["L__self___w_pre"].data_ptr());
+
+  // From non user_managed
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // From user_managed
+  runner->swap_constant_buffer();
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // We modify the buffer by the data's pointer outside of container.
+  cudaMemcpy(
+      real_map["L__self___w_add"]->data_ptr(),
+      rand_map["L__self___w_add"]->data_ptr(),
+      4096 * 4096 * sizeof(float),
+      cudaMemcpyDeviceToDevice);
+  cudaMemcpy(
+      real_map["L__self___w_pre"]->data_ptr(),
+      rand_map["L__self___w_pre"]->data_ptr(),
+      4096 * 4096 * sizeof(float),
+      cudaMemcpyDeviceToDevice);
+
+  // We should get the result of the rand output.
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(
+      torch::allclose(ref_rand_output_tensors[0], actual_output_tensors[0]));
 }
 
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
