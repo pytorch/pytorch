@@ -1717,12 +1717,9 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template <typename T>
-inline unsigned short getHermitianLimit() {
-  if constexpr (sizeof(T) <= sizeof(float)) {
-    return 128;
-  }
-  // double isn't supported in metal.
-  return 512;
+// TODO: Add 512 if/when double will be supported in Metal
+inline constexpr int getHermitianLimit() {
+  return 128;
 }
 
 template <typename T>
