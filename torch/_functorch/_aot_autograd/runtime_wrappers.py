@@ -292,7 +292,10 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: list[Any]):
-        with _disable_saved_tensors_hooks() if not torch._dynamo.compiled_autograd.in_compiled_autograd_region else contextlib.nullcontext():
+        in_compiled_autograd = (
+            torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        )
+        with _disable_saved_tensors_hooks() if not in_compiled_autograd else contextlib.nullcontext():
             # stash a ref to each input tensor we plan to use after the compiled function
             orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
