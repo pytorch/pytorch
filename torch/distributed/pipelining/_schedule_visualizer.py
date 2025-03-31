@@ -7,9 +7,6 @@ This visualizer requires matplotlib to be installed.
 from typing import Optional, Union
 from unittest import mock
 
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-
 from torch.distributed.pipelining.schedules import (
     _Action,
     _ComputationType,
@@ -95,6 +92,9 @@ action_type_to_color_mapping = {
 def visualize_schedule(
     schedule: list[list[Optional[_Action]]], filename: Optional[str] = None
 ) -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
     plt.rcParams["font.family"] = (
         "DejaVu Sans"  # or any other font available on your system
     )
