@@ -541,14 +541,6 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(False)
         unimplemented(f"hasattr on {self.user_cls} is not supported")
 
-    def var_getattr(self, tx: "InstructionTranslator", name):
-        if edict and self.user_cls is edict:
-            name_vt = ConstantVariable.build(tx, name)
-            if self.maybe_getitem_const(name_vt):
-                return self.call_method(tx, "__getitem__", args=[name_vt], kwargs={})
-
-        return super().var_getattr(tx, name)
-
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)

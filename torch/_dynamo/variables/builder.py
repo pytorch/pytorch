@@ -656,8 +656,9 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        # elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)) or (edict and istype(value, edict)):
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+        elif istype(
+            value, (dict, collections.defaultdict, collections.OrderedDict)
+        ) or (edict and istype(value, edict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
