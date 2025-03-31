@@ -164,6 +164,7 @@ struct NodeCall {
   uint32_t id;
   std::shared_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
+  std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
   std::vector<int> post_acc_grad_hooks;
@@ -333,6 +334,12 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  size_t emplace_cpp_tensor_pre_hook(
+      std::function<at::TensorBase(const at::TensorBase&)>&& fn) {
+    cpp_tensor_pre_hooks.emplace_back(std::move(fn));
+    return cpp_tensor_pre_hooks.size() - 1;
+  }
+
   size_t emplace_packed_input(c10::SafePyObject&& input) {
     packed_inputs.emplace_back(std::move(input));
     return packed_inputs.size() - 1;
@@ -348,6 +355,8 @@ struct AutogradCompilerCall {
   LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
+  std::vector<std::function<at::TensorBase(const at::TensorBase&)>>
+      cpp_tensor_pre_hooks;
   std::vector<c10::SafePyObject> packed_inputs;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type;
@@ -602,10 +611,10 @@ class CompiledNodeArgs {
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
-    TORCH_CHECK(
-        fn->retains_grad_hooks().empty(),
-        "retains_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
+      i->compiled_args(*this);
+    }
+    for (auto& [_, i] : fn->retains_grad_hooks()) {
       i->compiled_args(*this);
     }
     for (auto& i : fn->pre_hooks()) {
@@ -645,6 +654,23 @@ class CompiledNodeArgs {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
+  }
+
+  void add_cpp_single_tensor_pre_hook(
+      const std::function<at::TensorBase(const at::TensorBase&)>& hook,
+      size_t idx) {
+    auto wrapper = [hook](const at::TensorBase& grad) {
+      // handle when hook returns nothing
+      auto out = hook(grad);
+      if (!out.defined()) {
+        return grad;
+      }
+      return out;
+    };
+
+    auto hook_id = _compiler.emplace_cpp_tensor_pre_hook(std::move(wrapper));
+    collect_size(hook_id);
+    _node_call.cpp_tensor_pre_hooks.emplace_back(hook_id, idx);
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {

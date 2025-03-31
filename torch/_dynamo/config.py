@@ -188,7 +188,7 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1
 rewrite_assert_with_torch_assert = True
 
 # Disable dynamo
-disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
+disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
@@ -431,6 +431,10 @@ use_graph_deduplication = False
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True
 track_nodes_for_deduplication = False
+
+# Whether to lint the graph after each region is replaced
+# (Debug)
+graph_deduplication_lint = False
 
 # Issues a warning in Python 3.13.0 for possibly slower guard evaluation and
 # instructs user to attempt using 3.13.1+, where the CPython bug is fixed.

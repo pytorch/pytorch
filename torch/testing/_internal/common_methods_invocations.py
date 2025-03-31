@@ -7647,6 +7647,7 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
              ((S, S, S), (-1, 2)),
              ((S, S, S), (-1, -1)),
              ((S, S, S), (1, -1)),
+             ((S, S), (-1, 2)),
              ((S,), (0, 2))
              )
 
