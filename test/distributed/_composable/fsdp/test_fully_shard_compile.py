@@ -751,7 +751,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -834,7 +834,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 *self._create_nested_fully_shard_factory_fns(fwd_fullgraph=False),
                 "inductor",
                 fwd_fullgraph=False,
-            )
+            ),
         )
         # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
         # there are several recompiles, need to figure out why.
@@ -978,7 +978,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -1071,7 +1071,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
-                    )
+                    ),
                 )
             # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
             # there are several recompiles, need to figure out why.

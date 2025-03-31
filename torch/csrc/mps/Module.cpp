@@ -1,10 +1,10 @@
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 
 #include <ATen/ATen.h>
-#include <c10/util/CallOnce.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/mps/Module.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -17,6 +17,7 @@
 #endif
 
 #ifdef USE_MPS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
@@ -34,9 +35,8 @@ static void forked_mps_child() {
 // Should be called before the first mps call.
 static void track_bad_mps_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [] { pthread_atfork(nullptr, nullptr, forked_mps_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_mps_child);
 #endif
 }
 } // namespace
@@ -504,6 +504,16 @@ void initModule(PyObject* module) {
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
   });
+  m.def("_mps_isCaptureEnabled", []() {
+    return at::mps::getMPSProfiler().isCaptureEnabled();
+  });
+  m.def("_mps_isCapturing", []() {
+    return at::mps::getMPSProfiler().isCapturing();
+  });
+  m.def("_mps_startCapture", [](const std::string& fileName) {
+    at::mps::getMPSProfiler().startCapture(fileName);
+  });
+  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
 }
 #endif /* USE_MPS */
 

@@ -253,7 +253,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
                 leaf_info.pretty_print_mismatch(graph=True)
             self.assertRegex(
                 f.getvalue(),
-                r"(.|\n)*" r"aten::relu.*/torch/nn/functional.py:[0-9]+(.|\n)*",
+                r"(.|\n)*aten::relu.*/torch/nn/functional.py:[0-9]+(.|\n)*",
             )
 
     def test_find_all_mismatch_operators(self):

@@ -13,15 +13,15 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum
-from typing import Any, BinaryIO, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
-from torch._inductor import config
-from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch._inductor.compile_worker.utils import _async_compile_initializer
+from torch._inductor.utils import get_ld_library_path
 
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def _unpack_msg(data: bytes) -> tuple[int, int]:
 msg_bytes = len(_pack_msg(0, 0))
 
 
-def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
+def _send_msg(write_pipe: IO[bytes], job_id: int, job_data: bytes = b"") -> None:
     length = len(job_data)
     write_pipe.write(_pack_msg(job_id, length))
     if length > 0:
@@ -51,23 +51,10 @@ def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: BinaryIO) -> tuple[int, bytes]:
+def _recv_msg(read_pipe: IO[bytes]) -> tuple[int, bytes]:
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data
-
-
-def _get_ld_library_path() -> str:
-    path = os.environ.get("LD_LIBRARY_PATH", "")
-    if config.is_fbcode():
-        from libfb.py.parutil import get_runtime_path
-
-        runtime_path = get_runtime_path()
-        if runtime_path:
-            lib_path = os.path.join(runtime_path, "runtime", "lib")
-            path = os.pathsep.join([lib_path, path]) if path else lib_path
-
-    return path
 
 
 class _SubprocExceptionInfo:
@@ -150,7 +137,7 @@ class SubprocPool:
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
-                "LD_LIBRARY_PATH": _get_ld_library_path(),
+                "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
         )
@@ -158,7 +145,7 @@ class SubprocPool:
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
-        self.pending_futures: Dict[int, Future[Any]] = {}
+        self.pending_futures: dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
@@ -255,8 +242,8 @@ class SubprocMain:
         pickler: SubprocPickler,
         kind: SubprocKind,
         nprocs: int,
-        read_pipe: BinaryIO,
-        write_pipe: BinaryIO,
+        read_pipe: IO[bytes],
+        write_pipe: IO[bytes],
     ) -> None:
         self.pickler = pickler
         self.kind = kind
@@ -308,15 +295,11 @@ class SubprocMain:
                 self.pool = self._new_pool(self.nprocs, False)
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
-        future = self.pool.submit(
-            functools.partial(SubprocMain.do_job, self.pickler, data)
-        )
-
-        def callback(_: Future[Any]) -> None:
+        def callback(fut: Future[Any]) -> None:
             if not self.running:
                 return
             try:
-                result = future.result()
+                result = fut.result()
             except Exception as e:
                 log.exception("Error in subprocess")
                 result = self.pickler.dumps(e)
@@ -326,6 +309,9 @@ class SubprocMain:
                     _send_msg(self.write_pipe, job_id, result)
             return
 
+        future = self.pool.submit(
+            functools.partial(SubprocMain.do_job, self.pickler, data)
+        )
         future.add_done_callback(callback)
 
     @staticmethod
@@ -338,6 +324,9 @@ class SubprocMain:
         except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
         return pickler.dumps(result)
+
+
+AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:

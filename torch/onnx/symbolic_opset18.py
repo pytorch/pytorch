@@ -20,7 +20,8 @@ New operators:
 """
 
 import functools
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import _C
@@ -67,7 +68,7 @@ def col2im(
     stride: Sequence[int],
 ):
     # convert [i0, i1, ..., in] into [i0, i0, i1, i1, ..., in, in]
-    adjusted_padding: List[int] = []
+    adjusted_padding: list[int] = []
     for pad in padding:
         adjusted_padding.extend(pad for _ in range(2))
 
@@ -119,7 +120,7 @@ def _native_layer_norm(
     weight: _C.Value,
     bias: _C.Value,
     eps: float,
-) -> Tuple[_C.Value, _C.Value, _C.Value]:
+) -> tuple[_C.Value, _C.Value, _C.Value]:
     return opset9.native_layer_norm(g, input, normalized_shape, weight, bias, eps)
 
 
@@ -216,7 +217,7 @@ def _linalg_matrix_norm(
     g: jit_utils.GraphContext,
     self: torch._C.Value,
     ord: torch._C.Value,
-    dim: List[int],
+    dim: list[int],
     keepdim: bool,
     dtype: torch._C.Value,
 ):

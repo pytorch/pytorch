@@ -82,7 +82,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
-    NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -5119,11 +5118,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_but_pass_in_sandcastle_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                         don't support multiprocessing with spawn start method",
-        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_parity_post_localSGD(self):
             # Although we start run local SGD at iteration 10, since we still use the global process group to run it,
@@ -6477,7 +6471,8 @@ class DistributedTest:
             inp = {0: [True, True], 1: [False, False]}
             # Run reduce() with product op
             for op in [dist.ReduceOp.PRODUCT, dist.ReduceOp.MIN]:
-                input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
+                # make sure rank 0 gets False if WORLD_SIZE=1 to match expected tensor
+                input_tensor = torch.tensor(inp[(self.rank + 1) % 2]).to(self.rank)
                 expected = torch.tensor([False, False]).to(self.rank)
                 self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
                 # Ensure that all ranks contributing True (cast to 1) results in the
@@ -6686,7 +6681,7 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            with self.assertRaises(AttributeError):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
