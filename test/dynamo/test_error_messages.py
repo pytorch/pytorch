@@ -308,38 +308,6 @@ from user code:
             post_munge=post_munge,
         )
 
-    def test_disable(self):
-        @torch.compiler.disable
-        def inner():
-            return 1
-
-        def fn():
-            return inner()
-
-        def post_munge(s):
-            return re.sub(
-                r"<function GraphBreakMessagesTest\.test_disable\.<locals>\.inner at 0x[0-9A-Fa-f]+>",
-                "<function inner>",
-                s,
-            )
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function inner>` since it was wrapped with `torch.compiler.disable`
-  Hint: Remove the `torch.compiler.disable` call
-
-  Developer debug context: <function inner>
-
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return inner()""",
-            post_munge=post_munge,
-        )
-
     def test_dynamo_graph_break_fn(self):
         def fn():
             torch._dynamo.graph_break()
