@@ -3,6 +3,7 @@
 import torch
 import torch.fx
 from torch._dynamo.graph_deduplication import _flatten_args_kwargs
+from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 
@@ -583,6 +584,76 @@ class <lambda>(torch.nn.Module):
         out = _flatten_args_kwargs(tree)
         self.assertExpectedInline(
             str(out), """[3, 'x', 1, 2, 3, 1, 4, 5, 6, 3, 4, 5]"""
+        )
+
+    def test_cycle_detection_no_cycle(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        self.assertExpectedInline(_detect_cycles(mod.graph), """no cycle detected""")
+
+    def test_cycle_detection_simple(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        add_node = next(n for n in mod.graph.nodes if n.name == "add")
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = add_node.args
+        add_node.args = (args[0], add_2)
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, add, sum_1, add_2, add])""",
+        )
+
+    def test_cycle_detection_complex(self):
+        def inner_fn(x, y):
+            x0 = x.view(x.size())
+            return x0.view(x.size())
+
+        def inner_fn2(x, y):
+            x = x * 2
+            y = y * 2
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = inner_fn(x, y)
+            o2 = inner_fn2(x, y)
+            o3 = inner_fn2(x, y)
+            return o0 + o1 + o2.sum() + o3.sum()
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x_clone, y_clone)
+        mod = fw_graphs[0]
+        invoke_subgraph_node = next(
+            n for n in mod.graph.nodes if n.name == "invoke_subgraph"
+        )
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = invoke_subgraph_node.args
+        invoke_subgraph_node.args = (add_2, args[1])
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, invoke_subgraph_1, getitem_1, sum_2, add_2, invoke_subgraph, getitem, sum_1, add_1, add_2])""",
         )
 
 
