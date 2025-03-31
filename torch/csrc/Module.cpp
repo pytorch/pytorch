@@ -2243,6 +2243,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
       .value("Ck", at::BlasBackend::Ck);

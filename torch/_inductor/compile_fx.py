@@ -847,6 +847,31 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # Dump provenance artifacts for debugging trace
+    provenance_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+    # provenance_info might be None if config.trace.enabled is not set
+    if provenance_info:
+        (
+            debug_info,
+            node_mappings,
+        ) = provenance_info
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_triton_kernel_to_post_grad_nodes",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(debug_info),
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(node_mappings),
+        )
+
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
