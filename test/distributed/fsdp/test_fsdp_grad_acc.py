@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: distributed"]
-
 import contextlib
 import itertools
 import sys
+import unittest
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -13,21 +13,25 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     ShardingStrategy,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -125,6 +129,7 @@ class TestGradAcc(FSDPTest):
             "backward_prefetch": backward_prefetch,
             "sharding_strategy": sharding_strategy,
             "use_orig_params": use_orig_params,
+            "device_id": device_type,
         }
         fsdp_model: FSDP = TransformerWithSharedParams.init(
             self.process_group,
@@ -134,7 +139,6 @@ class TestGradAcc(FSDPTest):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device("cuda")
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,
@@ -146,7 +150,7 @@ class TestGradAcc(FSDPTest):
         def permute_tensor(x: torch.Tensor):
             return x.view(-1)[torch.randperm(x.numel())].view_as(x)
 
-        batch: tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
+        batch: tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device_type)
         batches: list[tuple[torch.Tensor, ...]] = [batch]
         num_iters_to_acc = sum(config.num_iters for config in configs)
         for _ in range(num_iters_to_acc - 1):
@@ -249,6 +253,7 @@ class TestGradAcc(FSDPTest):
             ),
         ],
     )
+    @unittest.skipIf(TEST_HPU, "Unsupported Config on hpu")
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc(
         self,
@@ -274,6 +279,7 @@ class TestGradAcc(FSDPTest):
             use_orig_params=use_orig_params,
         )
 
+    @unittest.skipIf(TEST_HPU, "Unsupported Config on hpu")
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     @parametrize("use_orig_params", [False, True])
@@ -301,7 +307,7 @@ class TestGradAcc(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestGradAcc)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestGradAcc, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
