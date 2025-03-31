@@ -847,12 +847,14 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
-    def test_skip(self):
+    def test_disable_recursive_false(self):
         def fn2(x):
-            return x.sin()
+            return x + 1
 
         @torch._dynamo.disable(recursive=False)
         def fn1(x):
+            if torch.compiler.is_compiling():
+                raise RuntimeError("bad")
             x = x.sigmoid()
             return fn2(x.cos())
 
@@ -863,6 +865,79 @@ If the above doesn't work, please subtmit an issue to GitHub.
         opt_fn = torch.compile(fn, backend=cnts)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+        # test that applying disable nonrecursive doesn't modify the original function
+        def fn3(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return fn2(x) + 2
+
+        @torch.compile(backend=cnts)
+        def outer(f, x):
+            return f(x)
+
+        inp = torch.ones(3)
+        fn3_disabled = torch._dynamo.disable(fn3, recursive=False)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        # directly compiling a disabled function should result in a compile
+        torch._dynamo.reset()
+        cnts.clear()
+        res = torch.compile(fn3_disabled, backend=cnts)(inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+    def test_disable_recursive_false_weird(self):
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        # test the case where the next invocation of the function is
+        # manually skipped
+        def fn(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return x + 1
+
+        fn_disabled = torch._dynamo.disable(fn, recursive=False)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+        )
+
+        @torch.compile(backend="eager")
+        def outer(fn, x):
+            return fn(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(outer(fn_disabled, inp), inp + 1)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        )
+
+        self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
     def test_substitute_in_graph(self):
         counters.clear()
@@ -1188,6 +1263,21 @@ If the above doesn't work, please subtmit an issue to GitHub.
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    def test_set_stance_aot_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("aot_eager_then_compile"):
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+
+        # Would have been 4 without stance
+        self.assertEqual(cnts.op_count, 2)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):

@@ -61,7 +61,7 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   }
   LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
-};
+}
 
 IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
