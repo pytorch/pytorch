@@ -198,7 +198,6 @@ templates_path = [
     "_templates",
     os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
 ]
-
 # TODO: document these and remove them from here.
 
 html_domain_indices = False
