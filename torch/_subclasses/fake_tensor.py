@@ -1533,14 +1533,17 @@ class FakeTensorMode(TorchDispatchMode):
             # All nodes in the subgraph are cache-able.
             return
 
-        if torch.Tag.data_dependent_output in func.tags:
-            raise _BypassDispatchCache("data dependent output")
+        if not hasattr(func, "tags"):
+            return
+        if hasattr(func, "tags"):
+            if torch.Tag.data_dependent_output in func.tags:
+                raise _BypassDispatchCache("data dependent output")
 
-        if torch.Tag.dynamic_output_shape in func.tags:
-            raise _BypassDispatchCache("dynamic output shape")
+            if torch.Tag.dynamic_output_shape in func.tags:
+                raise _BypassDispatchCache("dynamic output shape")
 
-        if torch.Tag.inplace_view in func.tags:
-            raise _BypassDispatchCache("inplace view")
+            if torch.Tag.inplace_view in func.tags:
+                raise _BypassDispatchCache("inplace view")
 
         if func == aten._unsafe_view.default:
             raise _BypassDispatchCache("unsafe view")
@@ -1548,7 +1551,7 @@ class FakeTensorMode(TorchDispatchMode):
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
-        if func.name() == "inductor::resize_storage_bytes_":
+        if hasattr(func, "name") and func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
         if not torch._library.utils.is_builtin(func):
