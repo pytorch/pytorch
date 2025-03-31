@@ -44,10 +44,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static size_t pinned_max_register_threads() {
-    // Based on the benchmark results, we see better allocation performance
-    // with 8 threads. However on future systems, we may need more threads
-    // and limiting this to 128 threads.
-    return 128;
+    return c10::CachingAllocator::AllocatorConfig::instance()
+        .pinned_max_register_threads();
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
