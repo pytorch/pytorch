@@ -422,12 +422,12 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
-# Max time that a a valid benchmark result may take during autotuning
+# Max time that a valid benchmark result may take during autotuning
 max_autotune_subproc_result_timeout_seconds = 60.0
-# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
-max_autotune_subproc_graceful_timeout_seconds = 1.0
-# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
-max_autotune_subproc_terminate_timeout_seconds = 2.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_graceful_timeout_seconds = 0.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -1165,7 +1165,7 @@ class triton:
     # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
     # with a verison of triton new enough to support TMA
     enable_persistent_tma_matmul = (
-        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
+        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "1") == "1"
     )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
