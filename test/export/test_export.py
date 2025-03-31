@@ -11270,6 +11270,8 @@ def forward(self, x, y):
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_unbacked_expand(self):
+        # TODO(pianpwk): remove size-oblivious usage for broadcast_in_dim meta,
+        # so the (input == 1 | input == output) sym_or condition for expand works at runtime.
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 u0, u1, u2 = xs.tolist()

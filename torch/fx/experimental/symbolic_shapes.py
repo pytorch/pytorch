@@ -34,6 +34,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Iterable,
     NamedTuple,
     NoReturn,
     Optional,
@@ -144,6 +145,7 @@ __all__ = [
     "has_free_symbols",
     "has_free_unbacked_symbols",
     "sym_eq",
+    "sym_or",
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
@@ -1293,6 +1295,24 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         return x == y
     else:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
+
+
+def sym_or(x: Union[bool, SymBool], *others: Union[bool, SymBool]) -> Union[bool, SymBool]:
+    if len(others) == 0:
+        return x
+    assert isinstance(x, (bool, SymBool))
+    if isinstance(x, bool):
+        shape_env = torch._guards.detect_fake_mode().shape_env
+        x = shape_env.create_symboolnode(x)
+    else:
+        shape_env = x.node.shape_env
+    node = x.node
+    for y in others:
+        assert isinstance(y, (bool, SymBool))
+        if isinstance(y, bool):
+            y = shape_env.create_symboolnode(y)
+        node = node.sym_or(y.node)
+    return SymBool(node)
 
 
 def guard_scalar(
