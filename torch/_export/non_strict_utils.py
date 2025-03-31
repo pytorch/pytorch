@@ -16,7 +16,6 @@ from torch._dynamo.source import (
     TensorPropertySource,
 )
 from torch._dynamo.variables.builder import TrackedFake
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
 from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
@@ -27,6 +26,8 @@ from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
     _DimHint,
+    _DimHintType,
+    _IntWrapper,
     _process_dynamic_shapes,
     _RelaxedConstraint,
     _tree_map_with_path,
@@ -80,7 +81,7 @@ def key_path_to_source(kp: KeyPath) -> Source:
 
 
 def _is_constant_argument(t):
-    return t is None or isinstance(t, (int, float, bool, str))
+    return t is None or isinstance(t, (float, bool, str))
 
 
 def fakify(
@@ -94,6 +95,18 @@ def fakify(
     if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
 
+    if isinstance(t, _IntWrapper):
+        if t.dim is not None:
+            if t.dim.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+                symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
+                    t.val, source, DimDynamic.DYNAMIC
+                )
+                return symint
+            else:
+                return t.val
+        else:
+            return t.val
+
     if not isinstance(t, torch.Tensor):
         raise ValueError(
             f"Unsupported input type {type(t)}. "
@@ -102,6 +115,7 @@ def fakify(
             "To register a custom container type, use torch.utils._pytree.register_pytree_node. "
             "To register a constant input, use torch.utils._pytree.register_constant"
         )
+
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
@@ -158,6 +172,10 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
     import torch._functorch.config as _config
+
+    # Map ints to a wrapper structure to help us mark it as dynamic, if it is
+    # dynamic. We will unwrap ints in fakify later.
+    args, kwargs = pytree.tree_map_only(int, lambda a: _IntWrapper(a), (args, kwargs))
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
@@ -386,29 +404,54 @@ def make_constraints(
     num_placeholders = [node.op == "placeholder" for node in gm.graph.nodes].count(True)
     assert len(flat_dynamic_shapes) == num_placeholders - num_lifted_inputs
 
-    input_dims = defaultdict(list)
     free_symbols = set()
     for input_index, node in enumerate(gm.graph.nodes):
-        if input_index < num_lifted_inputs or node.op != "placeholder":
-            continue
-        if _is_constant_argument(node.meta["val"]) or isinstance(
-            node.meta["val"], CustomObjArgument
+        meta_val = node.meta.get("val")
+
+        if (
+            input_index < num_lifted_inputs
+            or node.op != "placeholder"
+            or meta_val is None
         ):
             continue
+
+        elif _is_constant_argument(meta_val) or isinstance(meta_val, CustomObjArgument):
+            continue
+
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
-        for i, d in enumerate(node.meta["val"].shape):
-            if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
-                # Compute the range constraint for the symbolic expression corresponding
-                # to this shape dimension and store it.
-                dim = shape_spec[i] if shape_spec else None
-                if dim is None or isinstance(dim, _DimHint):
-                    range_constraints[d.node.expr] = shape_env.bound_sympy(d.node.expr)
-                else:
-                    range_constraints[d.node.expr] = ValueRanges(
-                        lower=dim.min, upper=dim.max
-                    )
-                input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
-                free_symbols.update(d.node.expr.free_symbols)
+
+        if isinstance(meta_val, int) or (
+            isinstance(meta_val, torch.SymInt) and meta_val.node.expr.is_number
+        ):
+            pass
+
+        elif isinstance(meta_val, torch.SymInt):
+            if shape_spec is None or isinstance(shape_spec, _DimHint):
+                range_constraints[meta_val.node.expr] = shape_env.bound_sympy(
+                    meta_val.node._expr
+                )
+            else:
+                raise RuntimeError("nyi")
+            free_symbols.update(meta_val.node.expr.free_symbols)
+
+        elif isinstance(meta_val, torch.Tensor):
+            for i, d in enumerate(meta_val.shape):
+                if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
+                    # Compute the range constraint for the symbolic expression corresponding
+                    # to this shape dimension and store it.
+                    dim = shape_spec[i] if shape_spec else None
+                    if dim is None or isinstance(dim, _DimHint):
+                        range_constraints[d.node.expr] = shape_env.bound_sympy(
+                            d.node.expr
+                        )
+                    else:
+                        range_constraints[d.node.expr] = ValueRanges(
+                            lower=dim.min, upper=dim.max
+                        )
+                    free_symbols.update(d.node.expr.free_symbols)
+
+        else:
+            raise RuntimeError(f"Unfamiliar meta val: {meta_val}")
 
     for symbol in free_symbols:
         if symbol not in range_constraints:

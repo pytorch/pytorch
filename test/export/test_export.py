@@ -9381,6 +9381,61 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
+    def test_symint_input(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        ep = export(M(), (4, 5))
+        self.assertEqual(ep.module()(4, 5), 20)
+
+        with self.assertRaisesRegex(RuntimeError, r"to be equal to 4, but got 3"):
+            self.assertEqual(ep.module()(3, 6), 18)
+
+        ep = export(
+            M(), (4, 5), dynamic_shapes={"x": Dim.DYNAMIC, "y": Dim.AUTO}, strict=strict
+        )
+        self.assertEqual(ep.module()(4, 5), 20)
+        self.assertEqual(ep.module()(3, 6), 18)
+
+        ep = export(
+            M(), (5, 5), dynamic_shapes={"x": None, "y": Dim.AUTO}, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 6), 30)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x["moo"] * y
+
+        ep = export(
+            M(),
+            ({"moo": 2}, torch.ones(3, 3)),
+            dynamic_shapes={"x": {"moo": Dim.DYNAMIC}, "y": {0: Dim.DYNAMIC}},
+            strict=strict,
+        )
+        inp = ({"moo": 3}, torch.ones(4, 3))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                assert x == 3
+                assert y.shape[0] == 4
+                return x * y
+
+        inp = (3, torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+        ):
+            ep = export(
+                M(),
+                inp,
+                dynamic_shapes=(Dim.DYNAMIC, {0: Dim.DYNAMIC, 1: Dim.DYNAMIC}),
+                strict=strict,
+            )
+
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
             def __init__(self):
