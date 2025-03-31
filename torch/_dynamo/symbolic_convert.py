@@ -2824,6 +2824,17 @@ class InstructionTranslatorBase(
     def LOAD_ASSERTION_ERROR(self, inst):
         self.load_builtin_from_argval("AssertionError")
 
+    def LOAD_BUILD_CLASS(self, inst):
+        unimplemented_v2(
+            gb_type="LOAD_BUILD_CLASS bytecode not supported",
+            context="",
+            explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
+            hints=[
+                "Move the class definition out of the compiled region.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -3516,10 +3527,8 @@ class InstructionTranslator(InstructionTranslatorBase):
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
 
-        if inst.opname == "RETURN_VALUE":
-            return [create_instruction("RETURN_VALUE")]
-        elif inst.opname == "RETURN_CONST":
-            return [create_instruction("RETURN_CONST", argval=inst.argval)]
+        if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+            return [inst]
 
         reads = livevars_analysis(self.instructions, inst)
         all_argnames = tuple(

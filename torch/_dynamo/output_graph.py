@@ -1033,7 +1033,7 @@ class OutputGraph:
                         )
                     )
                 else:
-                    prefix_insts.append(copy.copy(inst))
+                    prefix_insts.append(inst)
         assert not (self.pregraph_bytecode and self.export), (
             "export does not support pregraph_bytecode"
         )
