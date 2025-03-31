@@ -233,11 +233,37 @@ TORCH_API void brgemm(
     float* C,
     bool is_vnni = false);
 
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const unsigned char* B,
+    int32_t* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni = true);
+
 // Release brgemm hardware context
 TORCH_API void brgemm_release(bool is_vnni = true);
 
 // Pack B matrix to get better performance if needed
-void pack(
+TORCH_API void pack(
     int64_t K,
     int64_t N,
     int64_t ld_in,

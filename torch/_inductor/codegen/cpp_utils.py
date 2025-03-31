@@ -5,7 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any, Callable, Optional
 from unittest.mock import patch
 
 import sympy
@@ -23,13 +24,7 @@ from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
-from .common import (
-    CSEVariable,
-    deduce_output_dtype_by_name,
-    Kernel,
-    KernelArgs,
-    OptimizationContext,
-)
+from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 
 
 DTYPE_TO_CPP = {
@@ -46,7 +41,9 @@ DTYPE_TO_CPP = {
     torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex32: "c10::complex<half>",
     torch.complex64: "c10::complex<float>",
+    torch.complex128: "c10::complex<double>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
     torch.float8_e4m3fnuz: "float8_e4m3fnuz",
@@ -79,6 +76,7 @@ DTYPE_TO_ATEN = {
 }
 
 DEVICE_TO_ATEN = {
+    "meta": "at::kMeta",
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
@@ -137,45 +135,6 @@ def promote_args(new_args):
     return new_args
 
 
-def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
-    return node.meta.get(OptimizationContext.key, None)
-
-
-def get_current_node_opt_ctx() -> OptimizationContext:
-    assert V.interpreter.current_node
-    return get_opt_ctx(V.interpreter.current_node)
-
-
-def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
-    if (
-        output_dtype := deduce_output_dtype_by_name(
-            name,
-            *args,
-            **kwargs,
-        )
-    ) is not None:
-        return output_dtype
-    elif name == "masked":
-        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
-        # inputs' CppCseVariable like other. Let's check it if any
-        # unexpected failures.
-        assert (
-            hasattr(V.interpreter, "current_node")
-            and V.interpreter.current_node.target.startswith("masked_subblock")
-            and get_current_node_opt_ctx() is not None
-        )
-        return get_current_node_opt_ctx().dtype
-    else:
-        # deduce output dtype by inputs' dtype
-        assert all(
-            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
-        )
-        return functools.reduce(
-            torch.promote_types,  # type: ignore[arg-type]
-            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
-        )
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -210,13 +169,6 @@ class CppCSEVariable(CSEVariable):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        if self.dtype is None:
-            # Take frexp for example: 2 output with different data type.
-            # The output dtype can't be deduced, since we don't know the idx
-            # of return tensor everywhere invoking update_on_args
-            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
-        assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
@@ -272,6 +224,7 @@ def rewrite_index_for_function(
 ):
     # Local buffer at the inner dimensions
     snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
+    assert snode is not None
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -313,7 +266,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local: Dict[str, ir.Buffer],
+        global_to_local: dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
@@ -361,11 +314,11 @@ class LocalBufferContext:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
-        self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to global buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.global_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
-        self.global_to_local: Dict[str, ir.Buffer] = {}
+        self.global_to_local: dict[str, ir.Buffer] = {}
         # record the global buffers that are removed by this LocalBufferContext
         self.removed_buffers: OrderedSet[str] = OrderedSet()
 
@@ -408,7 +361,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: Optional[list[ir.Buffer]] = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer
@@ -449,11 +402,11 @@ class LocalBufferContext:
 
     def localize_nodes(
         self,
-        nodes: List[ir.IRNode],
+        nodes: list[ir.IRNode],
         rewrite_index: Callable[
             ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
-    ) -> List[ir.IRNode]:
+    ) -> list[ir.IRNode]:
         """
         Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
         though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
@@ -546,7 +499,7 @@ def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
 
 
 def get_gemm_template_output_and_compute_dtype(input_dtype):
-    if input_dtype == torch.uint8:
+    if input_dtype in [torch.uint8, torch.int8]:
         return (torch.int32, torch.int32)
     else:
         return (torch.float32, torch.float32)
@@ -752,11 +705,11 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 
 def template_fusion_with_epilogues_supported(
-    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+    template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
 ) -> tuple[bool, bool]:
     def _get_indexes_of_template_buf_read(
-        epilogue_node: ir.Operation, template_buf_names: List[str]
-    ) -> List[sympy.Expr]:
+        epilogue_node: ir.Operation, template_buf_names: list[str]
+    ) -> list[sympy.Expr]:
         return [
             read.index
             for read in epilogue_node.get_reads()
@@ -787,7 +740,7 @@ def template_fusion_with_epilogues_supported(
         return supported, same_index
 
     def _template_fusion_supported(
-        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: list[ir.Operation]
     ) -> tuple[bool, bool]:
         template_buf_names = [x.get_name() for x in template_outputs]
         indexes_of_template_buf_reads = [

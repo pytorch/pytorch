@@ -195,13 +195,6 @@ RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 # cmake3 is needed for the MIOpen build
 RUN ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
-
-# Install AOTriton
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton

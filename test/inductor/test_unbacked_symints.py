@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-
 import functools
 import unittest
 
@@ -7,19 +6,14 @@ import torch
 from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipCPUIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import IS_LINUX, parametrize
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CUDA,
-    HAS_GPU,
-    requires_gpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfXpu
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -44,6 +38,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(
+        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
+        " Remove this skip after #146883 fixed."
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -127,7 +125,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_gpu()
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
@@ -163,6 +161,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_equivalent_backed_unbacked(self, device):
@@ -195,7 +194,8 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_gpu()
+    @skipCPUIf(True, "precision not good enough on CPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
@@ -214,9 +214,9 @@ class TestUnbackedSymints(InductorTestCase):
             return pointwise, reduction
 
         example_inputs = (
-            torch.randn(32, 16).to(GPU_TYPE),
-            torch.randn(1, 16).to(GPU_TYPE),
-            torch.tensor(32).to(GPU_TYPE),
+            torch.randn(32, 16, device=device),
+            torch.randn(1, 16, device=device),
+            torch.tensor(32, device=device),
         )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
@@ -224,6 +224,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize(
         "torch_fn", [torch.mm, torch.bmm, torch.addmm], name_fn=lambda fn: fn.__name__
@@ -262,6 +263,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
@@ -279,6 +281,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_unbacked_masked_scatter(self, device):
         def fn(value, mask):
@@ -294,6 +297,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
@@ -382,11 +386,66 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual.t, expected.t)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
+    def test_issue_143498(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
+                index = torch.ops.aten.index.Tensor(arg1_1, [arg2_1])
+                index_1 = torch.ops.aten.index.Tensor(arg0_1, [arg2_1])
+                unsqueeze = torch.ops.aten.unsqueeze.default(index, 1)
+                unsqueeze_1 = torch.ops.aten.unsqueeze.default(index_1, 1)
+                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], -1)
+                select = torch.ops.aten.select.int(cat, 1, 0)
+                index_put = torch.ops.aten.index_put.default(
+                    arg5_1, [select, arg6_1], arg4_1
+                )
+                return index_put
+
+        example_inputs = (
+            torch.tensor(
+                [-1, -1, 14, -1, -1, -1, -1, -1, -1, -1, 49, -1],
+                device=device,
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+                device=device,
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [
+                    False,
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    False,
+                ],
+                device=device,
+                dtype=torch.bool,
+            ),
+            torch.tensor([2, 10], device=device, dtype=torch.int64),
+            torch.tensor([34, 33], device=device, dtype=torch.int64),
+            torch.zeros(3, 50, device=device, dtype=torch.int64),
+            torch.tensor([14, 49], device=device, dtype=torch.int64),
+        )
+        model = Model()
+        self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu()):
-        run_tests()
+    run_tests()

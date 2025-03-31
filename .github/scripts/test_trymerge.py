@@ -12,7 +12,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, List, Optional
+from typing import Any, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
@@ -170,7 +170,7 @@ def mock_gh_get_info() -> Any:
     }
 
 
-def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="mock with nonexistent check",
@@ -182,7 +182,7 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
     ]
 
 
-def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="super",
@@ -211,7 +211,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 def mocked_read_merge_rules_approvers(
     repo: Any, org: str, project: str
-) -> List[MergeRule]:
+) -> list[MergeRule]:
     return [
         MergeRule(
             name="Core Reviewers",
@@ -234,11 +234,11 @@ def mocked_read_merge_rules_approvers(
     ]
 
 
-def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> list[MergeRule]:
     raise RuntimeError("testing")
 
 
-def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def xla_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name=" OSS CI / pytorchbot / XLA",
@@ -260,7 +260,7 @@ class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
 
-    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+    def commits_resolving_gh_pr(self, pr_num: int) -> list[str]:
         return ["FakeCommitSha"]
 
     def commit_message(self, ref: str) -> str:
@@ -535,8 +535,8 @@ class TestTryMerge(TestCase):
     def test_remove_job_name_suffix(self, *args: Any) -> None:
         test_cases = [
             {
-                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
-                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+                "name": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default)",
             },
             {
                 "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",

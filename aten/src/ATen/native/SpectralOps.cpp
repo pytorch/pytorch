@@ -590,11 +590,11 @@ Tensor fft_hfftn_symint(
   return fft_hfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_hfftn_symint_out(
+Tensor& fft_hfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim, std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_hfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -632,12 +632,12 @@ Tensor fft_ihfftn_symint(
   return fft_ihfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_ihfftn_symint_out(
+Tensor& fft_ihfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
     std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_ihfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -682,9 +682,9 @@ Tensor& fft_irfft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_irfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-const Tensor& fft_hfft2_symint_out(
+Tensor& fft_hfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_hfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
@@ -693,9 +693,9 @@ Tensor fft_hfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_hfftn_symint(self, s, dim, std::move(norm));
 }
 
-const Tensor& fft_ihfft2_symint_out(
+Tensor& fft_ihfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_ihfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
@@ -826,7 +826,7 @@ static Stream& write_opt(Stream& SS, const std::optional<T>& value) {
 Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
             const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
             const bool center, std::string_view mode, const bool normalized,
-            const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
+            const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt, const std::optional<bool> align_to_windowOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -837,7 +837,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
         "A window was not provided. A rectangular window will be applied,"
         "which is known to cause spectral leakage. "
         "Other windows such as torch.hann_window or torch.hamming_window "
-        "can are recommended to reduce spectral leakage."
+        "are recommended to reduce spectral leakage."
         "To suppress this warning and use a rectangular window, explicitly set "
         "`window=torch.ones(n_fft, device=<device>)`.");
   }
@@ -853,11 +853,14 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     } \
     SS << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", return_complex="; \
-    write_opt(SS, return_complexOpt) << ") "
+    write_opt(SS, return_complexOpt) << ", align_to_window="; \
+    write_opt(SS, align_to_windowOpt) << ") "
 
   TORCH_CHECK(!window.defined() || window.device() == self.device(),
               "stft input and window must be on the same device but got self on ",
               self.device(), " and window on ", window.device())
+  TORCH_CHECK(!center || !align_to_windowOpt.has_value(),
+          "stft align_to_window should only be set when center = false.")
 
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
@@ -868,7 +871,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     TORCH_CHECK(return_complexOpt.has_value(),
         "stft requires the return_complex parameter be given for real inputs, "
         "and will further require that return_complex=True in a future PyTorch release.");
-
 
     TORCH_WARN_ONCE(
         "stft with return_complex=False is deprecated. In a future pytorch "
@@ -943,7 +945,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
       window_.narrow(0, left, win_length).fill_(1);
     }
   }
-  int64_t n_frames = 1 + (len - n_fft) / hop_length;
+
+  const bool align_to_window = align_to_windowOpt.value_or(false);
+  int64_t n_frames;
+  if (!center && align_to_window) {
+    // Calculate n_frames based on window length, since we are aligning start of window with t = 0.
+    n_frames = 1 + (len - win_length) / hop_length;
+    // Window-based padding.
+    input = at::pad(input, {(n_fft - win_length) / 2, (n_fft - win_length) / 2}, mode);
+  } else {
+    n_frames = 1 + (len - n_fft) / hop_length;
+  }
   // time2col
   input = input.as_strided(
     {batch, n_frames, n_fft},
@@ -982,11 +994,12 @@ Tensor stft(
     const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
     const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
     const bool normalized,
-    const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
+    const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt,
+    const std::optional<bool> align_to_windowOpt) {
   return at::stft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
       /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
-      return_complexOpt);
+      return_complexOpt, align_to_windowOpt);
 }
 
 // Create complex tensor from the old style of real tensor with size=(..., 2)

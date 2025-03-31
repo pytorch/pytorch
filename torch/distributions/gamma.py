@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Gamma"]
@@ -32,6 +31,7 @@ class Gamma(ExponentialFamily):
         rate (float or Tensor): rate parameter of the distribution
             (often referred to as beta), rate = 1 / scale
     """
+
     arg_constraints = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
@@ -41,20 +41,20 @@ class Gamma(ExponentialFamily):
     _mean_carrier_measure = 0
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.concentration / self.rate
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return ((self.concentration - 1) / self.rate).clamp(min=0)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.concentration / self.rate.pow(2)
 
     def __init__(self, concentration, rate, validate_args=None):
         self.concentration, self.rate = broadcast_all(concentration, rate)
-        if isinstance(concentration, Number) and isinstance(rate, Number):
+        if isinstance(concentration, _Number) and isinstance(rate, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.concentration.size()
@@ -69,7 +69,7 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
             shape
@@ -99,7 +99,7 @@ class Gamma(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration - 1, -self.rate)
 
     def _log_normalizer(self, x, y):

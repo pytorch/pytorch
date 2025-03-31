@@ -3,7 +3,6 @@
 import os
 import sys
 import unittest
-from typing import Set
 
 # torch
 import torch
@@ -239,7 +238,7 @@ class TestSerialization(TestCase):
             mq = quantize_fx.convert_fx(mp)
             return mq
 
-        def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
+        def _get_get_attr_target_strings(m: GraphModule) -> set[str]:
             results = set()
             for node in m.graph.nodes:
                 if node.op == "get_attr":

@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -262,7 +262,7 @@ def _get_cache_or_reload(
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+            sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -666,7 +666,11 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     Example:
         >>> # xdoctest: +SKIP("stub local path")
         >>> path = "/some/local/path/pytorch/vision"
-        >>> model = _load_local(path, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1")
+        >>> model = _load_local(
+        ...     path,
+        ...     "resnet50",
+        ...     weights="ResNet50_Weights.IMAGENET1K_V1",
+        ... )
     """
     with _add_to_sys_path(hubconf_dir):
         hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
@@ -784,7 +788,7 @@ def _legacy_zip_load(
     model_dir: str,
     map_location: MAP_LOCATION,
     weights_only: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.
@@ -808,7 +812,7 @@ def load_state_dict_from_url(
     check_hash: bool = False,
     file_name: Optional[str] = None,
     weights_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
@@ -859,7 +863,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]

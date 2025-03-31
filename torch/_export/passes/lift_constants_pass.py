@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import warnings
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -29,13 +29,13 @@ class ConstantAttrMap(collections.abc.MutableMapping):
 
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
-        self._constant_attrs: Dict[
-            Union[int, torch.Tensor, FakeScriptObject], List[Any]
+        self._constant_attrs: dict[
+            Union[int, torch.Tensor, FakeScriptObject], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
-        self._script_object_map: Dict[int, torch.ScriptObject] = {}
+        self._script_object_map: dict[int, torch.ScriptObject] = {}
 
     def __getitem__(
         self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
@@ -113,7 +113,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -131,7 +131,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: Dict[
+    all_constants: dict[
         str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
     ] = {}
 
@@ -148,11 +148,13 @@ def lift_constants_pass(
     )
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
+    used_target_names = set()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if node.name in graph_signature.user_inputs:
                 first_user_input = node
                 break
+            used_target_names.add(inputs[first_user_input_loc].target)
             first_user_input_loc += 1
         # If we ever hit here, it means that
         # there was no user input so the constants
@@ -167,6 +169,15 @@ def lift_constants_pass(
     for node in gm.graph.nodes:
         if node.op == "get_attr":
             constant_val = _get_attr(gm, node.target)
+            # These are not hashable and not gonna be lifted
+            # so we can skip them earlier
+            if isinstance(constant_val, torch.fx.GraphModule):
+                continue
+            if "LoweredBackendModule" in type(constant_val).__name__:
+                continue
+            if isinstance(constant_val, torch.utils._pytree.TreeSpec):
+                continue
+
             if constant_val in lifted_objs:
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
@@ -194,12 +205,16 @@ def lift_constants_pass(
                 else:
                     constant_name = f"lifted_custom_{num_custom_obj}"
                     constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_custom_obj += 1
+                        constant_name = f"lifted_custom_{num_custom_obj}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 # Remove the parameterness of constant_val
                 if isinstance(constant_val, torch.nn.Parameter):
                     warnings.warn(
-                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"{node.target} created when tracing {node.meta.get('stack_trace', '<unknown stack>')} is a parameter. But"
                         f"it's not registered with register_parameter(). export will treat it as a constant tensor"
                     )
                     # We get the real data out of the parameter by disabling the surrounding fake mode.
@@ -212,11 +227,12 @@ def lift_constants_pass(
                 else:
                     constant_name = f"lifted_tensor_{num_tensor_constants}"
                     constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_tensor_constants += 1
+                        constant_name = f"lifted_tensor_{num_tensor_constants}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
-            elif isinstance(constant_val, torch.fx.GraphModule):
-                continue
-            elif "LoweredBackendModule" in type(constant_val).__name__:
-                continue
+
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
@@ -300,13 +316,13 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
     For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
-    constants: Dict[
+    constants: dict[
         str,
         Union[
             torch.Tensor,
@@ -332,4 +348,10 @@ def rewrite_script_object_meta(
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
+    return constants
+
+
+def _materialize_and_lift_constants(gm, export_graph_signature, constant_attrs):
+    constants = rewrite_script_object_meta(gm)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
     return constants
