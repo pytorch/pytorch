@@ -1717,8 +1717,8 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template <typename T>
-unsigned short getHermitianLimit() {
-  if (sizeof(T) <= sizeof(float)) {
+inline unsigned short getHermitianLimit() {
+  if constexpr (sizeof(T) <= sizeof(float)) {
     return 128;
   }
   // double isn't supported in metal.
@@ -1726,7 +1726,7 @@ unsigned short getHermitianLimit() {
 }
 
 template <typename T>
-float hermite_polynomial_h_forward(T x, int64_t n) {
+inline float hermite_polynomial_h_forward(T x, int64_t n) {
   if (n < 0) {
     return 0.0;
   }
