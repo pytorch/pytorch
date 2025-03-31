@@ -35,7 +35,7 @@ if try_import_cutlass():
     ):
         epilogue_functor = _trace(fn_src, example_tensors, **kwargs)
         visitor = EpilogueFunctorVisitor(90, epilogue_functor)
-        fusion_callbacks = FusionCallbacks(visitor.graph, 90)
+        fusion_callbacks = FusionCallbacks(visitor.graph, 90, emit_CD=False)
         collective_epilogue = CollectiveEpilogue(
             tile_description,
             epilogue_schedule,
@@ -43,11 +43,7 @@ if try_import_cutlass():
             output_type,
             fusion_callbacks,
         )
-        return (
-            "".join(fusion_callbacks.emit())
-            + "\n\n"
-            + "".join(collective_epilogue.emit())
-        )
+        return collective_epilogue.emit()
 
     # Based off of
     # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
