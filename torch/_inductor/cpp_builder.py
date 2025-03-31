@@ -839,7 +839,10 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
 
     if _IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        if "conda-meta" in os.listdir(sys.prefix):
+            python_lib_path = [os.path.join(python_path, "libs")]
+        else:
+            python_lib_path = [os.path.join(sys.base_prefix, "libs")]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
