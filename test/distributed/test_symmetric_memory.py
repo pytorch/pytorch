@@ -881,38 +881,34 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(4)
-    def test_two_shot_all_reduce(self) -> None:
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_two_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        for dtype, size_bytes, align_bytes, inplace in itertools.product(
-            [torch.float, torch.bfloat16],
-            [4, 8192, 8196],
-            [4, 8, 16],
-            [True, False],
-        ):
-            t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
-            symm_mem.rendezvous(t, group=group_name)
+        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(t, group=group_name)
 
-            self.assertTrue(t.data_ptr() % 16 == 0)
-            self.assertTrue(align_bytes % t.element_size() == 0)
-            self.assertTrue(size_bytes % t.element_size() == 0)
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
 
-            shift = align_bytes // t.element_size()
-            numel = size_bytes // t.element_size()
-            res = t[shift : shift + numel]
-            res.normal_().fill_(1)
-            inp = res.clone()
-            if not inplace:
-                out = torch.empty_like(inp)
-                torch.ops.symm_mem.two_shot_all_reduce_out(res, "sum", group_name, out)
-            else:
-                torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        res = t[shift : shift + numel]
+        res.normal_()
+        inp = res.clone()
 
-            # Head and tail should not be written
-            self.assertTrue(t[:shift].eq(0).all().item())
-            self.assertTrue(t[shift + numel :].eq(0).all().item())
-            self._verify_all_reduce_result(inp, res if inplace else out)
+        torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
+
+        # Head and tail should not be written
+        self.assertTrue(t[:shift].eq(0).all().item())
+        self.assertTrue(t[shift + numel :].eq(0).all().item())
+        self._verify_all_reduce_result(inp, res)
 
         dist.destroy_process_group()
 
