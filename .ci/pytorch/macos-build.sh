@@ -56,7 +56,7 @@ print_cmake_info
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
   # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
   # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
-  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
+  USE_DISTRIBUTED=0 USE_OPENMP=1 USE_MKLDNN=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
 elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
   export BUILD_LITE_INTERPRETER=1
   build_lite_interpreter

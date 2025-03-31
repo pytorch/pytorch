@@ -306,8 +306,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86_64, ARMv8+ and ppc64le."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_ARM64 OR CPU_AARCH64 OR CPU_POWER" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
