@@ -65,7 +65,9 @@ int round_up_to_nearest_multiple(int a, int b) {
 }
 
 template <
-    typename Pong,
+    bool a_row_major,
+    bool b_row_major,
+    bool Pong,
     typename TB_M,
     typename TB_N,
     typename TB_K>
@@ -79,10 +81,16 @@ void bf16bf16_grouped_gemm_impl_sm90(
   using DtypeB = cutlass::bfloat16_t;
   using DtypeOutput = cutlass::bfloat16_t;
   using DtypeAccum = float;
-  using LayoutA = cutlass::layout::RowMajor;
+  using LayoutA = cute::conditional_t<
+      a_row_major,
+      cutlass::layout::RowMajor,
+      cutlass::layout::ColumnMajor>;
   constexpr int AlignmentA = 16 / sizeof(DtypeA);
 
-  using LayoutB = cutlass::layout::ColumnMajor;
+  using LayoutB = cute::conditional_t<
+      b_row_major,
+      cutlass::layout::RowMajor,
+      cutlass::layout::ColumnMajor>;
   constexpr int AlignmentB = 16 / sizeof(DtypeB);
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
@@ -91,9 +99,9 @@ void bf16bf16_grouped_gemm_impl_sm90(
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
   using KernelSchedule =
-      typename Schedule<Pong::value, TB_M, TB_N, TB_K>::KernelSchedule;
+      typename Schedule<Pong, TB_M, TB_N, TB_K>::KernelSchedule;
   using EpilogueSchedule =
-      typename Schedule<Pong::value, TB_M, TB_N, TB_K>::EpilogueSchedule;
+      typename Schedule<Pong, TB_M, TB_N, TB_K>::EpilogueSchedule;
   using ProblemShape = cutlass::gemm::GroupProblemShape<
       cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                                // group
@@ -231,7 +239,9 @@ void bf16bf16_grouped_gemm_impl_sm90(
       tensor_StrideB,
       tensor_StrideOutput,
       0,
-      0);
+      0,
+      a_row_major,
+      b_row_major);
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -275,6 +285,7 @@ void bf16bf16_grouped_gemm_impl_sm90(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <bool a_row_major, bool b_row_major>
 void dispatch_bf16_grouped_kernel_on_tile_size(
     at::Tensor mat_a, // bf16
     at::Tensor mat_b, // bf16
@@ -305,18 +316,47 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   bool small = (M <= 128 || N <= 128);
   if (small) {
     bf16bf16_grouped_gemm_impl_sm90<
-        /*Pong*/ std::true_type,
+        a_row_major,
+        b_row_major,
+        /*Pong*/ true,
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
   } else {
     bf16bf16_grouped_gemm_impl_sm90<
-        /*Pong*/ std::false_type,
+        a_row_major,
+        b_row_major,
+        /*Pong*/ false,
         cute::_128,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
   }
 }
+
+void dispatch_bf16_grouped_kernel_on_ab_transpose(
+    at::Tensor mat_a, // bf16
+    at::Tensor mat_b, // bf16
+    std::optional<at::Tensor> offs,
+    std::optional<at::Tensor> bias, // BF16
+    at::Tensor& out) {
+  // we already checked that one of the strides is 1
+  bool a_row_major = mat_a.stride(-1) == 1;
+  bool b_row_major = mat_b.stride(-1) == 1;
+  if (a_row_major && b_row_major) {
+    dispatch_bf16_grouped_kernel_on_tile_size<true, true>(
+        mat_a, mat_b, offs, bias, out);
+  } else if (a_row_major && !b_row_major) {
+    dispatch_bf16_grouped_kernel_on_tile_size<true, false>(
+        mat_a, mat_b, offs, bias, out);
+  } else if (!a_row_major && b_row_major) {
+    dispatch_bf16_grouped_kernel_on_tile_size<false, true>(
+        mat_a, mat_b, offs, bias, out);
+  } else {
+    dispatch_bf16_grouped_kernel_on_tile_size<false, false>(
+        mat_a, mat_b, offs, bias, out);
+  }
+}
+
 } // namespace
 #endif
 
@@ -329,7 +369,7 @@ void bf16bf16_grouped_mm(
     std::optional<at::Tensor> bias, // BF16
     at::Tensor& out) {
 #if defined(BUILD_GG_KERNEL)
-  dispatch_bf16_grouped_kernel_on_tile_size(mat_a, mat_b, offs, bias, out);
+  dispatch_bf16_grouped_kernel_on_ab_transpose(mat_a, mat_b, offs, bias, out);
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");
 #endif

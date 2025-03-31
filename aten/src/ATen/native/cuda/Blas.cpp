@@ -1435,7 +1435,7 @@ namespace {
     } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
       return false;
     } else {
-      TORCH_CHECK(false, "Tensor should not be self-overlapping");
+      TORCH_CHECK(false, "Tensor should have a contiguous dimension and not be self-overlapping, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
     }
   }
 
@@ -1583,6 +1583,9 @@ std::optional<c10::ScalarType> out_dtype) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  // check that the strides are valid, the fn will throw an error if not
+  bool trans = transposed(mat_a);
+  trans = transposed(mat_b);
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {

@@ -39,23 +39,27 @@ __global__ void prepare_grouped_gemm_data(
     Strides tensor_StrideB,
     Strides tensor_StrideOutput,
     int64_t a_scale_stride,
-    int64_t b_scale_stride) {
+    int64_t b_scale_stride,
+    bool a_row_major = true,
+    bool b_row_major = false) {
   int32_t tid = threadIdx.x;
   int32_t delta = 0;
   if (offs != nullptr) {
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
     delta = offs[tid] - start;
+    int align = 16 / sizeof(DtypeA);
     CUDA_KERNEL_ASSERT(
-        delta % 16 == 0 && "expected dynamic dimension to be multiple of 16\n");
+        delta % align == 0 &&
+        "expected dynamic dimension to be multiple of 16\n");
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {
     // A and output is 2d
     M = delta;
-    lda = tensor_StrideA[0];
-    ldb = tensor_StrideB[2]; // B is transposed
+    lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
+    ldb = b_row_major ? tensor_StrideB[1] : tensor_StrideB[2];
     ldoutput = tensor_StrideOutput[0];
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * lda;
+    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * tensor_StrideA[0];
     if (scale_A != nullptr) {
       inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
       inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
@@ -64,12 +68,12 @@ __global__ void prepare_grouped_gemm_data(
     B_ptrs[tid] = B + tid * tensor_StrideB[0];
   } else if (N < 0) {
     N = delta;
-    lda = tensor_StrideA[1];
-    ldb = tensor_StrideB[1]; // B is transposed
+    lda = a_row_major ? tensor_StrideA[1] : tensor_StrideA[2];
+    ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1]; // B is transposed
     ldoutput = tensor_StrideOutput[0];
     A_ptrs[tid] = A + tid * tensor_StrideA[0];
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1];
-    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * ldb;
+    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * tensor_StrideB[1];
     if (scale_A != nullptr) {
       inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
       inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
@@ -77,11 +81,11 @@ __global__ void prepare_grouped_gemm_data(
   } else if (K < 0) {
     // A, B is 2d, output is 3d
     K = delta;
-    lda = tensor_StrideA[0];
-    ldb = tensor_StrideB[1]; // B is transposed
+    lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
+    ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
     ldoutput = tensor_StrideOutput[1];
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1];
-    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
+    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * tensor_StrideA[1];
+    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * tensor_StrideB[0];
     output_ptrs[tid] = output + tid * tensor_StrideOutput[0];
     if (scale_A != nullptr) {
       inputA_scale_ptrs[tid] = scale_A + tid * M;
@@ -89,8 +93,8 @@ __global__ void prepare_grouped_gemm_data(
     }
   } else {
     // A, B, output are 3D
-    lda = tensor_StrideA[1];
-    ldb = tensor_StrideB[2];
+    lda = a_row_major ? tensor_StrideA[1] : tensor_StrideA[2];
+    ldb = b_row_major ? tensor_StrideB[1] : tensor_StrideB[2];
     ldoutput = tensor_StrideOutput[1];
     A_ptrs[tid] = A + tid * tensor_StrideA[0];
     B_ptrs[tid] = B + tid * tensor_StrideB[0];
@@ -102,8 +106,16 @@ __global__ void prepare_grouped_gemm_data(
   }
   problem_sizes[tid] = ProblemShape(M, N, K);
 
-  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {M, lda, 1});
-  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {N, ldb, 1});
+  // make_cute_packed_stride only replaces one of the stride elements with
+  // one the provided values in the shape arguments
+  // the indices of the src/dst depend on whether A/B are row-major
+  // so constructing shape argument with two similar lda values
+  // while it looks non-sensical (and it is a nonsensical shape)
+  // is fine for these stride construction purposes - the one that will be used
+  // for replacement is correct, the other one is ignored, and we don't have to
+  // branch on whether A/B are row-major
+  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {lda, lda, 1});
+  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {ldb, ldb, 1});
   stride_output[tid] =
       cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
 }
