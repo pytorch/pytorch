@@ -327,7 +327,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   }
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -353,6 +353,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
+  // if lt path fails, we recurse back into this function here and force the lt path to off
+  disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -447,6 +449,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   if (useLtInterface) {
 #if defined(USE_ROCM)
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -462,7 +465,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation));
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -481,6 +484,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation)
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -492,6 +499,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       activation_epilogue = cuda::blas::GEMMAndBiasActivationEpilogue::None;
 #endif
 
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -507,7 +515,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue);
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -524,6 +532,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #endif
   } else
   {
