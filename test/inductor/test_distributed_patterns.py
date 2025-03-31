@@ -3,11 +3,13 @@ import dataclasses
 import functools
 
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
@@ -116,6 +118,32 @@ def steps(m, inp):
         out = m(inp)
         out.sum().backward()
     return out
+
+
+fw_graph = [None]
+bw_graph = [None]
+
+
+def aot_graph_capture_backend(gm, args):
+    from functorch.compile import min_cut_rematerialization_partition
+    from torch._functorch.aot_autograd import aot_module_simplified
+
+    def fw_compiler(gm, _):
+        fw_graph[0] = gm
+        return gm
+
+    def bw_compiler(gm, _):
+        bw_graph[0] = gm
+        return gm
+
+    return aot_module_simplified(
+        gm,
+        args,
+        fw_compiler,
+        bw_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )
 
 
 class DistributedPatternTests(TestCase):
@@ -497,6 +525,205 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(m1.weight, m2.weight)
         self._assert_same_grad(inp1, inp2)
         self._assert_same_grad(out1, out2)
+
+
+class FakeDistributedTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super(
+            type(self), self
+        ).setUp()  # use explicit params for compiled autograd test wrapping
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super(
+            type(self), self
+        ).tearDown()  # use explicit params for compiled autograd test wrapping
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skipIfRocm
+    @skipIfXpu
+    @requires_gpu()
+    @torch._functorch.config.patch(unsafe_allow_optimization_of_collectives=True)
+    def test_partitioner_saves_primal_instead_of_allgathered_primal(self):
+        import torch.distributed._functional_collectives as funcol
+
+        def scale(
+            t: torch.Tensor, amax_t: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            max_v = torch.finfo(torch.float8_e4m3fn).max
+            scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
+            t_fp8 = (t / scale_t).to(torch.float8_e4m3fn)
+            return t_fp8, scale_t
+
+        def fp8_matmul(
+            first: torch.Tensor,
+            amax_first: torch.Tensor,
+            second_t: torch.Tensor,
+            amax_second_t: torch.Tensor,
+            parallel: str,
+        ) -> torch.Tensor:
+            tp_group = torch.distributed.group.WORLD
+            first_fp8, scale_first = scale(first, amax_first)
+            second_t_fp8, scale_second_t = scale(second_t, amax_second_t)
+
+            if parallel == "col":
+                first_fp8 = funcol.all_gather_tensor(
+                    first_fp8, gather_dim=0, group=tp_group
+                )
+                scale_first = funcol.all_gather_tensor(
+                    scale_first, gather_dim=0, group=tp_group
+                )
+
+            res = torch._scaled_mm(
+                first_fp8,
+                second_t_fp8.t(),
+                scale_a=scale_first,
+                scale_b=scale_second_t.t(),
+                out_dtype=torch.bfloat16,
+            )
+
+            if parallel == "row":
+                res = funcol.reduce_scatter_tensor(
+                    res, "sum", scatter_dim=0, group=tp_group
+                )
+
+            return res
+
+        REVERSE = {"col": "row", "row": "col"}
+
+        @torch.compiler.allow_in_graph
+        class Fp8LinearFn(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx: torch.autograd.function.FunctionCtx,
+                a: torch.Tensor,
+                b_t: torch.Tensor,
+                parallel: str,
+            ) -> torch.Tensor:
+                amax_a = a.abs().amax(dim=-1, keepdim=True)
+                amax_b_t = b_t.abs().amax(dim=-1, keepdim=True)
+                out = fp8_matmul(a, amax_a, b_t, amax_b_t, parallel)
+                ctx.save_for_backward(a, b_t, amax_b_t)
+                ctx.parallel = parallel
+                return out
+
+            @staticmethod
+            def backward(
+                ctx: torch.autograd.function.FunctionCtx, grad_out: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor, None]:
+                a: torch.Tensor
+                b_t: torch.Tensor
+                amax_b_t: torch.Tensor
+                a, b_t, amax_b_t = ctx.saved_tensors
+                parallel = REVERSE[ctx.parallel]
+
+                # Workaround for https://github.com/pytorch/pytorch/issues/141881.
+                b_t = b_t + grad_out[0, :, None]
+
+                b = b_t.t().contiguous()
+                amax_grad_out = grad_out.abs().amax(dim=-1, keepdim=True)
+                amax_b = amax_b_t.t().amax(dim=-1, keepdim=True)
+                amax_b = amax_b.repeat_interleave(
+                    b.shape[0] // amax_b.shape[0], dim=0, output_size=b.shape[0]
+                )
+                grad_a = fp8_matmul(grad_out, amax_grad_out, b, amax_b, parallel)
+
+                tp_group = torch.distributed.group.WORLD
+                if parallel == "col":
+                    grad_out = funcol.all_gather_tensor(
+                        grad_out, gather_dim=0, group=tp_group
+                    )
+                if parallel == "row":
+                    a = funcol.all_gather_tensor(a, gather_dim=0, group=tp_group)
+                grad_b = grad_out.t() @ a
+
+                return grad_a, grad_b, None
+
+        @torch.compile(backend=aot_graph_capture_backend)
+        def ffn(x: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
+            x = Fp8LinearFn.apply(x, w1, "col")
+            x = torch.nn.functional.relu(x)
+            x = Fp8LinearFn.apply(x, w2, "row")
+            return x
+
+        in_ = torch.randn(
+            (3072 // WORLD_SIZE, 4096), device="cuda", dtype=torch.bfloat16
+        )
+        w1 = torch.randn(
+            (8192 // WORLD_SIZE, 4096),
+            device="cuda",
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        w2 = torch.randn(
+            (4096, 8192 // WORLD_SIZE),
+            device="cuda",
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        out = ffn(in_, w1, w2)
+        self.assertExpectedInline(
+            str(fw_graph[0].code.strip()),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    abs_1 = torch.ops.aten.abs.default(primals_1)
+    amax = torch.ops.aten.amax.default(abs_1, [-1], True);  abs_1 = None
+    abs_2 = torch.ops.aten.abs.default(primals_2)
+    amax_1 = torch.ops.aten.amax.default(abs_2, [-1], True);  abs_2 = None
+    _to_copy = torch.ops.aten._to_copy.default(amax, dtype = torch.float32);  amax = None
+    clamp = torch.ops.aten.clamp.default(_to_copy, 1e-12);  _to_copy = None
+    div = torch.ops.aten.div.Tensor(clamp, 448.0);  clamp = None
+    div_1 = torch.ops.aten.div.Tensor(primals_1, div)
+    _to_copy_1 = torch.ops.aten._to_copy.default(div_1, dtype = torch.float8_e4m3fn);  div_1 = None
+    _to_copy_2 = torch.ops.aten._to_copy.default(amax_1, dtype = torch.float32);  amax_1 = None
+    clamp_1 = torch.ops.aten.clamp.default(_to_copy_2, 1e-12);  _to_copy_2 = None
+    div_2 = torch.ops.aten.div.Tensor(clamp_1, 448.0);  clamp_1 = None
+    div_3 = torch.ops.aten.div.Tensor(primals_2, div_2);  primals_2 = None
+    _to_copy_3 = torch.ops.aten._to_copy.default(div_3, dtype = torch.float8_e4m3fn);  div_3 = None
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(_to_copy_1, 2, '0');  _to_copy_1 = None
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    all_gather_into_tensor_1 = torch.ops._c10d_functional.all_gather_into_tensor.default(div, 2, '0');  div = None
+    wait_tensor_1 = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+    t = torch.ops.aten.t.default(_to_copy_3);  _to_copy_3 = None
+    t_1 = torch.ops.aten.t.default(div_2);  div_2 = None
+    _scaled_mm = torch.ops.aten._scaled_mm.default(wait_tensor, t, wait_tensor_1, t_1, None, None, torch.bfloat16);  wait_tensor = t = wait_tensor_1 = t_1 = None
+    relu = torch.ops.aten.relu.default(_scaled_mm);  _scaled_mm = None
+    abs_3 = torch.ops.aten.abs.default(relu)
+    amax_2 = torch.ops.aten.amax.default(abs_3, [-1], True);  abs_3 = None
+    abs_4 = torch.ops.aten.abs.default(primals_3)
+    amax_3 = torch.ops.aten.amax.default(abs_4, [-1], True);  abs_4 = None
+    _to_copy_4 = torch.ops.aten._to_copy.default(amax_2, dtype = torch.float32);  amax_2 = None
+    clamp_2 = torch.ops.aten.clamp.default(_to_copy_4, 1e-12);  _to_copy_4 = None
+    div_4 = torch.ops.aten.div.Tensor(clamp_2, 448.0);  clamp_2 = None
+    div_5 = torch.ops.aten.div.Tensor(relu, div_4)
+    _to_copy_5 = torch.ops.aten._to_copy.default(div_5, dtype = torch.float8_e4m3fn);  div_5 = None
+    _to_copy_6 = torch.ops.aten._to_copy.default(amax_3, dtype = torch.float32)
+    clamp_3 = torch.ops.aten.clamp.default(_to_copy_6, 1e-12);  _to_copy_6 = None
+    div_6 = torch.ops.aten.div.Tensor(clamp_3, 448.0);  clamp_3 = None
+    div_7 = torch.ops.aten.div.Tensor(primals_3, div_6)
+    _to_copy_7 = torch.ops.aten._to_copy.default(div_7, dtype = torch.float8_e4m3fn);  div_7 = None
+    t_2 = torch.ops.aten.t.default(_to_copy_7);  _to_copy_7 = None
+    t_3 = torch.ops.aten.t.default(div_6);  div_6 = None
+    _scaled_mm_1 = torch.ops.aten._scaled_mm.default(_to_copy_5, t_2, div_4, t_3, None, None, torch.bfloat16);  _to_copy_5 = t_2 = div_4 = t_3 = None
+    reduce_scatter_tensor = torch.ops._c10d_functional.reduce_scatter_tensor.default(_scaled_mm_1, 'sum', 2, '0');  _scaled_mm_1 = None
+    wait_tensor_2 = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor);  reduce_scatter_tensor = None
+    t_5 = torch.ops.aten.t.default(amax_3);  amax_3 = None
+    amax_5 = torch.ops.aten.amax.default(t_5, [-1], True);  t_5 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(amax_5, 1);  amax_5 = None
+    return (wait_tensor_2, primals_1, primals_3, relu, unsqueeze_1)"""
+            "",
+        )
 
 
 if __name__ == "__main__":
