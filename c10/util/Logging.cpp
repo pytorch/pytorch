@@ -387,7 +387,7 @@ void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
 
-bool InitCaffeLogging(int* argc, char** argv [[maybe_unused]]) {
+bool InitCaffeLogging(int* argc, char** /*argv*/) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
