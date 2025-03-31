@@ -11,8 +11,13 @@ import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
-from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+from torch._library.infer_schema import find_hop_schema
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -575,6 +580,37 @@ class GraphModule(torch.nn.Module):
 
         ref.sum().backward()
         res.sum().backward()
+
+    def test_gen_scehma(self):
+        mod = torch.nn.Linear(8, 8)
+        backend = EagerAndRecordGraphs()
+
+        @mark_compile_region
+        def gn(x):
+            return (
+                mod(x),
+                x.sin(),
+            ), x.cos()
+
+        def fn(x):
+            return gn(x)
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=False)
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+        self.assertEqual(len(backend.graphs), 1)
+        hop_schema = find_hop_schema(
+            backend.graphs[0], torch.ops.higher_order.invoke_subgraph
+        )
+        self.assertEqual(len(hop_schema), 1)
+        self.assertExpectedInline(
+            str(hop_schema[0]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor operands_0, Tensor operands_1, Tensor operands_2, Any operands_tree_spec) -> ((Tensor, Tensor, Tensor) output)""",
+        )
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
