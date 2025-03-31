@@ -173,7 +173,13 @@ endif()
 if(USE_SYSTEM_NVTX)
   find_path(nvtx3_dir NAMES nvtx3 PATHS ${CUDA_INCLUDE_DIRS})
 else()
+  # Try to find nvtx3 from the source tree
   find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+  # If not found in source tree, try to find nvtx3 from the torch wheel install path
+  if(NOT nvtx3_dir)
+    get_filename_component(TORCH_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+    find_path(nvtx3_dir NAMES nvtx3 PATHS "${TORCH_INSTALL_PREFIX}/include")
+  endif()
 endif()
 find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
 if(nvtx3_FOUND)
