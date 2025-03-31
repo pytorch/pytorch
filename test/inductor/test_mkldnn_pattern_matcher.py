@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     MI300_ARCH,
     parametrize,
+    skipIfXpu,
     skipIfNoXPU,
     skipIfRocm,
     skipIfRocmArch,
@@ -607,6 +608,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
     def test_conv_transpose2d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=4)
@@ -614,6 +618,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
@@ -4426,10 +4433,10 @@ class TestDynamicQuantizedPatternMatcher(TestPatternMatcherBase):
 
 
 instantiate_device_type_tests(
-    TestPatternMatcher, globals(), allow_xpu=True, only_for=("cpu")
+    TestPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_device_type_tests(
-    TestDynamicPatternMatcher, globals(), allow_xpu=True, only_for=("cpu")
+    TestDynamicPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_parametrized_tests(TestQuantizedPatternMatcher)
 if __name__ == "__main__":
