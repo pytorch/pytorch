@@ -1130,7 +1130,7 @@ User code traceback:
             lambda: outer(f, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable`. Message: None
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
   Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
@@ -1142,7 +1142,7 @@ from user code:
             post_munge=post_munge,
         )
 
-        @torch.compiler.disable(msg="test message")
+        @torch.compiler.disable(reason="test message")
         def g(x):
             return x + 2
 
@@ -1151,7 +1151,7 @@ from user code:
             lambda: outer(g, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable`. Message: test message
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
   Hint: Remove the `torch.compiler.disable` call
 
   Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
@@ -1169,7 +1169,7 @@ from user code:
 
         mod = Mod()
         mod.compile()
-        mod = torch.compiler.disable(mod, msg="test message 2")
+        mod = torch.compiler.disable(mod, reason="test message 2")
 
         self.assertExpectedInlineMunged(
             Unsupported,

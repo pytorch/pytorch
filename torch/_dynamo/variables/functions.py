@@ -1203,7 +1203,7 @@ class SkipFunctionVariable(VariableTracker):
                 gb_type="Skip calling `torch.compiler.disable()`d function",
                 context=str(self.value),
                 explanation=f"Skip calling function `{self.value}` since it was wrapped "
-                f"with `torch.compiler.disable`. Message: {msg}",
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],

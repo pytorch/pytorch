@@ -3789,7 +3789,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 gb_type="Skip inlining `torch.compiler.disable()`d function",
                 context=str(func.get_function()),
                 explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
-                f"with `torch.compiler.disable`. Message: {msg}",
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],
