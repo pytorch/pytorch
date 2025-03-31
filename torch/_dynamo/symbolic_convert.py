@@ -3527,8 +3527,10 @@ class InstructionTranslator(InstructionTranslatorBase):
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
 
-        if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
-            return [inst]
+        if inst.opname == "RETURN_VALUE":
+            return [create_instruction("RETURN_VALUE")]
+        elif inst.opname == "RETURN_CONST":
+            return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
         reads = livevars_analysis(self.instructions, inst)
         all_argnames = tuple(
