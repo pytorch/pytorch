@@ -43,7 +43,6 @@ RELEASE = os.environ.get("RELEASE", False)
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
-
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
