@@ -1716,5 +1716,45 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
   return r;
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
 
+template <typename T>
+unsigned short getHermitianLimit() {
+  if (sizeof(T) <= sizeof(float)) {
+    return 128;
+  }
+  // double isn't supported in metal.
+  return 512;
+}
+
+template <typename T>
+float hermite_polynomial_h_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x + x;
+  }
+
+  if (n > getHermitianLimit<T>()) {
+    return NAN;
+  }
+
+  float p = T(1.0);
+  float q = x + x;
+  float r = T(0.0);
+
+  for (int64_t k = 2; k < n + n; k += 2) {
+    r = (x + x) * q - k * p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // hermite_polynomial_h_forward(T x, int64_t n)
+
 } // namespace metal
 } // namespace c10

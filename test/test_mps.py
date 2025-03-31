@@ -657,7 +657,6 @@ def mps_ops_modifier(ops):
         'sparse.mmreduce': None,
         'special.airy_ai': None,
         'special.erfcx': None,
-        'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
