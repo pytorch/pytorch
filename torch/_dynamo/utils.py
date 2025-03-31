@@ -382,6 +382,8 @@ class CompileEventLogger:
         Log an event to a toplevel "dynamo" event or metrics context
         depending on log level.
         """
+        return  # TODO(rzou): can't compile without this.
+
         chromium_log = get_chromium_event_logger()
         pt2_compile_substack = chromium_log.get_pt2_compile_substack()
 
@@ -470,6 +472,8 @@ class CompileEventLogger:
         """
         Increments a value on the toplevel metric. By default, logs to metric.
         """
+        return  # TODO(rzou): can't compile without this.
+
         chromium_log = get_chromium_event_logger()
         top_event = chromium_log.get_outermost_event()
         if top_event is None:
