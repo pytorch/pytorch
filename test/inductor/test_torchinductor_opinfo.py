@@ -663,9 +663,7 @@ inductor_override_kwargs["xpu"] = {
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {
-            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}
-        }
+        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
     )
 
 
