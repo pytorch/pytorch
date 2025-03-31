@@ -958,6 +958,8 @@ TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl(
       "convolution_backward_overrideable",
       TORCH_FN(convolution_backward_overrideable));
+}
+TORCH_LIBRARY_IMPL(mkldnn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
       TORCH_FN(convolution_pointwise));
