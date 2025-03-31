@@ -889,6 +889,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
