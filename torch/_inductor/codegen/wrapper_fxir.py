@@ -224,8 +224,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 raise NotImplementedError(f"Unrecognized output node: {node}")
 
         output_refs = [
-            codegen_output(node)
-            for idx, node in enumerate(V.graph.graph_outputs)
+            codegen_output(node) for idx, node in enumerate(V.graph.graph_outputs)
         ]
         self.writeline(OutputLine(output_refs))
 

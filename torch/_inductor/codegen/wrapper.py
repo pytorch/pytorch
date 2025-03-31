@@ -2277,6 +2277,7 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = f"tmp_arg_{index}"
                 buf = raw_arg
 
+            assert buf is not None, f"Failed to find a buffer for arg {arg}"
             size = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
                     e,
