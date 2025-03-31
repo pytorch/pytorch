@@ -95,17 +95,17 @@ class FSDPCommContext:
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
-    event: torch.Event  # all-gather copy-out
+    event: Optional[torch.Event]  # all-gather copy-out
 
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event  # reduce-scatter event
+    event: Optional[torch.Event]  # reduce-scatter event
 
 
 class AllReduceState(NamedTuple):
     all_reduce_input: torch.Tensor
-    event: torch.Event  # all-reduce event
+    event: Optional[torch.Event]  # all-reduce event
 
 
 class FSDPParamGroup:
@@ -458,7 +458,8 @@ class FSDPParamGroup:
                 reduce_scatter_input, reduce_scatter_event
             )
             if all_reduce_input is not None:
-                assert all_reduce_event is not None
+                if self.device.type != "cpu":
+                    assert all_reduce_event is not None
                 self._all_reduce_state = AllReduceState(
                     all_reduce_input, all_reduce_event
                 )
