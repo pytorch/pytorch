@@ -398,9 +398,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
+    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
+        return self.features.select_index_dtype()
+
     @property
     def index_dtype(self) -> str:
-        return self.dtype_to_str(self.features.select_index_dtype())
+        return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
 
     def want_no_x_dim(self) -> bool:
         return False
@@ -1650,6 +1653,11 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            # dump provenance node info for ComboKernelNode/ForeachKernel type
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(
+                    combo_kernel_node.snodes, kernel_name
+                )
             self.codegen_comment([combo_kernel_node])
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
