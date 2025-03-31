@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
+from typing import Union
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -515,7 +516,7 @@ def build_subgraph_buffer(
 
 def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
-) -> TensorBox | ShapeAsConstantBuffer:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
