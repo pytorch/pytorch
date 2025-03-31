@@ -4426,10 +4426,10 @@ class TestDynamicQuantizedPatternMatcher(TestPatternMatcherBase):
 
 
 instantiate_device_type_tests(
-    TestPatternMatcher, globals(), allow_xpu=True, only_for=("cpu")
+    TestPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_device_type_tests(
-    TestDynamicPatternMatcher, globals(), allow_xpu=True, only_for=("cpu")
+    TestDynamicPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_parametrized_tests(TestQuantizedPatternMatcher)
 if __name__ == "__main__":
