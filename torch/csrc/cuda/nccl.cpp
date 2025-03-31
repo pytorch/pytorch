@@ -9,21 +9,11 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <nccl.h>
-
 #include <sched.h>
 #include <limits>
 #include <sstream>
 #include <type_traits>
 #include <unordered_map>
-
-#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
-#define NCCL_HAS_REMOTE_ERROR 1
-#endif
-
-#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
-#define NCCL_HAS_COMM_NONBLOCKING 1
-#endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
@@ -126,7 +116,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
 #endif
 
-#if HAS_NCCL_BF16_DATATYPE
+#ifdef NCCL_HAS_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
