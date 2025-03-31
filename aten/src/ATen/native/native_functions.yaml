@@ -15262,7 +15262,7 @@
 - func: special_hermite_polynomial_h.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_hermite_polynomial_h_out
+    CPU, CUDA, MPS: special_hermite_polynomial_h_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
