@@ -2,6 +2,7 @@
 #include <c10/core/DeviceType.h>
 
 #include <array>
+#include <cstdlib>
 
 namespace c10::CachingAllocator {
 
@@ -15,17 +16,16 @@ constexpr size_t kPinnedMaxRegisterThreads = 128;
 
 AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
-  const char* env = getenv("PYTORCH_ALLOC_CONF");
+  const char* env = std::getenv("PYTORCH_ALLOC_CONF");
   if (env) {
     instance.parseArgs(env);
+    return instance;
   }
   // Keep this for backwards compatibility
-  const char* env_cuda = getenv("PYTORCH_CUDA_ALLOC_CONF");
+  const char* env_cuda = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
   if (env_cuda) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead");
-  }
-  if (!env && env_cuda) {
     instance.parseArgs(env_cuda);
   }
   return instance;
