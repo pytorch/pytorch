@@ -2243,6 +2243,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
       .value("Ck", at::BlasBackend::Ck);
@@ -2399,12 +2400,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
-#ifdef _GLIBCXX_USE_CXX11_ABI
-  ASSERT_TRUE(set_module_attr(
-      "_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
-#else
-  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
 // See note [Pybind11 ABI constants]
 #define SET_STR_DEFINE(name) \

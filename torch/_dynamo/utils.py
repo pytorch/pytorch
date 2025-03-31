@@ -598,6 +598,7 @@ def dynamo_timed(
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -674,13 +675,23 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    cx_managers: list[typing.Any] = [
+        torch.profiler.record_function(f"{key} (dynamo_timed)")
+    ]
+    wait_counter_name = key
+    if waitcounter_name_override:
+        wait_counter_name = waitcounter_name_override
+
+    if log_waitcounter:
+        cx_managers.append(
+            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
+        )
+
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            if log_waitcounter:
-                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
-                    yield
-            else:
-                yield
+        with contextlib.ExitStack() as stack:
+            for cx in cx_managers:
+                stack.enter_context(cx)
+            yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
@@ -1233,6 +1244,7 @@ class CompilationMetrics:
     triton_kernel_compile_times_us: Optional[str] = None
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1494,6 +1506,7 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+        "python_version": sys.version,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -3749,10 +3762,11 @@ def build_checkpoint_variable(**options):
 def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4068,6 +4082,14 @@ def is_tensor_base_attr_getter(value):
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_tensor_getset_descriptor(name):
+    try:
+        attr = inspect.getattr_static(torch.Tensor, name)
+        return type(attr) is types.GetSetDescriptorType
+    except AttributeError:
+        return False
 
 
 def is_torch_function_object(value):
@@ -4474,3 +4496,41 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    """
+    Disables torch.inference_mode for the compilation (still on at runtime).
+    This simplifies the compile stack where we can assume that inference_mode
+    will always be off.
+
+    Since inference_mode is equivalent to no_grad + some optimizations (version
+    counts etc), we turn on no_grad here. The other optimizations are not
+    relevant to torch.compile.
+    """
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            yield
+    else:
+        yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    """
+    Turns off tracking of inference_mode for fake tensor propagation. With this
+    context manager, when a real tensor is converted to fake tensor, the fake
+    tensor looses its inference-ness.
+    """
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        yield

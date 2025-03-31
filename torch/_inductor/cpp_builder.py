@@ -1557,9 +1557,9 @@ class CppBuilder:
 
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
-                self._include_dirs_args += f"/I {inc_dir} "
+                self._include_dirs_args += f'/I "{inc_dir}" '
             else:
-                self._include_dirs_args += f"-I{inc_dir} "
+                self._include_dirs_args += f"-I{shlex.quote(inc_dir)} "
 
         for ldflag in BuildOption.get_ldflags():
             if _IS_WINDOWS:

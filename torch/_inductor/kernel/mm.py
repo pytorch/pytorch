@@ -16,10 +16,12 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 from torch.torch_version import TorchVersion
 
+from ..lowering import lowerings
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
+from ..codegen.subgraph import SubgraphTemplate
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -28,7 +30,6 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
-    get_gpu_shared_memory,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
@@ -41,20 +42,20 @@ from ..utils import (
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
-    extra_mm_configs,
-    int8_mm_configs,
     mm_args,
-    mm_configs,
+    mm_config_kwargs,
     mm_grid,
     mm_options,
+<<<<<<< HEAD
+=======
     partition_k_mm_grid,
     persistent_mm_configs,
+>>>>>>> 92a913af043 (Add PartitionK)
     persistent_mm_grid,
     persistent_mm_options,
     should_fallback_to_aten,
-    triton_config,
 )
-
+from torch.fx.experimental.proxy_tensor import make_fx
 
 try:
     import triton
@@ -67,6 +68,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 mm_template = TritonTemplate(
     name="mm",
@@ -313,7 +315,7 @@ persistent_tma_mm_template = TritonTemplate(
 
 
 partition_k_mm_template = TritonTemplate(
-    name="partition_k_mm_template",
+    name="partition_k_mm",
     grid=partition_k_mm_grid,
     source=r"""
 {{def_kernel("A", "B")}}
@@ -424,15 +426,6 @@ def _is_large_block_for_cpu(m, n, k):
     return m * n > 2**13
 
 
-def mm_config_kwargs(device):
-    if device == "cpu":
-        return {
-            "scale": 0.5,
-            "exclude": _is_large_block_for_cpu,
-        }
-    return {}
-
-
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
     Giving torch.addmm a 1D tensor calls a different (faster) cublasLt
@@ -446,10 +439,29 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
+def decomposeK(a, b, kPartitions):
+    m = a.shape[0]
+    n = b.shape[1]
+    k = a.shape[1]
+
+    B = k // kPartitions
+    a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
+    b_reshaped = b.reshape(B, kPartitions, n)
+    result = torch.bmm(a_reshaped, b_reshaped)
+    result_fp32 = result.to(torch.float32)
+    reduced_buf = torch.sum(result_fp32, 0)
+    return reduced_buf.to(a.dtype)
+
+decompose_k_subgraph_template = SubgraphTemplate(
+    name="decompose_k_mm",
+    graph=make_fx(decomposeK),
+)
+
 
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    device_type = ir.get_device_type(mat1)
     name = "mm"
 
     # below is for getting an overview logging info of inductor mms
@@ -471,43 +483,52 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
 
     # options to tune from
-    choices = (
-        [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
-    )
+    choices = []
     
     static_shape, is_nonzero = _is_static_problem(layout)
-    if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout),
-            )
+    # if is_nonzero and use_triton_template(layout):
+        # for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
+            # mm_template.maybe_append_choice(
+            #     choices,
+            #     input_nodes=(mat1, mat2),
+            #     layout=layout,
+            #     **mm_options(config, m, n, k, layout),
+            # )
 
             # Enforce accumulation in float32 for accuracy
-            _, _, _, layout_partitionk, _, _ = mm_args(mat1, mat2, layout=None, partitionK=True)
-            partition_k_mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout_partitionk,
-                **mm_options(config, m, n, k, layout),
-            )
-        if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
-            ):
-                persistent_tma_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2),
-                    layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
-                )
+
+            # kPartitions = 256
+            # assert k % kPartitions == 0, "K must be divisible by Kmini"
+            # B = k // kPartitions
+
+            # a_reshaped = lowerings[aten.permute](lowerings[aten.reshape](mat1, (m, B, kPartitions)), (1, 0, 2))
+            # b_reshaped = lowerings[aten.reshape](mat2, (B, kPartitions, n))
+            # result = lowerings[aten.bmm](a_reshaped, b_reshaped)  # Shape: (B, M, N)
+            # result_fp32 = lowerings[prims.convert_element_type](result, torch.float32)
+            # reduced_buf = lowerings[aten.sum](result_fp32, 0)
+            # output = lowerings[prims.convert_element_type](reduced_buf, mat1.get_dtype())
+
+        # if use_triton_tma_template(mat1, mat2):
+        #     for config in persistent_mm_configs(
+        #         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        #     ):
+        #         persistent_tma_mm_template.maybe_append_choice(
+        #             choices,
+        #             input_nodes=(mat1, mat2),
+        #             layout=layout,
+        #             workspace_arg=get_tma_workspace_arg(
+        #                 num_tma_descriptors=2,
+        #                 device=mat1.get_device(),
+        #             ),
+        #             **mm_options(config, m, n, k, layout),
+        #             **persistent_mm_options(mat1, mat2),
+        #         )
+
+    decompose_k_subgraph_template.maybe_append_choice(
+        choices,
+        input_nodes=(mat1, mat2),
+        layout=layout,
+    )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
@@ -534,7 +555,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -571,7 +592,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
-
     if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -596,6 +616,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         layout,
     )
 
+    device_type = ir.get_device_type(mat1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
@@ -607,9 +629,12 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+
+    int8_mm_configs = V.choices.get_int8_mm_configs(device_type)
+
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -627,6 +652,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
+    device_type = ir.get_device_type(mat1)
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
 
@@ -692,8 +718,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
+    mm_configs = V.choices.get_base_mm_configs(device_type)
+    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
+        for config in mm_configs(
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -705,7 +736,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -842,52 +873,6 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 
 def dims_are_int(dims):
     return all(isinstance(dim, int) for dim in dims)
-
-
-def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
-    m, n, k = get_size_hints(mat1, mat2, m, n, k)
-    if not dims_are_int([m, n, k]):
-        return None
-
-    if mat1.dtype != torch.float16:
-        return None
-
-    # only use heuristic if we are running on an A100
-    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
-    # which does not have enough shared memory for one of the configs
-    if (
-        not torch.cuda.get_device_capability() >= (8, 0)
-    ) or get_gpu_shared_memory() != 166912:
-        return None
-
-    if m == 1 and (n % 16 != 0 or k % 16 != 0):
-        return None
-
-    if m <= 16 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=16,
-            BLOCK_N=64,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=32,
-            BLOCK_N=32,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
-        return triton_config(
-            BLOCK_M=64,
-            BLOCK_N=32,
-            BLOCK_K=128,
-            num_stages=5,
-            num_warps=4,
-        )
-    return None
 
 
 def mm_autoheuristic(
