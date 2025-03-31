@@ -11,6 +11,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.testing import skipIfNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -670,6 +671,7 @@ from user code:
     class Foo:""",
         )
 
+    @skipIfNotPy312
     def test_unsupported_bytecode(self):
         async def fn():
             async for i in range(3):
