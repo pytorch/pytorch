@@ -604,7 +604,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
 
 at::Tensor two_shot_all_reduce_impl(
     at::Tensor input,
-    c10::optional<at::Tensor> output,
+    std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(
