@@ -89,7 +89,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-{%- if os == "windows-arm64" %}      
+{%- if os == "windows-arm64" %}
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     steps:
-      {%- if os == "windows-arm64" %}
+{%- if os == "windows-arm64" %}
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
