@@ -113,9 +113,9 @@ bool IsNUMAEnabled() {
   return false;
 }
 
-void NUMABind(int numa_node_id [[maybe_unused]]) {}
+void NUMABind(int /*numa_node_id*/) {}
 
-int GetNUMANode(const void* ptr [[maybe_unused]]) {
+int GetNUMANode(const void* /*ptr*/) {
   return -1;
 }
 
@@ -123,10 +123,7 @@ int GetNumNUMANodes() {
   return -1;
 }
 
-void NUMAMove(
-    void* ptr [[maybe_unused]],
-    size_t size [[maybe_unused]],
-    int numa_node_id [[maybe_unused]]) {}
+void NUMAMove(void* /*ptr*/, size_t /*size*/, int /*numa_node_id*/) {}
 
 int GetCurrentNUMANode() {
   return -1;

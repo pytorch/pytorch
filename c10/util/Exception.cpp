@@ -213,7 +213,7 @@ Warning::Warning(
 Warning::Warning(
     warning_variant_t type,
     SourceLocation source_location,
-    detail::CompileTimeEmptyString msg [[maybe_unused]],
+    detail::CompileTimeEmptyString /*msg*/,
     const bool verbatim)
     : Warning(type, source_location, "", verbatim) {}
 

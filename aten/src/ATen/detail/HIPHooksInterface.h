@@ -35,7 +35,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  bool isPinnedPtr(const void* data [[maybe_unused]]) const override {
+  bool isPinnedPtr(const void* /*data*/ ) const override {
     return false;
   }
 
@@ -47,7 +47,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index [[maybe_unused]]) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/ ) const override {
     TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };
