@@ -127,6 +127,58 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_dtensor_basic_export(self):
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+
+        param = torch.randn(4, 4)
+        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(param_x)
+
+            def forward(self, x):
+                inter = self.buffer + DTensor.from_local(
+                    x, mesh, [Shard(0)], run_check=False
+                )
+                return inter.to_local()
+
+        torch.utils._pytree.register_constant(
+            torch.distributed.tensor._dtensor_spec.DTensorSpec
+        )
+        torch.utils._pytree.register_constant(DeviceMesh)
+
+        ep = torch.export.export_for_training(
+            Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
+        )
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, b_buffer, x):
+    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
+    view_as = torch.ops.aten.view_as.default(to, to);  to = None
+    dtensor___init__0 = self.dtensor___init__0
+    dtensor_const_func_spec0 = self.dtensor_const_func_spec0
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
+    add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
+    access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
+    view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
+    return (view_as_1,)""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            str(ep.run_decompositions({}).graph_module.code).strip(),
+            """\
+def forward(self, b_parametrizations_buffer_original0, x):
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
+    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    return (view_1,)""",  # noqa: B950
+        )
+
     def test_placement_compile(self):
         def fn(x):
             a = 0
@@ -154,7 +206,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn, compiled_out)
 
     def test_device_mesh_compile(self):
-        def fn(x):
+        def fn(x: DeviceMesh):
             # test size()
             a = x.size()
             b = x.size(0)
@@ -163,13 +215,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             # test get_coordinate()
             coord = x.get_coordinate()
             # test get_group()
-            group = x.get_group()
-            return size, coord, group
+            group0 = x.get_group(0)
+            group1 = x.get_group(mesh_dim=1)
+            return size, coord, group0, group1
 
         # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
         opt_fn = fn(mesh)
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)

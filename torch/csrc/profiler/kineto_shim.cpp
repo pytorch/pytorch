@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <type_traits>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -50,6 +51,9 @@ const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_RUNTIME,
     libkineto::ActivityType::MTIA_WORKLOADD,
 };
+const std::set<libkineto::ActivityType> hpuTypes = {
+    libkineto::ActivityType::HPU_OP,
+};
 const std::set<libkineto::ActivityType> kPrivateUse1Types = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
@@ -63,7 +67,7 @@ const std::set<libkineto::ActivityType> kPrivateUse1Types = {
 #endif // USE_KINETO
 
 static_assert(
-    c10::is_pod_v<DeviceAndResource>,
+    std::is_trivial_v<DeviceAndResource>,
     "Kineto specific details should be in `kineto_ids`.");
 
 const DeviceAndResource kineto_ids() {
@@ -265,6 +269,9 @@ void prepareTrace(
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
     k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
   }
+  if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
+    k_activities.insert(hpuTypes.begin(), hpuTypes.end());
+  }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
     if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
@@ -399,6 +406,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
       }();
       return device_type;
     }
+    case libkineto::ActivityType::HPU_OP:
+      return c10::DeviceType::HPU;
     case libkineto::ActivityType::CPU_OP:
     case libkineto::ActivityType::USER_ANNOTATION:
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
