@@ -4416,7 +4416,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         node = [node for node in ep.graph.nodes][-2]
         val = node.meta["val"]
         u0, u1, u2 = val.shape
-        self.assertEqual(val.stride(0), u1*u2)
+        self.assertEqual(val.stride(0), u1 * u2)
         self.assertEqual(val.stride(1), u2)
 
     def test_tolist(self):
