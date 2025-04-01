@@ -128,10 +128,11 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
-        if USE_FAST_ACCUM:
-            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        else:
-            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% if USE_FAST_ACCUM %}
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% else %}
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -201,9 +202,10 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
         {% if USE_FAST_ACCUM %}
-            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
-            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -306,17 +308,18 @@ persistent_tma_mm_template = TritonTemplate(
             allow_tf32=ALLOW_TF32,
         )
 
-        if ki == k_tiles - 1:
-            # rematerialize rm and rn to save registers
-            rcm = rm + tl.arange(0, BLOCK_M)
-            rcn = rn + tl.arange(0, BLOCK_N)
-            idx_m = rcm[:, None]
-            idx_n = rcn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
+        {% if ki == k_tiles - 1 %}
+        # rematerialize rm and rn to save registers
+        rcm = rm + tl.arange(0, BLOCK_M)
+        rcn = rn + tl.arange(0, BLOCK_N)
+        idx_m = rcm[:, None]
+        idx_n = rcn[None, :]
+        mask = (idx_m < M) & (idx_n < N)
 
-            # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
-            acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+        # inductor generates a suffix
+        {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+        acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+        {% endif %}
 """,
 )
 
@@ -460,30 +463,31 @@ device_tma = r"""
         else:
             accumulator += tl.dot(a, b.T)
 
-        if ki == k_tiles - 1:
-            # Apply inverse scaling
-            offs_cm = offs_am + tl.arange(0, BLOCK_M)
-            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
-            # Apply scaling
-            accumulator = apply_scaling(
-                accumulator,
-                a_scale,
-                b_scale,
-                SCALING_ROWWISE,
-                offs_cm,
-                offs_cn,
-                M,
-                N,
-                stride_a_scale_m,
-                stride_b_scale_n,
-            )
+        {% if ki == k_tiles - 1 %}
+        # Apply inverse scaling
+        offs_cm = offs_am + tl.arange(0, BLOCK_M)
+        offs_cn = offs_bn + tl.arange(0, BLOCK_N)
+        # Apply scaling
+        accumulator = apply_scaling(
+            accumulator,
+            a_scale,
+            b_scale,
+            SCALING_ROWWISE,
+            offs_cm,
+            offs_cn,
+            M,
+            N,
+            stride_a_scale_m,
+            stride_b_scale_n,
+        )
 
-            idx_m = offs_cm[:, None]
-            idx_n = offs_cn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
-            # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
-            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        idx_m = offs_cm[:, None]
+        idx_n = offs_cn[None, :]
+        mask = (idx_m < M) & (idx_n < N)
+        # inductor generates a suffix
+        {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+        accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        {% endif %}
 """
 
 
