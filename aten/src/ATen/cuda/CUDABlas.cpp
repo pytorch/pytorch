@@ -366,7 +366,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 
 template <typename Dtype>
-static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
+static inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
@@ -454,7 +454,6 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
 
-  cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
@@ -469,10 +468,10 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       &heuristicResult,
       &returnedResult));
   if (returnedResult == 0) {
-    cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
-  else {
-    cublasStatus = cublasLtMatmul(
+
+  cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       alpha_ptr,
@@ -489,10 +488,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       workspace_ptr,
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
-  }
-  if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    TORCH_WARN(
-      "bgemm_internal_cublaslt error: ",
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",
       (opa == CUBLAS_OP_T),
@@ -515,11 +513,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       " computeType ",
       computeType,
       " scaleType ",
-      scaleType,
-      ". Will attempt to recover by calling cublas instead.");
-    return false;
-  }
-  return true;
+      scaleType);
 }
 
 
@@ -680,9 +674,7 @@ void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double))
     // hipblaslt does not support double gemm yet
     bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGS(double));
 #else
-    if (!bgemm_internal_cublaslt<double>(CUDABLAS_BGEMM_ARGS(double))) {
-      bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGS(double));
-    }
+    bgemm_internal_cublaslt<double>(CUDABLAS_BGEMM_ARGS(double));
 #endif
   }
   else {
@@ -694,9 +686,7 @@ template <>
 void bgemm_internal<float>(CUDABLAS_BGEMM_ARGTYPES(float))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    if (!bgemm_internal_cublaslt<float>(CUDABLAS_BGEMM_ARGS(float))) {
-      bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGS(float));
-    }
+    bgemm_internal_cublaslt<float>(CUDABLAS_BGEMM_ARGS(float));
   }
   else {
     bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGS(float));
@@ -711,9 +701,7 @@ void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<d
     // hipblaslt does not support complex<double> gemm yet
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
 #else
-    if (!bgemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>))) {
-      bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
-    }
+    bgemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
 #endif
   }
   else {
@@ -729,9 +717,7 @@ void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<fl
     // hipblaslt does not support complex<float> gemm yet
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
 #else
-    if (!bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>))) {
-      bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
-    }
+    bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
 #endif
   }
   else {
@@ -743,9 +729,7 @@ template <>
 void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    if (!bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
-      bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
-    }
+    bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
   }
   else {
     bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
@@ -756,9 +740,7 @@ template <>
 void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    if (!bgemm_internal_cublaslt<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
-      bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
-    }
+    bgemm_internal_cublaslt<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
@@ -882,9 +864,16 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 }
 
 template <typename Dtype>
+inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+  // forward to bgemm implementation but set strides and batches to 0
+  bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0);
+}
+
+template <typename Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static_assert(false && sizeof(Dtype), "at::cuda::blas::gemm_internal_cublas: not implemented");
 }
+
 
 template <>
 void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
@@ -1093,14 +1082,6 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       compute_type,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-}
-
-template <typename Dtype>
-inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
-  // forward to bgemm implementation but set strides and batches to 0
-  if (!bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0)) {
-    gemm_internal_cublas(CUDABLAS_GEMM_ARGS(Dtype));
-  }
 }
 
 template <>
@@ -1319,7 +1300,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 
 template <typename Dtype>
-bool gemm_and_bias(
+void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
@@ -1434,12 +1415,11 @@ bool gemm_and_bias(
       1,
       &heuristicResult,
       &returnedResult));
-  cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   if (returnedResult == 0) {
-    cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
-  else {
-    cublasStatus = cublasLtMatmul(
+
+  cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       alpha_ptr,
@@ -1456,10 +1436,9 @@ bool gemm_and_bias(
       workspace_ptr,
       workspaceSize,
       stream);
-  }
-  if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    TORCH_WARN(
-      "gemm_and_bias error: ",
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",
       transpose_mat1,
@@ -1482,14 +1461,10 @@ bool gemm_and_bias(
       " computeType ",
       computeType,
       " scaleType ",
-      scaleType,
-      ". Will attempt to recover by calling unfused cublas path.");
-    return false;
-  }
-  return true;
+      scaleType);
 }
 
-template bool gemm_and_bias(
+template void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
@@ -1505,7 +1480,7 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
-template bool gemm_and_bias(
+template void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
@@ -1521,7 +1496,7 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
-template bool gemm_and_bias(
+template void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
@@ -1537,7 +1512,7 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
-template bool gemm_and_bias(
+template void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
