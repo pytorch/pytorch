@@ -1813,9 +1813,7 @@ class ScanTests(TestCase):
     def test_scan_compare_chunked_ce_with_no_scan(self, device, dynamic):
         for trunk_size, B, T in zip([10, 20], [10, 100], [20, 40]):
             self._compare_result(
-                model1=torch.compile(
-                    ScanModels.ChunkedCENoScan(trunk_size), dynamic=dynamic
-                ),
+                model1=torch.compile(ScanModels.ChunkedCE(trunk_size), dynamic=dynamic),
                 model2=ScanModels.ChunkedCENoScan(trunk_size),
                 inputs=(
                     torch.randn(B, T),
