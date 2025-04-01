@@ -21,7 +21,6 @@ def _pin_memory_loop(in_queue, out_queue, done_event, device):
     torch.set_num_threads(1)
 
     torch.multiprocessing._set_thread_name("pt_data_pin")
-    current_device_index = torch.accelerator.current_device_index()
 
     def do_one_step():
         try:
@@ -33,6 +32,7 @@ def _pin_memory_loop(in_queue, out_queue, done_event, device):
             try:
                 data = pin_memory(data, device)
             except Exception:
+                current_device_index = torch.accelerator.current_device_index()
                 data = ExceptionWrapper(
                     where=f"in pin memory thread for device {current_device_index}"
                 )
