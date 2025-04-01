@@ -2,8 +2,6 @@ import io
 import json
 import logging
 import os
-import shlex
-import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -13,12 +11,17 @@ from typing_extensions import Self
 import torch
 import torch._inductor
 import torch.utils._pytree as pytree
-from torch._inductor import exc
+from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 from torch.types import FileLike
 
-from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
+from .pt2_archive_constants import (
+    AOTINDUCTOR_DIR,
+    ARCHIVE_VERSION,
+    CONSTANTS_DIR,
+    CUSTOM_OBJ_FILENAME_PREFIX,
+)
 
 
 log = logging.getLogger(__name__)
@@ -92,14 +95,6 @@ class PT2ArchiveReader:
         return self.archive_file.namelist()
 
 
-def _run_command_and_check(cmd: str) -> None:
-    cmd = shlex.split(cmd)
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
-
-
 def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     def get_aoti_file_with_suffix(suffix: str) -> str:
         for file in aoti_files:
@@ -117,32 +112,32 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     with open(file_name + "_compile_flags.json") as f:
         compile_flags = json.load(f)
 
-    compile_options = BuildOptionsBase(**compile_flags)
+    compile_options = BuildOptionsBase(
+        **compile_flags, use_relative_path=config.is_fbcode()
+    )
     object_builder = CppBuilder(
         name=file_name,
         sources=cpp_file,
         BuildOption=compile_options,
     )
-    compile_cmd = object_builder.get_command_line()
     output_o = object_builder.get_target_file_path()
-
-    _run_command_and_check(compile_cmd)
+    object_builder.build()
 
     # Parse linker flags and build the .so file
     with open(file_name + "_linker_flags.json") as f:
         linker_flags = json.load(f)
 
-    linker_options = BuildOptionsBase(**linker_flags)
+    linker_options = BuildOptionsBase(
+        **linker_flags, use_relative_path=config.is_fbcode()
+    )
     so_builder = CppBuilder(
         name=os.path.split(so_path)[-1],
         sources=[output_o, consts_o],
         BuildOption=linker_options,
         output_dir=so_path,
     )
-    link_cmd = so_builder.get_command_line()
     output_so = so_builder.get_target_file_path()
-
-    _run_command_and_check(link_cmd)
+    so_builder.build()
 
     # mmapped weights
     serialized_weights_filename = file_name + "_serialized_weights.bin"
@@ -222,7 +217,10 @@ def package_aoti(
                         )
 
                 filename = os.path.basename(file)
-                new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
+                if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
+                    new_filepath = os.path.join(CONSTANTS_DIR, filename)
+                else:
+                    new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
                 log.debug(
                     "Saving AOTI generated file %s to archive in %s", file, new_filepath
                 )
@@ -284,7 +282,12 @@ class AOTICompiledModel:
         return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
 
 
-def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+def load_package(
+    path: FileLike,
+    model_name: str = "model",
+    run_single_threaded: bool = False,
+    num_runners: int = 1,
+) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
     ) or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")), (
@@ -298,9 +301,13 @@ def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel
             f.write(path.read())
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
-            loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
+            loader = torch._C._aoti.AOTIModelPackageLoader(
+                f.name, model_name, run_single_threaded, num_runners
+            )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
-    loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
+    loader = torch._C._aoti.AOTIModelPackageLoader(
+        path, model_name, run_single_threaded, num_runners
+    )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

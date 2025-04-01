@@ -224,7 +224,7 @@ class EntryState:
         self.input_sizes = entry["input_sizes"]
         self.output_sizes = entry["output_sizes"]
         self.collective_state = entry["state"]
-        self.collective_frames = entry["frames"]
+        self.collective_frames = entry.get("frames", [])
         self.expected_ranks = expected_ranks
         self.missing_ranks: set[int]
         self.input_numel: int
@@ -316,7 +316,7 @@ class EntryState:
                     output_sizes=entry["output_sizes"],
                     expected_ranks=self.expected_ranks,
                     collective_state=entry["state"],
-                    collective_frames=entry["frames"],
+                    collective_frames=entry.get("frames", []),
                     type_of_mismatch=error,
                 )
             return Collective(
@@ -414,7 +414,7 @@ class Op:
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
         self.time_created_ns = event["time_created_ns"]
-        self.collective_frames = event["frames"]
+        self.collective_frames = event.get("frames", [])
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
