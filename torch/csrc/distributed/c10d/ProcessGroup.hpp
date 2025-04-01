@@ -821,14 +821,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   c10::intrusive_ptr<Backend> getDefaultBackend() const {
+    auto backend_iter = backendTypeToBackend_.find(backendType_);
     TORCH_CHECK(
-        backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
+        backend_iter != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
-        backendType_,
+        uint16_t(backendType_),
         " for Process Group with name ",
         getBackendName(),
         ".");
-    return backendTypeToBackend_.at(backendType_);
+    return backend_iter->second;
   }
 
   void setDefaultBackend(const BackendType& backendType) {
@@ -845,7 +846,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
         "Could not find backend type ",
-        backendType,
+        uint16_t(backendType),
+        " for Process Group with name ",
+        backendTypeToString(backendType),
         ".");
     return backendTypeToBackend_.at(backendType);
   }
@@ -872,8 +875,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->waitForPendingWorks();
   }
 
+  virtual void shutdown() {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->shutdown();
+    }
+  }
+
+  virtual void abort() {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->abort();
+    }
+  }
+
   bool hasHooks() const {
-    return getDefaultBackend()->hasHooks();
+    auto backend_iter = backendTypeToBackend_.find(backendType_);
+    if (backend_iter == backendTypeToBackend_.end()) {
+      TORCH_WARN(
+          "No backend of type ",
+          uint16_t(backendType_),
+          " found for Process Group with name ",
+          getBackendName(),
+          ". Assuming no hooks are registered.");
+      return false;
+    }
+
+    return backend_iter->second->hasHooks();
   }
 
   virtual const std::string& getGroupName() const;

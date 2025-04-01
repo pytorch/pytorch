@@ -14,6 +14,7 @@ from .optimizer import (
     _fused_doc,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     DeviceDict,
     Optimizer,
@@ -331,6 +332,9 @@ def _single_tensor_sgd(
 ):
     assert grad_scale is None and found_inf is None
 
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
 
@@ -389,11 +393,12 @@ def _multi_tensor_sgd(
     if len(params) == 0:
         return
 
+    lr = _to_scalar(lr)
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list],  # type: ignore[list-item]
         with_indices=True,
     )
-
     for (
         device_params_,
         device_grads_,

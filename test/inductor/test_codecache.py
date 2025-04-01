@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -89,17 +90,20 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
-        CacheArtifactManager.clear()
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
+    @parametrize("use_static_cuda_launcher", (False, True))
     @parametrize("grad", (False, True))
-    def test_cache_load_function(self, device, dtype, dynamic, bundle_triton, grad):
+    def test_cache_load_function(
+        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher, grad
+    ):
         """
         Verify that we can populate and load functions from the cache.
         """
@@ -107,6 +111,12 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
+        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
+            raise unittest.SkipTest(
+                "Static cuda launcher requires cuda and triton bundling"
+            )
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
 
@@ -117,7 +127,10 @@ class TestFxGraphCache(TestCase):
         a_orig = torch.rand(25, dtype=dtype, device=device)
         b_orig = torch.rand(5, 5, dtype=dtype, device=device)
 
-        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+        with config.patch(
+            bundle_triton_into_fx_graph_cache=bundle_triton,
+            use_static_cuda_launcher=use_static_cuda_launcher,
+        ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             a1 = a_orig.clone().requires_grad_(grad)
@@ -150,6 +163,14 @@ class TestFxGraphCache(TestCase):
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
                 )
+                if use_static_cuda_launcher:
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_save_static_autotuner"],
+                        grad_multiplier if device == "cuda" else 0,
+                    )
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+                    )
 
             # A second call should hit. (First reset so in-memory guards
             # don't prevent compilation).
@@ -190,6 +211,15 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * read_and_emit_kernel_count,
                 )
+                if use_static_cuda_launcher:
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_save_static_autotuner"],
+                        grad_multiplier if device == "cuda" else 0,
+                    )
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_load_static_autotuner"],
+                        grad_multiplier if device == "cuda" else 0,
+                    )
 
             self.reset()
 
@@ -229,6 +259,15 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * read_and_emit_kernel_count,
                 )
+                if use_static_cuda_launcher:
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_save_static_autotuner"],
+                        grad_multiplier * 2 if device == "cuda" else 0,
+                    )
+                    self.assertEqual(
+                        counters["inductor"]["triton_bundler_load_static_autotuner"],
+                        grad_multiplier if device == "cuda" else 0,
+                    )
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
@@ -236,13 +275,25 @@ class TestFxGraphCache(TestCase):
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
-    def test_remote_cache_load_function(self, device, dtype, dynamic, bundle_triton):
+    @parametrize("use_static_cuda_launcher", (False, True))
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Can't check globalStats if there are workers
+    def test_remote_cache_load_function(
+        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher
+    ):
         from unittest.mock import patch
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
+        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
+            raise unittest.SkipTest(
+                "Static cuda launcher requires cuda and triton bundling"
+            )
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -254,6 +305,7 @@ class TestFxGraphCache(TestCase):
             {
                 "fx_graph_remote_cache": True,
                 "bundle_triton_into_fx_graph_cache": bundle_triton,
+                "use_static_cuda_launcher": use_static_cuda_launcher,
             }
         ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
@@ -363,6 +415,61 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_cache_hot_load_repeat(self):
+        def fn(x, y):
+            return x @ y.sin()
+
+        compiled_fn = torch.compile(fn, dynamic=False)
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+
+        a2 = torch.randn(4, 8)
+        b2 = torch.randn(8, 4)
+
+        with fresh_inductor_cache():
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+
+        self.assertFalse(torch.compiler._cache.CacheArtifactManager.need_serialize())
+        self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        self.reset()
+
+        with fresh_inductor_cache():
+            torch.compiler.load_cache_artifacts(artifact_bytes)
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self.assertFalse(torch.compiler._cache.CacheArtifactManager.need_serialize())
+
+        self.reset()
+
+        with fresh_inductor_cache():
+            eager_result = fn(a2, b2)
+            compiled_result = compiled_fn(a2, b2)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self.assertTrue(torch.compiler._cache.CacheArtifactManager.need_serialize())
 
     @torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -714,7 +821,9 @@ class TestFxGraphCache(TestCase):
 
             return torch.cond(x.shape[0], true_fn, false_fn, (x,))
 
-        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+        with config.patch(
+            bundle_triton_into_fx_graph_cache=bundle_triton,
+        ):
             compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
 
             x = torch.randn(4, 4, device=GPU_TYPE)
@@ -879,8 +988,13 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
     @parametrize("bundle_triton", (False, True))
-    def test_triton_op(self, bundle_triton):
+    @parametrize("use_static_cuda_launcher", (False, True))
+    def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
+
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
@@ -898,7 +1012,12 @@ class TestFxGraphCache(TestCase):
         def f(x, y):
             return add(x, y)
 
-        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+        compile_threads = 1 if use_static_cuda_launcher else config.compile_threads
+        with config.patch(
+            bundle_triton_into_fx_graph_cache=bundle_triton,
+            use_static_cuda_launcher=use_static_cuda_launcher,
+            compile_threads=compile_threads,
+        ):
             compiled_fn = torch.compile(f, fullgraph=True)
 
             x = torch.randn(4, device=GPU_TYPE)
@@ -1480,21 +1599,27 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test the get_hash_for_files helper.
         """
-        with tempfile.NamedTemporaryFile(delete=True) as temp:
-            temp.write(b"contents")
-            temp.flush()
+        # delete=True does not work on Windows.
+        # See https://docs.python.org/3.12/library/tempfile.html#tempfile.NamedTemporaryFile
+        with tempfile.NamedTemporaryFile(delete=False) as temp:
+            try:
+                temp.write(b"contents")
+                temp.flush()
 
-            hash1 = get_hash_for_files((temp.name,))
-            get_hash_for_files.cache_clear()
-            hash2 = get_hash_for_files((temp.name,))
+                hash1 = get_hash_for_files((temp.name,))
+                get_hash_for_files.cache_clear()
+                hash2 = get_hash_for_files((temp.name,))
 
-            temp.write(b" ")
-            temp.flush()
-            get_hash_for_files.cache_clear()
-            hash3 = get_hash_for_files((temp.name,))
+                temp.write(b" ")
+                temp.flush()
+                get_hash_for_files.cache_clear()
+                hash3 = get_hash_for_files((temp.name,))
 
-            self.assertEqual(hash1, hash2)
-            self.assertNotEqual(hash1, hash3)
+                self.assertEqual(hash1, hash2)
+                self.assertNotEqual(hash1, hash3)
+            finally:
+                temp.close()
+                os.unlink(temp.name)
 
 
 class TestCudaCompileCommand(TestCase):
