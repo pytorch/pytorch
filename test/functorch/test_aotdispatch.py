@@ -4315,10 +4315,9 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = cond[0];  cond = None
-    add = torch.ops.aten.add.Tensor(getitem, 3)
-    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cond, 3)
+    add_1 = torch.ops.aten.add.Tensor(cond, 4);  cond = None
     return (add, add_1)""",  # noqa: B950
         )
 
@@ -4334,9 +4333,8 @@ def forward(self, arg0_1):
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (cos_1,));  gt = true_graph_0 = false_graph_0 = cos_1 = None
-    getitem = cond[0];  cond = None
-    return (getitem,)""",  # noqa: B950
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [cos_1]);  gt = true_graph_0 = false_graph_0 = cos_1 = None
+    return cond""",  # noqa: B950
         )
 
         self.assertExpectedInline(
@@ -4346,7 +4344,7 @@ def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(sin, 7);  sin = None
     sin_1 = torch.ops.aten.sin.default(add);  add = None
-    return (sin_1,)""",
+    return sin_1""",
         )
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -4391,10 +4389,9 @@ def forward(self, arg0_1, arg1_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1, arg1_1));  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
-    getitem = cond[0];  cond = None
-    add = torch.ops.aten.add.Tensor(getitem, 3)
-    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(cond, 3)
+    add_1 = torch.ops.aten.add.Tensor(cond, 4);  cond = None
     return (add, add_1)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -4406,26 +4403,24 @@ def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_1,)""",
+    return add_1""",
         )
         self.assertExpectedInline(
             str(gm.false_graph_0.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    select = torch.ops.aten.select.int(cos, 0, 0);  select = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    select_1 = torch.ops.aten.select.int(cos, 0, 0);  select_1 = None
     body_graph_1 = self.body_graph_1
     map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
     getitem_1 = map_impl_1[0];  map_impl_1 = None
     sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
-    return (add_1,)""",
+    return add_1""",
         )
         self.assertExpectedInline(
             str(gm.false_graph_0.body_graph_0.code).strip(),
@@ -4434,7 +4429,7 @@ def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
     add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
-    return (add_1,)""",
+    return [add_1]""",
         )
 
     def test_aot_export_predispatch_map_2(self):
@@ -4510,10 +4505,9 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = cond[0];  cond = None
-    add = torch.ops.aten.add.Tensor(getitem, 3)
-    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cond, 3)
+    add_1 = torch.ops.aten.add.Tensor(cond, 4);  cond = None
     return (add, add_1)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -4525,7 +4519,7 @@ def forward(self, arg0_1):
     linear = torch.ops.aten.linear.default(sin, randn);  sin = randn = None
     add = torch.ops.aten.add.Tensor(linear, 5);  linear = None
     cos = torch.ops.aten.cos.default(add);  add = None
-    return (cos,)""",
+    return cos""",
         )
 
     def test_aot_export_predispatch_conv_and_bn(self):
@@ -4946,9 +4940,8 @@ def forward(self, arg0_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = cond[0];  cond = None
-    add = torch.ops.aten.add.Tensor(getitem, 3)
-    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    add = torch.ops.aten.add.Tensor(cond, 3)
+    add_1 = torch.ops.aten.add.Tensor(cond, 4);  cond = None
     return (add, add_1)""",  # noqa: B950
         )
 
@@ -4959,7 +4952,7 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 4)
     add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    return (cos,)""",
+    return cos""",
         )
 
         self.assertExpectedInline(
@@ -4969,7 +4962,7 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 5)
     add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    return (sin,)""",
+    return sin""",
         )
 
     def test_aot_export_simplified_pytrees_banned(self):
