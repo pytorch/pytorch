@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
+from typing_extensions import ParamSpec
 
 from . import config
 
@@ -228,7 +228,7 @@ def assume_constant_result(fn):
     return torch._dynamo.assume_constant_result(fn)
 
 
-def disable(fn=None, recursive=True, reason=None):
+def disable(fn=None, recursive=True, *, reason=None):
     """
     This function provides a decorator to disable compilation on a function.
     It also provides the option of recursively disabling called functions.
@@ -240,7 +240,7 @@ def disable(fn=None, recursive=True, reason=None):
     """
     import torch._dynamo
 
-    return torch._dynamo.disable(fn, recursive, reason)
+    return torch._dynamo.disable(fn, recursive, reason=reason)
 
 
 def set_stance(
