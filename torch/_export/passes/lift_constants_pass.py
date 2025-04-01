@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
-import warnings
+import logging
 from typing import Any, Union
 
 import torch
@@ -17,6 +17,9 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx.graph_module import _get_attr
+
+
+log = logging.getLogger(__name__)
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -213,9 +216,11 @@ def lift_constants_pass(
             elif isinstance(constant_val, torch.Tensor):
                 # Remove the parameterness of constant_val
                 if isinstance(constant_val, torch.nn.Parameter):
-                    warnings.warn(
-                        f"{node.target} created when tracing {node.meta.get('stack_trace', '<unknown stack>')} is a parameter. But"
-                        f"it's not registered with register_parameter(). export will treat it as a constant tensor"
+                    log.debug(
+                        "%s created when tracing %s is a parameter. But "
+                        "it's not registered with register_parameter(). export will treat it as a constant tensor",
+                        str(node.target),
+                        str(node.meta.get("stack_trace", "<unknown stack>")),
                     )
                     # We get the real data out of the parameter by disabling the surrounding fake mode.
                     with unset_fake_temporarily():
