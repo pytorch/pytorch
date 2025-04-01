@@ -37,14 +37,7 @@ class Partition:
 
 class _DependencyViewer:
     def __init__(self, graph_module: GraphModule):
-        self.upstreams = collections.defaultdict(set)
         self.downstreams = collections.defaultdict(set)
-
-        for node in graph_module.graph.nodes:
-            for input_node in node.all_input_nodes:
-                # add input_node and input_node's upstream dependency
-                self.upstreams[node].add(input_node)
-                self.upstreams[node].update(self.upstreams[input_node])
 
         for node in reversed(graph_module.graph.nodes):
             for output_node in node.users:
@@ -54,9 +47,6 @@ class _DependencyViewer:
 
     def downstreams_of(self, node: Node) -> set[Node]:
         return self.downstreams[node]
-
-    def upstreams_of(self, node: Node) -> set[Node]:
-        return self.upstreams[node]
 
 
 class CapabilityBasedPartitioner:
@@ -79,7 +69,7 @@ class CapabilityBasedPartitioner:
         )
         self.dependency_viewer = _DependencyViewer(graph_module)
 
-    def __is_node_supported(self, node: Node) -> bool:
+    def _is_node_supported(self, node: Node) -> bool:
         return self.operator_support.is_node_supported(
             dict(self.graph_module.named_modules()), node
         )
@@ -191,15 +181,6 @@ class CapabilityBasedPartitioner:
                         partition_map[id].add(target_id)
                         partition_map[id].update(partition_map[target_id])
 
-                # Iterate through all the upstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of the upstream node to the
-                # current node's partition id.
-                upstream_nodes = self.dependency_viewer.upstreams_of(node)
-                for curr_node in upstream_nodes:
-                    source_id = assignment.get(curr_node, None)
-                    if source_id is not None:
-                        partition_map[source_id].add(id)
-
             if node in assignment:
                 partitions_by_id[assignment[node]].remove_node(node)
 
@@ -225,7 +206,7 @@ class CapabilityBasedPartitioner:
             #
             # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
             # the fusion by adding an `else` block here to skip horizontal fusion.
-            if self.__is_node_supported(node) and node not in assignment:
+            if self._is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id
