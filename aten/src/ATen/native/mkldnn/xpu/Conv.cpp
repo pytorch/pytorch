@@ -890,7 +890,7 @@ Tensor convolution_pointwise_binary(
       padding,
       dilation,
       /*transpoced*/ false,
-      {{0, 0}},
+      {{0}},
       groups,
       attr);
 
@@ -945,7 +945,7 @@ Tensor& convolution_pointwise_binary_(
       padding,
       dilation,
       /*transpoced*/ false,
-      {{0, 0}},
+      {{0}},
       groups,
       attr);
 
