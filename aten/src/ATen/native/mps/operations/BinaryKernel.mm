@@ -92,6 +92,30 @@ static void chebyshev_polynomial_t_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "chebyshev_polynomial_t");
 }
 
+static void chebyshev_polynomial_u_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "chebyshev_polynomial_u_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "chebyshev_polynomial_u");
+}
+
+static void chebyshev_polynomial_v_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "chebyshev_polynomial_v_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "chebyshev_polynomial_v");
+}
+
+static void chebyshev_polynomial_w_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "chebyshev_polynomial_w_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "chebyshev_polynomial_w");
+}
+
+static void hermite_polynomial_h_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "hermite_polynomial_h_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "hermite_polynomial_h");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -107,6 +131,10 @@ REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_mps_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_mps_kernel)
+REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 } // namespace at::native
