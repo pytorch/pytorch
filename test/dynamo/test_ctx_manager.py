@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
-    TEST_WITH_ROCM,
 )
 
 
@@ -669,7 +668,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
