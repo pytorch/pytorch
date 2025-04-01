@@ -2207,9 +2207,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         strides = ", ".join([str(n.get_stride()) for n in input_nodes])
-        dtypes = ", ".join(
-            [str(n.get_dtype()) for n in input_nodes]
-        )
+        dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
         # when autotune_num_choices_displayed is None, [:None] means all
@@ -2279,7 +2277,6 @@ class AlgorithmSelectorCache(PersistentCache):
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
             f" seconds precompiling for {len(timings)} choices\n"
         )
-
 
     @staticmethod
     def benchmark_example_value(node):
