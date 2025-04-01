@@ -89,39 +89,22 @@ class Shard(Placement):
 
         # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
-        num_empty_tensors = num_chunks - len(tensor_list)
-
-        # if no need to have padding or tensor dim size is evenly sharded already
-        # we can return early.
-        if not with_padding or tensor.size(self.dim) % num_chunks == 0:
-            if contiguous:
-                tensor_list = [t.contiguous() for t in tensor_list]
-            return (
-                fill_empty_tensor_to_shards(tensor_list, self.dim, num_empty_tensors),
-                [],
-            )
+        tensor_list = fill_empty_tensor_to_shards(
+            tensor_list, self.dim, num_chunks - len(tensor_list)
+        )
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
-        # Compute chunk size for each chunk for ``self.dim``
-        chunk_sizes = [
-            tensor_list[idx].size(self.dim) if idx < len(tensor_list) else 0
-            for idx in range(num_chunks)
-        ]
-        # Compute pad size on each chunk
-        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
-
-        # Reuse tensor to fill empty chunk with empty tensor
-        tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, self.dim, num_empty_tensors
-        )
-        shard_list = []
-        for shard, pad_size in zip(tensor_list, pad_sizes):
-            # Fill the empty tensor with zeroes with padding.
-            if with_padding and pad_size > 0:
+        shard_list: list[torch.Tensor] = []
+        pad_sizes: list[int] = []
+        for shard in tensor_list:
+            if with_padding:
+                pad_size = full_chunk_size - shard.size(self.dim)
                 shard = pad_tensor(shard, self.dim, pad_size)
-            shard = shard.contiguous() if contiguous else shard
+                pad_sizes.append(pad_size)
+            if contiguous:
+                shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
 
@@ -134,6 +117,11 @@ class Shard(Placement):
     ) -> tuple[int, int]:
         """
         returns the local shard size and offset on a given tensor dim
+
+        # TODO(whc)
+         - `size_on_dim` arg has a pretty confusing name, would 'global_dim_size' be better?
+         - `local_shard_size_on_dim` could be renamed to `local_shard_size`?
+         - why do we have 'return_offset` bool? if we always return a tuple anyway, why not always return the real offset?
         """
         # Compute the chunk size inline with ``torch.chunk``
         if size_on_dim % num_chunks == 0:
@@ -186,14 +174,17 @@ class Shard(Placement):
             tensor, num_chunks, with_padding=True, contiguous=True
         )
         output = torch.empty_like(scatter_list[mesh_dim_local_rank])
+
         # perform scatter from the src_data_rank as data source when it is not None
         mesh_scatter(
             output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
         )
 
         # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
+        if pad_sizes[mesh_dim_local_rank] > 0:
             output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
+            # Unpad might return a view, hence we need to remake it contiguous
+            output = output.contiguous()
         return output
 
     def _reduce_shard_tensor(
@@ -243,15 +234,13 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        # check if it's uneven, so we need to pad input tensor before all_gather
-        local_shape = list(local_tensor.size())
 
         logical_dim_size = current_logical_shape[self.dim]
         is_padded = logical_dim_size % num_chunks != 0
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_shape[self.dim]
+            pad_size = full_chunk_size - local_tensor.size(self.dim)
             local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
 
         if not local_tensor.is_contiguous():
@@ -427,8 +416,6 @@ class _StridedShard(Shard):
     dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
     `split_factor` of the _StridedShard placement on "dp" dim is 2.
 
-    TODO: strided sharding needs to work fine with uneven sharding. Now it forbids
-    resharding if the tensor is unevenly sharded.
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
@@ -457,6 +444,8 @@ class _StridedShard(Shard):
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
 
+    # TODO(whc) (we should update this to match the uneven shard behavior in `to_replicate_tensor
+    # but this only matters for unit tests
     def _split_tensor(
         self,
         tensor: torch.Tensor,
@@ -465,37 +454,35 @@ class _StridedShard(Shard):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        """
-        TODO: currently _StridedShard does not support padding
-        """
         assert self.dim <= tensor.ndim, (
             f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
 
         total_split = num_chunks * self.split_factor
-        assert tensor.size(self.dim) % total_split == 0, (
-            "_StridedShard currently only allows even sharding but got tensor size"
-            f" {tensor.size(self.dim)} on dim {self.dim} and total split"
-            f" {total_split}={num_chunks} * {self.split_factor}"
+
+        tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
+        tensor_list = fill_empty_tensor_to_shards(
+            tensor_list, self.dim, total_split - len(tensor_list)
         )
 
-        group_size = self.split_factor
-        total_split_tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
-        tensor_list = [
-            torch.cat(
-                [
-                    total_split_tensor_list[i + j * num_chunks]  # stride is num_chunks
-                    for j in range(group_size)
-                ],
+        # compute the chunk size inline with ``torch.chunk`` to calculate padding
+        full_chunk_size = (tensor.size(self.dim) + total_split - 1) // total_split
+
+        shard_list: list[torch.Tensor] = []
+        pad_sizes: list[int] = []
+        for i in range(num_chunks):
+            shard = torch.cat(
+                [tensor_list[i + j * num_chunks] for j in range(self.split_factor)],
                 dim=self.dim,
             )
-            for i in range(num_chunks)
-        ]
-
-        if contiguous:
-            tensor_list = [t.contiguous() for t in tensor_list]
-
-        return tensor_list, []
+            if with_padding:
+                pad_size = full_chunk_size * self.split_factor - shard.size(self.dim)
+                shard = pad_tensor(shard, self.dim, pad_size)
+                pad_sizes.append(pad_size)
+            if contiguous:
+                shard = shard.contiguous()
+            shard_list.append(shard)
+        return shard_list, pad_sizes
 
     def _to_replicate_tensor(
         self,
@@ -505,17 +492,77 @@ class _StridedShard(Shard):
         current_logical_shape: list[int],
     ) -> torch.Tensor:
         """
-        Note: currently _StridedShard does not support padding
+        Given a tensor with strided sharding (e.g. [StridedShard(d), Shard(d)]),
+        this function is called during the process of converting to [Replicate(), Replicate()],
+        and `local_tensor` represents the portion of the tensor on this rank after the intermediate step of
+        converting to [StridedShard(d), Replicate()] in right-to-left unsharding order.
+
+        note: this conversion logic is pretty specialized on this 2D case.  It could be generalized further. This
+        is a common enough case to be worth fixing (since it occurs when applying TP and then FSDP to a model).
+
+        note: this does not support 'reduce_scatter' for StridedShard.
+
+        Example
+        -------
+        mesh = (DP=2, TP=2)
+        # single-gpu "weight" of size 5, will be 'uneven' for sharding
+        original = torch.arange(5)
+
+        tp sharded tensor
+        -----------------
+        `tp = distribute_tensor(x, world_mesh['tp'], [Shard(0)])`
+
+        local_tensors:
+        rank0: [0,1,2]    rank1: [3,4]
+        rank1: [0,1,2]    rank3: [3,4]
+
+        fsdp+tp sharded tensor
+        ----------------------
+        `dp_tp = ...` (the process of creating a strided-shard tensor is skipped over as it is hacky and complicated
+        #TODO put an example somewhre and ref to it)
+        dp_tp has placement (_StridedShard(0, split_factor=2), Shard(0))
+        local_tensors:
+        rank0: [0,1]  rank1: [3]
+        rank1: [2]    rank3: [4]
+
+        Now, say someone wants to reconstruct dp_tp's full tensor. This will invoke 'redistribute' to replicate.
+        redistribute will first replicate the "Shard(0)" placement on the rightmost mesh dim, then replicate the
+        StridedShard placement second, which is implemented by this function.
+        So our starting point (`local_tensor` arg) is the result of replicating the Shard(0) placement across the
+        TP dim, which looks like this.
+
+        Note the discrepancy with the 'tp sharded tensor' line above!  We'll fix it by locally shuffling data.
+
+        local_tensors:
+        rank0: [0,1,3]  rank1: [0,1,3]
+        rank1: [2,4]    rank3: [2,4]
+
+        Step 1: replicate over the DP dimension.  Afterwards, each rank can locally sort the values.
+          note: we need padding to do this allgather, and we'll need to keep track of the padding amount for later
+                local_tensors:
+        rank0: [0,1,3,2,4]    rank1: [0,1,3,2,4]
+        rank1: [0,1,3,2,4]    rank3: [0,1,3,2,4]
+
+        Step 2: chunk and shuffle values around to account for the wrong order of operations above
+        and get the original tensor content back
+
+        01324#       <- our allgather includes padding, if padding was applied in step 1
+        01324        <- Remove the padding
+        013, 24      <- chunk once, 'undoing' the DP allgather
+        01, 3, 2, 4  <- chunk each chunk, 'undoing' the initial (wrong) TP allgather performed by Shard(0)->Replicate()
+        012, 34      <- interleave with stride=TP mesh dim size
+        01234        <- concatenate
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        total_split = num_chunks * self.split_factor
-        # NOTE: we require Strided Sharding to be even for now
-        assert current_logical_shape[self.dim] % total_split == 0, (
-            "_StridedShard requires even sharding but got tensor size "
-            f"{current_logical_shape[self.dim]} on dim {self.dim} and "
-            f"total split {total_split}=num_chunks {num_chunks} "
-            f"* split_factor {self.split_factor}"
-        )
+        logical_dim_size = current_logical_shape[self.dim]
+        full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+        local_pad_size = full_chunk_size - local_tensor.size(self.dim)
+
+        if local_pad_size > 0:
+            local_tensor = pad_tensor(local_tensor, self.dim, local_pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         result = funcol.all_gather_tensor(
             local_tensor,
@@ -525,19 +572,22 @@ class _StridedShard(Shard):
         if isinstance(result, funcol.AsyncCollectiveTensor):
             result = result.wait()
 
-        tensor_shard_list = torch.chunk(result, total_split, dim=self.dim)
-        # rearrange the order
-        new_tensor_shard_list = []
-        for idx in range(len(tensor_shard_list)):
-            # the shard split of index `idx` is assigned a new index within
-            # _StridedShard._split_tensor:
-            # the original tensor was split into `total_split` chunks,
-            # all chunks with the same `idx % num_chunks` are merged into one
-            # new shard and placed on mesh's local rank `idx % num_chunks`
-            idx_after_split = idx % num_chunks * self.split_factor + idx // num_chunks
-            new_tensor_shard_list.append(tensor_shard_list[idx_after_split])
+        if result.shape[self.dim] > logical_dim_size:
+            result = unpad_tensor(
+                result, self.dim, result.shape[self.dim] - logical_dim_size
+            )
 
-        return torch.cat(new_tensor_shard_list, dim=self.dim).contiguous()
+        # this reverses our 'all_gather' but gives every rank a copy
+        dp_shards = torch.chunk(result, num_chunks, dim=self.dim)
+        # this undoes the 'Shard(0)' -> Replicate() that happened over the wrong mesh dim in the first place
+        tp_shards: list[torch.Tensor] = []
+        for p in dp_shards:
+            tp_shards.extend(torch.chunk(p, self.split_factor, dim=self.dim))
+        # now we just have to correctly stride the shards
+        reordered_shards = []
+        for i in range(self.split_factor):
+            reordered_shards.extend(tp_shards[i :: self.split_factor])
+        return torch.cat(reordered_shards, dim=self.dim).contiguous()
 
 
 @dataclass(frozen=True)

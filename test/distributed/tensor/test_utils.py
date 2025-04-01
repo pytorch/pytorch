@@ -115,6 +115,31 @@ class UtilTest(DTensorTestBase):
         self.assertEqual(global_offset, expected_global_offset)
 
     @with_comms
+    def test_uneven_fsdp_tp_meta_compute(self):
+        # FSDP + TP uneven sharding
+        tp_size = 2
+        dp_size = self.world_size // tp_size
+        global_mesh = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        global_tensor_shape = torch.Size([15, 5])
+        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
+        rank = global_mesh.get_rank()
+        if dp_size == 2:
+            expected_shapes = [4, 4, 4, 3]
+            expected_offsets = [0, 8, 4, 12]
+        elif dp_size == 4:
+            expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
+            expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
+        else:
+            raise RuntimeError("Expected dp_size 2 or 4")
+        self.assertEqual(local_shape[0], expected_shapes[rank])
+        self.assertEqual(global_offset[0], expected_offsets[rank])
+
+    @with_comms
     def test_hsdp_tp_meta_compute(self):
         # HSDP + TP sharding
         tp_size = 2
