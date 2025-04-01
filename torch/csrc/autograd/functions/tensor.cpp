@@ -270,9 +270,9 @@ variable_list CopySlices::apply_with_saved(
     TORCH_INTERNAL_ASSERT(stuff.size() == 3);
     // These variables are named the same as in CopySlices::apply_impl.
     // Follow along there.
-    auto result = stuff[0];
-    auto grad_slice = stuff[1];
-    auto grad_slice_clone = stuff[2];
+    const auto& result = stuff[0];
+    const auto& grad_slice = stuff[1];
+    const auto& grad_slice_clone = stuff[2];
     auto res = fn->apply_with_saved({grad_slice_clone}, saved);
     results = interface->call_copy_slices_epilogue(
         saved.get_py_compiler(), needs_input_grad, result, res, grad_slice);
