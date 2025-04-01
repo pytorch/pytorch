@@ -1668,6 +1668,10 @@ class GraphLowering(torch.fx.Interpreter):
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
                         if user.target in need_fixed_layout:
+                            if "val" not in n.meta:
+                                print(f"node missing val is: {n.format_node()}")
+                                breakpoint()
+                                assert False
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(n.meta["val"].stride()),
