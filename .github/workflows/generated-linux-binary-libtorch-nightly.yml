@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -76,7 +76,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cpu-shared-with-deps-release
@@ -98,7 +98,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cpu-shared-with-deps-release
@@ -118,7 +118,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -140,7 +140,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda11_8-shared-with-deps-release
@@ -163,7 +163,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda11_8-shared-with-deps-release
@@ -183,7 +183,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -205,7 +205,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_6-shared-with-deps-release
@@ -228,7 +228,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_6-shared-with-deps-release
@@ -248,7 +248,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -270,7 +270,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_8-shared-with-deps-release
@@ -293,7 +293,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_8-shared-with-deps-release
@@ -313,7 +313,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -337,7 +337,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
     steps:
@@ -366,7 +366,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm6.2.4-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.2.4:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -385,7 +385,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-rocm6_2_4-shared-with-deps-release
@@ -405,7 +405,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -429,7 +429,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
     steps:
@@ -458,7 +458,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm6.3-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.3:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -477,7 +477,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-rocm6_3-shared-with-deps-release
