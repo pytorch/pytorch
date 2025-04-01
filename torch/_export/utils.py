@@ -844,6 +844,12 @@ def placeholder_naming_pass(
             These are named token, token_1, ...
     """
 
+    custom_meta: dict[str, Any] = {}
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if "custom" in node.meta:
+                custom_meta[node.name] = node.meta["custom"]
+
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
@@ -918,6 +924,8 @@ def placeholder_naming_pass(
         if node.op == "placeholder":
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
+            if node.name in custom_meta:
+                node.meta["custom"] = custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):

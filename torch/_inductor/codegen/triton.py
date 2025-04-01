@@ -31,7 +31,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
-from ..codecache import code_hash, get_path, PyCodeCache
+from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -4182,8 +4182,7 @@ class TritonScheduling(SIMDScheduling):
 
             def store_cache():
                 path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
+                write_atomic(path, str(ms))
 
             def load_cache():
                 path = cache_file_path()
@@ -4360,8 +4359,7 @@ class TritonScheduling(SIMDScheduling):
 
         def store_cache():
             path = cache_file_path()
-            with open(path, "w") as fd:
-                fd.write(str(ms) + " " + str(ms_clone))
+            write_atomic(path, str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
         total_clone_ms: float = 0.0
