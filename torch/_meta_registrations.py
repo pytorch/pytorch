@@ -6234,9 +6234,11 @@ def meta_scaled_mm(
         n = mat2.size(1)
 
         is_blockwise_scaling = (
-            (scale_a.dtype == torch.float8_e8m0fnu
-            and scale_b.dtype == torch.float8_e8m0fnu) or
-            (scale_a.dtype == torch.float8_e4m3fn and scale_b.dtype == torch.float8_e4m3fn)
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        ) or (
+            scale_a.dtype == torch.float8_e4m3fn
+            and scale_b.dtype == torch.float8_e4m3fn
         )
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
