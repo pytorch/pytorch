@@ -620,15 +620,6 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-        # NB: Why is this the dynamo_compile counter?  The rule here is that
-        # if it gets an entry in the dynamo_compile table, we also want to
-        # tick up the wait counter.  We have to displeasingly manually trigger
-        # the counter here because we may dropped into compile_fx directly
-        # from lazy backwards compilation.
-        stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
-        stack.enter_context(
-            _WaitCounter("pytorch.wait_counter.all_compilation_types").guard()
-        )
 
         if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
@@ -691,7 +682,6 @@ def _compile_fx_inner(
 
     with (
         _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
-        _WaitCounter("pytorch.wait_counter.all_compilation_types").guard(),
     ):
         use_cache = (
             not config.force_disable_caches
