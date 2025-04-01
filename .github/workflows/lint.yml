@@ -233,8 +233,6 @@ jobs:
             runner: linux.24_04.4x
           - test_type: without_torch
             runner: linux.24_04.4x
-          # NOTE: The oldest supported version of python for 24.04 is 3.8
-          #       so this cannot be updated if we want to keep this test at 3.6
           - test_type: older_python_version
             runner: linux.24_04.4x
     steps:
@@ -256,7 +254,7 @@ jobs:
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v5
         with:
-          python-version: 3.6
+          python-version: 3.8
           architecture: x64
           check-latest: false
           cache: pip
