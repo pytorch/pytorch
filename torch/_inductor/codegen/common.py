@@ -185,9 +185,6 @@ class WorkspaceArg:
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
 
-    def get_offset(self) -> sympy.Expr:
-        return sympy.S.Zero
-
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
 
@@ -196,10 +193,6 @@ class WorkspaceArg:
 
     def get_name(self) -> str:
         return self.outer_name
-
-    @property
-    def name(self) -> str:
-        return self.get_name()
 
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
