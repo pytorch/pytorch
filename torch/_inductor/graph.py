@@ -580,7 +580,7 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in ["cpu", "xpu"]
                 for n in conv_nodes
                 for idx in [0, 1]
             )

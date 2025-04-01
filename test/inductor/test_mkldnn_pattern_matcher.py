@@ -129,17 +129,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     if output.is_contiguous(memory_format=torch.contiguous_format) or (
         TEST_ACL and dtype == torch.bfloat16
     ):
-        # For xpu dynamic conv, we don't do layout optimization in fw_compile_freezing:
-        # https://github.com/pytorch/pytorch/blob/99a03211cb58cf3e5e3dea0c543795af43c41da8/torch/_inductor/graph.py#L528C1-L555
-        # Thus we don't need a new kernel to enforce output_layout.
-        if (
-            device.startswith("xpu")
-            and dynamo_config.dynamic_shapes
-            and (not dynamo_config.assume_static_by_default)
-        ):
-            output_kernel = 0
-        else:
-            output_kernel = 1
+        output_kernel = 1
 
     return input_kernel + output_kernel
 
