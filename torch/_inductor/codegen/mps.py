@@ -299,6 +299,12 @@ class MetalOverrides(OpOverrides):
         return f"metal::sqrt({x})"
 
     @staticmethod
+    def neg(x: CSEVariable) -> str:
+        # TODO: Does it rely on undefined behavior?
+        # If so, add special logic for unsigned types
+        return f"static_cast<decltype({x})>(-{x})"
+
+    @staticmethod
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::rsqrt({x})"
 
