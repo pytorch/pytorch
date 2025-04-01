@@ -11,13 +11,13 @@ import sys
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 from torch._environment import is_fbcode
 from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from typing_extensions import ParamSpec
 
 from . import trace_rules, variables
 from .comptime import comptime
@@ -65,7 +65,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, reason=None):
+def disable(fn=None, recursive=True, *, reason=None):
     """
     Decorator to disable TorchDynamo
 
