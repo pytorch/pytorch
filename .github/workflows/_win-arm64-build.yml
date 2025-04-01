@@ -127,17 +127,16 @@ jobs:
         shell: bash
         run: python pytorch/.github/scripts/parse_ref.py
 
-      - name: cd pytorch
-        shell: cmd
-        run: |
-          cd pytorch
-
       - name: Get workflow job id
+      # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
+      # timeout-minutes: 10
+        shell: bash
         id: get-job-id
-        uses: ./pytorch/.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
+        env:
+          GITHUB_TOKEN: ${{ inputs.github-token }}
 
       - name: popd
         shell: cmd
