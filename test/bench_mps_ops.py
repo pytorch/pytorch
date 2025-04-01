@@ -72,6 +72,8 @@ def bench_binary(
 
 def main() -> None:
     dtypes = [torch.float16, torch.float32]
+    if torch.backends.mps.is_macos_or_newer(14, 0):
+        dtypes.append(torch.bfloat16)
     # Profile unary ops
     rc = []
     for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):
@@ -83,8 +85,8 @@ def main() -> None:
     ops = [torch.fmax, torch.add]
     for op, dtype in itertools.product(ops, dtypes):
         rc.extend(bench_binary(op, dt_a=dtype))
-    for op in ops:
-        rc.extend(bench_binary(op, dt_b=torch.float16))
+        if dtype == torch.float32:
+            rc.extend(bench_binary(op, dt_b=torch.float16))
     Compare(rc).print()
 
 
