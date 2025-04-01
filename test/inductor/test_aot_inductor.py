@@ -3900,7 +3900,8 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
-    def test_aoti_debug_printer_codegen(self):
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -3911,9 +3912,10 @@ class AOTInductorTestsTemplate:
             def forward(self, a):
                 return torch.nn.functional.linear(a, self.weight, self.bias)
 
-        # only linux and win32 support enable_kernel_profile
         if sys.platform not in ["linux", "win32"]:
-            return
+            raise unittest.SkipTest(
+                "enable_kernel_profile only supported on linux and win32"
+            )
 
         M = 8
         N = 6
@@ -3922,28 +3924,22 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-
-        kernel_calls =                          \
-            f"aoti_torch_{GPU_TYPE}_addmm_out"  \
-            if self.device == GPU_TYPE          \
+        kernel_calls = (
+            f"aoti_torch_{GPU_TYPE}_addmm_out"
+            if self.device == GPU_TYPE
             else "aoti_torch_cpu_addmm_out"
-
-        # test default config
-        with config.patch({"cpp.enable_kernel_profile": False}):
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
-            )
-            FileCheck().check_not(f"RECORD_FUNCTION").run(code)
-
-        with config.patch({"cpp.enable_kernel_profile": True}):
+        )
+        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = (
-                f"RECORD_FUNCTION(\"{kernel_calls}\", c10::ArrayRef<c10::IValue>());"
+                f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
             )
-
-            FileCheck().check(shim_fn_codes).run(code)
+            if enable_kernel_profile:
+                FileCheck().check(shim_fn_codes).run(code)
+            else:
+                FileCheck().check_not(shim_fn_codes).run(code)
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
