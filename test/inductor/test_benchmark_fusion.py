@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
 import math
 import os
+
+
+os.environ["TORCH_LOGS"] = "+inductor"
+
 import sys
 
 import torch
