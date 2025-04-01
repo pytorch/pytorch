@@ -421,9 +421,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 }
             """
         )
-        with self.prefix.indent():
-            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
-                gen_check("input_handles", idx, name, tensor)
+        if (
+            config.aot_inductor.compile_wrapper_opt_level == "O0"
+            or len(V.graph.graph_inputs) < 500
+        ):
+            with self.prefix.indent():
+                for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+                    gen_check("input_handles", idx, name, tensor)
+        else:
+            self.prefix.splice(
+                """
+                throw std::runtime_error(
+                    "too many inputs for wrapper code to be compiled with input runtime checks. "
+                    "Please compile with _inductor.config.aot_inductor.compile_wrapper_opt_level == O0"
+                );
+                """
+            )
         self.prefix.writeline("}")
 
     def write_wrapper_decl(self):
