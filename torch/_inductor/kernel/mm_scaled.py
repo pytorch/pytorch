@@ -11,7 +11,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 from torch.utils._triton import has_triton_tma_device
 
 from ..config import triton as triton_config
-from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
+from ..ir import _IntLike, ChoiceCaller, get_device_type, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -27,13 +27,12 @@ from ..utils import (
     use_ck_gemm_template,
     use_triton_template,
 )
+from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     mm_args,
     mm_grid,
     persistent_mm_grid,
-    scaled_mm_configs,
-    scaled_persistent_mm_configs,
     should_fallback_to_aten,
 )
 
@@ -508,6 +507,7 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
+
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten._scaled_mm.default_{m}_{n}_{k}"] += 1
     log.info(
@@ -519,6 +519,8 @@ def tuned_scaled_mm(
         mat_b.get_dtype(),
         layout,
     )
+
+    device_type = get_device_type(mat_a)
 
     check_supported_striding(mat_a, mat_b)
 
@@ -543,6 +545,11 @@ def tuned_scaled_mm(
         choices.append(aten_choice)
 
     _, is_nonzero = _is_static_problem(layout)
+
+    scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)
+    scaled_persistent_mm_configs = V.choices.get_scaled_persistent_mm_configs(
+        device_type
+    )
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):
