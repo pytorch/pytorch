@@ -589,7 +589,9 @@ class UnflattenedModule(torch.nn.Module):
         return flat_args
 
     def forward(self, *args, **kwargs):
-        flat_args = torch._dynamo.disable(self.process_forward_inputs)(*args, **kwargs)
+        flat_args = torch._dynamo.disable(self.process_forward_inputs, reason=None)(
+            *args, **kwargs
+        )
         signature = self.module_call_graph[0].signature
 
         if is_fx_tracing():
