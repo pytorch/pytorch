@@ -4165,6 +4165,28 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ]
         subprocess.check_output(cmd, shell=False)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_custom_ops_inputs_mem_leak(self):
+        @torch.library.custom_op("mylib::f", mutates_args={"y"})
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            y.mul_(2)
+            return x * y
+
+        def _test(*args, **kwargs):
+            ref_counts_before = [
+                sys.getrefcount(a) for a in pytree.arg_tree_leaves(args, kwargs)
+            ]
+
+            torch.ops.mylib.f(*args, **kwargs)
+            ref_counts_after = [
+                sys.getrefcount(a) for a in pytree.arg_tree_leaves(args, kwargs)
+            ]
+            self.assertEqual(ref_counts_before, ref_counts_after)
+
+        _test(torch.ones(1, requires_grad=True), torch.ones(2))
+        _test(torch.ones(1), y=torch.ones(2, requires_grad=True))
+        _test(x=torch.ones(1), y=torch.ones(2))
+
 
 class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""

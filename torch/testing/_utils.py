@@ -50,3 +50,19 @@ def freeze_rng_state():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
             torch.set_rng_state(rng_state)
+
+
+def test_cuda_memory_leak(fn, inp_fn, assert_true_fn):
+    # Requires to be used in serialTest
+    import gc
+
+    ins = inp_fn()
+    torch.cuda.reset_peak_memory_stats()
+    fn(*ins)
+    gc.collect()
+    was_allocated = torch.cuda.memory_allocated()
+
+    for _ in range(1000):
+        fn(*ins)
+    gc.collect()
+    assert_true_fn(torch.cuda.memory_allocated() == was_allocated)

@@ -54,6 +54,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -72,6 +73,7 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     parametrize,
     run_tests,
+    serialTest,
     skipIfRocm,
     TestCase,
     xfail_inherited_tests,
@@ -6560,6 +6562,29 @@ metadata incorrectly.
             y.backward(tg)
 
             self.assertEqual(ref_x.grad, x.grad)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @serialTest()
+    def test_memory_leaks_base(self, backend):
+        bsz = 10
+        emb_dim = 5
+        num_classes = 2
+        x = torch.randn(bsz, emb_dim, device="cuda", requires_grad=True)
+        w = torch.randn(num_classes, emb_dim, device="cuda")
+        l = torch.randint(num_classes, (bsz,), device="cuda", dtype=torch.int64)
+
+        def fn(inp, w, l):
+            x = torch.nn.functional.linear(inp, w)
+            loss = torch.nn.functional.cross_entropy(x, l)
+            return loss
+
+        def inp_fn():
+            return x, w, l
+
+        _test_fn = torch.compile(fn, backend=backend)
+        torch.testing._utils.test_cuda_memory_leak(_test_fn, inp_fn, self.assertTrue)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_flex_attn_noncontiguous_tangents(self):
