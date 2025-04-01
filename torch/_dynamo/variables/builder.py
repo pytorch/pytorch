@@ -1539,7 +1539,13 @@ class VariableBuilder:
                 # we graph break here, Dynamo does not know how to create
                 # continuation functions for such bytecodes. So, we delay the
                 # graph break to CALL_FUNCTION.
-                return DelayGraphBreakVariable(source=self.source)
+                msg = inspect.getattr_static(
+                    value.forward, "_torchdynamo_disable_msg", None
+                )
+                return DelayGraphBreakVariable(
+                    source=self.source,
+                    msg=f"Optimized `nn.Module` is wrapped with `torch.compiler.disable` (reason: {msg})",
+                )
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.source = AttrSource(self.source, "_orig_mod")

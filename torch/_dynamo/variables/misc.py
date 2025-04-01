@@ -35,7 +35,7 @@ import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
@@ -395,6 +395,24 @@ class DelayGraphBreakVariable(UnknownVariable):
     """
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
+
+    def __init__(self, msg=None, **kwargs):
+        super().__init__(**kwargs)
+        self.msg = msg
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented_v2(
+            gb_type="Unsupported function call (delayed)",
+            context=f"source: {self.source}",
+            explanation="Dynamo determined that a graph break should occur "
+            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            hints=[],
+        )
 
 
 class ComptimeVariable(VariableTracker):

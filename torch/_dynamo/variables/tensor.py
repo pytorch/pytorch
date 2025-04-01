@@ -453,7 +453,8 @@ class TensorVariable(VariableTracker):
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
                 return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name)
+                    source=AttrSource(self.source, name),
+                    msg="Getting an inplace view on a graph input is not supported",
                 )
 
         # For attributes (not methods) that were not caught in the special handling above,

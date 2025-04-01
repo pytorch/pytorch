@@ -805,8 +805,9 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
+    def __init__(self, msg: Optional[str] = None) -> None:
         super().__init__(callback=None)
+        self.msg = msg
 
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -854,6 +855,7 @@ class DisableContext(_TorchDynamoContext):
                 _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+        _fn._torchdynamo_disable_msg = self.msg  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
