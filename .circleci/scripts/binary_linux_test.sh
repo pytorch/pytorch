@@ -97,7 +97,7 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
   # this package contains all libraries packaged in torch libs folder
   # example of such package is https://download.pytorch.org/whl/cu126_full/torch
   if [[ "\$torch_pkg_size" -gt  1500000000 ]]; then
-    python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled --pypi-pckg-check disabled
+    python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled --pypi-pkg-check disabled
   else
     python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled $extra_parameters
   fi
