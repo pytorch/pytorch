@@ -11,10 +11,10 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._logging._internal
 import torch._logging.structured
-from torch._export.passes.insert_custom_op_guards import (
+from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
+from torch._subclasses.fake_profile import (
     generate_and_register_fake_kernels,
     get_custom_op_profiles,
-    insert_custom_op_guards,
     OpProfile,
 )
 from torch.export import ExportedProgram
