@@ -197,14 +197,14 @@ jobs:
         run: |
           cd pytorch
           ./.ci/pytorch/win-arm64-build.sh
-
-      - name: Upload artifacts to s3
-        if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
         with:
+          name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
-          name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
 
       - name: Upload sccache stats
