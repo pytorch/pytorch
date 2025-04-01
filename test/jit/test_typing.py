@@ -140,7 +140,7 @@ class TestTyping(JitTestCase):
 
         # Check for invalid key and value type annotation
         def wrong_key_value_type(
-            dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]
+            dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule],
         ):
             return
 

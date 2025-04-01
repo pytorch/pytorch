@@ -40,13 +40,12 @@ USE_BLACK_FILELIST = re.compile(
                     # test/[a-h]*/**
                     "test/[a-h]*/**",
                     # test/[i-j]*/**
-                    "test/j*/**",
                     # test/[k-n]*/**
-                    "test/[k-n]*/**",
+                    # test/n*/**
+                    "test/n*/**",
                     # test/optim/**
                     "test/optim/**",
                     # "test/[p-z]*/**",
-                    "test/[p-z]*/**",
                     # torch/**
                     # torch/_[a-c]*/**
                     "torch/_[a-c]*/**",
