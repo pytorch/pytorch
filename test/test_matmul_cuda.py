@@ -307,7 +307,7 @@ class TestMatmulCuda(TestCase):
         if b_row_major:
             b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, 
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
         a_contig = a if a_row_major else a.t()
@@ -342,12 +342,12 @@ class TestMatmulCuda(TestCase):
         if a_row_major:
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, 
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
         if b_row_major:
             b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, 
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
         a_contig = a if a_row_major else a.transpose(-2, -1)
@@ -371,7 +371,7 @@ class TestMatmulCuda(TestCase):
         if a_row_major:
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, 
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
         if b_row_major:
             b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
