@@ -137,11 +137,6 @@ jobs:
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
           GITHUB_TOKEN: ${{ inputs.github-token }}
-
-      - name: popd
-        shell: cmd
-        run: |
-          popd
         
       - name: Bootstrap Build Tools
         shell: cmd
