@@ -23,7 +23,7 @@ None values for efficiency and code reuse.
 import collections
 import functools
 import types
-from collections.abc import Hashable as t_Hashable
+from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -66,8 +66,11 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
-    elif isinstance(x, variables.UserDefinedObjectVariable):
-        return isinstance(x.value, t_Hashable)
+    elif (
+        isinstance(x, variables.UserDefinedObjectVariable)
+        and "__instancecheck__" not in type(x.value).__dict__
+    ):
+        return isinstance(x.value, py_Hashable)
     else:
         return isinstance(
             x,
@@ -138,8 +141,9 @@ class ConstDictVariable(VariableTracker):
                 return Hashable(self.vt.referent_vt).underlying_value
             elif (
                 isinstance(self.vt, variables.UserDefinedObjectVariable)
-                and isinstance(self.vt.value, t_Hashable)
-                and self.vt.value.__class__.__hash__ is int.__hash__
+                and "__instancecheck__" not in type(self.vt.value).__dict__
+                and isinstance(self.vt.value, py_Hashable)
+                and type(self.vt.value).__hash__ is int.__hash__
             ):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (_ZeroSentinel):
