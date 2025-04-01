@@ -883,9 +883,16 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert exc2.__context__ is None
 
 
-class CPythonExceptionTests(torch._dynamo.test_case.CPythonTestCase):
+class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
+    def setUp(self):
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
     @make_dynamo_test
     def testChainingAttrs(self):
         e = Exception()
