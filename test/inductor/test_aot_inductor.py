@@ -2,6 +2,10 @@
 import itertools
 import logging
 import os
+
+
+os.environ["TORCH_LOGS"] = "+inductor"
+
 import sys
 import tempfile
 import unittest
