@@ -18,8 +18,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "parsePinnedNumRegisterThreads:8,"
       "pinned_use_background_threads:True";
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
-  c10::CachingAllocator::AllocatorConfig& config =
-      c10::CachingAllocator::AllocatorConfig::instance();
+  auto& config = c10::CachingAllocator::getAllocatorConfig();
   EXPECT_EQ(config.last_allocator_settings(), env);
   EXPECT_EQ(config.max_split_size(), 40 * 1024ul * 1024);
   EXPECT_EQ(config.max_non_split_rounding_size(), 30 * 1024ul * 1024);
