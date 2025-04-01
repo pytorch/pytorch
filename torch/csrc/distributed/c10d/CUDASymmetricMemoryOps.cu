@@ -438,7 +438,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
 
 at::Tensor one_shot_all_reduce_out_impl(
     const at::Tensor& input,
-    const c10::optional<at::Tensor>& local_input,
+    const std::optional<at::Tensor>& local_input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
@@ -522,7 +522,7 @@ at::Tensor one_shot_all_reduce_out(
     std::string group_name,
     at::Tensor out) {
   return one_shot_all_reduce_out_impl(
-      input, c10::nullopt, reduce_op, group_name, out);
+      input, std::nullopt, reduce_op, group_name, out);
 }
 
 at::Tensor one_shot_all_reduce_copy_out(
@@ -541,7 +541,7 @@ at::Tensor one_shot_all_reduce(
     std::string group_name) {
   auto out = at::empty_like(input);
   return one_shot_all_reduce_out_impl(
-      input, c10::nullopt, reduce_op, group_name, out);
+      input, std::nullopt, reduce_op, group_name, out);
 }
 
 at::Tensor one_shot_all_reduce_copy(
@@ -661,7 +661,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
 
 at::Tensor two_shot_all_reduce_impl(
     at::Tensor input,
-    c10::optional<at::Tensor> output,
+    std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(
@@ -754,7 +754,7 @@ at::Tensor two_shot_all_reduce_(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name) {
-  return two_shot_all_reduce_impl(input, c10::nullopt, reduce_op, group_name);
+  return two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
 }
 
 at::Tensor two_shot_all_reduce_out(
