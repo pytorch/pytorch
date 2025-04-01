@@ -4414,6 +4414,25 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(M(), (torch.ones(3, dtype=torch.int),))
         self.assertEqual(ep.module()(torch.tensor([1, 2, 3])), [1, 2, 3])
 
+    def test_unbacked_select(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, ys):
+                u0, u1 = ys.tolist()
+                return x[u0] + x[(u0-u1+1)//2]
+
+        ep = export(
+            Foo(),
+            (torch.arange(16), torch.tensor([5, 8])),
+            dynamic_shapes={
+                "x": (Dim.DYNAMIC,),
+                "ys": None,
+            },
+        )
+        self.assertEqual(
+            ep.module()(torch.arange(20), torch.tensor([2, -3])),
+            5,
+        )
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):
