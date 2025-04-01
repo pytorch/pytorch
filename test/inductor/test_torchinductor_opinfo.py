@@ -45,6 +45,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA,
+    has_triton,
     HAS_XPU,
     maybe_skip_size_asserts,
 )
@@ -1103,48 +1104,50 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                if device_type == GPU_TYPE:
-                    # opinfo test case have already place the input on the correct device
-                    # so we don't need do additional copy by setting copy_to_gpu=False
+                no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                    with context_fn():
+                        # Base kwargs
+                        adjusted_kwargs = {
+                            "check_lowp": False,
+                            "nopython": no_python,
+                            "check_has_compiled": no_python,
+                            "atol": atol,
+                            "rtol": rtol,
+                        }
 
-                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
-                        with context_fn():
-                            adjusted_kwargs = {
-                                "check_lowp": False,
-                                "nopython": no_python,
-                                "copy_to_gpu": False,
-                                "reference_in_float": False,
-                                "check_gradient": requires_grad,
-                                "check_has_compiled": no_python,
-                                "output_process_fn_grad": sample_input.output_process_fn_grad,
-                                "atol": atol,
-                                "rtol": rtol,
-                            }
-                            adjusted_kwargs.update(overridden_kwargs)
-                            adjusted_kwargs.update(kwarg_overrides)
+                        # Backend-specific adjustments
+                        # Triton
+                        if has_triton():
+                            adjusted_kwargs.update(
+                                {
+                                    "copy_to_gpu": False,
+                                    "reference_in_float": False,
+                                    "check_gradient": requires_grad,
+                                    "output_process_fn_grad": sample_input.output_process_fn_grad,
+                                }
+                            )
+                        # C++ CPU backend
+                        elif torch._inductor.config.cpu_backend == "cpp":
+                            adjusted_kwargs.update(
+                                {
+                                    "check_gradient": False,  # Skip checking gradient on CPU for now
+                                }
+                            )
+
+                        # Update with overridden kwargs and context-specific overrides
+                        adjusted_kwargs.update(overridden_kwargs)
+                        adjusted_kwargs.update(kwarg_overrides)
+
+                        # Call the appropriate check method based on device type
+                        if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
                             )
-                elif device_type == "cpu":
-                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
-                        with context_fn():
-                            adjusted_kwargs = {
-                                "check_lowp": False,
-                                "nopython": no_python,
-                                "check_has_compiled": no_python,
-                                # skip checking gradient on CPU for now
-                                "check_gradient": False,
-                                "atol": atol,
-                                "rtol": rtol,
-                            }
-                            adjusted_kwargs.update(overridden_kwargs)
-                            adjusted_kwargs.update(kwarg_overrides)
-
+                        else:
                             self.check_model(
                                 fn,
                                 args,
