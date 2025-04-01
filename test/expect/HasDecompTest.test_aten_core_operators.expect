@@ -310,8 +310,6 @@ aten::lgamma_
 aten::lift
 aten::lift.out
 aten::lift_fresh
-aten::linalg_vector_norm
-aten::linalg_vector_norm.out
 aten::log
 aten::log.out
 aten::log10

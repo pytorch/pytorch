@@ -386,6 +386,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.leaky_relu_backward,
             aten.lerp,
             aten.lerp_,
+            aten.linalg_vector_norm,
             aten.linspace,
             aten.logaddexp,
             aten.logaddexp2,
