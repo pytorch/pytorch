@@ -660,6 +660,18 @@ public:
   Vectorized<T> le(const Vectorized<T>& other) const { return binary_pred_bool(other, std::less_equal<T>()); }
 };
 
+  // There is an implicit conversion that would make this work if
+  // these operators weren't template functions, but they are template
+  // functions (and can't be moved to be non-member friends defined in
+  // the class body as suggested in
+  // https://stackoverflow.com/questions/9787593/implicit-type-conversion-with-template/9788255#9788255
+  // because we have a lot of disparate specializations of
+  // Vectorized). So, just explicitly make scalars work.
+#define VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(name) \
+  template <class T> Vectorized<T> inline name(const Vectorized<T> &a, T b) { return name(a, Vectorized<T>(b)); } \
+  template <class T> Vectorized<T> inline name(T a, const Vectorized<T>& b) { return name(Vectorized<T>(a), b); }
+#define VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(op) VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(operator op)
+
 template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -667,6 +679,8 @@ template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const 
   }
   return c;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(+)
 
 template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
@@ -676,6 +690,8 @@ template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const 
   return c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(-)
+
 template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -683,6 +699,9 @@ template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const 
   }
   return c;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(*)
+
 
 template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vectorized<T> c;
@@ -692,11 +711,15 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
   return c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(/)
+
 template <class T,
           typename std::enable_if_t<!is_floating_point_v<T>, int> = 0>
 Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   return a - a / b * b;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(%)
 
 template <class T> Vectorized<T> inline operator||(
     const Vectorized<T> &a, const Vectorized<T> &b) {
@@ -706,6 +729,8 @@ template <class T> Vectorized<T> inline operator||(
   }
   return c;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(||)
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
@@ -741,6 +766,9 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
   return c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(maximum)
+
+
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
@@ -775,6 +803,8 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
   return c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(minimum)
+
 template <class T,
           typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec, const Vectorized<T> &max_vec) {
@@ -784,6 +814,39 @@ Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec,
   }
   return c;
 }
+
+#define VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(name)               \
+  template <class T>                                                    \
+  Vectorized<T> inline name(const Vectorized<T> &a, const Vectorized<T>& b, T c) { \
+    return name(a, b, Vectorized<T>(c));                                \
+  }                                                                     \
+                                                                        \
+  template <class T>                                                    \
+  Vectorized<T> inline name(const Vectorized<T> &a, T b, const Vectorized<T>& c) { \
+    return name(a, Vectorized<T>(b), c);                                \
+  }                                                                     \
+                                                                        \
+  template <class T>                                                    \
+  Vectorized<T> inline name(const Vectorized<T> &a, T b, T c) {         \
+    return name(a, Vectorized<T>(b), Vectorized<T>(c));                 \
+  }                                                                     \
+                                                                        \
+  template <class T>                                                    \
+  Vectorized<T> inline name(T a, const Vectorized<T>& b, const Vectorized<T>& c) { \
+    return name(Vectorized<T>(a), b, c);                                \
+  }                                                                     \
+                                                                        \
+  template <class T>                                                    \
+  Vectorized<T> inline name(T a, const Vectorized<T>& b, T c) {         \
+    return name(Vectorized<T>(a), b, Vectorized<T>(c));                 \
+  }                                                                     \
+                                                                        \
+  template <class T>                                                    \
+  Vectorized<T> inline name(T a, T b, const Vectorized<T>& c) {         \
+    return name(Vectorized<T>(a), Vectorized<T>(b), c);                 \
+  }
+
+VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(clamp)
 
 template <class T,
           typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
@@ -795,6 +858,9 @@ Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_
   return c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_max)
+
+
 template <class T,
           typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_vec) {
@@ -804,6 +870,8 @@ Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_
   }
   return c;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_min)
 
 struct Vectorizedi;
 
@@ -904,6 +972,10 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 #endif // defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(&)
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(|)
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(^)
+
 template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   using int_t = int_same_size_t<T>;
@@ -983,10 +1055,14 @@ inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const
   return a * b + c;
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
+
 template <typename T>
 inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
   return a * b - c;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
 
 template <typename T>
 Vectorized<T> inline operator&&(
@@ -998,6 +1074,8 @@ Vectorized<T> inline operator&&(
   }
   return ret;
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(&&)
 
 template <int64_t scale = 1, typename T = void>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
@@ -1120,6 +1198,8 @@ deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
                         Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
 
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
+
 // inverse operation of deinterleave2
 // Example inputs for AVX512:
 //  a       Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15}
@@ -1151,6 +1231,8 @@ interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
                         Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
+
+  VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(interleave2)
 
 template <typename src_T, typename dst_T>
 inline void convert(const src_T *src, dst_T *dst, int64_t n) {
