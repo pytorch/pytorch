@@ -493,6 +493,16 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 1e-2,
     },
+    ("fft.irfft2", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 7e-1,
+    },
+    ("fft.irfftn", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 7e-1,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -941,6 +951,7 @@ class TestInductorOpInfo(TestCase):
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
