@@ -1215,15 +1215,7 @@ if(USE_GLOO)
         set(NCCL_EXTERNAL ON)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
-      if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-        # Remove me when https://github.com/facebookincubator/gloo/pull/424 is landed
-        message(WARNING "Downgrading cmake-policy-version for gloo build")
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-        unset(CMAKE_POLICY_VERSION_MINIMUM)
-      else()
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      endif()
+      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
       # gloo generates a new config.h in the binary diretory.
