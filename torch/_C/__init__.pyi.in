@@ -1309,6 +1309,7 @@ def _get_blas_preferred_backend() -> torch._C._BlasBackend: ...
 def _set_blas_preferred_backend(arg: torch._C._BlasBackend): ...
 
 class _BlasBackend:
+    Default: _BlasBackend
     Cublas: _BlasBackend
     Cublaslt: _BlasBackend
     Ck: _BlasBackend
