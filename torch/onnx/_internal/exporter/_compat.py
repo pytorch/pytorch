@@ -106,7 +106,9 @@ def export_compat(
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
     if opset_version is not None:
-        registry = _registration.ONNXRegistry().from_torchlib(opset_version=opset_version)
+        registry = _registration.ONNXRegistry().from_torchlib(
+            opset_version=opset_version
+        )
     else:
         registry = _registration.ONNXRegistry().from_torchlib()
     if custom_translation_table is not None:

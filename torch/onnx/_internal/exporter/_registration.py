@@ -277,18 +277,18 @@ class ONNXRegistry:
             True if the given op is registered, otherwise False.
         """
         return bool(self.get_decomps(target))
-    
-    def cleanup_registry(self) -> None:
-        """Cleans up the registry to avoid duplicates based on opset version.
 
-        """
+    def cleanup_registry(self) -> None:
+        """Cleans up the registry to avoid duplicates based on opset version."""
         cleaned_functions = {}
         for target_or_name, decomps in self.functions.items():
             # Filter decompositions to only include those with opset_introduced <= opset_version
             decomps = [d for d in decomps if d.opset_introduced <= self.opset_version]
 
             # Sort decompositions by opset_introduced in descending order
-            decomps_sorted = sorted(decomps, key=lambda x: x.opset_introduced, reverse=True)
+            decomps_sorted = sorted(
+                decomps, key=lambda x: x.opset_introduced, reverse=True
+            )
 
             # Keep only the decomposition with the highest opset_introduced
             if decomps_sorted:
