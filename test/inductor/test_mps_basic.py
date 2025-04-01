@@ -208,6 +208,7 @@ for test_name in [
     "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
+    "test_neg_max_uint8",
     "test_pow2",
     "test_prod",
     "test_randint_int64_mod",
