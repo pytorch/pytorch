@@ -14,7 +14,6 @@ import operator
 import traceback
 import typing
 import typing_extensions
-import warnings
 import weakref
 from collections import defaultdict, OrderedDict
 from collections.abc import Generator, Mapping, Sequence
@@ -813,6 +812,12 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
+            from .symbolic_shapes import guard_size_oblivious
+
+            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    "Boolean value of Tensor with more than one value is ambiguous"
+                )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
@@ -1814,11 +1819,12 @@ class _ModuleStackTracer(PythonKeyTracer):
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
         except _ModuleNotInstalledAsSubmoduleError:
-            warnings.warn(
-                f"Unable to find the path of the module {m}. "
+            log.debug(
+                "Unable to find the path of the module %s. "
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
-                "through the module without recording stack information."
+                "through the module without recording stack information.",
+                str(m),
             )
             return forward(*args, **kwargs)
 

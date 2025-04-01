@@ -3841,10 +3841,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
                 [3, 4]], device='cuda:0') # Rank 0
         tensor([[1, 2],
                 [3, 4]], device='cuda:1') # Rank 1
-
-    .. warning::
-        The Gloo backend does not support this API.
-
     """
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
@@ -4296,9 +4292,6 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         >>> tensor_out
         tensor([0, 2], device='cuda:0') # Rank 0
         tensor([4, 6], device='cuda:1') # Rank 1
-
-    .. warning::
-        The Gloo backend does not support this API.
 
     """
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
