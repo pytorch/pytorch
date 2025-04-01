@@ -1122,7 +1122,10 @@ class OutputGraph:
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
+            rand_fn = disable(
+                _get_gen_rand_values_fn(self.random_calls),
+                reason="do not trace into Dynamo rng recovery function",
+            )
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root, overridden_sources=overridden_sources)
             random_calls_instructions.extend(
@@ -1470,7 +1473,9 @@ class OutputGraph:
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
-            compiled_fn = disable(compiled_fn)
+            compiled_fn = disable(
+                compiled_fn, reason="do not trace Dynamo-compiled graph"
+            )
 
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
