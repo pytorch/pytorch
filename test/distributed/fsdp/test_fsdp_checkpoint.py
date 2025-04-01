@@ -334,7 +334,9 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestFSDPCheckpointSubmodule, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestFSDPCheckpointSubmodule, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
