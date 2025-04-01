@@ -73,13 +73,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
     def gen_schema(self, *args, **kwargs):
         import torch.utils._pytree as pytree
-        from torch._higher_order_ops.utils import (
-            check_input_alias_and_mutation_return_ouputs,
-        )
-        from torch._library.infer_schema import (
+        from torch._higher_order_ops.schema import (
             CFunctionSchemaGen,
             HopArgumentInfo,
             HopArgumentInfoGen,
+        )
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_ouputs,
         )
 
         def _arg_extractor(subgraph, identifier, operands):

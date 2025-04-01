@@ -17,7 +17,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
-from torch._library.infer_schema import find_hop_schema
+from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -581,7 +581,7 @@ class GraphModule(torch.nn.Module):
         ref.sum().backward()
         res.sum().backward()
 
-    def test_gen_scehma(self):
+    def test_gen_schema(self):
         mod = torch.nn.Linear(8, 8)
         backend = EagerAndRecordGraphs()
 
@@ -609,7 +609,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(hop_schema), 1)
         self.assertExpectedInline(
             str(hop_schema[0]),
-            """invoke_subgraph(Any subgraph, str identifier, Tensor operands_0, Tensor operands_1, Tensor operands_2, Any operands_tree_spec) -> ((Tensor, Tensor, Tensor) output)""",
+            """invoke_subgraph(Any subgraph, str identifier, Tensor operands_0, Tensor operands_1, Tensor operands_2, Any operands_tree_spec) -> (Tensor, Tensor, Tensor)""",
         )
 
     def test_fail_with_direct_invoke_subgraph(self):
