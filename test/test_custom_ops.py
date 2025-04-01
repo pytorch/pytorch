@@ -4165,6 +4165,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ]
         subprocess.check_output(cmd, shell=False)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_custom_ops_inputs_mem_leak(self):
         @torch.library.custom_op("mylib::f", mutates_args={"y"})
         def f(x: Tensor, y: Tensor) -> Tensor:

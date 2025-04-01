@@ -54,6 +54,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -6563,6 +6564,7 @@ metadata incorrectly.
             self.assertEqual(ref_x.grad, x.grad)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     @serialTest()
     def test_memory_leaks_base(self, backend):
