@@ -648,6 +648,8 @@ def _create_aot_dispatcher_function(
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
+    from torch._C._dynamo.eval_frame import get_eval_frame_callback
+    maybe_set_stance = nullcontext() if get_eval_frame_callback() else torch.compiler.set_stance("force_eager")
     with torch.autograd.set_multithreading_enabled(
         False
     ), preserve_rng_state(), (
@@ -656,7 +658,7 @@ def _create_aot_dispatcher_function(
         python_dispatcher_mode
     ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(), (
         collectives_ctx
-    ):
+    ), maybe_set_stance, patch.object(torch._dynamo.config, "error_on_nested_fx_trace", False):
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,

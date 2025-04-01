@@ -7057,6 +7057,52 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
+    def test_nested_compile_in_torch_dispatch(self):
+        class Subclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                )
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __repr__(self):
+                return f"Subclass({repr(self.elem)})"
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                elem = inner_tensors["elem"]
+                return Subclass(elem)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                if func is torch.ops.aten.add.Tensor:
+                    return torch.compile(func, backend="aot_eager")(
+                        args[0].elem, args[1].elem
+                    )
+
+        def f(x):
+            return x + x
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x = Subclass(torch.randn(4))
+        out = f(x)
+        out_compiled = f_compiled(x)
+        self.assertEqual(out, out_compiled)
+
     def test_getattr_return(self):
         _WrapperDescriptor = type(type.__call__)
         _MethodWrapper = type(all.__call__)
