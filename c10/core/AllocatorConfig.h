@@ -23,11 +23,11 @@ const size_t kLargeBuffer = 20971520;
  * and XPU, assuming that environment variables apply universally.
  *
  * Naming Convention:
- * - Public API names in AllocatorConfig should be device-agnostic. For example,
+ * - Public API names in AllocatorConfig should be device-generic. For example,
  *     `use_release_lock_on_cudamalloc` is not ideal; instead, use
  *     `use_release_lock_on_device_malloc` to maintain neutrality.
  * - Members prefixed with `pinned_` are specific to the host/pinned allocator.
- * - Environment variable names should also be device-agnostic to ensure
+ * - Environment variable names should also be device-generic to ensure
  *     consistency across different hardware backends.
  *
  * Environment Variables:
