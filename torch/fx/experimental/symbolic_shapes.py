@@ -1193,26 +1193,22 @@ def compute_unbacked_bindings(
 #      benefit of not failing.
 def guard_or_false(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return false.
+    Try to guard a, if data dependent error encountered just return false.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return False
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
-    Try to gaurd a, if data dependent error encountered just return true.
+    Try to guard a, if data dependent error encountered just return true.
     """
-    if isinstance(a, SymBool):
-        try:
-            guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            return True
-    return bool(a)
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -2788,8 +2784,8 @@ class DimConstraints:
     ) -> TypeGuard[torch.export.dynamic_shapes._DerivedDim]:
         return isinstance(dim, torch.export.dynamic_shapes._DerivedDim)
 
-    def _is_dim(self, dim: object) -> TypeGuard[torch.export.dynamic_shapes._Dim]:
-        return isinstance(dim, torch.export.dynamic_shapes._Dim) and not isinstance(
+    def _is_dim(self, dim: object) -> TypeGuard[torch.export.dynamic_shapes.Dim]:
+        return isinstance(dim, torch.export.dynamic_shapes.Dim) and not isinstance(
             dim, torch.export.dynamic_shapes._DerivedDim
         )
 
