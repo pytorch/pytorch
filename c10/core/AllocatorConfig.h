@@ -187,6 +187,10 @@ class C10_API AllocatorConfig {
   std::string last_allocator_settings_;
 };
 
+C10_API inline AllocatorConfig& getAllocatorConfig() {
+  return AllocatorConfig::instance();
+}
+
 C10_API void setAllocatorSettings(const std::string& env);
 
 } // namespace c10::CachingAllocator
