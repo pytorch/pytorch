@@ -649,7 +649,7 @@ class ShapesCollection:
 
     Example::
 
-        args = ({"x": tensor_x, "others": [tensor_y, tensor_z]})
+        args = {"x": tensor_x, "others": [tensor_y, tensor_z]}
 
         dim = torch.export.Dim(...)
         dynamic_shapes = torch.export.ShapesCollection()
@@ -665,16 +665,16 @@ class ShapesCollection:
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(
-            t, torch.Tensor
-        ), f"Cannot assign shape to non-tensor type {type(t)}"
+        assert isinstance(t, torch.Tensor), (
+            f"Cannot assign shape to non-tensor type {type(t)}"
+        )
         # TODO(avik): check that shape is indeed a Shape
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert (
-                shape == _shape
-            ), f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+            assert shape == _shape, (
+                f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+            )
         else:
             self._shapes[id(t)] = shape
 
@@ -928,7 +928,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         else:
@@ -938,7 +939,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.min, upper=dim.max), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.min, upper=dim.max),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         return constraint
@@ -1018,7 +1020,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None]
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     name_to_dim = {}
     for dim in tree_flatten(

@@ -147,7 +147,7 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
 
 @contextmanager
 def decompose(
-    decomposition_table: Optional[Mapping[OpOverload, Callable]]
+    decomposition_table: Optional[Mapping[OpOverload, Callable]],
 ) -> Generator[Mapping[OpOverload, Callable], None, None]:
     global CURRENT_DECOMPOSITION_TABLE
     old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
@@ -181,22 +181,19 @@ def is_sym_node(node: _HasMeta) -> bool:
 
 
 @overload
-def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None:
-    ...
+def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None: ...
 
 
 @overload
 def set_proxy_slot(
     obj: _AnyScriptObjectType, tracer: _ProxyTracer, proxy: Proxy
-) -> None:
-    ...
+) -> None: ...
 
 
 @overload
 def set_proxy_slot(
     obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
-) -> None:
-    ...
+) -> None: ...
 
 
 def set_proxy_slot(
@@ -255,8 +252,7 @@ _PySymProxyType = Thunk[Proxy]
 def get_proxy_slot(
     obj: Tensor,
     tracer: _ProxyTracer,
-) -> _ProxyTensor:
-    ...
+) -> _ProxyTensor: ...
 
 
 @overload
@@ -264,8 +260,7 @@ def get_proxy_slot(
     obj: Tensor,
     tracer: _ProxyTracer,
     default: U,
-) -> Union[_ProxyTensor, U]:
-    ...
+) -> Union[_ProxyTensor, U]: ...
 
 
 @overload
@@ -274,16 +269,14 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[_ProxyTensor], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 @overload
 def get_proxy_slot(
     obj: _AnyScriptObjectType,
     tracer: _ProxyTracer,
-) -> Proxy:
-    ...
+) -> Proxy: ...
 
 
 @overload
@@ -291,8 +284,7 @@ def get_proxy_slot(
     obj: _AnyScriptObjectType,
     tracer: _ProxyTracer,
     default: U,
-) -> Union[Proxy, U]:
-    ...
+) -> Union[Proxy, U]: ...
 
 
 @overload
@@ -301,16 +293,14 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[Proxy], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 @overload
 def get_proxy_slot(
     obj: PySymType,
     tracer: _ProxyTracer,
-) -> _PySymProxyType:
-    ...
+) -> _PySymProxyType: ...
 
 
 @overload
@@ -318,8 +308,7 @@ def get_proxy_slot(
     obj: PySymType,
     tracer: _ProxyTracer,
     default: T,
-) -> Union[T, _PySymProxyType]:
-    ...
+) -> Union[T, _PySymProxyType]: ...
 
 
 @overload
@@ -328,8 +317,7 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[_PySymProxyType], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 # the default argument is what to return if the slot is not set.
@@ -714,22 +702,21 @@ def fetch_sym_proxy(
 
 
 @overload
-def fetch_object_proxy(tracer: _ProxyTracer, t: Tensor) -> Union[_ProxyTensor, Tensor]:
-    ...
+def fetch_object_proxy(
+    tracer: _ProxyTracer, t: Tensor
+) -> Union[_ProxyTensor, Tensor]: ...
 
 
 @overload
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: _AnyScriptObjectType
-) -> Union[Proxy, _AnyScriptObjectType]:
-    ...
+) -> Union[Proxy, _AnyScriptObjectType]: ...
 
 
 @overload
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: PySymType
-) -> Union[_PySymProxyType, PySymType]:
-    ...
+) -> Union[_PySymProxyType, PySymType]: ...
 
 
 def fetch_object_proxy(
@@ -1080,18 +1067,15 @@ class PythonKeyTracer(Tracer):
         return super().create_arg(a)  # type: ignore[return-value]
 
     @overload
-    def unwrap_proxy(self, e: Tensor) -> Union[Proxy, Tensor]:
-        ...
+    def unwrap_proxy(self, e: Tensor) -> Union[Proxy, Tensor]: ...
 
     @overload
-    def unwrap_proxy(self, e: PySymType) -> Union[Proxy, PySymType]:
-        ...
+    def unwrap_proxy(self, e: PySymType) -> Union[Proxy, PySymType]: ...
 
     @overload
     def unwrap_proxy(
         self, e: _AnyScriptObjectType
-    ) -> Union[Proxy, _AnyScriptObjectType]:
-        ...
+    ) -> Union[Proxy, _AnyScriptObjectType]: ...
 
     def unwrap_proxy(self, e: T) -> object:
         if isinstance(e, Tensor):
@@ -1520,7 +1504,10 @@ class DecompositionInterpreter(fx.Interpreter):
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
     def placeholder(
-        self, target: str, args: tuple[object, ...], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
     ) -> object:
         out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
@@ -1529,7 +1516,10 @@ class DecompositionInterpreter(fx.Interpreter):
         return out
 
     def get_attr(
-        self, target: str, args: tuple[object, ...], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
     ) -> object:
         out = super().get_attr(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.get_attr(target), self.tracer)
@@ -1539,7 +1529,10 @@ class DecompositionInterpreter(fx.Interpreter):
     # call_function, call_method, call_module get traced automatically by the outer mode.
 
     def output(
-        self, target: str, args: tuple[object, ...], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
     ) -> object:
         out = super().output(target, args, kwargs)  # type: ignore[arg-type]
 
@@ -1929,14 +1922,14 @@ class _MakefxTracer:
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.proxy_mode: Union[nullcontext, ProxyTorchDispatchMode] = nullcontext()
-        self.proxy_function_mode: Union[
-            nullcontext, PreDispatchTorchFunctionMode
-        ] = nullcontext()
+        self.proxy_function_mode: Union[nullcontext, PreDispatchTorchFunctionMode] = (
+            nullcontext()
+        )
         self.fx_tracer: Optional[PythonKeyTracer] = None
         self.python_dispatcher_mode: Union[nullcontext, Any] = nullcontext()
-        self.torch_fn_metadata_mode: Union[
-            nullcontext, TorchFunctionMetadataMode
-        ] = nullcontext()
+        self.torch_fn_metadata_mode: Union[nullcontext, TorchFunctionMetadataMode] = (
+            nullcontext()
+        )
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2008,9 +2001,9 @@ class _MakefxTracer:
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=shape_env,
                         )
-                assert (
-                    fake_tensor_mode.shape_env is not None
-                ), "shape_env should be set if tracing with 'symbolic'"
+                assert fake_tensor_mode.shape_env is not None, (
+                    "shape_env should be set if tracing with 'symbolic'"
+                )
                 self.fake_tensor_mode = fake_tensor_mode
             else:
                 if not self.tracing_mode == "real":
@@ -2098,9 +2091,9 @@ class _MakefxTracer:
                     return self.fake_tensor_mode.from_tensor(x, source=source)
                 # NB: don't match on bools
                 elif type(x) is int and self.tracing_mode == "symbolic":
-                    assert (
-                        self.fake_tensor_mode.shape_env is not None
-                    ), "shape_env should be set if tracing with 'symbolic'"
+                    assert self.fake_tensor_mode.shape_env is not None, (
+                        "shape_env should be set if tracing with 'symbolic'"
+                    )
                     return self.fake_tensor_mode.shape_env.create_symintnode(
                         self.fake_tensor_mode.shape_env.create_symbol(
                             x, source, positive=None
@@ -2113,9 +2106,9 @@ class _MakefxTracer:
                         self.fake_tensor_mode, x
                     )
 
-                assert not isinstance(
-                    x, FakeScriptObject
-                ), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
+                assert not isinstance(x, FakeScriptObject), (
+                    f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
+                )
                 return x
 
             wrap_fn_map = {
@@ -2275,9 +2268,9 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
         torch._C._TorchDispatchModeKey.PROXY
     )
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-    assert (
-        pre_dispatch_mode is None or mode is None
-    ), f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}"
+    assert pre_dispatch_mode is None or mode is None, (
+        f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}"
+    )
     return pre_dispatch_mode or mode
 
 

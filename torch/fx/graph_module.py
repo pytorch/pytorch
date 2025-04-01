@@ -309,9 +309,9 @@ def _print_readable(
     colored=False,
 ):
     graph = module.graph
-    assert graph is not None and isinstance(
-        graph, torch.fx.Graph
-    ), "print_readable must be used on a module with a graph"
+    assert graph is not None and isinstance(graph, torch.fx.Graph), (
+        "print_readable must be used on a module with a graph"
+    )
 
     verbose_python_code = graph.python_code(
         root_module="self",
