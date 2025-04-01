@@ -449,7 +449,7 @@ def expand_bias(B: _T | None, X: _T) -> _T | None:
     """
     Expand Bias to the same size of X.
     """
-    if B is not None:
+    if B is not None and len(B.shape) == 1:
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
                 # pyrefly: ignore [bad-assignment]
