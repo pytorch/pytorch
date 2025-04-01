@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 """Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
 
 This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
@@ -10,8 +12,12 @@ It includes:
 
 import contextlib
 import importlib
+import inspect
 import logging
 import os
+import re
+import sys
+import unittest
 from typing import Union
 
 import torch
@@ -98,7 +104,23 @@ class TestCase(TorchTestCase):
 
 
 class CPythonTestCase(TestCase):
+    """
+    Enable certain features that are off by default (i.e. tracing through unittest)
+    """
+
     _stack: contextlib.ExitStack
+    dynamo_strict_nopython = True
+
+    def _dynamo_test_key(self):
+        suffix = super()._dynamo_test_key()
+        test_cls = self.__class__
+        test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
+        py_ver = re.search(r"/([\d.]+)/", inspect.getfile(test_cls))
+        if py_ver:
+            py_ver = py_ver.group().strip(os.sep).replace(".", "")  # type: ignore[assignment]
+        else:
+            return suffix
+        return f"CPython{py_ver}-{test_file}-{suffix}"
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -107,6 +129,21 @@ class CPythonTestCase(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        # Skip test if python versions doesn't match
+        try:
+            test_py_ver = tuple(
+                map(int, inspect.getfile(cls).split(os.sep)[-2].split("."))
+            )
+            py_ver = sys.version_info[:2]
+            if py_ver != test_py_ver:
+                expected = ".".join(map(str, test_py_ver))
+                got = ".".join(map(str, py_ver))
+                raise unittest.SkipTest(
+                    f"Test requires Python {expected} but got Python {got}"
+                )
+        except Exception:
+            pass
+
         super().setUpClass()
         cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
         cls._stack.enter_context(  # type: ignore[attr-defined]

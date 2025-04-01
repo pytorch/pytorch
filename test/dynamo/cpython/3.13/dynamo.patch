@@ -1,0 +1,3080 @@
+diff --git a/test/dynamo/cpython/3.13/exception_hierarchy.txt b/test/dynamo/cpython/3.13/exception_hierarchy.txt
+index 65f54859e2a..5e83faab9a6 100644
+--- a/test/dynamo/cpython/3.13/exception_hierarchy.txt
++++ b/test/dynamo/cpython/3.13/exception_hierarchy.txt
+@@ -45,7 +45,7 @@ BaseException
+       ├── StopAsyncIteration
+       ├── StopIteration
+       ├── SyntaxError
+-      │    └── IncompleteInputError
++      │    └── _IncompleteInputError
+       │    └── IndentationError
+       │         └── TabError
+       ├── SystemError
+diff --git a/test/dynamo/cpython/3.13/list_tests.py b/test/dynamo/cpython/3.13/list_tests.py
+index 89cd10f76a3..ae7d0bbc5f2 100644
+--- a/test/dynamo/cpython/3.13/list_tests.py
++++ b/test/dynamo/cpython/3.13/list_tests.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """
+ Tests common to list and UserList.UserList
+ """
+@@ -5,7 +60,7 @@ Tests common to list and UserList.UserList
+ import sys
+ from functools import cmp_to_key
+ 
+-from test import seq_tests
++import seq_tests
+ from test.support import ALWAYS_EQ, NEVER_EQ, get_c_recursion_limit
+ 
+ 
+diff --git a/test/dynamo/cpython/3.13/mapping_tests.py b/test/dynamo/cpython/3.13/mapping_tests.py
+index ed89a81a6ea..8b1975763ce 100644
+--- a/test/dynamo/cpython/3.13/mapping_tests.py
++++ b/test/dynamo/cpython/3.13/mapping_tests.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # tests common to dict and UserDict
+ import unittest
+ import collections
+diff --git a/test/dynamo/cpython/3.13/patch.py b/test/dynamo/cpython/3.13/patch.py
+deleted file mode 100644
+index fdd6aae555d..00000000000
+--- a/test/dynamo/cpython/3.13/patch.py
++++ /dev/null
+@@ -1,210 +0,0 @@
+-import ast
+-import importlib
+-import os
+-import subprocess
+-
+-
+-path_to_pytorch = "/home/guilhermeleobas/git/pytorch/test/dynamo/cpython/3.13"
+-path_to_cpython = "/home/guilhermeleobas/git/cpython/Lib/test/"
+-should_patch = False
+-
+-
+-folders = [
+-    # folders
+-    "data",
+-    "typinganndata",
+-    "mathdata",
+-]
+-
+-files = [
+-    # *.txt files
+-    "exception_hierarchy.txt",
+-
+-    # *.py files
+-    "list_tests.py",
+-    "mapping_tests.py",
+-    "seq_tests.py",
+-    "string_tests.py",
+-    "test_baseexception.py",
+-    "test_cmath.py",
+-    "test_complex.py",
+-    "test_contextlib.py",
+-    "test_dict.py",
+-    "test_exceptions.py",
+-    "test_float.py",
+-    "test_generators.py",
+-    "test_generator_stop.py",
+-    "test_grammar.py",
+-    "test_int_literal.py",
+-    "test_int.py",
+-    "test_iter.py",
+-    "test_list.py",
+-    "test_math.py",
+-    "test_ordered_dict.py",
+-    "test_raise.py",
+-    "test_setcomps.py",
+-    "test_set.py",
+-    "test_sort.py",
+-    "test_string.py",
+-    "test_sys.py",
+-    "test_tuple.py",
+-    # "test_unittest.py",
+-    "test_userdict.py",
+-    "test_userlist.py",
+-    "test_userstring.py",
+-]
+-
+-
+-patch_1 = """# ======= BEGIN Dynamo patch =======
+-# Owner(s): ["module: dynamo"]
+-
+-# ruff: noqa
+-# flake8: noqa
+-
+-import sys
+-import torch
+-import torch._dynamo.test_case
+-import unittest
+-from torch.testing._internal.common_utils import (
+-    TEST_WITH_TORCHDYNAMO,
+-    run_tests,
+-)
+-
+-
+-if TEST_WITH_TORCHDYNAMO:
+-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
+-
+-
+-# redirect import statements
+-import sys
+-import importlib.abc
+-
+-redirect_imports = (
+-    "test.mapping_tests",
+-    "test.typinganndata",
+-    "test.test_grammar",
+-    "test.test_math",
+-    "test.test_iter",
+-    "test.typinganndata.ann_module",
+-)
+-
+-class RedirectImportFinder(importlib.abc.MetaPathFinder):
+-    def find_spec(self, fullname, path, target=None):
+-        # Check if the import is the problematic one
+-        if fullname in redirect_imports:
+-            try:
+-                # Attempt to import the standalone module
+-                name = fullname.removeprefix("test.")
+-                r = importlib.import_module(name)
+-                # Redirect the module in sys.modules
+-                sys.modules[fullname] = r
+-                # Return a module spec from the found module
+-                return importlib.util.find_spec(name)
+-            except ImportError:
+-                return None
+-        return None
+-
+-# Add the custom finder to sys.meta_path
+-sys.meta_path.insert(0, RedirectImportFinder())
+-
+-
+-# ======= END DYNAMO PATCH =======
+-
+-"""
+-
+-patch_2 = """
+-
+-if __name__ == "__main__":
+-    if TEST_WITH_TORCHDYNAMO:
+-        run_tests()
+-    else:
+-        unittest.main()
+-"""
+-
+-
+-class SetUpVisitor(ast.NodeVisitor):
+-    def __init__(self):
+-        self.modified = False
+-
+-    def visit_FunctionDef(self, node):
+-        if node.name == "setUp":
+-            # Check if `super().setUp()` is missing in the setUp method
+-            if (
+-                not any(
+-                    isinstance(n, ast.Call)
+-                    and isinstance(n.func, ast.Attribute)
+-                    and n.func.attr == "setUp"
+-                    and isinstance(n.func.value, ast.Call)
+-                    and isinstance(n.func.value.func, ast.Name)
+-                    and n.func.value.func.id == 'super' for n in node.body
+-                )
+-            ):
+-                self.modified = True
+-                # Insert `super().setUp()` at the beginning of the setUp method
+-                super_call = ast.parse('super().setUp()').body[0]
+-                node.body.insert(0, super_call)
+-        self.generic_visit(node)
+-
+-
+-def fix_missing_super_setUp(tree):
+-    visitor = SetUpVisitor()
+-    visitor.visit(tree)
+-    return tree
+-
+-
+-def has_module(module_name):
+-    try:
+-        importlib.import_module(module_name)
+-    except ImportError:
+-        return False
+-    return True
+-
+-
+-def try_import(module_name, fromlist):
+-    try:
+-        module = importlib.import_module(module_name)
+-        # Check if all items in fromlist can be imported from the module
+-        return [hasattr(module, item) for item in fromlist]
+-    except ImportError:
+-        return False
+-
+-
+-if __name__ == "__main__":
+-    # copy
+-    for fname in files + folders:
+-        src = os.path.join(path_to_cpython, fname)
+-        dest = path_to_pytorch
+-        cmd = f"cp -r {src} {dest}".split(' ')
+-        subprocess.run(cmd)
+-
+-
+-    if should_patch:
+-        for fname in files:
+-            if not fname.endswith(".py"):
+-                continue
+-
+-            print(f"patching {fname}")
+-
+-            with open(os.path.join(path_to_pytorch, fname), 'r') as f:
+-                lines = f.readlines()
+-
+-            tree = ast.parse("".join(lines))
+-            # fix_missing_super_setUp(tree)
+-            lines = ast.unparse(tree).split("\n")
+-
+-            with open(os.path.join(path_to_pytorch, fname), 'w') as f:
+-                f.write(patch_1)
+-                match = False
+-                for idx, line in enumerate(lines):
+-                    if (
+-                        line.startswith("if __name__ == ")
+-                        and idx + 1 < len(lines)
+-                        and lines[idx+1].strip().startswith("unittest.main()")
+-                    ):
+-                        match = True
+-                        break
+-                    f.write(line)
+-                    if not line.endswith("\n"):
+-                        f.write("\n")
+-                if match:
+-                    f.write(patch_2)
+diff --git a/test/dynamo/cpython/3.13/seq_tests.py b/test/dynamo/cpython/3.13/seq_tests.py
+index a41970d8f3f..5b14da9a5be 100644
+--- a/test/dynamo/cpython/3.13/seq_tests.py
++++ b/test/dynamo/cpython/3.13/seq_tests.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """
+ Tests common to tuple, list and UserList.UserList
+ """
+diff --git a/test/dynamo/cpython/3.13/string_tests.py b/test/dynamo/cpython/3.13/string_tests.py
+index 9bb0ce7bb57..7cb6e22c4c9 100644
+--- a/test/dynamo/cpython/3.13/string_tests.py
++++ b/test/dynamo/cpython/3.13/string_tests.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """
+ Common tests shared by test_unicode, test_userstring and test_bytes.
+ """
+diff --git a/test/dynamo/cpython/3.13/test_baseexception.py b/test/dynamo/cpython/3.13/test_baseexception.py
+index 6dc06c5e4bc..fe64cdf2977 100644
+--- a/test/dynamo/cpython/3.13/test_baseexception.py
++++ b/test/dynamo/cpython/3.13/test_baseexception.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import builtins
+ import os
+@@ -205,5 +260,8 @@ class UsageTests(unittest.TestCase):
+         self.catch_fails("spam")
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_cmath.py b/test/dynamo/cpython/3.13/test_cmath.py
+index 57f80d5d8cd..3d4a810c83b 100644
+--- a/test/dynamo/cpython/3.13/test_cmath.py
++++ b/test/dynamo/cpython/3.13/test_cmath.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ from test.support import requires_IEEE_754, cpython_only, import_helper
+ from test.test_math import parse_testfile, test_file
+ import test.test_math as test_math
+@@ -622,4 +677,7 @@ class IsCloseTests(test_math.IsCloseTests):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_complex.py b/test/dynamo/cpython/3.13/test_complex.py
+index fa3017b24e1..fcead4ec3e7 100644
+--- a/test/dynamo/cpython/3.13/test_complex.py
++++ b/test/dynamo/cpython/3.13/test_complex.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import sys
+ from test import support
+@@ -302,6 +358,7 @@ class ComplexTest(unittest.TestCase):
+                     except OverflowError:
+                         pass
+ 
++    @xfailIfTorchDynamo
+     def test_pow_with_small_integer_exponents(self):
+         # Check that small integer exponents are handled identically
+         # regardless of their type.
+@@ -843,4 +900,7 @@ class ComplexTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_contextlib.py b/test/dynamo/cpython/3.13/test_contextlib.py
+index 36c3abca80f..c5ef7b70b36 100644
+--- a/test/dynamo/cpython/3.13/test_contextlib.py
++++ b/test/dynamo/cpython/3.13/test_contextlib.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for contextlib.py, and other context managers."""
+ 
+ import io
+@@ -1365,4 +1420,7 @@ class TestChdir(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_dict.py b/test/dynamo/cpython/3.13/test_dict.py
+index e5dba7cdc57..be6819abc37 100644
+--- a/test/dynamo/cpython/3.13/test_dict.py
++++ b/test/dynamo/cpython/3.13/test_dict.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import collections
+ import collections.abc
+ import gc
+@@ -718,6 +774,7 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(k1 ^ k2, {(3,3)})
+         self.assertEqual(k1 ^ k3, {(1,1), (2,2), (4,4)})
+ 
++    @xfailIfTorchDynamo
+     def test_items_symmetric_difference(self):
+         rr = random.randrange
+         for _ in range(100):
+@@ -1621,4 +1678,7 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_exceptions.py b/test/dynamo/cpython/3.13/test_exceptions.py
+index 3138f50076f..26ab9b3a5eb 100644
+--- a/test/dynamo/cpython/3.13/test_exceptions.py
++++ b/test/dynamo/cpython/3.13/test_exceptions.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- part 5, built-in exceptions
+ 
+ import copy
+@@ -58,6 +114,7 @@ class ExceptionTests(unittest.TestCase):
+             self.assertEqual(buf1, buf2)
+             self.assertEqual(exc.__name__, excname)
+ 
++    @xfailIfTorchDynamo
+     def testRaising(self):
+         self.raise_catch(AttributeError, "AttributeError")
+         self.assertRaises(AttributeError, getattr, sys, "undefined_attribute")
+@@ -228,6 +285,7 @@ class ExceptionTests(unittest.TestCase):
+         check = self.check
+         check('"\\\n"(1 for c in I,\\\n\\', 2, 2)
+ 
++    @unittest.expectedFailure
+     def testSyntaxErrorOffset(self):
+         check = self.check
+         check('def fact(x):\n\treturn x!\n', 2, 10)
+@@ -593,6 +651,7 @@ class ExceptionTests(unittest.TestCase):
+         with self.assertRaisesRegex(TypeError, "state is not a dictionary"):
+             e.__setstate__(42)
+ 
++    @xfailIfTorchDynamo
+     def test_notes(self):
+         for e in [BaseException(1), Exception(2), ValueError(3)]:
+             with self.subTest(e=e):
+@@ -1996,6 +2055,7 @@ class AssertionErrorTests(unittest.TestCase):
+         _rc, _out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
+         return err.decode('utf-8').splitlines()
+ 
++    @xfailIfTorchDynamo
+     @force_not_colorized
+     def test_assertion_error_location(self):
+         cases = [
+@@ -2073,6 +2133,7 @@ class AssertionErrorTests(unittest.TestCase):
+                 result = self.write_source(source)
+                 self.assertEqual(result[-3:], expected)
+ 
++    @xfailIfTorchDynamo
+     @force_not_colorized
+     def test_multiline_not_highlighted(self):
+         cases = [
+@@ -2397,5 +2458,8 @@ class PEP626Tests(unittest.TestCase):
+                 1/0
+         self.lineno_after_raise(after_with, 1, 1)
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_float.py b/test/dynamo/cpython/3.13/test_float.py
+index 5bd640617d6..65d34f8f085 100644
+--- a/test/dynamo/cpython/3.13/test_float.py
++++ b/test/dynamo/cpython/3.13/test_float.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import fractions
+ import operator
+ import os
+@@ -1504,5 +1559,8 @@ class HexFloatTestCase(unittest.TestCase):
+         self.assertEqual(getattr(f, 'foo', 'none'), 'bar')
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_generator.py b/test/dynamo/cpython/3.13/test_generator.py
+deleted file mode 100644
+index 6ae3b48c67e..00000000000
+--- a/test/dynamo/cpython/3.13/test_generator.py
++++ /dev/null
+@@ -1,238 +0,0 @@
+-# Owner(s): ["module: dynamo"]
+-
+-# ruff: noqa
+-# flake8: noqa
+-
+-import torch
+-import torch._dynamo.test_case
+-
+-
+-class GeneratorTestsBase(torch._dynamo.test_case.CPythonTestCase):
+-    def setUp(self):
+-        super().setUp()
+-        self._old = torch._dynamo.config.enable_faithful_generator_behavior
+-        torch._dynamo.config.enable_faithful_generator_behavior = True
+-
+-    def tearDown(self):
+-        super().tearDown()
+-        torch._dynamo.config.enable_faithful_generator_behavior = self._old
+-
+-
+-class GeneratorCloseTests(GeneratorTestsBase):
+-    # Taken from commit
+-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
+-
+-    def test_close_no_return_value(self):
+-        def f():
+-            yield
+-
+-        gen = f()
+-        gen.send(None)
+-        self.assertIsNone(gen.close())
+-
+-    def test_close_return_value(self):
+-        def f():
+-            try:
+-                yield
+-                # close() raises GeneratorExit here, which is caught
+-            except GeneratorExit:
+-                return 0
+-
+-        gen = f()
+-        gen.send(None)
+-        self.assertEqual(gen.close(), 0)
+-
+-    def test_close_not_catching_exit(self):
+-        def f():
+-            yield
+-            # close() raises GeneratorExit here, which isn't caught and
+-            # therefore propagates -- no return value
+-            return 0
+-
+-        gen = f()
+-        gen.send(None)
+-        self.assertIsNone(gen.close())
+-
+-    def test_close_not_started(self):
+-        def f():
+-            try:
+-                yield
+-            except GeneratorExit:
+-                return 0
+-
+-        gen = f()
+-        self.assertIsNone(gen.close())
+-
+-    def test_close_exhausted(self):
+-        def f():
+-            try:
+-                yield
+-            except GeneratorExit:
+-                return 0
+-
+-        gen = f()
+-        next(gen)
+-        with self.assertRaises(StopIteration):
+-            next(gen)
+-        self.assertIsNone(gen.close())
+-
+-    def test_close_closed(self):
+-        def f():
+-            try:
+-                yield
+-            except GeneratorExit:
+-                return 0
+-
+-        gen = f()
+-        gen.send(None)
+-        self.assertEqual(gen.close(), 0)
+-        self.assertIsNone(gen.close())
+-
+-    def test_close_raises(self):
+-        def f():
+-            try:
+-                yield
+-            except GeneratorExit:
+-                pass
+-            raise RuntimeError
+-
+-        gen = f()
+-        gen.send(None)
+-        with self.assertRaises(RuntimeError):
+-            gen.close()
+-
+-
+-class GeneratorThrowTests(GeneratorTestsBase):
+-    # Taken from commit
+-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
+-
+-    def test_exception_context_with_yield(self):
+-        def f():
+-            try:
+-                raise KeyError("a")
+-            except Exception:
+-                yield
+-
+-        gen = f()
+-        gen.send(None)
+-        with self.assertRaises(ValueError) as cm:
+-            gen.throw(ValueError)
+-        context = cm.exception.__context__
+-        self.assertEqual((type(context), context.args), (KeyError, ("a",)))
+-
+-    def test_exception_context_with_yield_inside_generator(self):
+-        # Check that the context is also available from inside the generator
+-        # with yield, as opposed to outside.
+-        def f():
+-            try:
+-                raise KeyError("a")
+-            except Exception:
+-                try:
+-                    yield
+-                except Exception as exc:
+-                    self.assertEqual(type(exc), ValueError)
+-                    context = exc.__context__
+-                    self.assertEqual((type(context), context.args), (KeyError, ("a",)))
+-                    yield "b"
+-
+-        gen = f()
+-        gen.send(None)
+-        actual = gen.throw(ValueError)
+-        # This ensures that the assertions inside were executed.
+-        self.assertEqual(actual, "b")
+-
+-    def test_exception_context_with_yield_from(self):
+-        def f():
+-            yield
+-
+-        def g():
+-            try:
+-                raise KeyError("a")
+-            except Exception:
+-                yield from f()
+-
+-        gen = g()
+-        gen.send(None)
+-        with self.assertRaises(ValueError) as cm:
+-            gen.throw(ValueError)
+-        context = cm.exception.__context__
+-        self.assertEqual((type(context), context.args), (KeyError, ("a",)))
+-
+-    def test_exception_context_with_yield_from_with_context_cycle(self):
+-        # Check trying to create an exception context cycle:
+-        # https://bugs.python.org/issue40696
+-        has_cycle = None
+-
+-        def f():
+-            yield
+-
+-        def g(exc):
+-            nonlocal has_cycle
+-            try:
+-                raise exc
+-            except Exception:
+-                try:
+-                    yield from f()
+-                except Exception as exc:
+-                    has_cycle = exc is exc.__context__
+-            yield
+-
+-        exc = KeyError("a")
+-        gen = g(exc)
+-        gen.send(None)
+-        gen.throw(exc)
+-        # This also distinguishes from the initial has_cycle=None.
+-        self.assertEqual(has_cycle, False)
+-
+-    def test_throw_after_none_exc_type(self):
+-        def g():
+-            try:
+-                raise KeyError
+-            except KeyError:
+-                pass
+-
+-            try:
+-                yield
+-            except Exception:
+-                raise RuntimeError
+-
+-        gen = g()
+-        gen.send(None)
+-        with self.assertRaises(RuntimeError) as cm:
+-            gen.throw(ValueError)
+-
+-
+-class GeneratorTests(GeneratorTestsBase):
+-    # Taken from commit
+-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
+-
+-    def test_send_non_none_to_new_gen(self):
+-        def f():
+-            yield 1
+-
+-        g = f()
+-        with self.assertRaises(TypeError):
+-            g.send(0)
+-        self.assertEqual(next(g), 1)
+-
+-    def test_issue103488(self):
+-        def gen_raises():
+-            yield
+-            raise ValueError()
+-
+-        def loop():
+-            try:
+-                for _ in gen_raises():
+-                    if True is False:
+-                        return
+-            except ValueError:
+-                pass
+-
+-        # This should not raise
+-        loop()
+-
+-
+-if __name__ == "__main__":
+-    from torch._dynamo.test_case import run_tests
+-
+-    run_tests()
+diff --git a/test/dynamo/cpython/3.13/test_generator_stop.py b/test/dynamo/cpython/3.13/test_generator_stop.py
+index bc235ceb00e..ddeefbeaee8 100644
+--- a/test/dynamo/cpython/3.13/test_generator_stop.py
++++ b/test/dynamo/cpython/3.13/test_generator_stop.py
+@@ -1,5 +1,60 @@
+ from __future__ import generator_stop
+ 
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ 
+ 
+@@ -30,5 +85,8 @@ class TestPEP479(unittest.TestCase):
+                       'were not properly set')
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_generators.py b/test/dynamo/cpython/3.13/test_generators.py
+index 6d36df2c741..23269e30990 100644
+--- a/test/dynamo/cpython/3.13/test_generators.py
++++ b/test/dynamo/cpython/3.13/test_generators.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import copy
+ import gc
+ import pickle
+@@ -2599,4 +2654,7 @@ def load_tests(loader, tests, pattern):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_grammar.py b/test/dynamo/cpython/3.13/test_grammar.py
+index c72f4387108..f28f029a1e7 100644
+--- a/test/dynamo/cpython/3.13/test_grammar.py
++++ b/test/dynamo/cpython/3.13/test_grammar.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- part 1, grammar.
+ # This just tests whether the parser accepts them all.
+ 
+@@ -212,6 +268,7 @@ class TokenTests(unittest.TestCase):
+         check("1e2_", "invalid decimal literal")
+         check("1e+", "invalid decimal literal")
+ 
++    @xfailIfTorchDynamo
+     def test_end_of_numerical_literals(self):
+         def check(test, error=False):
+             with self.subTest(expr=test):
+@@ -2031,5 +2088,8 @@ class GrammarTests(unittest.TestCase):
+             foo().send(None)
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_int.py b/test/dynamo/cpython/3.13/test_int.py
+index 8959ffb6dcc..ec615b041c6 100644
+--- a/test/dynamo/cpython/3.13/test_int.py
++++ b/test/dynamo/cpython/3.13/test_int.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import sys
+ import time
+ 
+@@ -920,4 +975,7 @@ class PyLongModuleTests(unittest.TestCase):
+             bits <<= 1
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_int_literal.py b/test/dynamo/cpython/3.13/test_int_literal.py
+index bf725710d55..a25cfaa8de6 100644
+--- a/test/dynamo/cpython/3.13/test_int_literal.py
++++ b/test/dynamo/cpython/3.13/test_int_literal.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Test correct treatment of hex/oct constants.
+ 
+ This is complex because of changes due to PEP 237.
+@@ -140,4 +195,7 @@ class TestHexOctBin(unittest.TestCase):
+         self.assertEqual(-0b1111111111111111111111111111111111111111111111111111111111111111, -18446744073709551615)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_iter.py b/test/dynamo/cpython/3.13/test_iter.py
+index 9606d5beab7..b87bf7e7d4d 100644
+--- a/test/dynamo/cpython/3.13/test_iter.py
++++ b/test/dynamo/cpython/3.13/test_iter.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    skipIfTorchDynamo,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Test iterators.
+ 
+ import sys
+@@ -633,6 +689,7 @@ class TestCase(unittest.TestCase):
+                 pass
+ 
+     # Test zip()'s use of iterators.
++    @skipIfTorchDynamo("infinite loop")
+     def test_builtin_zip(self):
+         self.assertEqual(list(zip()), [])
+         self.assertEqual(list(zip(*[])), [])
+@@ -1145,4 +1202,7 @@ class TestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_list.py b/test/dynamo/cpython/3.13/test_list.py
+index 0601b33e79e..827b48498f5 100644
+--- a/test/dynamo/cpython/3.13/test_list.py
++++ b/test/dynamo/cpython/3.13/test_list.py
+@@ -1,5 +1,60 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import sys
+-from test import list_tests
++import list_tests
+ from test.support import cpython_only
+ import pickle
+ import unittest
+@@ -276,4 +331,7 @@ class ListTest(list_tests.CommonTest):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_math.py b/test/dynamo/cpython/3.13/test_math.py
+index b68c442013c..191cd8b14bd 100644
+--- a/test/dynamo/cpython/3.13/test_math.py
++++ b/test/dynamo/cpython/3.13/test_math.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- math module
+ # XXXX Should not do tests around zero only
+ 
+@@ -1261,6 +1317,7 @@ class MathTests(unittest.TestCase):
+         self.assertEqual(math.log(INF), INF)
+         self.assertTrue(math.isnan(math.log10(NAN)))
+ 
++    @xfailIfTorchDynamo
+     def testSumProd(self):
+         sumprod = math.sumprod
+         Decimal = decimal.Decimal
+@@ -1708,6 +1765,7 @@ class MathTests(unittest.TestCase):
+         self.ftest('radians(-45)', math.radians(-45), -math.pi/4)
+         self.ftest('radians(0)', math.radians(0), 0)
+ 
++    @xfailIfTorchDynamo
+     @requires_IEEE_754
+     def testRemainder(self):
+         from fractions import Fraction
+@@ -2856,5 +2914,8 @@ def load_tests(loader, tests, pattern):
+     tests.addTest(DocFileSuite(os.path.join("mathdata", "ieee754.txt")))
+     return tests
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_ordered_dict.py b/test/dynamo/cpython/3.13/test_ordered_dict.py
+index 4571b23dfe7..237addc2c27 100644
+--- a/test/dynamo/cpython/3.13/test_ordered_dict.py
++++ b/test/dynamo/cpython/3.13/test_ordered_dict.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import builtins
+ import contextlib
+ import copy
+@@ -292,6 +348,7 @@ class OrderedDictTests:
+         # different length implied inequality
+         self.assertNotEqual(od1, OrderedDict(pairs[:-1]))
+ 
++    @xfailIfTorchDynamo
+     def test_copying(self):
+         OrderedDict = self.OrderedDict
+         # Check that ordered dicts are copyable, deepcopyable, picklable,
+@@ -821,6 +878,7 @@ class CPythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+                 del od['c']
+         self.assertEqual(list(od), list('bdeaf'))
+ 
++    @xfailIfTorchDynamo
+     def test_iterators_pickling(self):
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+@@ -895,6 +953,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+     @classmethod
+     def setUpClass(cls):
+         cls.type2test = py_coll.OrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -907,6 +966,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+     @classmethod
+     def setUpClass(cls):
+         cls.type2test = c_coll.OrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -920,6 +980,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+         class MyOrderedDict(py_coll.OrderedDict):
+             pass
+         cls.type2test = MyOrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -934,6 +995,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+         class MyOrderedDict(c_coll.OrderedDict):
+             pass
+         cls.type2test = MyOrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -1021,7 +1083,11 @@ class CSimpleLRUCacheTests(SimpleLRUCacheTests, unittest.TestCase):
+         class type2test(SimpleLRUCache, c_coll.OrderedDict):
+             pass
+         cls.type2test = type2test
++        super().setUpClass()
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_raise.py b/test/dynamo/cpython/3.13/test_raise.py
+index 6d26a61bee4..0d75061198c 100644
+--- a/test/dynamo/cpython/3.13/test_raise.py
++++ b/test/dynamo/cpython/3.13/test_raise.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Copyright 2007 Google, Inc. All Rights Reserved.
+ # Licensed to PSF under a Contributor Agreement.
+ 
+@@ -517,4 +572,7 @@ class TestRemovedFunctionality(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_set.py b/test/dynamo/cpython/3.13/test_set.py
+index d9102eb98a5..50846b9d13b 100644
+--- a/test/dynamo/cpython/3.13/test_set.py
++++ b/test/dynamo/cpython/3.13/test_set.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ from test import support
+ from test.support import warnings_helper
+@@ -47,6 +102,7 @@ class TestJointOps:
+         self.letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+         self.s = self.thetype(word)
+         self.d = dict.fromkeys(word)
++        super().setUp()
+ 
+     def test_new_or_init(self):
+         self.assertRaises(TypeError, self.thetype, [], 2)
+@@ -813,9 +869,16 @@ class SetSubclassWithSlots(set):
+ 
+ class TestSetSubclassWithSlots(unittest.TestCase):
+     thetype = SetSubclassWithSlots
+-    setUp = TestJointOps.setUp
+     test_pickling = TestJointOps.test_pickling
+ 
++    def setUp(self):
++        self.word = word = 'simsalabim'
++        self.otherword = 'madagascar'
++        self.letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
++        self.s = self.thetype(word)
++        self.d = dict.fromkeys(word)
++        super().setUp()
++
+ class FrozenSetSubclassWithSlots(frozenset):
+     __slots__ = ('x', 'y', '__dict__')
+ 
+@@ -942,6 +1005,7 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
+         self.dup    = set(self.values)
+         self.length = 0
+         self.repr   = "set()"
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -953,6 +1017,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+         self.dup    = set(self.values)
+         self.length = 1
+         self.repr   = "{3}"
++        super().setUp()
+ 
+     def test_in(self):
+         self.assertIn(3, self.set)
+@@ -970,6 +1035,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+         self.dup    = set(self.values)
+         self.length = 1
+         self.repr   = "{(0, 'zero')}"
++        super().setUp()
+ 
+     def test_in(self):
+         self.assertIn((0, "zero"), self.set)
+@@ -987,6 +1053,7 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
+         self.dup    = set(self.values)
+         self.length = 3
+         self.repr   = None
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -997,6 +1064,7 @@ class TestBasicOpsString(TestBasicOps, unittest.TestCase):
+         self.set    = set(self.values)
+         self.dup    = set(self.values)
+         self.length = 3
++        super().setUp()
+ 
+     def test_repr(self):
+         self.check_repr_against_values()
+@@ -1010,6 +1078,7 @@ class TestBasicOpsBytes(TestBasicOps, unittest.TestCase):
+         self.set    = set(self.values)
+         self.dup    = set(self.values)
+         self.length = 3
++        super().setUp()
+ 
+     def test_repr(self):
+         self.check_repr_against_values()
+@@ -1025,6 +1094,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
+         self.set    = set(self.values)
+         self.dup    = set(self.values)
+         self.length = 4
++        super().setUp()
+ 
+     def test_repr(self):
+         self.check_repr_against_values()
+@@ -1081,6 +1151,7 @@ class TestSetOfSets(unittest.TestCase):
+ class TestBinaryOps(unittest.TestCase):
+     def setUp(self):
+         self.set = set((2, 4, 6))
++        super().setUp()
+ 
+     def test_eq(self):              # SF bug 643115
+         self.assertEqual(self.set, set({2:1,4:3,6:5}))
+@@ -1154,6 +1225,7 @@ class TestBinaryOps(unittest.TestCase):
+ class TestUpdateOps(unittest.TestCase):
+     def setUp(self):
+         self.set = set((2, 4, 6))
++        super().setUp()
+ 
+     def test_union_subset(self):
+         self.set |= set([2])
+@@ -1241,6 +1313,7 @@ class TestMutate(unittest.TestCase):
+     def setUp(self):
+         self.values = ["a", "b", "c"]
+         self.set = set(self.values)
++        super().setUp()
+ 
+     def test_add_present(self):
+         self.set.add("c")
+@@ -1510,6 +1583,7 @@ class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = 19
+         self.otherIsIterable = False
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -1518,6 +1592,7 @@ class TestOnlySetsDict(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = {1:2, 3:4}
+         self.otherIsIterable = True
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -1526,6 +1601,7 @@ class TestOnlySetsOperator(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = operator.add
+         self.otherIsIterable = False
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -1534,6 +1610,7 @@ class TestOnlySetsTuple(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = (2, 4, 6)
+         self.otherIsIterable = True
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -1542,6 +1619,7 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = 'abc'
+         self.otherIsIterable = True
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+@@ -1553,6 +1631,7 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
+         self.set   = set((1, 2, 3))
+         self.other = gen()
+         self.otherIsIterable = True
++        super().setUp()
+ 
+ #==============================================================================
+ 
+@@ -1580,30 +1659,35 @@ class TestCopying:
+ class TestCopyingEmpty(TestCopying, unittest.TestCase):
+     def setUp(self):
+         self.set = set()
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+ class TestCopyingSingleton(TestCopying, unittest.TestCase):
+     def setUp(self):
+         self.set = set(["hello"])
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+ class TestCopyingTriple(TestCopying, unittest.TestCase):
+     def setUp(self):
+         self.set = set(["zero", 0, None])
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+ class TestCopyingTuple(TestCopying, unittest.TestCase):
+     def setUp(self):
+         self.set = set([(1, 2)])
++        super().setUp()
+ 
+ #------------------------------------------------------------------------------
+ 
+ class TestCopyingNested(TestCopying, unittest.TestCase):
+     def setUp(self):
+         self.set = set([((1, 2), (3, 4))])
++        super().setUp()
+ 
+ #==============================================================================
+ 
+@@ -1611,6 +1695,7 @@ class TestIdentities(unittest.TestCase):
+     def setUp(self):
+         self.a = set('abracadabra')
+         self.b = set('alacazam')
++        super().setUp()
+ 
+     def test_binopsVsSubsets(self):
+         a, b = self.a, self.b
+@@ -2118,4 +2203,7 @@ class TestGraphs(unittest.TestCase):
+ #==============================================================================
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_setcomps.py b/test/dynamo/cpython/3.13/test_setcomps.py
+index 976fa885bd8..e2212a8e158 100644
+--- a/test/dynamo/cpython/3.13/test_setcomps.py
++++ b/test/dynamo/cpython/3.13/test_setcomps.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import doctest
+ import unittest
+ 
+@@ -157,4 +212,7 @@ def load_tests(loader, tests, pattern):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_sort.py b/test/dynamo/cpython/3.13/test_sort.py
+index 2a7cfb7affa..07f43388e24 100644
+--- a/test/dynamo/cpython/3.13/test_sort.py
++++ b/test/dynamo/cpython/3.13/test_sort.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ from test import support
+ import random
+ import unittest
+@@ -408,4 +463,7 @@ class TestOptimizedCompares(unittest.TestCase):
+ #==============================================================================
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_string.py b/test/dynamo/cpython/3.13/test_string.py
+index 824b89ad517..4695edbadb1 100644
+--- a/test/dynamo/cpython/3.13/test_string.py
++++ b/test/dynamo/cpython/3.13/test_string.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import string
+ from string import Template
+@@ -527,5 +582,8 @@ class TestTemplate(unittest.TestCase):
+         self.assertRaises(ValueError, s.get_identifiers)
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_sys.py b/test/dynamo/cpython/3.13/test_sys.py
+index ee3bd0092f9..49d92c9ced4 100644
+--- a/test/dynamo/cpython/3.13/test_sys.py
++++ b/test/dynamo/cpython/3.13/test_sys.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import builtins
+ import codecs
+ import _datetime
+@@ -1404,6 +1459,7 @@ class SizeofTest(unittest.TestCase):
+         _testinternalcapi = import_helper.import_module("_testinternalcapi")
+         self.gc_headsize = _testinternalcapi.SIZEOF_PYGC_HEAD
+         self.managed_pre_header_size = _testinternalcapi.SIZEOF_MANAGED_PRE_HEADER
++        super().setUp()
+ 
+     check_sizeof = test.support.check_sizeof
+ 
+@@ -1452,6 +1508,7 @@ class SizeofTest(unittest.TestCase):
+         self.assertEqual(sys.getsizeof(True), size('') + self.longdigit)
+         self.assertEqual(sys.getsizeof(True, -1), size('') + self.longdigit)
+ 
++    @unittest.expectedFailure
+     def test_objecttypes(self):
+         # check all types defined in Objects/
+         calcsize = struct.calcsize
+@@ -1762,6 +1819,7 @@ class SizeofTest(unittest.TestCase):
+             __slots__ = 'a', 'b', 'c'
+         check(OD(x=[]), OrderedDict(x=[]), '3P')
+ 
++    @unittest.expectedFailure
+     def test_pythontypes(self):
+         # check all types defined in Python/
+         size = test.support.calcobjsize
+@@ -1839,4 +1897,7 @@ class SizeofTest(unittest.TestCase):
+         self.assertEqual(err, b"")
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_tuple.py b/test/dynamo/cpython/3.13/test_tuple.py
+index 9ce80c5e8ea..d545d7f14d9 100644
+--- a/test/dynamo/cpython/3.13/test_tuple.py
++++ b/test/dynamo/cpython/3.13/test_tuple.py
+@@ -1,4 +1,60 @@
+-from test import support, seq_tests
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
++from test import support
++import seq_tests
+ import unittest
+ 
+ import gc
+@@ -510,4 +566,7 @@ class TupleTest(seq_tests.CommonTest):
+ #            pileup 262,143 mean 8.0 coll 262,143 z +92683.6
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_unittest/test_assertions.py b/test/dynamo/cpython/3.13/test_unittest/test_assertions.py
+index 1dec947ea76..1489aec4fe2 100644
+--- a/test/dynamo/cpython/3.13/test_unittest/test_assertions.py
++++ b/test/dynamo/cpython/3.13/test_unittest/test_assertions.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import datetime
+ import warnings
+ import weakref
+@@ -414,4 +469,7 @@ class TestLongMessage(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_userdict.py b/test/dynamo/cpython/3.13/test_userdict.py
+index 61e79f553e8..566db0b52e2 100644
+--- a/test/dynamo/cpython/3.13/test_userdict.py
++++ b/test/dynamo/cpython/3.13/test_userdict.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Check every path through every method of UserDict
+ 
+ from test import mapping_tests, support
+@@ -221,4 +276,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_userlist.py b/test/dynamo/cpython/3.13/test_userlist.py
+index 312702c8e39..d3f9deda7b2 100644
+--- a/test/dynamo/cpython/3.13/test_userlist.py
++++ b/test/dynamo/cpython/3.13/test_userlist.py
+@@ -1,7 +1,62 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Check every path through every method of UserList
+ 
+ from collections import UserList
+-from test import list_tests
++import list_tests
+ import unittest
+ from test import support
+ 
+@@ -74,4 +129,7 @@ class UserListTest(list_tests.CommonTest):
+     )
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
+diff --git a/test/dynamo/cpython/3.13/test_userstring.py b/test/dynamo/cpython/3.13/test_userstring.py
+index 74df52f5412..8d11b36e99b 100644
+--- a/test/dynamo/cpython/3.13/test_userstring.py
++++ b/test/dynamo/cpython/3.13/test_userstring.py
+@@ -1,8 +1,63 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch.testing._internal.common_utils import (
++    TEST_WITH_TORCHDYNAMO,
++    run_tests,
++)
++
++
++if TEST_WITH_TORCHDYNAMO:
++    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # UserString is a wrapper around the native builtin string type.
+ # UserString instances should behave similar to builtin string objects.
+ 
+ import unittest
+-from test import string_tests
++import string_tests
+ 
+ from collections import UserString
+ 
+@@ -68,4 +123,7 @@ class UserStringTest(
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    if TEST_WITH_TORCHDYNAMO:
++        run_tests()
++    else:
++        unittest.main()
