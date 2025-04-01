@@ -56,7 +56,6 @@
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/alias_info.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>

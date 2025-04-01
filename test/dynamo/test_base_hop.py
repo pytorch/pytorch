@@ -299,8 +299,11 @@ class GraphModule(torch.nn.Module):
         ):
             f(inner, x, y)
 
-        # input mutation can be supported with auto_functionalize
-        f(inner2, x, y)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(inner2, x, y)
 
     def test_eager_call(self):
         def inner(x, y):
