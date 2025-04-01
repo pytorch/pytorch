@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
@@ -296,6 +297,12 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
+
+    @staticmethod
+    def neg(x: CSEVariable) -> str:
+        # TODO: Does it rely on undefined behavior?
+        # If so, add special logic for unsigned types
+        return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
     def rsqrt(x: CSEVariable) -> str:
@@ -677,6 +684,14 @@ class MetalKernel(SIMDKernel):
             )
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
+            if self.inside_reduction:
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
+                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
