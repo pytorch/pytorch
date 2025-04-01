@@ -3956,14 +3956,19 @@ CUDAAllocator* allocator();
 
 struct BackendStaticInitializer {
   CUDAAllocator* parseEnvForBackend() {
-    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
 #ifdef USE_ROCM
     // convenience for ROCm users to allow either CUDA or HIP env var
-    if (!val.has_value()) {
-      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+    if (!c10::utils::has_env("PYTORCH_ALLOC_CONF") &&
+        !c10::utils::has_env("PYTORCH_CUDA_ALLOC_CONF")) {
+      auto val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+      if (val) {
+        c10::CachingAllocator::AllocatorConfig::instance().parseArgs(
+            val->c_str());
+      }
     }
 #endif
-    if (c10::CachingAllocator::AllocatorConfig::instance().use_async_allocator()) {
+    if (c10::CachingAllocator::AllocatorConfig::instance()
+            .use_async_allocator()) {
       return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
