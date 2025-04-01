@@ -39,6 +39,16 @@
     }                                              \
   }
 
+#define DISPATCH_WORLD_SIZES_NO_DEFAULT(world_size, ...)                 \
+  switch (world_size) {                                                  \
+    INT_SWITCH_CASE(k_world_size, 8, __VA_ARGS__);                       \
+    INT_SWITCH_CASE(k_world_size, 4, __VA_ARGS__);                       \
+    INT_SWITCH_CASE(k_world_size, 2, __VA_ARGS__);                       \
+    default: {                                                           \
+      TORCH_CHECK(false, "Not implemented for world_size=", world_size); \
+    }                                                                    \
+  }
+
 #define DISPATCH_ALIGNMENTS_16_8_4(alignment, ...)                    \
   switch (alignment) {                                                \
     INT_SWITCH_CASE(k_alignment, 16, __VA_ARGS__);                    \
@@ -494,6 +504,70 @@ template <typename T, int alignment, int k_world_size>
 static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     void two_shot_all_reduce_kernel(
         T** input_ptrs,
+        T* output_ptr,
+        size_t input_offset,
+        size_t numel,
+        uint32_t** signal_pads,
+        size_t rank,
+        size_t world_size) {
+  static_assert(alignment % sizeof(T) == 0);
+  constexpr size_t numel_per_thread = alignment / sizeof(T);
+
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  __syncthreads();
+
+  const size_t numel_per_rank =
+      at::round_up(numel, alignment * world_size) / world_size;
+  const size_t start = numel_per_rank * rank;
+
+  auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
+  auto stride = blockDim.x * gridDim.x * numel_per_thread;
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    if (start + i >= numel) {
+      continue;
+    }
+    auto vec = load_and_reduce<T, alignment, k_world_size>(
+        input_ptrs, rank, world_size, input_offset + start + i);
+    // store to local buffer
+    st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+  }
+
+  __syncthreads();
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  __syncthreads();
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    Vec<alignment> tmp[k_world_size];
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      tmp[step] = ld_vec<alignment>(
+          input_ptrs[remote_rank] + input_offset + remote_start + i);
+    }
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      st_vec<alignment>(
+          output_ptr + remote_start + i, tmp[step]);
+    }
+  }
+  // need to make sure all blocks exit simultaneously so that the data
+  // is not corrupted by the subsequent kernels
+  __syncthreads();
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+}
+
+template <typename T, int alignment, int k_world_size>
+static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
+    void two_shot_all_reduce_kernel_inplace(
+        T** input_ptrs,
         size_t input_offset,
         size_t numel,
         uint32_t** signal_pads,
@@ -528,8 +602,9 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
 }
 
-at::Tensor two_shot_all_reduce_(
+at::Tensor two_shot_all_reduce_impl(
     at::Tensor input,
+    std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(
@@ -546,6 +621,14 @@ at::Tensor two_shot_all_reduce_(
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
 
+  if (output.has_value()) {
+    const size_t output_alignment =
+        get_and_verify_alignment(*output, "two_shot_all_reduce");
+    TORCH_CHECK(
+        alignment <= output_alignment,
+        "two_shot_all_reduce: output alignment must be equal to or larger than input.");
+  }
+
   int num_blocks = 0, num_threads = 0;
   init_elementwise_launch_config(
       input.numel(),
@@ -557,30 +640,73 @@ at::Tensor two_shot_all_reduce_(
       num_blocks,
       num_threads);
 
-  AT_DISPATCH_FLOAT_AND_BFLOAT16(
-      input.scalar_type(), "two_shot_all_reduce", [&]() {
-        DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
-          DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
-            two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
-                <<<num_blocks,
-                   num_threads,
-                   0,
-                   at::cuda::getCurrentCUDAStream()>>>(
-                    reinterpret_cast<scalar_t**>(
-                        symm_mem->get_buffer_ptrs_dev()),
-                    input.storage_offset(),
-                    input.numel(),
-                    reinterpret_cast<uint32_t**>(
-                        symm_mem->get_signal_pad_ptrs_dev()),
-                    symm_mem->get_rank(),
-                    symm_mem->get_world_size());
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (!output.has_value()) {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel_inplace<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
           });
         });
-      });
-  return input;
+    return input;
+  } else {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output->data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+    return *output;
+  }
 }
 
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  return two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  return two_shot_all_reduce_impl(input, output, reduce_op, group_name);
+}
 } // namespace
 #endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 
@@ -713,6 +839,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
   m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
   m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
+
   m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
