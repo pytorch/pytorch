@@ -526,6 +526,7 @@ class ConfigFuzzer:
     ```python
     import torch._inductor.config as cfg
 
+
     def create_simple_test_model_gpu() -> FactoryOutputType:
         batch_size = 32
         seq_length = 50
@@ -539,6 +540,8 @@ class ConfigFuzzer:
             return True
 
         return test_fn
+
+
     fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
 
     # Test every pair of configs:
@@ -550,7 +553,9 @@ class ConfigFuzzer:
     ret = fuzzer.bisect(num_attempts=10)
 
     # reproduce a failing config
-    fuzzer.reproduce([{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}])
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
     ```
 
     The list of known failures on inductor config are:
@@ -806,6 +811,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(

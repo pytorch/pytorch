@@ -246,9 +246,9 @@ class FileManager:
         for key in sharded_keys:
             for shard in all_shards:
                 if key in shard:
-                    assert isinstance(
-                        shard[key], list
-                    ), "sharded keys in base_env must be a list"
+                    assert isinstance(shard[key], list), (
+                        "sharded keys in base_env must be a list"
+                    )
                     shard[key] = shard[key].copy()
                 else:
                     shard[key] = []
@@ -441,9 +441,9 @@ class NamespaceHelper:
     ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
-        assert (
-            len(cpp_namespaces) <= max_level
-        ), f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        assert len(cpp_namespaces) <= max_level, (
+            f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        )
         self.cpp_namespace_ = namespace_str
         self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
         self.epilogue_ = "\n".join(
