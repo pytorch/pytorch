@@ -258,6 +258,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS_ARM64,
             generate_binary_build_matrix.DEBUG,
