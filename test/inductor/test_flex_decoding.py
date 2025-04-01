@@ -902,7 +902,7 @@ class TestFlexDecoding(InductorTestCase):
     def test_non_divisible_multi_token_offset_mask(self):
         KV_S = S - 3
         Q_S = 3
-        offset_tensor = torch.tensor(S // 2 - 1, device=GPU_TYPE, dtype=torch.int32)
+        offset_tensor = torch.tensor(S // 2 - 1, device=self.device, dtype=torch.int32)
 
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
@@ -1690,8 +1690,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
-    # Double and complex datatype matmul is not supported in oneDNN
-    # @expectedFailureXPU
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @supported_platform

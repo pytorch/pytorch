@@ -1237,7 +1237,7 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
-        # self.run_test(*inputs)
+        self.run_test(*inputs)
         self.run_test_with_paged_attention(*inputs)
 
     test_strides = [
@@ -3001,7 +3001,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
-        bias_sdpa_gold = bias.detach().clone().to(torch.float64).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
@@ -3610,7 +3612,6 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
     @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
-        gold_dtype_str = {torch.float64: "f64", torch.float32: "f32"}[torch.float64]
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
@@ -3632,7 +3633,10 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         self.assertEqual(len(cnt.graphs), 1)
         graph = cnt.graphs[0]
         norm_graph = normalize_gm(graph.print_readable(print_output=False))
-        expected_norm_graph = """\
+
+        self.assertExpectedInline(
+            norm_graph,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
         l_query_ = L_query_
@@ -3662,13 +3666,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
-""".replace(
-            "f64", gold_dtype_str
-        )  # noqa: B950
-
-        self.assertExpectedInline(
-            norm_graph,
-            expected_norm_graph,
+""",  # noqa: B950
         )
         # Save the AOT graphs
         aot_graphs = []
@@ -3716,11 +3714,9 @@ class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full
-""".replace(
-            "f64", gold_dtype_str
-        ).replace(
+""".replace(  # noqa: B950
             "GPU_TYPE", self.device
-        )  # noqa: B950
+        )
 
         self.assertExpectedInline(
             joint_graph,
