@@ -621,22 +621,22 @@ struct SwiGLUOptions {
 };
 
 class TORCH_API SwiGLUImpl : public torch::nn::Cloneable<SwiGLUImpl> {
-  public:
-   /// Constructs the SwiGLU module with the given options.
-   explicit SwiGLUImpl(const SwiGLUOptions& options_ = {});
- 
-   /// Applies the SwiGLU activation to the input tensor.
-   Tensor forward(const Tensor& input);
- 
-   /// Resets the module parameters (none in this case).
-   void reset() override;
- 
-   /// Pretty prints the `SwiGLU` module into the given `stream`.
-   void pretty_print(std::ostream& stream) const override;
- 
-   /// The options with which this `Module` was constructed.
-   SwiGLUOptions options;
- };
+ public:
+  /// Constructs the SwiGLU module with the given options.
+  explicit SwiGLUImpl(const SwiGLUOptions& options_ = {});
+
+  /// Applies the SwiGLU activation to the input tensor.
+  Tensor forward(const Tensor& input);
+
+  /// Resets the module parameters (none in this case).
+  void reset() override;
+
+  /// Pretty prints the `SwiGLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SwiGLUOptions options;
+};
 
 /// A `ModuleHolder` subclass for `SwiGLUImpl`.
 /// See the documentation for `SwiGLUImpl` class to learn what methods it
