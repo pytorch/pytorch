@@ -414,7 +414,10 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            if self.comm_ctx.reduce_scatter_state is not None and self.comm_ctx.reduce_scatter_state.event is not None:
+            if (
+                self.comm_ctx.reduce_scatter_state is not None 
+                and self.comm_ctx.reduce_scatter_state.event is not None
+            ):
                 self.device_handle.current_stream().wait_event(
                     self.comm_ctx.reduce_scatter_state.event
                 )
@@ -485,7 +488,10 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if self._all_reduce_state is not None and self._all_reduce_state.event is not None:
+        if (
+            self._all_reduce_state is not None 
+            and self._all_reduce_state.event is not None
+        ):
             self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
         self._all_reduce_state = None
 
