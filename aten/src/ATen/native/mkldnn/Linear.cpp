@@ -187,6 +187,14 @@ Tensor mkldnn_linear_pointwise(
     std::string_view attr,
     c10::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
+  auto aprop_kind = ideep::prop_kind::forward;
+  bool maybe_backward = GradMode::is_enabled() &&
+      (input_t.requires_grad() || weight_t.requires_grad() ||
+       (bias_opt.has_value() && bias_opt->defined() &&
+        bias_opt->requires_grad()));
+  if (!maybe_backward) {
+    aprop_kind = ideep::prop_kind::forward_inference;
+  }
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
@@ -238,13 +246,15 @@ Tensor mkldnn_linear_pointwise(
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        op_attr);
+        op_attr,
+        aprop_kind);
   } else {
     ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_output,
-        op_attr);
+        op_attr,
+        aprop_kind);
   }
 
   if (dim != 2) {
@@ -317,6 +327,7 @@ Tensor mkldnn_linear_pointwise_binary(
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+  auto aprop_kind = ideep::prop_kind::forward_inference;
 
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
@@ -325,10 +336,11 @@ Tensor mkldnn_linear_pointwise_binary(
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        op_attr);
+        op_attr,
+        aprop_kind);
   } else {
     ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
-        mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
+        mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr, aprop_kind);
   }
 
   if (dim != 2) {

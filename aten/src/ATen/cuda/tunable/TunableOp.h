@@ -396,7 +396,7 @@ class TunableOp {
       for (auto it = top_solns.rbegin(); it != top_solns.rend(); ++it) {
         TUNABLE_LOG2("   ", *it);
       }
-      return ResultEntry(id_name, min_duration_ms);
+      return ResultEntry(id_name, min_duration_ms, blas_sig);
     }
 
   private:
