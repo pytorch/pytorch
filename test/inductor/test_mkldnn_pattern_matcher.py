@@ -129,7 +129,18 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     if output.is_contiguous(memory_format=torch.contiguous_format) or (
         TEST_ACL and dtype == torch.bfloat16
     ):
-        output_kernel = 1
+        # For xpu dynamic conv, we don't do layout optimization in fw_compile_freezing:
+        # https://github.com/pytorch/pytorch/blob/99a03211cb58cf3e5e3dea0c543795af43c41da8/torch/_inductor/graph.py#L528C1-L555
+        # Thus we don't need a new kernel to enforce output_layout.
+        if (
+            device.startswith("xpu")
+            and dynamo_config.dynamic_shapes
+            and (not dynamo_config.assume_static_by_default)
+        ):
+            output_kernel = 0
+        else:
+            output_kernel = 1
+
     return input_kernel + output_kernel
 
 
@@ -462,6 +473,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
+    @skipIfXpu(msg="Different with CPU, two linears will be concat on XPU for better performance")
     def test_linear_add_bias(self, device):
         self.device = device
 
@@ -977,6 +989,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         self._test_common(mod, (x1, x2), matcher_check_fn)
 
+    @skipIfXpu(msg="Different with CPU, two linears will be concat on XPU for better performance")
     def test_multi_linear_share_same_input(self, device):
         self.device = device
 
@@ -4217,6 +4230,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
         self._test_common(mod, (v,), matcher_check_fn)
 
+    @skipIfXpu(msg="Different with CPU, two linears will be concat on XPU for better performance")
     def test_multi_linear_share_same_input_dynamic(self, device):
         self.device = device
 
