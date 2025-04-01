@@ -1207,7 +1207,7 @@ def swiglu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     )
     b, c = torch.tensor_split(a, 2, dim)
 
-    return b * torch.silu(c)
+    return b * torch.nn.functional.silu(c)
 
 
 @register_decomposition(aten.pairwise_distance)
