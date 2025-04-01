@@ -45,7 +45,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 
@@ -672,7 +672,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c

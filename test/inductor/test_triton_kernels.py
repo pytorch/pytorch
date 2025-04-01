@@ -25,13 +25,7 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -44,23 +38,22 @@ if HAS_GPU:
     import triton
     from triton import language as tl
 
-    if not TEST_WITH_ROCM:
-        if HAS_CUDA:
-            try:
-                from triton.language.extra.libdevice import (  # @manual
-                    fast_dividef,
-                    fast_dividef as my_fast_dividef,
-                )
-            except ImportError:
-                from triton.language.extra.cuda.libdevice import (  # @manual
-                    fast_dividef,
-                    fast_dividef as my_fast_dividef,
-                )
-        elif HAS_XPU:
-            from triton.language.extra.intel.libdevice import (  # @manual
+    if HAS_CUDA:
+        try:
+            from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
+        except ImportError:
+            from triton.language.extra.cuda.libdevice import (  # @manual
+                fast_dividef,
+                fast_dividef as my_fast_dividef,
+            )
+    elif HAS_XPU:
+        from triton.language.extra.intel.libdevice import (  # @manual
+            fast_dividef,
+            fast_dividef as my_fast_dividef,
+        )
 
     def _triton_get_ast_equal_to_str(params):
         try:
@@ -1341,7 +1334,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_with_imported_symbol(self):
         @triton.jit
         def add_kernel_with_imported_symbol(
@@ -1373,7 +1365,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_with_imported_symbol_with_custom_name(self):
         @triton.jit
         def add_kernel_with_imported_symbol(
