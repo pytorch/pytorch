@@ -1644,7 +1644,7 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        if is_nested_int(l) or guard_or_true(l <= 0):
+        if is_nested_int(l) or guard_or_true(l >= 1):
             multiplier *= l  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
