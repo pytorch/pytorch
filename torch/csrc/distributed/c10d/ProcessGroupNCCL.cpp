@@ -1281,7 +1281,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
           e.what());
 
       debugLog.strings["status"] = "EXCEPTION";
-      debugLog.strings["exception"] = e.what();
+      debugLog.strings["exception_msg"] = e.what();
       LOG(ERROR) << errorMsg;
     } catch (...) {
       errorMsg = c10::str(
@@ -1289,7 +1289,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
           "Unknown exception thrown when waiting for future ",
           futDescription);
       debugLog.strings["status"] = "EXCEPTION";
-      debugLog.strings["exception"] = "Unknown exception";
+      debugLog.strings["exception_msg"] = "Unknown exception";
       LOG(ERROR) << errorMsg;
     }
   } else {
