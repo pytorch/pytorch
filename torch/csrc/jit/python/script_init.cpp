@@ -314,45 +314,6 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-TypePtr createTupleType(std::vector<TypePtr> types) {
-  return TupleType::create(types);
-}
-
-AliasInfo createAliasInfo(std::string alias_group_name, bool is_write) {
-  auto alias_info = AliasInfo();
-  if (is_write) {
-    // We need to add dummy alias info to before set after set so that the alias
-    // info gets printed correctly when printing Argument. Otherwise, they're
-    // ignored.
-    auto group_name = "alias::" + alias_group_name;
-    alias_info.addBeforeSet(Symbol::fromQualString(group_name));
-    alias_info.addAfterSet(Symbol::fromQualString(group_name));
-    alias_info.setIsWrite(is_write);
-  }
-  return alias_info;
-}
-
-Argument createArgument(
-    std::string name,
-    const TypePtr& type,
-    std::optional<int32_t> N,
-    std::optional<IValue> default_value,
-    bool kwarg_only,
-    std::optional<AliasInfo> alias_info) {
-  return Argument(name, type, N, default_value, kwarg_only, alias_info);
-}
-
-FunctionSchema createFunctionSchema(
-    std::string name,
-    std::string overload_name,
-    std::vector<Argument> arguments,
-    std::vector<Argument> returns,
-    bool is_vararg,
-    bool is_varret) {
-  return FunctionSchema(
-      name, overload_name, arguments, returns, is_vararg, is_varret);
-}
-
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
     const Decl& impl_decl,
@@ -1917,10 +1878,6 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
   m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
 
-  m.def("_create_argument", &createArgument);
-  m.def("_create_function_schema", &createFunctionSchema);
-  m.def("_create_alias_info", &createAliasInfo);
-  m.def("_create_tuple_type", &createTupleType);
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
