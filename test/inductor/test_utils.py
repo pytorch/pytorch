@@ -1,12 +1,20 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
+
 from sympy import Symbol
 
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import sympy_subs
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import allclose_many
 
 
+@instantiate_parametrized_tests
 class TestUtils(TestCase):
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
@@ -71,6 +79,20 @@ class TestUtils(TestCase):
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
         self.assertEqual(result.is_nonnegative, None)
+
+    @parametrize(
+        "ref,actual,raises",
+        [
+            (1, 1, False),
+            ([2, 3], [2, 4], True),
+        ],
+    )
+    def test_allclose_many(self, ref, actual, raises):
+        """
+        Checks that allclose_many raises an exception when the operands are not close.
+        """
+        with self.assertRaises(AssertionError) if raises else contextlib.nullcontext():
+            allclose_many(self, torch.tensor(ref), torch.tensor(actual))
 
 
 if __name__ == "__main__":
