@@ -6,7 +6,7 @@
 
 namespace c10::cuda::CUDACachingAllocator {
 
-// Environment config parser
+// Keep this for backwards compatibility
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
   static size_t max_split_size() {
