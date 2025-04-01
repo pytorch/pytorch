@@ -735,6 +735,17 @@ def forward(self, x_1):
         # you're unlikely to get other equalities like this on the
         # unbacked SymInts.)
 
+    def test_loss_of_sizelikeness(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            u0, *_ = x.tolist()
+            t = torch.empty(u0)
+            return t[:-1] + t[1:]
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            self.assertEqual(fn(torch.tensor([3, 1])).size(0), 2)
+            self.assertEqual(fn(torch.tensor([1, 1])).size(0), 0)
+
     def test_unbacked_substitution(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
