@@ -56,6 +56,7 @@ from torch.utils.data import (
     Subset,
     TensorDataset,
 )
+from torch.utils.data.distributed import DistributedWeightedRandomSampler
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.dataset import random_split
@@ -3613,6 +3614,69 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(sum(worker_ids), 5)
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
+        
+        
+class TestDistributedWeightedRandomSampler(TestCase):
+    def setUp(self):
+        """Setup a mock distributed environment."""
+        self.world_size = 2  # Simulating two processes
+        self.num_samples = 10  # Total samples across all processes
+        self.weights = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], dtype=torch.double)
+
+    def test_correct_number_of_samples_per_process(self):
+        """Ensure each process gets the correct number of samples."""
+        num_samples_per_proc = int(self.num_samples / self.world_size)
+
+        sampler_0 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=0)
+        sampler_1 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=1)
+
+        self.assertEqual(len(list(iter(sampler_0))), num_samples_per_proc)
+        self.assertEqual(len(list(iter(sampler_1))), num_samples_per_proc)
+
+    def test_weighted_sampling_distribution(self):
+        """Ensure indices with higher weights are sampled more frequently."""
+        sampler = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=1, rank=0)
+
+        sampled_indices = list(iter(sampler))
+        counts = {idx: sampled_indices.count(idx) for idx in set(sampled_indices)}
+
+        # Higher weights should have higher counts
+        self.assertGreater(counts[max(counts, key=counts.get)], counts[min(counts, key=counts.get)])  # Index 9 has the highest weight, index 0 the lowest
+
+    def test_limited_overlapping_samples_across_processes(self):
+        """Ensure different ranks do not have excessive overlap in sampled indices."""
+        sampler_0 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=0)
+        sampler_1 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=1)
+
+        indices_0 = set(iter(sampler_0))
+        indices_1 = set(iter(sampler_1))
+
+        overlap = len(indices_0.intersection(indices_1))
+
+        # Allow some overlap but not complete overlap
+        self.assertLess(overlap, len(indices_0) * 0.5, "Excessive overlap between sampled indices across ranks")
+
+    def test_shuffling_works_across_epochs(self):
+        """Ensure shuffling changes the sampled indices when the epoch is updated."""
+        sampler = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=1, rank=0, shuffle=True)
+
+        sampler.set_epoch(1)
+        indices_epoch_1 = list(iter(sampler))
+
+        sampler.set_epoch(2)
+        indices_epoch_2 = list(iter(sampler))
+
+        self.assertNotEqual(indices_epoch_1, indices_epoch_2)  # Different epochs should yield different orders
+
+    def test_reproducibility_with_fixed_seed(self):
+        """Ensure that using the same seed produces the same results."""
+        sampler_1 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=1, rank=0, seed=42)
+        sampler_2 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=1, rank=0, seed=42)
+
+        indices_1 = list(iter(sampler_1))
+        indices_2 = list(iter(sampler_2))
+
+        self.assertEqual(indices_1, indices_2)  # Same seed should produce identical samples
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
