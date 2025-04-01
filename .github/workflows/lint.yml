@@ -242,7 +242,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     strategy:
       matrix:
         test_type: [with_torch, without_torch, older_python_version]
@@ -265,7 +265,7 @@ jobs:
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: 3.6
+          python-version: 3.8
           architecture: x64
           check-latest: false
           cache: pip
