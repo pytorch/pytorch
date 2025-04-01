@@ -4,6 +4,7 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+import unittest
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
@@ -210,10 +211,11 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         mesh.get_coordinate()
 
+    @unittest.skipif(not torch.accelerator.is_available(), "No accelerator available!")
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(torch.accelerator.current_accelerator().type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
         global_tensor = funcol.all_gather_tensor(
@@ -264,6 +266,7 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
+    @unittest.skipif(not torch.accelerator.is_available(), "No accelerator available!")
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -272,7 +275,7 @@ class DeviceMeshTest(DTensorTestBase):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
             init_device_mesh(
-                self.device_type + ":0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+                torch.accelerator.current_accelerator().type + ":0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
     @with_comms

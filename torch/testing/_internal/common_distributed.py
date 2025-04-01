@@ -1377,7 +1377,9 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
                 store=store,
             )
         else:
-            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+            backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
+                torch.accelerator.current_accelerator().type)
+            c10d.init_process_group(backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1411,9 +1413,10 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+        device = torch.accelerator.current_accelerator().type
+        cls.device = f"{device}:{cls.rank}"
+        cls.device_ids = None if device in cls.device else [cls.rank]
+        c10d.init_process_group(c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -1444,7 +1447,7 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:

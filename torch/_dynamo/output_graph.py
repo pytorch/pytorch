@@ -1331,7 +1331,7 @@ class OutputGraph:
                 payload_fn=lambda: ds.local_state.render(),
             )
             with (
-                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
+                torch.accelerator.set_device_index(compile_pg.rank() % torch.accelerator.device_count()),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states = [None] * compile_pg.size()

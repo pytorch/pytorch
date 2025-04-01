@@ -22,7 +22,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
+from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, skipIfXpu, TestCase
 
 
 DEFAULT_WORLD_SIZE = 4
@@ -299,6 +299,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
+    @skipIfXpu
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
         fwd_tid = threading.current_thread().ident
