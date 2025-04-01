@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -422,7 +422,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         ps = pstats.Stats(prof)
         try:
             prof.dump_stats(profile_path)
-        except PermissionError:
+        except OSError:
             log.exception("Cannot write to %s", profile_path)
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -559,6 +559,20 @@ class ConvertFrameAssert:
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # skip tracing non-recursive disabled functions
+        # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
+        prev_frame = sys._getframe()
+        while (
+            prev_frame
+            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
+        ):
+            prev_frame = prev_frame.f_back  # type: ignore[assignment]
+        if (
+            prev_frame
+            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+        ):
+            return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()
@@ -760,9 +774,6 @@ def _compile(
                     dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
                 )
             )
-            stack.enter_context(
-                _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -943,7 +954,9 @@ def _compile(
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
+        _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
+        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
