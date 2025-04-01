@@ -371,11 +371,22 @@ namespace {
     }
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
+// NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
+#if defined(CPU_CAPABILITY_SVE)
+        using UVT = UvalueType<vec>;
+        UVT tolerance = getDefaultTolerance<UVT>();
+        test_unary<vec>(
+            NAME_INFO(tanH),
+            RESOLVE_OVERLOAD(std::tanh),
+            [](vec v) { return v.tanh(); },
+            createDefaultUnaryTestCase<vec>(TestSeed(), tolerance));
+#else
         test_unary<vec>(
             NAME_INFO(tanH),
             RESOLVE_OVERLOAD(std::tanh),
             [](vec v) { return v.tanh(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
+#endif
     }
     TYPED_TEST(Hyperbolic, Sinh) {
         using vec = TypeParam;
