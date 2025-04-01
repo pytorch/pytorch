@@ -93,8 +93,16 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
                                         output.stride(2),
                                         output.stride(1),
                                         output.stride(0)};
+      constexpr uint32_t TILE_DIM = 16;
+      uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeZ = output.size(0);
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
+
       mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
-      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });
@@ -110,10 +118,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
                                    dataType:getMPSDataType(self)];
     return {nil, nil, output};
   }
-  auto selfTensor = mpsGraphRankedPlaceHolder(graph, self);
-  auto otherTensor = mpsGraphRankedPlaceHolder(graph, other);
+  auto selfTensor_ = mpsGraphRankedPlaceHolder(graph, self);
+  auto otherTensor_ = mpsGraphRankedPlaceHolder(graph, other);
+  auto selfTensor = self.is_conj() ? [graph conjugateWithTensor:selfTensor_ name:nil] : selfTensor_;
+  auto otherTensor = other.is_conj() ? [graph conjugateWithTensor:otherTensor_ name:nil] : otherTensor_;
   auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
-  return {selfTensor, otherTensor, output};
+  return {selfTensor_, otherTensor_, output};
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {

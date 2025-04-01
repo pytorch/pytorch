@@ -77,8 +77,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None
 )
 
 
@@ -3374,6 +3373,28 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         c10d.destroy_process_group()
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device(f"cuda:{self.rank:d}")
+        t = torch.full(
+            (1024,),
+            self.rank,
+        ).cuda()
+        with dist._time_estimator(group=process_group, device=device) as cm:
+            c10d.all_reduce(t, c10d.ReduceOp.SUM)
+        self.assertTrue(cm.estimated_time is not None)
+        self.assertTrue(cm.estimated_time > 0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

@@ -31,6 +31,7 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
+import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
@@ -51,6 +52,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._dynamo.variables import builder
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -571,6 +573,19 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertEqual(obj.y, x + 1)
         self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
+    def test_tensor_setattr_getset_descriptor(self):
+        # Tensor attribute `real` has special getter/setter for complex dtype.
+        def f(x):
+            x.real = 10
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=False)
+        x = torch.ones(5, dtype=torch.cfloat)
+
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+
     def test_closure_recompiles(self):
         cnt = CompileCounter()
 
@@ -896,7 +911,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
         self.assertIn(
-            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+            """tensor 'a' size mismatch at index 0. expected 3, actual 4""",
             guard_failure.reason,
         )
 
@@ -1269,7 +1284,12 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # When we unspecialize float, we wobble this test by changing
+    # the op count since previously we would just specialize and constant
+    # fold floats into the graph, whereas when we unspecialize we will have
+    # ops for item, add, and all other tensorified operations. Since this
+    # test really isn't testing that, we purposely specialize floats here.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_config_obj(self):
         class Cfg:
             def __init__(self) -> None:
@@ -1294,7 +1314,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 8)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -3245,6 +3265,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
 
+    def test_nesteduserfunction_setattr(self):
+        x = 0
+
+        def update(y):
+            def wrapper():
+                x += y
+
+            return wrapper
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            w = update(123)
+            w.__wrapped__ = x
+            return t.sin(), w
+
+        t = torch.randn(2)
+        y, w = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(w.__wrapped__, x)
+
     def test_object_setattr(self):
         @dataclasses.dataclass
         class A:
@@ -3598,7 +3638,12 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(out[0], out[1]))
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # When we unspecialize float, we wobble this test by changing
+    # the op count since previously we would just specialize and constant
+    # fold floats into the graph, whereas when we unspecialize we will have
+    # ops for item, add, and all other tensorified operations. Since this
+    # test really isn't testing that, we purposely specialize floats here.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_closure_out_of_scope_cell(self):
         cell1 = torch.rand(1).item()
         cell2 = torch.rand(3, 3)
@@ -3620,7 +3665,12 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # When we unspecialize float, we wobble this test by changing
+    # the op count since previously we would just specialize and constant
+    # fold floats into the graph, whereas when we unspecialize we will have
+    # ops for item, add, and all other tensorified operations. Since this
+    # test really isn't testing that, we purposely specialize floats here.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_closure_out_of_scope_cell_with_mutation(self):
         cell1 = torch.rand(1).item()
         orig1 = cell1
@@ -3647,18 +3697,8 @@ utils_device.CURRENT_DEVICE == None""".split(
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
-            if i == 1:
-                # No automatic dynamic
-                self.assertEqual(cnts.frame_count, 1)
-                self.assertEqual(cnts.op_count, 3)
-            elif i == 2:
-                # Automatic dynamic float arguments kicked in
-                self.assertEqual(cnts.frame_count, 1)
-                self.assertEqual(cnts.op_count, 6)
-            else:
-                # No more recompiles
-                self.assertEqual(cnts.frame_count, 0)
-                self.assertEqual(cnts.op_count, 0)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 3)
             cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):
@@ -6656,11 +6696,11 @@ utils_device.CURRENT_DEVICE == None""".split(
         first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
             self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+                """tensor 'x' size mismatch at index 0. expected 2, actual 5""",
                 first_guard_failure,
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertIn("""x.size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -6689,7 +6729,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         if torch._dynamo.config.assume_static_by_default:
             self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                """tensor 'x' size mismatch at index 0. expected 2, actual 3""",
                 guard_failure[0],
             )
         else:
@@ -6724,7 +6764,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
         self.assertIn(
-            """len(L['x']) == 10""",
+            """len(x) == 10""",
             guard_failure[0],
         )
 
@@ -6781,7 +6821,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_out = opt_fn(args2)
         self.assertEqual(out, opt_out)
         self.assertTrue(guard_failure is not None)
-        self.assertIn("""tensor 'L['x']' size mismatch at index 0""", guard_failure[0])
+        self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -6850,9 +6890,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(3)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertTrue(guard_failure is not None)
-        self.assertIn(
-            """tensor 'L['rank']' size mismatch at index 0""", guard_failure[0]
-        )
+        self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_symint_as_device_kwarg_non_strict_export(self):
@@ -7771,6 +7809,109 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y, y)
+
+    @torch._dynamo.config.patch(force_parameter_static_shapes=True)
+    @torch._dynamo.config.patch(force_nn_module_property_static_shapes=True)
+    @torch.compiler.config.patch(
+        dynamic_sources="L['x'],L['y'],L['self']._modules['y'].x,L['self']._modules['y']._modules['c']._parameters['weight'],L['self']._modules['y']._modules['c']._parameters['bias']"
+    )
+    def test_dynamic_sources_force_parameter_static_shapes_and_property_static_shapes_override(
+        self,
+    ):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        class Y(torch.nn.Module):
+            def __init__(self, n_input, n_output):
+                super().__init__()
+                self.c = torch.nn.Linear(n_input, n_output)
+                self.x = n_input
+
+            def forward(self, x):
+                return self.c(x) * self.x
+
+        class M(torch.nn.Module):
+            def __init__(self, n_input, n_output):
+                self.n_input = n_input
+                self.n_output = n_output
+                super().__init__()
+                self.y = Y(n_input, n_output)
+
+            @torch.compile(backend=counter)
+            def forward(self, x, y):
+                return self.y(x) * y
+
+        model = M(3210, 30)
+        model(torch.randn(1, 3210), 2)
+        model = M(3211, 30)
+        model(torch.randn(1, 3211), 3)
+        model = M(3212, 30)
+        model(torch.randn(1, 3212), 4)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_int(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_tensor(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_graph_break(self):
+        counter = CompileCounter()
+
+        def foo(x):
+            return x * x
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            x = x * x
+            torch._dynamo.graph_break()
+            return foo(x)
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        # 2 since graph break produces 2 graphs. NB: there are no recompiles
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x'], L['y']")
+    def test_dynamic_sources_dynamic_override(self):
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x, y):
+            return x * y
+
+        fn(2, torch.randn(2))
+        fn(3, torch.randn(3))
+        fn(4, torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
 
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])
@@ -10216,8 +10357,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -10241,19 +10382,22 @@ ShapeEnv not equal: field values don't match:
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
   > Right: {}
 ==> source_to_var: values don't match.
-  >  Left: {x.size()[0]: s0, x.size()[1]: s1}
+  >  Left: {x.size()[0]: s93, x.size()[1]: s44}
+  > Right: {}
+==> unique_ids: values don't match.
+  >  Left: {44, 93}
   > Right: {}
 ==> val_to_var: values don't match.
-  >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
+  >  Left: {0: 0, 1: 1, 2: s44, 3: s93}
   > Right: {0: 0, 1: 1}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
+  >  Left: {s44: VR[2, int_oo], s93: VR[2, int_oo]}
   > Right: {}
 ==> var_to_sources: values don't match.
-  >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
+  >  Left: {s44: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)], s93: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)]}
   > Right: {}
 ==> var_to_val: values don't match.
-  >  Left: {s0: 3, s1: 2}
+  >  Left: {s44: 2, s93: 3}
   > Right: {}
 """,
         )
@@ -10312,13 +10456,13 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {(Mod(s0, 3)) < 0: False, (Mod(s0, 3)) <= 0: True, 0 < (Mod(s0, 3)): False, 0 <= (Mod(s0, 3)): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  >  Left: {(Mod(s93, 3)) < 0: False, (Mod(s93, 3)) <= 0: True, 0 < (Mod(s93, 3)): False, 0 <= (Mod(s93, 3)): True, Eq(0, Mod(s93, 3)): True, Eq(Mod(s93, 3), 0): True, Ne(0, Mod(s93, 3)): False, Ne(Mod(s93, 3), 0): False}
   > Right: {}
 ==> divisible: values don't match.
-  >  Left: {Mod(s0, 3)}
+  >  Left: {Mod(s93, 3)}
   > Right: {}
 ==> guards: values don't match.
-  >  Left: [Eq(Mod(s0, 3), 0)]
+  >  Left: [Eq(Mod(s93, 3), 0)]
   > Right: []
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, mod, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
@@ -10355,17 +10499,17 @@ ShapeEnv not equal: field values don't match:
   >  Left: {False: False, True: True}
   > Right: {}
 ==> guards: values don't match.
-  >  Left: [Eq(s0, 3)]
+  >  Left: [Eq(s93, 3)]
   > Right: []
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> replacements: values don't match.
-  >  Left: {s0: 3}
+  >  Left: {s93: 3}
   > Right: {}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, 3], s1: VR[2, int_oo]}
-  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
+  >  Left: {s44: VR[2, int_oo], s93: VR[3, 3]}
+  > Right: {s44: VR[2, int_oo], s93: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)
@@ -10396,17 +10540,17 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {3 <= s0: True, s0 < 3: False}
+  >  Left: {3 <= s93: True, s93 < 3: False}
   > Right: {}
 ==> guards: values don't match.
-  >  Left: [s0 >= 3]
+  >  Left: [s93 >= 3]
   > Right: []
 ==> name_to_node: values don't match.
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, int_oo], s1: VR[2, int_oo]}
-  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
+  >  Left: {s44: VR[2, int_oo], s93: VR[3, int_oo]}
+  > Right: {s44: VR[2, int_oo], s93: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)
@@ -10523,6 +10667,10 @@ ShapeEnv not equal: field values don't match:
 
     @skipIfWindows(
         msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
+    )
+    @unittest.skipIf(
+        torch._inductor.config.cpu_backend != "cpp",
+        "Skip for non cpp backend CPU as comments contain 'aten.pow' ",
     )
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):

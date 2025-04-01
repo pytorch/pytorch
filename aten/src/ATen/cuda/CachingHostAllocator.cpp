@@ -76,6 +76,10 @@ struct CUDACachingHostAllocatorImpl
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
     // primary context, if available. See pytorch/pytorch#21081.
+    // This can be a large performance hit if we cross NUMA nodes by allocating
+    // and pinning memory on one side of the NUMA node and then using it on the
+    // other side. Thankfully, we use one process per GPU, so we don't run into
+    // this issue.
     at::OptionalDeviceGuard device_guard;
     auto primary_ctx_device_index =
         c10::cuda::getDeviceIndexWithPrimaryContext();
@@ -84,6 +88,7 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
+    auto start = std::chrono::system_clock::now();
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_use_cuda_host_register()) {
       allocWithCudaHostRegister(ptr, size);
@@ -91,9 +96,18 @@ struct CUDACachingHostAllocatorImpl
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
+    auto end = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Update the statistics on the time spent on cudaHostAlloc/hostRegister
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_alloc_time.increase(duration.count());
+    }
   }
 
   void free_block(Block* block) override {
+    auto start = std::chrono::system_clock::now();
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
@@ -102,6 +116,14 @@ struct CUDACachingHostAllocatorImpl
       std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+    }
+    auto end = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Update the statistics on the time spent on cudaFreeHost/hostUnregister
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_free_time.increase(duration.count());
     }
   }
 
@@ -163,21 +185,6 @@ struct CUDACachingHostAllocatorImpl
     }
   }
 
-  void registerPages(const void* ptr, size_t size) {
-    AT_CUDA_CHECK(
-        cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
-
-    // If host and device pointer don't match, give a warning and exit
-    void* devptr = nullptr;
-    AT_CUDA_CHECK(cudaHostGetDevicePointer(&devptr, (void*)ptr, 0));
-    TORCH_CHECK(
-        (void*)devptr == (void*)ptr,
-        "Host and device pointer dont match with cudaHostRegister. "
-        "Please dont use this feature by setting "
-        "PYTORCH_CUDA_ALLOC_CONF=use_cuda_host_register:False (default)",
-        "");
-  }
-
   void allocWithCudaHostRegister(void** ptr, size_t roundSize) {
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
@@ -227,7 +234,8 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
-    registerPages(*ptr, roundSize);
+    AT_CUDA_CHECK(
+        cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
   }
 };
 
@@ -271,6 +279,18 @@ void CachingHostAllocator_emptyCache() {
 
 at::Allocator* getCachingHostAllocator() {
   return &getCUDACachingHostAllocator();
+}
+
+at::HostStats CachingHostAllocator_getStats() {
+  return getCUDACachingHostAllocator().getStats();
+}
+
+void CachingHostAllocator_resetAccumulatedStats() {
+  return getCUDACachingHostAllocator().resetAccumulatedStats();
+}
+
+void CachingHostAllocator_resetPeakStats() {
+  return getCUDACachingHostAllocator().resetPeakStats();
 }
 
 } // namespace at::cuda

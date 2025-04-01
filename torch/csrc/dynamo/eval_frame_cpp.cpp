@@ -7,6 +7,7 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
@@ -289,4 +290,28 @@ PyObject* dynamo__custom_eval_frame(
     eval_default();
   }
   return eval_result;
+}
+
+PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+  PyObject* code_obj = nullptr;
+  PyObject* strategy_obj = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
+    return nullptr;
+  }
+  if (!PyCode_Check(code_obj)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return nullptr;
+  }
+
+  PyCodeObject* code = (PyCodeObject*)code_obj;
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      py::handle(strategy_obj).cast<FrameExecStrategy>();
+
+  extra_state_set_exec_strategy(extra, strategy);
+  Py_RETURN_NONE;
 }
