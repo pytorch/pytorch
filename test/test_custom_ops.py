@@ -3910,6 +3910,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x + y)
 
+    @skipIfTorchDynamo("Skip due to sys.refcount")
     def test_any_requires_grad(self):
         test_fn = torch._C._any_requires_grad
         # Regression test on not leaking kwargs
@@ -3939,6 +3940,7 @@ Please use `add.register_fake` to add an fake impl.""",
         )
         self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)], torch.zeros(1)))
 
+    @skipIfTorchDynamo("Skip due to sys.refcount")
     def test_any_output_is_alias_to_input_or_output(self):
         test_fn = torch._C._any_output_is_alias_to_input_or_output
         # Regression test on not leaking kwargs
