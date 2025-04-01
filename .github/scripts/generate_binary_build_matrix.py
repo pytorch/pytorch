@@ -181,14 +181,14 @@ DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cuda{gpu_arch}:333eb7ca4002e7a3bf4e9a84344d657b6e74f538"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-rocm{gpu_arch}:333eb7ca4002e7a3bf4e9a84344d657b6e74f538"
         for gpu_arch in ROCM_ARCHES
     },
-    "cpu": f"pytorch/libtorch-cxx11-builder:cpu:{DEFAULT_TAG}",
+    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cpu:333eb7ca4002e7a3bf4e9a84344d657b6e74f538",
 }
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
