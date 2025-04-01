@@ -18,10 +18,22 @@ const size_t kLargeBuffer = 20971520;
 /**
  * Note [AllocatorConfig design]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * This class is used to configure the allocator for both device and host
- * allocator. A single AllocatorConfig for all devices, assuming that
- * environment variables apply universally.
+ * This class configures the allocator for both device and host memory
+ * management. A single AllocatorConfig is used across all devices, such as CUDA
+ * and XPU, assuming that environment variables apply universally.
  *
+ * Naming Convention:
+ * - Public API names in AllocatorConfig should be device-agnostic. For example,
+ *     `use_release_lock_on_cudamalloc` is not ideal; instead, use
+ *     `use_release_lock_on_device_malloc` to maintain neutrality.
+ * - Members prefixed with `pinned_` are specific to the host/pinned allocator.
+ * - Environment variable names should also be device-agnostic to ensure
+ *     consistency across different hardware backends.
+ *
+ * Environment Variables:
+ * - The default environment variable for configuration is `PYTORCH_ALLOC_CONF`.
+ * - For backward compatibility, `PYTORCH_CUDA_ALLOC_CONF` is also supported
+ *     with lower priority.
  */
 
 class C10_API AllocatorConfig {
