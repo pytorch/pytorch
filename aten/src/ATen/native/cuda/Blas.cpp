@@ -1571,9 +1571,9 @@ bool use_fast_accum) {
 
 }
 
-Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b, 
+Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias, 
+const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
 

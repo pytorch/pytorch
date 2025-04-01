@@ -266,7 +266,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
         device = "cuda"
-        dtype=torch.bfloat16
+        dtype = torch.bfloat16
         m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
@@ -279,7 +279,7 @@ class TestMatmulCuda(TestCase):
             b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         out = torch._grouped_mm(a, b.t(), offs=offs,
-                                       out_dtype=torch.bfloat16)
+                                out_dtype=torch.bfloat16)
         offs_cpu = offs.cpu()
         alist, blist = [], []
         start = 0
@@ -296,7 +296,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
         device = "cuda"
-        dtype=torch.bfloat16
+        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
         if a_row_major:
@@ -307,7 +307,8 @@ class TestMatmulCuda(TestCase):
         if b_row_major:
             b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, 
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
         a_contig = a if a_row_major else a.t()
         self.assertTrue(a_contig.is_contiguous() is not strided)
@@ -316,7 +317,7 @@ class TestMatmulCuda(TestCase):
         offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
 
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
-                                       out_dtype=torch.bfloat16)
+                                out_dtype=torch.bfloat16)
 
         offs_cpu = offs.cpu()
         alist, outlist = [], []
@@ -335,17 +336,19 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
         device = "cuda"
-        dtype=torch.bfloat16
+        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
         if a_row_major:
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, 
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
         if b_row_major:
             b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, 
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
         a_contig = a if a_row_major else a.transpose(-2, -1)
         self.assertTrue(a_contig.is_contiguous() is not strided)
@@ -361,16 +364,15 @@ class TestMatmulCuda(TestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
-        #a_row_major = True
-        #b_row_major = True
         device = "cuda"
-        dtype=torch.bfloat16
+        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
         if a_row_major:
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, 
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
         if b_row_major:
             b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
         else:
@@ -382,7 +384,7 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(b_contig.is_contiguous() is not strided)
         offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
-                                       out_dtype=torch.bfloat16)
+                                out_dtype=torch.bfloat16)
         offs_cpu = offs.cpu()
         blist, outlist = [], []
         start = 0
