@@ -10,6 +10,9 @@ import itertools
 import math
 import operator
 import os
+
+os.environ["TORCH_LOGS"] = "+inductor"
+
 import random
 import re
 import subprocess
