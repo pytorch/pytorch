@@ -64,6 +64,19 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             self.assertEqual(tensor.device, cuda_device)
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_move_states_to_device_ignored_param_device(self):
+        cpu_device = torch.device("cpu")
+        model = MLP(8, cpu_device, with_buffer=True)
+        ignored_params = [model.out_proj.weight, model.out_proj.bias]
+        fully_shard(model, ignored_params=set(ignored_params))
+        for tensor in ignored_params:
+            self.assertEqual(tensor.device, cpu_device)
+        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        model.to(torch.device("cuda"))
+        for tensor in ignored_params:
+            self.assertEqual(tensor.device, cuda_device)
+
 
 class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
     """Tests that DTensor parameters are moved to the expected device."""
@@ -1024,8 +1037,6 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
     def perThreadSetUp(self) -> None:
         super().perThreadSetUp()
         torch.set_default_device("cuda")
-        rank = dist.get_rank()
-        torch.cuda.set_device(rank)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_custom_hook_custom_stream(self):

@@ -1055,12 +1055,10 @@ endif()
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
-  if(WIN32)
-    target_compile_options(torch_xpu PRIVATE /permissive-)
-  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1229,6 +1227,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
 endif()
 
+if(USE_MKLDNN_ACL)
+  find_package(ACL REQUIRED)
+  target_include_directories(torch_cpu PRIVATE ${ACL_INCLUDE_DIRS})
+endif()
+
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
@@ -1312,10 +1315,6 @@ if(BUILD_TEST)
       ${TORCH_ROOT}/test/cpp/aoti_inference
       ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  include(../cmake/CheckAbi.cmake)
 endif()
 
 # CMake config for external projects.
