@@ -126,7 +126,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cpu-shared-with-deps-release

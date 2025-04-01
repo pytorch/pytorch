@@ -159,22 +159,21 @@ DEFAULT_TAG = "f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40"
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux2_28-builder-cuda{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinuxaarch64-builder-cuda{gpu_arch.replace('-aarch64', '')}:{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux2_28-builder-rocm{gpu_arch}:{DEFAULT_TAG}"
-
+        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "xpu": f"pytorch/manylinux2_28-builder-xpu:{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder-cpu:{DEFAULT_TAG}",
-    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder-cpu-aarch64:{DEFAULT_TAG}",
-    "cpu-s390x": f"pytorch/manylinuxs390x-builder-cpu-s390x:{DEFAULT_TAG}",
+    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
+    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
+    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
 }
 
 RELEASE = "release"
@@ -182,14 +181,14 @@ DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "cpu": f"pytorch/libtorch-cxx11-builder:cpu:{DEFAULT_TAG}",
+    "cpu": f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
