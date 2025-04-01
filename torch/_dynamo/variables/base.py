@@ -20,9 +20,9 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented, unimplemented_v2
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import cmp_name_to_op_mapping, istype
@@ -88,7 +88,15 @@ class MutationType:
         elif typ is SourceType.New:
             self.scope = current_scope_id()
         else:
-            unimplemented(f"Unsupported SourceType: {typ}")
+            unimplemented_v2(
+                gb_type="Unsupported SourceType",
+                context=f"MutationType.__init__ {self} {typ}",
+                explanation=f"Dynamo does not support the type `{typ}`",
+                hints=[
+                    "This branch is not supposed to be reachable.",
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
 
 
 class ValueMutationNew(MutationType):
@@ -336,8 +344,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
         try:
             return self.as_python_constant()
-        except NotImplementedError as e:
-            unimplemented(str(e))
+        except NotImplementedError:
+            unimplemented_v2(
+                gb_type="Not a Python constant",
+                context=f"guard_as_python_constant {self}",
+                explanation=f"Failed to convert {self} into a Python constant.",
+                hints=[],
+            )
 
     def is_python_constant(self):
         try:
@@ -413,12 +426,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return self.has_unpack_var_sequence(tx)
 
     def inspect_parameter_names(self) -> list[str]:
-        unimplemented(f"inspect_parameter_names: {self}")
+        unimplemented_v2(
+            gb_type="Unsupported inspect call",
+            context=f"inspect_parameter_names {self}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[],
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        unimplemented(f"hasattr {self.__class__.__name__} {name}")
+        unimplemented_v2(
+            gb_type="Unsupported hasattr call",
+            context=f"call_obj_hasattr {self} {name}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call_function(
         self,
@@ -469,7 +495,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 not other.is_python_constant()
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
-                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+                unimplemented_v2(
+                    gb_type="Builtin `operator.*` comparison with constant `self` failed",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=f"Failed to compare {self} with {other}, "
+                    + f"because {other} is not a Python constant or its mutation check fails.",
+                    hints=[],
+                )
 
             return variables.ConstantVariable.create(
                 cmp_name_to_op_mapping[name](
@@ -514,7 +546,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return True
 
     def next_variable(self, tx):
-        unimplemented(f"next({self})")
+        unimplemented_v2(
+            gb_type="Unsupported next() call",
+            context=f"next({self})",
+            explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
