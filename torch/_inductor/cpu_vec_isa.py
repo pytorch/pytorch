@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Union
+from typing import Any, Callable, Union, Type
 
 import torch
 from torch._inductor import config
@@ -188,7 +188,7 @@ class VecSVE256(VecISA):
 
 
 # Add the necessary flags to enable bf16 on an Arm ISA
-def enable_arm_bf16(isa: VecISA):
+def enable_arm_bf16(isa: Type[VecISA]):
     isa._macro.append("__ARM_FEATURE_BF16")
     _arch_flags = isa._arch_flags.split(" ")
     _arch_flags[0] += "+bf16"
