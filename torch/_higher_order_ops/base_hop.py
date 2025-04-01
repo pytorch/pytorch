@@ -151,7 +151,7 @@ class BaseHOPFunction(torch.autograd.Function):
                 from .utils import _from_fun
 
                 fw_inputs = pytree.tree_map(_from_fun, operands)
-                _, joint_graph, _ = create_fw_bw_graph(
+                _, joint_graph, _, _ = create_fw_bw_graph(
                     subgraph, fw_inputs, grad_outputs
                 )
 
