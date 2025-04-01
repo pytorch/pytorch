@@ -499,22 +499,22 @@ class ListVariable(CommonListMethodsVariable):
                     reverse=reverse,
                 )
                 self.items[:] = [x for x, *_ in sorted_items_with_keys]
-            elif all(k.call_obj_hasattr(tx, "__lt__").value for k in keys):
-                tx.output.side_effects.mutation(self)
+            # elif all(k.call_obj_hasattr(tx, "__lt__").value for k in keys):
+            #     tx.output.side_effects.mutation(self)
 
-                class Wrapper:
-                    def __init__(self, x, k):
-                        self.x = x
-                        self.k = k
+            #     class Wrapper:
+            #         def __init__(self, x, k):
+            #             self.x = x
+            #             self.k = k
 
-                    def __lt__(self, other):
-                        return self.k.call_method(tx, "__lt__", [other.k], {}).value
+            #         def __lt__(self, other):
+            #             return self.k.call_method(tx, "__lt__", [other.k], {}).value
 
-                sorted_items_with_keys = sorted(
-                    (Wrapper(x, k) for (k, x) in zip(keys, self.items)),
-                    reverse=reverse,
-                )
-                self.items[:] = [w.x for w in sorted_items_with_keys]
+            #     sorted_items_with_keys = sorted(
+            #         (Wrapper(x, k) for (k, x) in zip(keys, self.items)),
+            #         reverse=reverse,
+            #     )
+            #     self.items[:] = [w.x for w in sorted_items_with_keys]
             else:
                 # TODO: update this error message
                 unimplemented("sort with non-constant keys")
