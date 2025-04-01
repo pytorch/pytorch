@@ -5019,6 +5019,7 @@ class TestLinalg(TestCase):
     def test_rotating_buffer_tunableop(self, device, dtype):
         # Test the TunableOp rotating buffer API
         # Test the default value, will return the l2_cache_size
+        set_tunableop_defaults()
         l2_cache_size = torch.cuda.tunable.get_rotating_buffer_size()
         self.assertGreater(l2_cache_size, 0)
         # Test zero
