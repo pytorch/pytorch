@@ -1256,8 +1256,8 @@ Keyword args:
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
            error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
-           Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
-           :attr:`obj` is a Python sequence, the current default device will be used.
+           Default: ``None`` or if :attr:`obj` is a Python sequence, which both causes current
+           default device to be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
            Default: ``False``, which causes the returned tensor not to require a gradient.
            If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
