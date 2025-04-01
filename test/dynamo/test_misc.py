@@ -7659,6 +7659,39 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_scatter_gather_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fs(xs):
+            u0, u1, u2, u3 = xs.tolist()
+            x = torch.empty(u0)
+            y = torch.randint(u1, size=((u2-1)//2,))
+            z = torch.randn(u3)
+            x.scatter_(0, y, z, reduce="add")
+            x.scatter_add_(0, y, z)
+            return x
+
+        fs(torch.tensor([8, 8, 32, 32]))
+        fs(torch.tensor([1, 1, 8, 8]))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fg(xs):
+            u0, u1, u2 = xs.tolist()
+            x = torch.empty(u0)
+            y = torch.randint(u1, size=((u2-1)//2,))
+            return torch.gather(x, 0, y)
+
+        fg(torch.tensor([8, 8, 32]))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fi(xs):
+            u0, u1, u2 = xs.tolist()
+            x = torch.empty((u0-1)//2)
+            y = torch.randint(u1, size=(u2,))
+            return x[y]
+
+        fi(torch.tensor([9, 4, 32]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
         # Tests the following case:
         # Deferred runtime asserts adds sym_constrain_range(u0).
