@@ -816,9 +816,18 @@ if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
 
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
   set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  add_subdirectory(
-    "${FP16_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+    message(WARNING "FP16 is only cmake-2.8 compatible")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(
+      "${FP16_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+  else()
+    add_subdirectory(
+      "${FP16_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+  endif()
 elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   add_library(fp16 STATIC "/usr/include/fp16.h")
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
@@ -1206,15 +1215,7 @@ if(USE_GLOO)
         set(NCCL_EXTERNAL ON)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
-      if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-        # Remove me when https://github.com/facebookincubator/gloo/pull/424 is landed
-        message(WARNING "Downgrading cmake-policy-version for gloo build")
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-        unset(CMAKE_POLICY_VERSION_MINIMUM)
-      else()
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      endif()
+      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
       # gloo generates a new config.h in the binary diretory.
