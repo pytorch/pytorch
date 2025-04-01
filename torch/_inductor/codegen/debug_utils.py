@@ -64,7 +64,7 @@ class DebugPrinterManager:
         arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
-        def null_writeline():
+        def null_writeline(*args, **kwargs):
             pass
 
         self.writeline = writeline if writeline else null_writeline
