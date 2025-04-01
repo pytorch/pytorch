@@ -132,6 +132,7 @@ mm_template = TritonTemplate(
             acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
             acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -204,6 +205,7 @@ mm_template = TritonTemplate(
             acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
             acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -461,7 +463,7 @@ device_tma = r"""
         else:
             accumulator += tl.dot(a, b.T)
 
-        if ki == k_tiles - 1:
+        {% if ki == k_tiles - 1 %}
             # Apply inverse scaling
             offs_cm = offs_am + tl.arange(0, BLOCK_M)
             offs_cn = offs_bn + tl.arange(0, BLOCK_N)
@@ -485,6 +487,7 @@ device_tma = r"""
             # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        {% endif %}
 """
 
 
