@@ -420,7 +420,7 @@ void AllocatorConfig::parseArgs(const char* env) {
 }
 
 void setAllocatorSettings(const std::string& env) {
-  AllocatorConfig::instance().parseArgs(env.c_str());
+  getAllocatorConfig().parseArgs(env.c_str());
 }
 
 } // namespace c10::CachingAllocator
