@@ -4750,7 +4750,7 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
              devIdx,
              " as device used by this process is currently unknown. ",
              "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-             "You can pecify device_id in init_process_group() to force use of a particular device.");
+             "You can specify device_id in init_process_group() to force use of a particular device.");
   return static_cast<c10::DeviceIndex>(devIdx);
 }
 
