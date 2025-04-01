@@ -2,7 +2,7 @@ ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG IMAGE_NAME
 
-FROM ${IMAGE_NAME}
+FROM ${IMAGE_NAME} as base
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
@@ -50,13 +50,6 @@ RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
 RUN rm install_protobuf.sh
 ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
-# (optional) Install database packages like LMDB and LevelDB
-ARG DB
-COPY ./common/install_db.sh install_db.sh
-RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
-RUN rm install_db.sh
-ENV INSTALLED_DB ${DB}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
@@ -97,14 +90,20 @@ RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
 ARG TRITON
+
+FROM base as triton-builder
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
+RUN bash ./install_triton.sh
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
 
 ARG HALIDE
 # Build and install halide
