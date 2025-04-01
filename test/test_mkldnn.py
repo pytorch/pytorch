@@ -1287,7 +1287,7 @@ class TestMkldnn(TestCase):
         for bias in [True, False]:
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
-            linear = torch.nn.Linear(in_features, out_features).float()
+            linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
             mkldnn_linear = copy.deepcopy(linear)
             y1 = linear(x1).sum()
             y2 = mkldnn_linear(x2).to_dense().sum()
