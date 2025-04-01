@@ -2701,6 +2701,7 @@ class GraphModule(torch.nn.Module):
 class CPythonContextManagerTestCase(torch._dynamo.test_case.CPythonTestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
+
     @make_dynamo_test
     def test_contextmanager_plain(self):
         state = []
