@@ -2377,6 +2377,97 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    def test_dim_hint_ranges(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inputs = (
+            torch.randn(6, 4),
+            torch.randn(6, 4),
+        )
+        shapes = {
+            "x": (Dim.AUTO(min=4), Dim.AUTO),
+            "y": (Dim.DYNAMIC(max=16), Dim.AUTO(max=32)),
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        ep.module()(torch.randn(8, 5), torch.randn(8, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be >= 4, but got 3"
+        ):
+            ep.module()(torch.randn(3, 5), torch.randn(3, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be <= 16, but got 17"
+        ):
+            ep.module()(torch.randn(17, 5), torch.randn(17, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be <= 32, but got 33"
+        ):
+            ep.module()(torch.randn(9, 33), torch.randn(9, 33))
+
+    def test_dim_hint_range_violations(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                x, y = xs["data"][0]
+                assert y.shape[0] <= 32
+                return x[6:], y + 2
+
+        x, y = torch.randn(8), torch.randn(8)
+
+        # conflict with lower bound
+        shapes = torch.export.ShapesCollection()
+        shapes[x] = [Dim.DYNAMIC(max=5)]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[None, 5\], conflicting with the inferred .*"
+            r"\[6, int_oo\],.* for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
+        ):
+            export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
+
+        # conflict with upper bound
+        shapes = torch.export.ShapesCollection()
+        shapes[y] = [Dim.AUTO(min=48, max=62)]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[48, 62\], conflicting with the inferred .*"
+            r"\[2, 32\],.* for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
+        ):
+            export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        # conflict with static range
+        shapes = {"x": [Dim.STATIC(min=6, max=8)]}
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[6, 8\], conflicting with the inferred .*"
+            r"\[4, 4\],.* for inputs\['x'\].shape\[0\]",
+        ):
+            export(Bar(), (torch.randn(4),), dynamic_shapes=shapes)
+
+        # multiple conflicts
+        class Moo(torch.nn.Module):
+            def forward(self, x, y):
+                assert x.shape[0] <= 32
+                assert y.shape[0] >= 128
+                return x + 2, y + 2
+
+        inps = (torch.randn(16), torch.randn(256))
+        shapes = {
+            "x": (Dim.DYNAMIC(min=33),),
+            "y": (Dim.DYNAMIC(max=127),),
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[33, None\], conflicting with the inferred .*"
+            r"\[2, 32\],.* for inputs\['x'\].shape\[0\](.*\n)*.*"
+            r"Received user-specified .* \[None, 127\], conflicting with the inferred .*"
+            r"\[128, int_oo\],.* for inputs\['y'\].shape\[0\]",
+        ):
+            export(Moo(), inps, dynamic_shapes=shapes)
+
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -3703,6 +3794,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
 
+    def test_range_constraints_with_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y)[:3]
+
+        m = M()
+        inp = (torch.randn(4), torch.randn(4))
+        dynamic_shapes = ((torch.export.Dim.DYNAMIC,), (torch.export.Dim.DYNAMIC,))
+        ep = export(m, inp, dynamic_shapes=dynamic_shapes)
+        assert len(ep.range_constraints) == 1
+        vr = next(iter(ep.range_constraints.values()))
+        self.assertEqual(vr.lower, 3)
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -3839,7 +3943,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dynamic_shapes = (
             {"k": {"k": dim}},
-        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*_Dim.*.
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*Dim.*.
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
@@ -11042,6 +11146,21 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_attr_assignment_extra(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                self.bar = x.sum()
+                return x + 2
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "During torch.export, following attrs were created in the model.forward:",
+        ):
+            _ = export(Foo(), (torch.randn(4, 4),), strict=False)
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -12334,7 +12453,7 @@ def forward(self, x):
 
         self.assertExpectedInline(
             _load_dynamic_shapes(spec, from_dict=False),
-            """[[<class 'torch._export.serde.dynamic_shapes.dx'>]]""",
+            """[[Dim('dx', min=4, max=16)]]""",
         )
 
         # check incorrect info in dims
