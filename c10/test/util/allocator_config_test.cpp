@@ -1,5 +1,5 @@
 #include <c10/core/AllocatorConfig.h>
-#include <c10/utils/env.h>
+#include <c10/util/env.h>
 
 #include <gtest/gtest.h>
 
@@ -21,8 +21,8 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::CachingAllocator::AllocatorConfig& config =
       c10::CachingAllocator::AllocatorConfig::instance();
   EXPECT_EQ(config.last_allocator_settings(), env);
-  EXPECT_EQ(config.max_split_size(), 40 * 1024 * 1024);
-  EXPECT_EQ(config.max_non_split_rounding_size(), 30 * 1024 * 1024);
+  EXPECT_EQ(config.max_split_size(), 40 * 1024ul * 1024);
+  EXPECT_EQ(config.max_non_split_rounding_size(), 30 * 1024ul * 1024);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.5);
   EXPECT_EQ(config.roundup_power2_divisions(32), 1);
   EXPECT_EQ(config.roundup_power2_divisions(64), 8);
@@ -46,8 +46,8 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(config.last_allocator_settings(), env);
-  EXPECT_EQ(config.max_split_size(), 20 * 1024 * 1024);
-  EXPECT_EQ(config.max_non_split_rounding_size(), 40 * 1024 * 1024);
+  EXPECT_EQ(config.max_split_size(), 20 * 1024ul * 1024);
+  EXPECT_EQ(config.max_non_split_rounding_size(), 40 * 1024ul * 1024);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.8);
 
   env = "roundup_power2_divisions:[128:8,256:6,512:4,2048:4>:2]";

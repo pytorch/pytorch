@@ -3962,13 +3962,11 @@ struct BackendStaticInitializer {
         !c10::utils::has_env("PYTORCH_CUDA_ALLOC_CONF")) {
       auto val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       if (val) {
-        c10::CachingAllocator::AllocatorConfig::instance().parseArgs(
-            val->c_str());
+        c10::CachingAllocator::getAllocatorConfig().parseArgs(val->c_str());
       }
     }
 #endif
-    if (c10::CachingAllocator::AllocatorConfig::instance()
-            .use_async_allocator()) {
+    if (c10::CachingAllocator::getAllocatorConfig().use_async_allocator()) {
       return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
