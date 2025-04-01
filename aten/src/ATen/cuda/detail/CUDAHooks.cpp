@@ -449,7 +449,13 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
 
 #ifdef USE_ROCM
 bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index) const {
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+  hipDeviceProp_t* prop;
+  if (device_index == -1){
+      prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+      prop = at::cuda::getDeviceProperties(device_index);
+  }
+  
   std::string device_arch = prop->gcnArchName;
   for (std::string arch : archs) {
       size_t substring = device_arch.find(arch);
