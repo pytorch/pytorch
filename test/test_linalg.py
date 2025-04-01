@@ -4693,7 +4693,8 @@ class TestLinalg(TestCase):
             make_arg = partial(make_tensor, device=device, dtype=dtype)
             # Using gen_sizes_matmul(2) to ensure we cover
             # 'NN', 'TN', 'TT', and 'NN' cases.
-            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2, y_dim=3),
+                                                            (True, False), (True, False)):
                 x = make_arg(size_x, noncontiguous=nctg_x)
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
