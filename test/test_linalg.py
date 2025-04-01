@@ -5215,9 +5215,9 @@ class TestLinalg(TestCase):
             ref_num_results = len(torch.cuda.tunable.get_results())
 
             # Tune one GEMMs to make sure TunableOp is enabled
-            M = 3
-            N = 3
-            K = 3
+            M = 11
+            N = 13
+            K = 17
             A = torch.randn(N, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
@@ -5236,9 +5236,9 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tuning_enable(False)
 
             # Try to tune one more GEMM
-            M = 3
-            N = 3
-            K = 4
+            M = 11
+            N = 13
+            K = 18
             A = torch.randn(N, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
