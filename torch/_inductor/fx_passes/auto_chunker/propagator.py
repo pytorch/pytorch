@@ -1,6 +1,6 @@
 from torch.fx import Node
 from .utils import get_fake_tensor_from_node_arg, get_nodes_with_chunking_meta, format_node_with_chunking_meta, get_args_of_node_type, has_any_chunking_meta, get_first_chunking_meta, get_scale_by_from_metas, get_node_is_scalar, is_chunked_by_dim
-from .core import get_chunking_meta, set_chunking_meta, copy_chunking_meta, set_chunking_meta_if_none, CantChunk, ChunkingMeta, has_nop_chunking_meta
+from .core import get_chunking_meta, set_chunking_meta, copy_chunking_meta, set_chunking_meta_if_none, CantChunk, ChunkingMeta, has_nop_chunking_meta, update_chunking_meta
 from .propagate_scale_by import propagate_scale_by
 import torch
 import logging
@@ -223,6 +223,9 @@ def propagate_mm(mm_node):
 
     def fwd():
         out_meta = get_chunking_meta(mm_node)
+        if has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
+            return _bool_to_status(False)
+
         # only lhs is chunked
         if not has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
             return _bool_to_status(
@@ -413,5 +416,42 @@ def propagate_nop(node):
 
     def bwd():
         return _bool_to_status(False)
+
+    return fwd(), bwd()
+
+@register_propagate_rule([
+    aten.sum.default,
+])
+def propagate_sum_to_scalar(sum_node):
+    input_node = sum_node.args[0]
+    input_meta = get_chunking_meta(input_node)
+
+    def fwd():
+        if has_nop_chunking_meta(input_node):
+            return _bool_to_status(False)
+
+        if input_meta.chunk_dim is not None:
+            changed = update_chunking_meta(sum_node,
+                scale_by=input_meta.scale_by,
+                need_sum=True,
+                chunk_by=None
+            )
+            return _bool_to_status(changed)
+        return PropagateStatus.FAIL
+
+    def bwd():
+        if has_nop_chunking_meta(sum_node):
+            return _bool_to_status(False)
+
+        # We won't know how the input is chunked if sum_node.meta.need_sum is True.
+        # On the other hand, sum_node.meta.need_sum is True can only happen
+        # by propagating from input_node. Doing sanity check here is fine
+        # since the input_node.meta should have already been properly
+        # setup.
+        output_meta = get_chunking_meta(sum_node)
+        if output_meta is not None and output_meta.need_sum and input_meta.chunk_dim is not None:
+            return _bool_to_status(False)
+
+        return PropagateStatus.FAIL
 
     return fwd(), bwd()

@@ -7,8 +7,10 @@ from typing import List
 from torch.fx import Node, Graph
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.utils import detect_fake_mode
+from .core import reorder_nodes
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 def _factory_args(fake_tensor):
     return {
@@ -29,11 +31,24 @@ def fake_tensor_prop(gm):
     fake_mode = detect_fake_mode(inputs)
     FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
 
+def is_chunking_subgraph_input(node):
+    meta = get_chunking_meta(node)
+    if meta is None:
+        return False
+    if node.op == "placeholder" and "tangent" in node.target:
+        return False
+    arg_nodes = get_args_of_node_type(node)
+    arg_nodes_no_meta = [node for node in arg_nodes if get_chunking_meta(node) is None]
+    return len(arg_nodes_no_meta) > 0 or node.op == "placeholder"
+
 
 class ChunkingApplier:
     def __init__(self, parent_gm, num_chunk):
-        self.parent_gm = parent_gm
-        self.parent_graph = self.parent_gm.graph
+        self.gm = parent_gm
+        self.parent_graph = reorder_nodes(self.gm.graph)
+        # From this point on self.parent_graph is not equal to self.gm.graph
+        # due to reordering. We create a new copy of the graph so it's
+        # easier to fallback if chunking fails.
         self.num_chunk = num_chunk
 
         # tangent node to the all-one tensor
@@ -69,7 +84,7 @@ class ChunkingApplier:
         For each chunked node, decide if it's a input/body/output node of the
         chunking subgraph.
         """
-        for node in self.parent_gm.graph.nodes:
+        for node in self.parent_graph.nodes:
             meta = get_chunking_meta(node)
 
             # The node does not have chunking metadata, skip
@@ -95,13 +110,10 @@ class ChunkingApplier:
             # Alternative 2 does not work for this case, so we implement
             # alternative 1.
 
-            arg_nodes = get_args_of_node_type(node)
-            arg_nodes_no_meta = [node for node in arg_nodes if get_chunking_meta(node) is None]
-
             user_nodes = node.users
             user_nodes_no_meta = [node for node in user_nodes if get_chunking_meta(node) is None]
 
-            if len(arg_nodes_no_meta) > 0 or node.op == "placeholder":
+            if is_chunking_subgraph_input(node):
                 # None of the node's arguments are chunked. It's a placeholder
                 self.subgraph_input.append(node)
             elif len(user_nodes_no_meta) > 0:
@@ -213,7 +225,7 @@ class ChunkingApplier:
         for _, accum in self.accumulators.items():
             env[accum] = _create_placeholder_node(accum)
 
-        for original_node in self.subgraph_body:
+        for original_node in self.subgraph_body + self.subgraph_output:
             assert original_node.op != "placeholder"
 
             # Chunk aten.full
@@ -240,9 +252,6 @@ class ChunkingApplier:
             # create the node with chunked inputs
             env[original_node] = new_graph.node_copy(original_node, lambda x: env[x])
 
-        print(new_graph) # TODO continue refactoring the code below
-        breakpoint()
-
         # Do the accumulation inside this subgraph
         for node, accum in self.accumulators.items():
             lhs = env[node]
@@ -257,16 +266,17 @@ class ChunkingApplier:
             env[node] = add_out
 
         out_values = []
-        for node in self.nodes_to_recover:
+        for node in self.subgraph_output:
             out_values.append(env[node])
+
         new_graph.output(tuple(out_values))
         new_graph.eliminate_dead_code()
         new_graph.lint()
 
         sub_gm = torch.fx._lazy_graph_module._make_graph_module(
-            self.parent_gm, new_graph
+            self.gm, new_graph
         )
-        print(f"sub gm:\n{sub_gm.print_readable(False)}")
+        fake_tensor_prop(sub_gm)
         return sub_gm
 
 
@@ -279,13 +289,89 @@ class ChunkingApplier:
             sub_gm = self.build_subgraph(chunk_size)
             gm_attr = f"chunking_subgraph_{len(self.chunk_size_to_gm_attr)}"
             self.chunk_size_to_gm_attr[chunk_size] = gm_attr
-            setattr(self.parent_gm, gm_attr, sub_gm)
-
-            fake_tensor_prop(sub_gm)
+            setattr(self.gm, gm_attr, sub_gm)
 
             # Mark this sub graph module so we don't recursively chunking
             # it.
             sub_gm.meta["produced_by_chunker"] = True
+
+    def call_subgraph_for_each_chunk(self):
+        for chunk_id in range(self.num_chunk):
+            chunk_size = self.chunk_sizes[chunk_id]
+            sub_gm = self.parent_graph.get_attr(self.chunk_size_to_gm_attr[chunk_size])
+
+            args = []
+            chunks_iter = iter(self.chunked_subgraph_input)
+            for node in self.subgraph_input:
+                if get_chunking_meta(node).chunk_dim is not None:
+                    args.append(next(chunks_iter)[chunk_id])
+                else:
+                    # not chunked
+                    args.append(node)
+            for node in self.overriden_tangent.values():
+                args.append(node)
+
+            for _, accum in self.accumulators.items():
+                args.append(accum)
+
+            output_node = self.parent_graph.call_function(torch.ops.higher_order.invoke_subgraph,
+                    (sub_gm, None, args), {})
+    
+            output_node_dict = {}
+            for i, orig_node in enumerate(self.subgraph_output):
+                output_node_dict[orig_node] = self.parent_graph.call_function(operator.getitem, (output_node, i))
+    
+            for orig_node, node_list in self.chunks_for_recovering.items():
+                chunk = output_node_dict[orig_node]
+                node_list.append(chunk)
+    
+            for orig_node in self.accumulators:
+                self.accumulators[orig_node] = output_node_dict[orig_node]
+
+    def recover_to_unchunked_nodes(self):
+        """
+        Recover the node from chunks and do the replacement.
+        """
+        for node in self.subgraph_output:
+            meta = get_chunking_meta(node)
+            assert meta is not None
+
+            recovered = node
+
+            if meta.chunk_dim is not None:
+                chunks = self.chunks_for_recovering[node]
+                recovered = self.parent_graph.call_function(
+                    aten.cat.default,
+                    (chunks, meta.chunk_dim))
+            elif meta.need_sum:
+                recovered = self.accumulators[node]
+    
+            # do scaling last
+            if meta.scale_by is not None:
+                recovered = self.parent_graph.call_function(
+                    aten.mul.Tensor, (recovered, meta.scale_by)
+                )
+    
+            # convert back to the original dtype
+            if meta.need_sum:
+                original_dtype = node.meta["val"].dtype
+                # TODO(shunting): do we always uses a fp32 accumulator?
+                if original_dtype != torch.float32:
+                    recovered = self.parent_graph.call_function(
+                        prims.convert_element_type.default,
+                        (recovered, original_dtype)
+                    )
+    
+            assert recovered is not node
+            node.replace_all_uses_with(recovered)
+
+    def erase_original_nodes(self):
+        # Traveral reversely to erase user first
+        for node in reversed(tuple(self.subgraph_body + self.subgraph_output)):
+            if node.op == "placeholder":
+                continue
+
+            self.parent_graph.erase_node(node)
 
 
     def apply(self):
@@ -294,7 +380,12 @@ class ChunkingApplier:
             self.chunk_subgraph_input()
             self.create_accumulators()
             self.build_subgraphs()
-        
-        self.parent_gm.print_readable()
-        breakpoint()
-        assert False
+            self.call_subgraph_for_each_chunk()
+            self.recover_to_unchunked_nodes()
+            self.erase_original_nodes()
+
+        newgm = torch.fx._lazy_graph_module._make_graph_module(
+            self.gm, self.parent_graph,
+        )
+        fake_tensor_prop(newgm)
+        return newgm
