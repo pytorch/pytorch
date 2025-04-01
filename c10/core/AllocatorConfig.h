@@ -62,6 +62,13 @@ class C10_API AllocatorConfig {
     return use_async_allocator_;
   }
 
+  void set_allocator_loaded() {
+    TORCH_INTERNAL_ASSERT(
+        !is_allocator_loaded_,
+        "AllocatorConfig::set_allocator_loaded() called multiple times");
+    is_allocator_loaded_ = true;
+  }
+
   bool use_expandable_segments() {
     return use_expandable_segments_;
   }
@@ -164,6 +171,8 @@ class C10_API AllocatorConfig {
   std::atomic<double> garbage_collection_threshold_{0};
   // A flag to enable MallocAsync feature.
   std::atomic<bool> use_async_allocator_{false};
+  // A flag to determine whether the allocator is loaded.
+  std::atomic<bool> is_allocator_loaded_{false};
   // A flag to enable expandable segments feature.
   std::atomic<bool> use_expandable_segments_{false};
   // A flag to release the lock on device malloc.

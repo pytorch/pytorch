@@ -3,16 +3,15 @@
 namespace c10::cuda::CUDACachingAllocator {
 
 size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
-  return c10::CachingAllocator::getAllocatorConfig().roundup_power2_divisions(
-      size);
+  return getAllocatorConfig().roundup_power2_divisions(size);
 }
 
 void CUDAAllocatorConfig::parseArgs(const char* env) {
-  c10::CachingAllocator::getAllocatorConfig().parseArgs(env);
+  getAllocatorConfig().parseArgs(env);
 }
 
 void setAllocatorSettings(const std::string& env) {
-  c10::CachingAllocator::getAllocatorConfig().parseArgs(env.c_str());
+  getAllocatorConfig().parseArgs(env.c_str());
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
