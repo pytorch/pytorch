@@ -15,6 +15,7 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+
 # TODO(whc) add tests for this util
 def _explicit_order_placements(
     mesh_shape: ShapeType, placements: Sequence[Placement]
@@ -88,9 +89,9 @@ def compute_local_shape_and_global_offset(
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
-                assert (
-                    shard_dim < len(local_shape)
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+                assert shard_dim < len(local_shape), (
+                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+                )
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],
                     mesh_dim_size,
@@ -177,9 +178,9 @@ def compute_global_tensor_info(
                 )
             shard_dim = shard_placement.dim
 
-            assert (
-                shard_dim < tensor.ndim
-            ), f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
+            assert shard_dim < tensor.ndim, (
+                f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
+            )
 
             local_dim_size = tensor_shape[shard_dim]
             tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
