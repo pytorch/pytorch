@@ -31,11 +31,14 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = torch.accelerator.current_accelerator().type
+device_id = torch.accelerator.current_device_index()
 
 def get_cur_mem(rank, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
-    torch._C._cuda_clearCublasWorkspaces()
-    result[prefix] = round(torch.cuda.memory_allocated() / 1024 / 1024)
+    if device_type == 'cuda':
+        torch._C._cuda_clearCublasWorkspaces()
+    result[prefix] = round(torch.get_device_module(device_type).memory_allocated() / 1024 / 1024)
 
 
 class Model(nn.Module):
@@ -110,14 +113,17 @@ class TestFSDPMemory(FSDPTest):
 
     def _dist_train(self, with_checkpoint, expected, model_hidden_dim, iterations):
         gpu_id = self.rank
-        batch = torch.randn(size=(2, 3, 224, 224)).cuda()
+       
+        batch = torch.randn(size=(2, 3, 224, 224)).to(device=device_type)
 
         model = create_model(
             with_fsdp=True,
             with_checkpoint=with_checkpoint,
             model_hidden_dim=model_hidden_dim,
         )
-        model = model.cuda()
+
+        model = model.to(device=device_type)
+
         model = FSDP(model)
 
         # We enable momentum so that after the first iteration, the optimizer state is added
@@ -133,7 +139,7 @@ class TestFSDPMemory(FSDPTest):
             get_cur_mem(gpu_id, results, f"iter {iteration}: after fwd")
 
             out = sum(o.sum() for o in out[0])
-            fake_loss = criterion(out, torch.tensor(0.0).cuda())
+            fake_loss = criterion(out, torch.tensor(0.0).to(device=device_type))
             get_cur_mem(gpu_id, results, f"iter {iteration}: after loss")
 
             fake_loss.backward()
@@ -167,8 +173,8 @@ class TestFSDPMemory(FSDPTest):
 
         model = create_model(
             with_fsdp=False, with_checkpoint=False, model_hidden_dim=model_hidden_dim
-        ).cuda()
-        model_size_mb = round(torch.cuda.memory_allocated() / 1024 / 1024)
+        ).to(device=device_type)
+        model_size_mb = round(torch.get_device_module(device_type).memory_allocated() / 1024 / 1024)
         del model
 
         sharded_model_size_mb = int(model_size_mb / self.world_size)

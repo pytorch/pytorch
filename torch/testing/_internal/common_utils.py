@@ -1524,6 +1524,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_xpu = unittest.skipUnless(torch.xpu.is_available(), "Requires XPU")
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -5245,14 +5246,18 @@ def get_cycles_per_ms() -> float:
     """
 
     def measure() -> float:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        cycles_per_ms = 1000000 / start.elapsed_time(end)
-        return cycles_per_ms
+        if torch.cuda.is_available():
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            torch.cuda._sleep(1000000)
+            end.record()
+            end.synchronize()
+            cycles_per_ms = 1000000 / start.elapsed_time(end)
+            return cycles_per_ms
+        elif torch.xpu.is_available():
+            cycles_per_ms = 1000000 / 1000.0
+            return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.
