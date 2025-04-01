@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import uuid
 from ast import literal_eval
@@ -340,6 +341,44 @@ class Venv:
         self.base_python("-m", "venv", str(self.prefix))
         assert self.is_venv(), "Failed to create virtual environment."
         (self.prefix / ".gitignore").write_text("*\n", encoding="utf-8")
+
+        if LINUX:
+            activate_script = self.activate_script
+            st_mode = activate_script.stat().st_mode
+            # The activate script may be read-only and we need to add write permissions
+            activate_script.chmod(st_mode | 0o200)
+            with activate_script.open(mode="a", encoding="utf-8") as f:
+                f.write(
+                    "\n"
+                    + textwrap.dedent(
+                        f"""
+                        # Add NVIDIA PyPI packages to LD_LIBRARY_PATH
+                        export LD_LIBRARY_PATH="$(
+                            {self.executable.name} - <<EOS
+                        import glob
+                        import itertools
+                        import os
+                        import site
+
+                        nvidia_libs = [
+                            p.rstrip("/")
+                            for p in itertools.chain.from_iterable(
+                                glob.iglob(f"{{site_dir}}/{{pattern}}/", recursive=True)
+                                for site_dir in site.getsitepackages()
+                                for pattern in ("nvidia/**/lib", "cu*/**/lib")
+                            )
+                        ]
+                        ld_library_path = os.getenv("LD_LIBRARY_PATH", "").split(os.pathsep)
+                        print(os.pathsep.join(dict.fromkeys(nvidia_libs + ld_library_path)))
+                        EOS
+                        )"
+                        """
+                    ).strip()
+                    + "\n"
+                )
+            # Change the file mode back
+            activate_script.chmod(st_mode)
+
         return self.ensure()
 
     def ensure(self) -> Path:
