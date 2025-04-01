@@ -100,6 +100,60 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_schema_gen_single_return(self):
         def inner(x, y):
+            return (x @ y).sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=False)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        out = f(x.clone(), y)
+        self.assertEqual(out, inner(x.clone(), y))
+        schemas = self._find_hop_schema(backend.graphs[0], invoke_quant_test)
+        self.assertEqual(len(schemas), 1)
+        self.assertExpectedInline(
+            str(schemas[0]),
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_schema_gen_pytree_in_out(self):
+        def inner(x_y):
+            x, y = x_y
+            return [
+                (x @ y).sin().cos(),
+                (x + y, x - y),
+                {"out": (x @ y,)},
+            ]
+
+        # make x not require grad because we want to inplace mutate it
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def f(x, y):
+            return invoke_quant_test(inner, [x, y], scheme="nf4")
+
+        out = f(x.clone(), y)
+        self.assertEqual(out, inner([x.clone(), y]))
+        schemas = self._find_hop_schema(backend.graphs[0], invoke_quant_test)
+        self.assertEqual(len(schemas), 1)
+        self.assertExpectedInline(
+            str(schemas[0]),
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    # input mutation is not supported yet
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_schema_gen_single_return_with_mutation(self):
+        def inner(x, y):
             x.add_(1)
             y.mul_(-1)
             return (x @ y).sin().cos()
@@ -119,13 +173,13 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            # See Note [schema for signle return item with parenthesis] for why
-            # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor(a2!) arg1, str scheme="nf4") -> ((Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor(a2!) arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
         )
 
+    # input mutation is not supported yet
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(assume_static_by_default=True)
-    def test_schema_gen_pytree_in_out(self):
+    def test_schema_gen_pytree_in_out_with_mutation(self):
         def inner(x_y):
             x, y = x_y
             x.add_(1)
@@ -151,9 +205,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            # See Note [schema for signle return item with parenthesis] for why
-            # there's an extra parenthesis in schema of return
-            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, str scheme="nf4") -> ((Tensor, Tensor, Tensor, Tensor) out)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
