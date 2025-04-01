@@ -110,8 +110,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
@@ -407,7 +409,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
             bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
-                const static bool result = env_var_value != nullptr && env_var_value[0] != 0;
+                const static bool result = env_var_value != nullptr && env_var_value[0] != '0';
                 return result;
             }
 
@@ -461,17 +463,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
-                run_impl_proto += """
+                run_impl_proto = """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -1925,9 +1917,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 raise AssertionError(f"Unsupported return type found: {return_type}")
 
-        # TODO: Only support tensor(s) returns for now, SymInt is not implemented yet
+        # TODO: Only support None and tensor(s) returns for now, SymInt is not implemented yet
         for return_type in return_types:
-            if isinstance(return_type, (torch.TensorType)):
+            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
                 pass
             elif isinstance(return_type, torch.OptionalType):
                 assert isinstance(return_type.getElementType(), torch.TensorType)
@@ -1939,8 +1931,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
         for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
-            assert output_arg is not None, "Optional return types are not yet supported"
-            if isinstance(output_arg, (list, tuple)):
+            # None output is supported, but Optional return types are not yet supported
+            if output_arg is None:
+                continue
+            elif isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
                     fill_output_arg(
                         out,
