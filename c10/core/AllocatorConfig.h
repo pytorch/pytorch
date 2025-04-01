@@ -155,6 +155,7 @@ class C10_API AllocatorConfig {
       size_t i);
 
   /* Internal functions for host allocator */
+
   // Parse `pinned_use_device_host_register` from environment variable.
   size_t parsePinnedUseDeviceHostRegister(
       const std::vector<std::string>& config,
