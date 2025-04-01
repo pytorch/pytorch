@@ -499,7 +499,7 @@ class KernelCallLine(WrapperLine):
             triton_meta=self.triton_meta,
             device=self.device,
             graph_name=self.graph_name,
-            original_fxnode_name=self.original_fxnode_name
+            original_fxnode_name=self.original_fxnode_name,
         )
 
 

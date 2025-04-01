@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 from torch import dtype as torch_dtype
@@ -57,13 +57,17 @@ class DebugPrinterManager:
         self,
         debug_printer_level,
         use_array_ref: bool,
+        writeline: Optional[Callable[..., None]] = None,
         args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
         arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
-        self.writeline: Optional[Callable[..., None]] = None
+        def null_writeline():
+            pass
+
+        self.writeline = writeline if writeline else null_writeline
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
         self.use_array_ref = use_array_ref
         if args_to_print_or_save is None:
