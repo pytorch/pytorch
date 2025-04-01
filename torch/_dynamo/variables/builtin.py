@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1266,6 +1267,12 @@ class BuiltinVariable(VariableTracker):
 
                 # Inline the user function
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
+        elif isinstance(arg, (variables.ExceptionVariable,)):
+            if len(arg.args) == 0:
+                value = f"{arg.exc_type}"
+            else:
+                value = ", ".join(a.as_python_constant() for a in arg.args)
+            return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -1649,7 +1656,10 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
-        return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        try:
+            return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        except AttributeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
@@ -1863,6 +1873,30 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and issubclass(obj.value.__class__, unittest.TestCase)
+                and config.enable_trace_unittest
+                and name
+                in (
+                    "assertRaisesRegex",
+                    "assertNotWarns",
+                    "assertWarnsRegex",
+                    "assertDictEqual",
+                    "assertSequenceEqual",
+                    "assertWarns",
+                )
+            ):
+                unimplemented_v2(
+                    gb_type="Failed to trace builtin operator",
+                    context=f"function: unittest.TestCase.{name}",
+                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    hints=[
+                        f"Avoid calling builtin `{name}`. "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
@@ -1911,6 +1945,7 @@ class BuiltinVariable(VariableTracker):
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
+                variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
             ),
         ):
