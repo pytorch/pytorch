@@ -278,13 +278,16 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K).to(torch.float16).cuda()
         b = torch.randn(K, N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "autotune_fallback_to_aten": False,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_fallback_to_aten": False,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
@@ -368,12 +371,12 @@ class TestMaxAutotune(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert (
-                    fake_choice.thread_id is not None
-                ), "Expected all ChoiceCaller's precompile method to have been called"
-                assert (
-                    fake_choice.thread_id != main_thread_id
-                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                assert fake_choice.thread_id is not None, (
+                    "Expected all ChoiceCaller's precompile method to have been called"
+                )
+                assert fake_choice.thread_id != main_thread_id, (
+                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                )
         finally:
             V.set_debug_handler(old_debug_handler)
 
@@ -454,13 +457,16 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N).to(torch.float16).cuda()
         x = torch.randn(N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "autotune_fallback_to_aten": False,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_fallback_to_aten": False,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
@@ -1079,8 +1085,9 @@ class TestMaxAutotune(TestCase):
 
         a = torch.zeros([16, 16], device=GPU_TYPE)
         b = torch.zeros([16, 16], device=GPU_TYPE)
-        with patch.object(AlgorithmSelectorCache, "lookup", mock_lookup), config.patch(
-            benchmark_epilogue_fusion=multi_template
+        with (
+            patch.object(AlgorithmSelectorCache, "lookup", mock_lookup),
+            config.patch(benchmark_epilogue_fusion=multi_template),
         ):
             with self.assertRaises(BackendCompilerFailed) as context:
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
@@ -1164,21 +1171,26 @@ class TestMaxAutotuneRemoteCache(TestCase):
         x = torch.randn(100, 100).to(GPU_TYPE)
         y = torch.randn(100, 100).to(GPU_TYPE)
 
-        with config.patch(
-            {
-                "autotune_local_cache": False,
-                "autotune_remote_cache": True,
-            }
-        ), patch.dict(os.environ), PatchCaches():
+        with (
+            config.patch(
+                {
+                    "autotune_local_cache": False,
+                    "autotune_remote_cache": True,
+                }
+            ),
+            patch.dict(os.environ),
+            PatchCaches(),
+        ):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
                     with fresh_inductor_cache():
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                with torch.compiler.config.patch(
-                    {"cache_key_tag": "test"}
-                ), fresh_inductor_cache():
+                with (
+                    torch.compiler.config.patch({"cache_key_tag": "test"}),
+                    fresh_inductor_cache(),
+                ):
                     torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
 
@@ -1190,9 +1202,10 @@ class TestMaxAutotuneRemoteCache(TestCase):
                 with fresh_inductor_cache():
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-            with torch.compiler.config.patch(
-                {"cache_key_tag": "test"}
-            ), fresh_inductor_cache():
+            with (
+                torch.compiler.config.patch({"cache_key_tag": "test"}),
+                fresh_inductor_cache(),
+            ):
                 torch.compile(mm, dynamic=dynamic)(a, b)
                 reset()
             global_stats.report()

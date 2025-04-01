@@ -301,13 +301,17 @@ class TestFxGraphCache(TestCase):
         a = torch.rand(25, dtype=dtype, device=device)
         b = torch.rand(5, 5, dtype=dtype, device=device)
 
-        with config.patch(
-            {
-                "fx_graph_remote_cache": True,
-                "bundle_triton_into_fx_graph_cache": bundle_triton,
-                "use_static_cuda_launcher": use_static_cuda_launcher,
-            }
-        ), patch.dict(os.environ), PatchCaches():
+        with (
+            config.patch(
+                {
+                    "fx_graph_remote_cache": True,
+                    "bundle_triton_into_fx_graph_cache": bundle_triton,
+                    "use_static_cuda_launcher": use_static_cuda_launcher,
+                }
+            ),
+            patch.dict(os.environ),
+            PatchCaches(),
+        ):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             for _ in range(4):
                 with fresh_inductor_cache():
@@ -317,9 +321,10 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
 
-            with torch.compiler.config.patch(
-                {"cache_key_tag": "test"}
-            ), fresh_inductor_cache():
+            with (
+                torch.compiler.config.patch({"cache_key_tag": "test"}),
+                fresh_inductor_cache(),
+            ):
                 compiled_fn = torch.compile(fn, dynamic=dynamic)
                 self.assertEqual(fn(a, b), compiled_fn(a, b))
 

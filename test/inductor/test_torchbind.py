@@ -283,9 +283,10 @@ class TestTorchbind(TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, aoti_files)
 
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+                zipfile.ZipFile(package_path, "r") as zip_ref,
+            ):
                 zip_ref.extractall(tmp_dir)
                 tmp_path_model = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 tmp_path_constants = Path(tmp_dir) / "data" / "constants"

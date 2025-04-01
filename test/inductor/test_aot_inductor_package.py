@@ -80,7 +80,9 @@ def compile(
         if sys.platform != "darwin"
         else []
     ),
-    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
 )
 class TestAOTInductorPackage(TestCase):
     def check_model(
@@ -210,9 +212,10 @@ class TestAOTInductorPackage(TestCase):
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+                zipfile.ZipFile(package_path, "r") as zip_ref,
+            ):
                 zip_ref.extractall(tmp_dir)
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())

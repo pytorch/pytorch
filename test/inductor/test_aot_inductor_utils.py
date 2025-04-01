@@ -205,11 +205,14 @@ def check_model(
     atol=None,
     rtol=None,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
         if not isinstance(model, types.FunctionType):
@@ -248,11 +251,14 @@ def check_model_with_multiple_inputs(
     options=None,
     dynamic_shapes=None,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -275,11 +281,14 @@ def code_check_count(
     target_str: str,
     target_count: int,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         package_path = torch._export.aot_compile(model, example_inputs)
 

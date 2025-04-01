@@ -292,9 +292,9 @@ class TestFlexDecoding(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
+        assert score_mod is not None or block_mask is not None, (
+            "Must provide score_mod or block_mask"
+        )
         assert Q_H % KV_H == 0
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D),
