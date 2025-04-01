@@ -1073,9 +1073,9 @@ class ReplacementPatternEntry(PatternEntry):
             def run_node(self, node: torch.fx.Node) -> Any:
                 if node.op in ("placeholder", "output"):
                     return super().run_node(node)
+                target = node.target
+                args, kwargs = self.fetch_args_kwargs_from_env(node)
                 if node.op == "call_function":
-                    target = node.target
-                    args, kwargs = self.fetch_args_kwargs_from_env(node)
                     assert callable(target)
                     result = graph.call_function(target, args, kwargs)
                     _transfer_meta(
@@ -1089,6 +1089,26 @@ class ReplacementPatternEntry(PatternEntry):
                             assert "tensor_meta" in node.meta
                             result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
+                if node.op == "get_attr":
+                    # If the replacement graph contains a HOP, the subgraphs of the HOP are "get_attr" nodes.
+                    # We need to fetch the subgraph of the HOP then register the subgraph to the replaced graph's root.
+                    from torch._higher_order_ops.utils import (
+                        unique_graph_name_with_root,
+                    )
+
+                    sub_gm = super().get_attr(target, args, kwargs)
+                    if not isinstance(sub_gm, torch.fx.GraphModule):
+                        raise NotImplementedError(
+                            f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}."
+                        )
+
+                    assert graph.owning_module is not None
+                    _, graph_name = unique_graph_name_with_root(
+                        graph.owning_module, str(target)
+                    )
+                    graph.owning_module.register_module(graph_name, sub_gm)
+                    return graph.get_attr(graph_name)
+
                 raise NotImplementedError(f"unhandled {node}")
 
         output_nodes = match.output_nodes()
@@ -1513,8 +1533,13 @@ def _serialize_pattern(
         pattern_matcher_imports = []
         for name in dir(torch._inductor.pattern_matcher):
             attr = getattr(torch._inductor.pattern_matcher, name)
-            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
-                pattern_matcher_imports.append(name)
+            try:
+                if isinstance(attr, type) and issubclass(
+                    attr, (PatternExpr, _TargetExpr)
+                ):
+                    pattern_matcher_imports.append(name)
+            except TypeError:
+                pass
 
         formatted_imports = ",\n   ".join(pattern_matcher_imports)
         formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"

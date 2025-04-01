@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
@@ -242,8 +243,16 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::i0({x})"
 
     @staticmethod
+    def i0e(x: CSEVariable) -> str:
+        return f"c10::metal::i0e({x})"
+
+    @staticmethod
     def i1(x: CSEVariable) -> str:
         return f"c10::metal::i1({x})"
+
+    @staticmethod
+    def i1e(x: CSEVariable) -> str:
+        return f"c10::metal::i1e({x})"
 
     @staticmethod
     def erf(x: CSEVariable) -> str:
@@ -282,8 +291,18 @@ class MetalOverrides(OpOverrides):
         return f"metal::atan({x})"
 
     @staticmethod
+    def atan2(x: CSEVariable, y: CSEVariable) -> str:
+        return f"::metal::atan2({x}, {y})"
+
+    @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
+
+    @staticmethod
+    def neg(x: CSEVariable) -> str:
+        # TODO: Does it rely on undefined behavior?
+        # If so, add special logic for unsigned types
+        return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
     def rsqrt(x: CSEVariable) -> str:
@@ -373,6 +392,62 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def entr(x: CSEVariable) -> str:
         return f"c10::metal::entr({x})"
+
+    @staticmethod
+    def bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j0_forward({x})"
+
+    @staticmethod
+    def bessel_j1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j1_forward({x})"
+
+    @staticmethod
+    def bessel_y0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y0_forward({x})"
+
+    @staticmethod
+    def bessel_y1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i0_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i1(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k0_forward({x})"
+
+    @staticmethod
+    def modified_bessel_k1(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k1_forward({x})"
+
+    @staticmethod
+    def scaled_modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::scaled_modified_bessel_k0_forward({x})"
+
+    @staticmethod
+    def scaled_modified_bessel_k1(x: CSEVariable) -> str:
+        return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
+
+    @staticmethod
+    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_u(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_u_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_v(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_v_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
@@ -609,6 +684,14 @@ class MetalKernel(SIMDKernel):
             )
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
+            if self.inside_reduction:
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
+                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
@@ -693,7 +776,8 @@ class MetalKernel(SIMDKernel):
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
         lower_expr = f"{expr_str} < 0" if lower else ""
-        upper_expr = f"{expr_str} >= {self.index_to_str(size)}" if upper else ""
+        # TODO(malfet): Is upper bound inclusive or exclusive?
+        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
             line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:
