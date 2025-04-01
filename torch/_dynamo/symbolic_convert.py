@@ -590,7 +590,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 hints=_hints,
             ),
         )
-        assert self.should_compile_partial_graph()
+        if not self.should_compile_partial_graph():
+            unimplemented_v2(
+                gb_type="Should not compile partial graph (data-dependent branching)",
+                context="",
+                explanation="Dynamo has determined when encountering data-dependent "
+                "branching (e.g. `if my_tensor.item() > 0:`) that it should not "
+                "compile the partial graph.",
+                hints=[],
+            )
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -634,20 +642,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant():
                 if bool(value.as_python_constant()):
                     return self.jump(inst)
-                elif self.should_compile_partial_graph():
-                    jump_graph_break(self, inst, value)
                 else:
-                    unimplemented_v2(
-                        gb_type="Assertion failed (cannot compile partial graph)",
-                        context=f"value: {value}",
-                        explanation="Dynamo has determined when encountering an assert failure "
-                        "that it should not compile the partial graph.",
-                        hints=_hints
-                        + [
-                            "Remove the assert statement.",
-                            "Move the assert statement outside of any context managers.",
-                        ],
-                    )
+                    jump_graph_break(self, inst, value)
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
