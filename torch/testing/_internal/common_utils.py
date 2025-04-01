@@ -2810,11 +2810,8 @@ class RelaxedNumberPair(NumberPair):
                 number = int(number)
 
             return number
-
-
-        # handling enum.Enum and Enum-like classes
-        elif hasattr(number_like, "value") and isinstance(number_like.value, int):
-            return number_like.value  # type: ignore[call-overload]
+        elif isinstance(number_like, Enum):
+            return int(number_like)  # type: ignore[call-overload]
         else:
             return super()._to_number(number_like, id=id)
 

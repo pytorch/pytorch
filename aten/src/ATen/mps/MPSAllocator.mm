@@ -905,14 +905,17 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     }
 
     if (sync) {
-      at::detail::getMPSHooks().deviceSynchronize();
-    }
-    default_copy_data(dest, src, count);
-    if (sync) {
-      at::detail::getMPSHooks().deviceSynchronize();
+      MPSStream* stream = _getAllocImpl().getStream();
+      stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
+        default_copy_data(dest, src, count);
+      });
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    } else {
+      default_copy_data(dest, src, count);
     }
   }
 
+  // NOTE: Current not used, probably will remove
   DataPtr clone_from_cpu(const void* data, std::size_t n) override {
     std::cout << "[MPSAllocator::clone_from_cpu] data: " << data << ", n: " << n << std::endl;
     TORCH_INTERNAL_ASSERT(m_has_unified_memory);
@@ -927,10 +930,15 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     void* dest_mps_ptr = new_data.mutable_get();
     std::cout << "[MPSAllocator::clone_from_cpu] dest_mps_ptr: " << dest_mps_ptr << std::endl;
 
-    copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
+    MPSStream* stream = _getAllocImpl().getStream();
+    stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
+      copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
+    });
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
     return new_data;
   }
 
+  // NOTE: Current not used, probably will remove
   DataPtr clone_to_cpu(const void* data, std::size_t n) override {
     std::cout << "[MPSAllocator::clone_to_cpu] data: " << data << ", n: " << n << std::endl;
     TORCH_INTERNAL_ASSERT(m_has_unified_memory);
@@ -953,7 +961,11 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     std::cout << "[MPSAllocator::clone_to_cpu] dest_cpu_ptr: " << src_cpu_ptr << std::endl;
     TORCH_INTERNAL_ASSERT(dest_cpu_ptr);
 
-    copy_data(dest_cpu_ptr, src_cpu_ptr, n, /*sync=*/true);
+    MPSStream* stream = _getAllocImpl().getStream();
+    stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
+      copy_data(dest_cpu_ptr, src_cpu_ptr, n, /*sync=*/true);
+    });
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
 
     return new_data;
   }

@@ -134,8 +134,10 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
   // function returns the lazy cloned tensor. The device may have pending write
   // operations on the source tensor's data, and we must force them to finish
   // before trying to read it from the destination device.
-  if (device_opt.has_value() && device_opt.value() != self.device() && self.device().type() != c10::kCPU) {
-    at::globalContext().getAcceleratorHooksInterface(self.device().type());
+  if (device_opt.has_value() && device_opt.value() != self.device()) {
+    if (self.device().type() == c10::kMPS) {
+      at::detail::getMPSHooks().deviceSynchronize();
+    }
   }
   return Tensor(std::move(tensor));
 }

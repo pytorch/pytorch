@@ -352,6 +352,10 @@ class MPSHeapAllocatorImpl {
 
   inline std::string format_size(uint64_t size) const;
 
+  MPSStream* getStream() const {
+    return m_stream;
+  }
+
  private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;
