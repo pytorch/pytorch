@@ -135,8 +135,7 @@ template<typename T, uint32_t Rank>
 using VecT = T __attribute__((ext_vector_type(Rank)));
 
 static bool isCDNA2orLater(int index) {
-    static const std::vector<std::string> archs = {"gfx90a", "gfx942"};
-    return at::detail::getCUDAHooks().isGPUArch(archs, index);
+    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942"}, index);
 }
 
 #else
