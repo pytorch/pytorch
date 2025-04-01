@@ -128,9 +128,9 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
-        if USE_FAST_ACCUM:
+        {% if USE_FAST_ACCUM %}
             acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        else:
+        {% else %}
             acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 
     # rematerialize rm and rn to save registers
@@ -306,7 +306,7 @@ persistent_tma_mm_template = TritonTemplate(
             allow_tf32=ALLOW_TF32,
         )
 
-        if ki == k_tiles - 1:
+        {% if ki == k_tiles - 1 %}
             # rematerialize rm and rn to save registers
             rcm = rm + tl.arange(0, BLOCK_M)
             rcn = rn + tl.arange(0, BLOCK_N)
@@ -317,6 +317,7 @@ persistent_tma_mm_template = TritonTemplate(
             # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+        {% endif %}
 """,
 )
 
