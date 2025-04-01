@@ -597,7 +597,7 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if (
+        if config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")

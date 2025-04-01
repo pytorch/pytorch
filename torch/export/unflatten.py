@@ -589,9 +589,10 @@ class UnflattenedModule(torch.nn.Module):
         return flat_args
 
     def forward(self, *args, **kwargs):
-        flat_args = torch._dynamo.disable(self.process_forward_inputs, reason=None)(
-            *args, **kwargs
-        )
+        flat_args = torch._dynamo.disable(
+            self.process_forward_inputs,
+            reason="do not trace into preprocessing the inputs",
+        )(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
         if is_fx_tracing():
@@ -1036,9 +1037,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
+                            flat_arg_node
+                        )
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
