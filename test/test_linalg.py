@@ -5383,6 +5383,7 @@ class TestLinalg(TestCase):
         # tested by PyTorch
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
             # Reference number of results
