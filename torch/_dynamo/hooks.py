@@ -22,3 +22,4 @@ from .types import GuardFail
 class Hooks:
     guard_export_fn: Optional[Callable[[GuardsSet], None]] = None
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None
+    new_precompile_fn: Optional[Callable[[], None]] = None

@@ -238,7 +238,8 @@ static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    PyObject* f_globals) {
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
@@ -255,7 +256,12 @@ static PyObject* dynamo_eval_custom_code_impl(
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
 #endif
 
-  PyFunctionObject* func = _PyFunction_CopyWithNewCode(old_func, code);
+  PyFunctionObject* func = NULL;
+  if (f_globals != NULL) {
+    func = (PyFunctionObject*)PyFunction_New((PyObject*)code, f_globals);
+  } else {
+    func = _PyFunction_CopyWithNewCode(old_func, code);
+  }
   if (func == NULL) {
     return NULL;
   }
@@ -292,7 +298,7 @@ static PyObject* dynamo_eval_custom_code_impl(
 #else
 
   THP_EVAL_API_FRAME_OBJECT* shadow =
-      PyFrame_New(tstate, code, frame->f_globals, NULL);
+      PyFrame_New(tstate, code, f_globals ? f_globals : frame->f_globals, NULL);
   if (shadow == NULL) {
     return NULL;
   }
@@ -451,11 +457,12 @@ PyObject* dynamo_eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     const char* trace_annotation,
-    int throw_flag) {
+    int throw_flag,
+    PyObject* f_globals) {
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(trace_annotation);
   PyObject* result =
-      dynamo_eval_custom_code_impl(tstate, frame, code, throw_flag);
+      dynamo_eval_custom_code_impl(tstate, frame, code, throw_flag, f_globals);
   _pytorch_record_function_exit(rf);
   return result;
 }

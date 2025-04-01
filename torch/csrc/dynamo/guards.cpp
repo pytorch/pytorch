@@ -33,6 +33,8 @@
 #include <tuple>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+
 // Certain CPython data structures are defined in `.c` files in earlier Python
 // versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
 // retrieve the underlying tuple and access the item. Before Python 3.12
@@ -552,6 +554,13 @@ struct AutocastState {
     }
     return true;
   }
+
+  template <typename T>
+  friend void to_json(T& json_j, const AutocastState& json_t) {
+    json_j["enabled"] = json_t.enabled;
+    json_j["dtype"] = json_t.dtype;
+    json_j["cached_enabled"] = json_t.cache_enabled;
+  }
 };
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
@@ -623,6 +632,22 @@ struct GlobalStateGuard {
     return os.str();
   }
 
+  template <typename T>
+  friend void to_json(T& json_j, const GlobalStateGuard& json_t) {
+    json_j["grad_mode"] = json_t._grad_mode;
+    json_j["autocast_state"] = json_t._autocast_state;
+    json_j["torch_function"] = json_t._torch_function;
+    json_j["torch_function_all_disabled"] = json_t._torch_function_all_disabled;
+    json_j["deterministic_algorithms"] = json_t._deterministic_algorithms;
+    json_j["deterministic_algorithms_warn_only"] =
+        json_t._deterministic_algorithms_warn_only;
+    json_j["allow_tf32"] = json_t._allow_tf32;
+    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
+    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
+    json_j["num_threads"] = json_t._num_threads;
+    json_j["default_dtype"] = json_t._default_dtype.toScalarType();
+  }
+
   bool _grad_mode;
   AutocastState _autocast_state;
   bool _torch_function;
@@ -663,6 +688,13 @@ PyObject* GlobalStateGuard_reason(
   return PyUnicode_FromString(self->reason().c_str());
 }
 
+PyObject* GlobalStateGuard_dump(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return PyUnicode_FromString(nlohmann::json(*self).dump().c_str());
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef GlobalStateGuard_methods[] = {
     {"check",
@@ -673,6 +705,12 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      (PyCFunction)(void*)GlobalStateGuard_reason,
      METH_NOARGS,
      "Return string reason for guard check failing"},
+    {
+        "dump",
+        (PyCFunction)(void*)GlobalStateGuard_dump,
+        METH_NOARGS,
+        "Return serialized json format",
+    },
     {nullptr}};
 static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
 };

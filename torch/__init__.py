@@ -2292,11 +2292,15 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, options, dynamic):
+    def __init__(self, mode, options, dynamic, package):
         from torch._inductor.compiler_bisector import CompilerBisector
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
+        self.package = package
+        if self.package:
+            self.apply_options({"cpp_wrapper": True})
+            self.apply_options({"aot_inductor.package": True})
         self.apply_mode(mode)
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
@@ -2352,7 +2356,9 @@ class _TorchCompileInductorWrapper:
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        return compile_fx(
+            model_, inputs_, config_patches=self.config, package=self.package
+        )
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2418,6 +2424,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    package: _Optional[str] = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2431,6 +2438,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    package: _Optional[str] = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2443,6 +2451,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    package: _Optional[str] = None,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2525,6 +2534,32 @@ def compile(
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
+       package (str or None): A file path to save serialized artifacts for torch.compile.
+        When `package` is not None, there will be additional methods on the compiled object
+        to control serialization of compiled code:
+
+        - .save_package(): Save compiled code to the path passed to torch.compile()
+        - .load_package(): Load compiled code from the path passed to torch.compile()
+
+        This is useful for reducing cold start time or avoiding recompilation in production environments.
+        Example workflow:
+        ```
+        def fn(…): …
+        compiled_fn = torch.compile(fn, fullgraph=True, package="dir/model")
+        compiled_fn(*example_inputs)
+        compiled_fn.save_package()  # Saved to dir/model
+        ```
+        Then we can load the compiled model later under a different context:
+        ```
+        compiled_fn.load_package()  # Loaded from dir/my_model
+        # No recompile if and only if the loaded cache was compiled under inputs with compatible tensor shape, device, etc.
+        compiled_fn(*example_inputs)
+        ```
+        [NOTE] Loading a precompiled compile package has some soundness implication due to the fact that
+        only a subset of the original guards are checked. For example, if the compiled model relies on a global
+        variable to have specific identity, loaded compile may simply ignore them even if they have been changed at
+        loading time.
+
     Example::
 
         @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
@@ -2572,13 +2607,23 @@ def compile(
     if mode is None and options is None:
         mode = "default"
 
+    compile_package = None
+    if package is not None:
+        if not fullgraph:
+            raise RuntimeError(
+                "Compile package is only supported with torch.compile(fullgraph=True)"
+            )
+        from torch._dynamo.compile_package import _CompilePackage
+
+        compile_package = _CompilePackage(package)
+
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic, compile_package)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
@@ -2587,6 +2632,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        package=compile_package,
     )(model)  # type: ignore[return-value]
 
 

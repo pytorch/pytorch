@@ -5,6 +5,7 @@
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -126,7 +127,7 @@ PyObject* dynamo__custom_eval_frame(
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate, frame, cached_code, trace_annotation, throw_flag, nullptr);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -173,6 +174,27 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
+  // TODO Need some design discussion here: Should we lookup
+  //      precompile separately?
+  for (const auto& entry : extra->precompile_entries) {
+    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, locals.get())) {
+      // TODO backend / guard error not handled?
+      // TODO Need to clean up any states?
+      eval_frame_callback_set(recursive_callback.ptr());
+      eval_result = dynamo_eval_custom_code(
+          tstate,
+          frame,
+          (PyCodeObject*)entry.code.ptr(),
+          trace_annotation,
+          throw_flag,
+          entry.f_globals.ptr());
+      if (!callback.is(recursive_callback)) {
+        eval_frame_callback_set(callback.ptr());
+      }
+      clear_old_frame_if_python_312_plus(tstate, frame);
+      return eval_result;
+    }
+  }
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
