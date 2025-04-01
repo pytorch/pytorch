@@ -34,33 +34,44 @@ def _explicit_order_placements(
         return list(enumerate(placements))
 
     ordered = []
-    _strided_tmp = defaultdict(list)
+    deferred_strided_placements = defaultdict(list)
+    strided_part_ended_for_dim = set()
     for mesh_dim, p in enumerate(placements):
         if isinstance(p, _StridedShard):
             # validate the stride is the correct multiple of the meshdim and the earlier shard
-            _strided_tmp[p.dim].append((mesh_dim, p))
+            deferred_strided_placements[p.dim].append((mesh_dim, p))
 
         else:
             ordered.append((mesh_dim, p))
             if isinstance(p, Shard):
-                aggregate_size = mesh_shape[mesh_dim]
-                while p.dim in _strided_tmp and len(_strided_tmp[p.dim]) > 0:
-                    # We can process multiple strided shardings in reverse-order
-                    # (e.g. [_StridedShard(0, split_factor=4), _StridedShard(0, split_factor=2), Shard(0)])
-                    # TODO- validate this logic and enable it (mainly, validate aggregate_size part)
-                    if len(_strided_tmp[p.dim]) > 1:
-                        raise NotImplementedError(
-                            "NYI nested strided sharding conversion to ordered"
-                        )
+                if p.dim in strided_part_ended_for_dim:
+                    raise NotImplementedError(
+                        f"Strided sharding does not allow Shard() to appear after "
+                        f"the strided part has ended. {p} at mesh dim {mesh_dim} in "
+                        f"{placements} violates this assumption."
+                    )
 
-                    strided_dim, strided = _strided_tmp[p.dim].pop(-1)
-                    if not strided.split_factor == aggregate_size:
-                        raise RuntimeError(
-                            f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
-                            f" == aggregate mesh size ({aggregate_size})"
-                        )
-                    aggregate_size *= mesh_shape[strided_dim]
-                    ordered.append((strided_dim, Shard(p.dim)))
+                if p.dim in deferred_strided_placements:
+                    strided_part_ended_for_dim.add(p.dim)
+                    strided_placements = deferred_strided_placements.pop(p.dim)
+                    aggregate_size = mesh_shape[mesh_dim]
+                    while len(strided_placements) > 0:
+                        # We can process multiple strided shardings in reverse-order
+                        # (e.g. [_StridedShard(0, split_factor=4), _StridedShard(0, split_factor=2), Shard(0)])
+                        # TODO- validate this logic and enable it (mainly, validate aggregate_size part)
+                        if len(strided_placements) > 1:
+                            raise NotImplementedError(
+                                "NYI nested strided sharding conversion to ordered"
+                            )
+
+                        strided_dim, strided = strided_placements.pop()
+                        if not strided.split_factor == aggregate_size:
+                            raise RuntimeError(
+                                f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
+                                f" == aggregate mesh size ({aggregate_size})"
+                            )
+                        aggregate_size *= mesh_shape[strided_dim]
+                        ordered.append((strided_dim, Shard(p.dim)))
 
     return ordered
 
