@@ -109,8 +109,8 @@ def get_chunking_meta(node):
 def has_nop_chunking_meta(node):
     return ChunkingMeta.is_nop(get_chunking_meta(node))
 
-def get_chunking_metas(nodes):
-    return [get_chunking_meta(node) for node in nodes]
+def get_chunking_metas(nodes, skip_none=False):
+    return [get_chunking_meta(node) for node in nodes if not skip_none or get_chunking_meta(node) is not None]
 
 eligible_amplifier_node = {
     aten.mm.default,

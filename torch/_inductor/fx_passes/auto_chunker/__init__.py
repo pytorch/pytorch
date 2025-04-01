@@ -19,7 +19,7 @@ from .collector import Collector, CantChunk
 from .partitioner import Partitioner
 from .old_propagator import Propagator
 from .collector import get_fake_tensor_from_node_arg, maybe_permuted, get_tangent_nodes
-from .applier import ChunkingApplier
+from .old_applier import ChunkingApplier as OldChunkingApplier
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -43,19 +43,6 @@ class AutoChunker:
             # skip
             return gm
 
-        log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
-
-        chunking_subgraph_nodes = Collector.collect_chunking_subgraph_nodes(graph)
-        print("Chunking subgraph nodes:")
-        for node in chunking_subgraph_nodes:
-            print(f"  {node.format_node()}")
-
-        chunking_subgraph = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
-
-        Propagator.add_chunking_meta(chunking_subgraph)
-
-        newgm = ChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 8).apply()
-
         metrics.num_auto_chunking += 1
 
         if os.getenv("NEW_API") == "1":
@@ -64,4 +51,20 @@ class AutoChunker:
             from .propagator import propagate
             amplifier_node = find_amplifier_node(graph)
             propagate(amplifier_node)
-        return newgm
+            from .applier import ChunkingApplier
+            return ChunkingApplier(gm, config.AutoChunker.num_chunk or 8).apply()
+        else:
+            log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
+    
+            chunking_subgraph_nodes = Collector.collect_chunking_subgraph_nodes(graph)
+            print("Chunking subgraph nodes:")
+            for node in chunking_subgraph_nodes:
+                print(f"  {node.format_node()}")
+    
+            chunking_subgraph = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
+    
+            Propagator.add_chunking_meta(chunking_subgraph)
+    
+            newgm = OldChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 8).apply()
+
+            return newgm
