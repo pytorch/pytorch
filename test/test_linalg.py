@@ -5087,21 +5087,21 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @dtypes(torch.float)
+    @dtypes(torch.bfloat16)
     def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
         import os
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
         # run operator first without tuning to ensure all rocm libs are loaded,
         # otherwise false positive mem leak
-        B = 16
-        N = M = K = 256
-        dtype = torch.bfloat16
+        B = 5
+        N = M = K = 29
         device = torch.device("cuda:0")
         i1 = torch.randn((B, N, M), device=device, dtype=dtype)
         i2 = torch.randn((B, M, K), device=device, dtype=dtype)
         out = torch.bmm(i1, i2)
 
         with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
             # enable tunableop numeric check via env variable.
             os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
 
