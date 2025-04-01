@@ -57,6 +57,11 @@ C10_DEFINE_bool(
     false,
     "When true we will attemps to pre-expand node stacks and cache expanded stacks.")
 
+C10_DEFINE_bool(
+    torch_jit_expanded_stacks_mangled,
+    false,
+    "When true pre-expanded stacks will use mangled names.")
+
 namespace torch::jit {
 
 using CodeImpl = interpreter::CodeImpl;

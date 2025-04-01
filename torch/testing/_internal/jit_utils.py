@@ -505,7 +505,7 @@ class JitTestCase(JitCommonTestCase):
                         script_outputs = scripted_fn(*recording_inputs)
                     with self.capture_stdout():
                         opt_script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout() as _python_stdout:
+                    with self.capture_stdout():
                         python_outputs = python_fn(*inputs)
                     if not IS_WINDOWS:
                         self.assertExpected(script_stdout[0], subname='stdout')

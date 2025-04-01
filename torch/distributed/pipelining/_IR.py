@@ -123,12 +123,11 @@ def _insert_stage_symbolic_backward(
             # getitem calls. If we have a target other than getitem in this
             # (forward-only) code, there is a bug.
             assert node.target == operator.getitem, (
-                "Found non-getitem call in forward pass. "
-                "Please report a bug to PiPPy"
+                "Found non-getitem call in forward pass. Please report a bug to PiPPy"
             )
-            assert (
-                len(node.args) == 2
-            ), "Found malformed getitem call. Please report a bug to PiPPy"
+            assert len(node.args) == 2, (
+                "Found malformed getitem call. Please report a bug to PiPPy"
+            )
             indexed_value, node_idx = tuple(node.args)
 
             # indexed_value is a collection that we are indexing into. It could
@@ -249,8 +248,8 @@ class LossWrapper(torch.nn.Module):
     targets value into the loss function, and get and return the loss value, which will
     be backpropagated by PiPPy. The above class would then be instantiated like::
 
-        model = ... # instantiate the model
-        loss_fn = torch.nn.MSELoss() # for the sake of demonstration
+        model = ...  # instantiate the model
+        loss_fn = torch.nn.MSELoss()  # for the sake of demonstration
 
         wrapper = MyModelWrapper(model, loss_fn)
         pipe = Pipe.from_tracing(wrapper, ...)
@@ -818,9 +817,9 @@ class Pipe(torch.nn.Module):
 
             # Get submodule
             callee = root.get_submodule(callee_name)
-            assert not hasattr(
-                callee, param_fqn
-            ), f"Module {callee_name} already has a parameter named {param_fqn}"
+            assert not hasattr(callee, param_fqn), (
+                f"Module {callee_name} already has a parameter named {param_fqn}"
+            )
 
             # Assign the parameter to the submodule
             if is_buffer:
@@ -979,7 +978,7 @@ class Pipe(torch.nn.Module):
         else:
             logger.debug("Pipeline is in inference mode, backward pass not generated")
 
-        logger.debug("Full pipe model:\n" f"{split}")  # noqa: G004
+        logger.debug(f"Full pipe model:\n{split}")  # noqa: G004
 
         return Pipe(
             split,
@@ -1184,7 +1183,7 @@ def annotate_split_points(mod: torch.nn.Module, spec: dict[str, SplitPoint]):
             except AttributeError as e:
                 raise AttributeError(
                     f"Specified target {qualname} referenced "
-                    f'nonexistent module {".".join(atoms[: i + 1])}'
+                    f"nonexistent module {'.'.join(atoms[: i + 1])}"
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
