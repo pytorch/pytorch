@@ -346,7 +346,7 @@ def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     """
     Expand Bias to the same size of X.
     """
-    if B is not None:
+    if B is not None and len(B.shape) == 1:
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
                 B = ir.TensorBox(B)
@@ -888,8 +888,6 @@ class CppGemmTemplate(CppTemplate):
                     view_size, view_stride, view_offset
                 )
 
-            if not trans_w:
-                return new_inputs, layout_or_out
             X = new_inputs[0]
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
