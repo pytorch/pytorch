@@ -239,8 +239,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             layout_or_out: _U,
         ) -> tuple[list[_T], _U]:
             new_inputs: list[_T] = list(inputs)
-            if not trans_w:
-                return new_inputs, layout_or_out
             X = new_inputs[0]
             for wgt_idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
                 new_input = new_inputs[wgt_idx]
