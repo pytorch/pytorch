@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -20,7 +20,7 @@ from ..remote_cache import (
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
-from .triton_compat import Config
+from .triton_compat import Config, HAS_WARP_SPEC
 
 
 if TYPE_CHECKING:
@@ -154,7 +154,46 @@ class AutotuneCache:
         if not remote_cache:
             return
 
+        # Save the args passed to create_cache
+        # in case AutotuneCache needs to be pickled
+        self.remote_cache_full_key = key
+        self.is_fbcode = is_fbcode
         self.remote_cache = (remote_cache, cache_key)
+
+    # The AutotuneCache may be serialized/deserialized if we're using
+    # AsyncCompile worker processes to run triton compilation.
+    # This is because AutotuneCache instances are created on the worker
+    # process, but we need to run AutotuneCache.save on the parent process
+    # when actually doing autotuning.
+    def __getstate__(self) -> dict[str, Any]:
+        # The remote cache handles themselves may not be serializable
+        # So clear it and reconstruct it on setstate
+        remote_cache = getattr(self, "remote_cache", None)
+        return {
+            **self.__dict__,
+            # Save the cache_key portion
+            "remote_cache": remote_cache and remote_cache[1],
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Reconstruct the remote cache on the parent class
+        self.__dict__.update(state)
+        if self.remote_cache is not None:
+            assert isinstance(self.remote_cache, str)
+            assert hasattr(self, "remote_cache_full_key")
+            assert hasattr(self, "is_fbcode")
+            cache_key = self.remote_cache
+            remote_cache = create_cache(
+                self.remote_cache_full_key,
+                self.is_fbcode,
+                "FbRemoteAutotuneCache",
+                "RemoteAutotuneCache",
+            )
+            if remote_cache is not None:
+                self.remote_cache = (remote_cache, cache_key)
+            else:
+                log.warning("Warning, failed to recreate remote cache after pickling")
+                self.remote_cache = None
 
     # Save the config in the caches
     def save(
@@ -168,6 +207,15 @@ class AutotuneCache:
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
         }
+        if HAS_WARP_SPEC:
+            data.update(
+                {
+                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                    "num_buffers_warp_spec": getattr(
+                        config, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
 
         if local_cache := self.local_cache:
             cache, key = local_cache
@@ -425,7 +473,25 @@ def _load_cached_autotuning(
     ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+
+        # Extract common arguments
+        config_args = {
+            "num_warps": num_warps,
+            "num_stages": num_stages,
+        }
+
+        if HAS_WARP_SPEC:
+            config_args.update(
+                {
+                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": best_config.pop(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+
+        # Create the triton_config with the appropriate arguments
+        triton_config = Config(best_config, **config_args)
         triton_config.found_by_coordesc = True
         return triton_config
 
@@ -454,8 +520,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

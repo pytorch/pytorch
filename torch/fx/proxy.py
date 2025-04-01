@@ -15,11 +15,13 @@ from typing import Any, Callable, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
-from .node import Argument, base_types, map_aggregate, Node, Target
+from .immutable_collections import immutable_dict, immutable_list
+from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -114,6 +116,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "arg_kwarg_vals",
 ]
 
 
@@ -289,6 +292,24 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        # IMPORTANT: Are you here because you are trying to proxy a new type into
+        # the graph? Please Please Please contact someone on the PyTorch Compiler team;
+        # the considerations are subtle.
+        #
+        # 1) When you add a new type, all of the downstream consumers and pass writers
+        # need to handle the new type. torch.fx is intended to be easy to write
+        # passes for, so we will push back against new types.
+        # 2) In torch.compile's IR, there are only specific operations that go
+        # into the graph. In particular, Tensor operations should go into the graph,
+        # but non-Tensor operations shouldn't. What that means is that constructors
+        # for new types *SHOULD NOT* become nodes in the FX graph.
+        handler = _create_arg_bypass.get(type(a))
+        if handler is not None:
+            # this is just a performance optimization and can be removed if needed
+            # for common types, we have a fast path to avoid isinstance() overhead
+            # this doesn't remove the checks below since we need to handle subclasses
+            return handler(self, a)
+
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
         elif hasattr(a, "__fx_create_arg__"):
@@ -305,24 +326,7 @@ class TracerBase:
         elif isinstance(a, list):
             return [self.create_arg(elem) for elem in a]
         elif isinstance(a, dict):
-
-            def no_node(arg):
-                if isinstance(arg, Node):
-                    raise RuntimeError(
-                        "Keys for dictionaries used as an argument cannot contain a "
-                        f"Node. Got key: {k}"
-                    )
-
-            r = {}
-            for k, v in a.items():
-                # Check for invalid dict keys. We do not want a Proxy to appear
-                # anywhere within the key. Since keys can be collection types,
-                # we iterate through the key with map_aggregate
-                k = self.create_arg(k)
-                map_aggregate(k, no_node)
-
-                r[k] = self.create_arg(v)
-            return r
+            return _create_arg_dict(self, a)
         elif isinstance(a, slice):
             return slice(
                 self.create_arg(a.start),
@@ -572,8 +576,8 @@ class Proxy:
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        torch.fx.node.map_aggregate(args, find_tracer)
-        torch.fx.node.map_aggregate(kwargs, find_tracer)
+        map_aggregate(args, find_tracer)
+        map_aggregate(kwargs, find_tracer)
 
         if len(tracers) > 1:
             raise RuntimeError(
@@ -733,3 +737,41 @@ def _define_reflectable(orig_method_name):
 
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
+
+
+def _no_nodes_error(arg):
+    raise RuntimeError(
+        "Keys for dictionaries used as an argument cannot contain a "
+        f"Node. Got key: {arg}"
+    )
+
+
+def _create_arg_dict(self, a):
+    r = {}
+    for k, v in a.items():
+        if not isinstance(k, str):
+            # Check for invalid dict keys. We do not want a Proxy to appear
+            # anywhere within the key. Since keys can be collection types,
+            # we iterate through the key with map_arg
+            k = self.create_arg(k)
+            map_arg(k, _no_nodes_error)
+        r[k] = self.create_arg(v)
+    return r
+
+
+_create_arg_bypass = {
+    t: lambda self, a: a
+    for t in [
+        *base_types,
+        type(None),
+        type(...),
+        torch._ops.OpOverload,
+        torch._ops.HigherOrderOperator,
+    ]
+}
+_create_arg_bypass[Proxy] = lambda self, a: a.node
+_create_arg_bypass[tuple] = lambda self, a: tuple([self.create_arg(elem) for elem in a])
+_create_arg_bypass[list] = lambda self, a: [self.create_arg(elem) for elem in a]
+_create_arg_bypass[dict] = _create_arg_dict
+_create_arg_bypass[immutable_list] = _create_arg_bypass[list]
+_create_arg_bypass[immutable_dict] = _create_arg_bypass[dict]

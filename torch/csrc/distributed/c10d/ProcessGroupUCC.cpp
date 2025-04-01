@@ -1,6 +1,7 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>

@@ -3,20 +3,22 @@
 
 namespace torch::dynamo::autograd {
 
-std::unique_ptr<PyCompilerInterface> kPyCompilerInterface;
+std::unique_ptr<PyCompilerInterface> kActivePyCompilerInterface;
 
 const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface() {
-  TORCH_INTERNAL_ASSERT(kPyCompilerInterface != nullptr);
-  return kPyCompilerInterface;
+  TORCH_INTERNAL_ASSERT(kActivePyCompilerInterface != nullptr);
+  return kActivePyCompilerInterface;
 }
 
-void setPyCompilerInterface(std::unique_ptr<PyCompilerInterface>&& impl) {
-  TORCH_INTERNAL_ASSERT(impl != nullptr);
-  kPyCompilerInterface = std::move(impl);
+PyCompilerGuard::PyCompilerGuard(std::unique_ptr<PyCompilerInterface>&& impl) {
+  TORCH_INTERNAL_ASSERT(
+      kActivePyCompilerInterface == nullptr && impl != nullptr);
+  kActivePyCompilerInterface = std::move(impl);
 }
 
-void resetPyCompilerInterface() {
-  kPyCompilerInterface.reset();
+PyCompilerGuard::~PyCompilerGuard() {
+  TORCH_INTERNAL_ASSERT(kActivePyCompilerInterface != nullptr);
+  kActivePyCompilerInterface.reset();
 }
 
 std::vector<std::optional<InputMetadata>> get_input_metadata(
