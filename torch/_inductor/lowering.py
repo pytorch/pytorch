@@ -40,6 +40,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
 
@@ -1088,8 +1089,6 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -1166,8 +1165,9 @@ def repeat(x, repeats):
         return x_loader(index)
 
     old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0:
-        # maybe realize the input
+    if old_size_product > 0 and not free_unbacked_symbols(new_size):
+        # maybe realize the input but skip for unbacked symints since it'll
+        # choke on the size hint.
         x.mark_reuse(
             V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
         )
