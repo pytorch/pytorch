@@ -590,15 +590,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 hints=_hints,
             ),
         )
-        if not self.should_compile_partial_graph():
-            unimplemented_v2(
-                gb_type="Should not compile partial graph (data-dependent branching)",
-                context="",
-                explanation="Dynamo has determined when encountering data-dependent "
-                "branching (e.g. `if my_tensor.item() > 0:`) that it should not "
-                "compile the partial graph.",
-                hints=[],
-            )
+        assert self.should_compile_partial_graph()
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -642,8 +634,24 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant():
                 if bool(value.as_python_constant()):
                     return self.jump(inst)
-                else:
+                elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                else:
+                    unimplemented_v2(
+                        gb_type="Data-dependent assertion failed (cannot compile partial graph)",
+                        context=f"value: {value}",
+                        explanation="Dynamo has determined when encountering a data-dependent assert failure "
+                        "that it should not compile the partial graph.",
+                        hints=[
+                            *graph_break_hints.FUNDAMENTAL,
+                            "Use `torch._assert()` to raise a hard AssertionError when the check fails. "
+                            "This error will propagate back the user code "
+                            "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+                            "Remove the assert statement.",
+                            "Move the assert statement outside of any context managers in order to graph break with "
+                            "partial graph compilation (if fullgraph=False).",
+                        ],
+                    )
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
