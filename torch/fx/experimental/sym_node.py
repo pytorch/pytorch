@@ -592,6 +592,18 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
+    def guard_or_false(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        assert self.is_bool()
+        return guard_or_false(SymBool(self))
+
+    def guard_or_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        assert self.is_bool()
+        return guard_or_true(SymBool(self))
+
     def bool_(self):
         return self.guard_bool("", 0)
 
@@ -868,6 +880,12 @@ def _optimized_add(
         #  (a2+a3..) + (a0+a1..) => (a0+a1+a2+a3)
         if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
             return make_optimized(rhs._args + lhs._args)
+
+        #  (a1+a3) + (a0+a2) => (a0+a1+a2+a3)
+        new_args = list(lhs._args)
+        for a in rhs._args:
+            new_args = _binary_search_insert_arg(new_args, a)
+        return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
