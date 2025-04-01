@@ -237,7 +237,6 @@ class TestFlexDecoding(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
-        self.gold_dtype = torch.float64 if test_device != "xpu" else torch.float32
 
     def _check_equal(
         self,
@@ -254,7 +253,7 @@ class TestFlexDecoding(InductorTestCase):
         if ref_error < (1e-4) * golden_out.abs().mean():
             print(
                 "very small ref error of ",
-                (ref_error.to(self.gold_dtype) * (1e5) / golden_out.abs().mean()),
+                (ref_error.to(torch.float64) * (1e5) / golden_out.abs().mean()),
             )
             tolerance = Tolerances(atol=2e-1, rtol=2e-1)
             torch.testing.assert_close(
@@ -317,7 +316,7 @@ class TestFlexDecoding(InductorTestCase):
             (KV_B, KV_H, KV_S, V_D), dtype=dtype, device=GPU_TYPE, requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
@@ -367,7 +366,7 @@ class TestFlexDecoding(InductorTestCase):
             (KV_B, KV_H, KV_S, V_D), dtype=dtype, device=GPU_TYPE, requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         compiled_sdpa = torch.compile(sdpa_call)
         golden_out = golden_call(q_gold, k_gold, v_gold)
@@ -526,7 +525,7 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         if block_mask is None:
             block_mask = create_block_mask(
@@ -582,7 +581,7 @@ class TestFlexDecoding(InductorTestCase):
             (KV_B, KV_H, KV_S, V_D), dtype=dtype, device=GPU_TYPE, requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         golden_call = functools.partial(
             torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
@@ -1546,14 +1545,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return flex_attention(q, k, v, score_mod, return_lse=True)
 
         ref_out, ref_lse = eager_sdpa_hop(
-            q.to(self.gold_dtype),
-            k.to(self.gold_dtype),
-            v.to(self.gold_dtype),
+            q.to(torch.float64),
+            k.to(torch.float64),
+            v.to(torch.float64),
             score_mod,
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
 
-        self.assertTrue(ref_lse.dtype == self.gold_dtype)
+        self.assertTrue(ref_lse.dtype == torch.float64)
         self.assertTrue(compiled_lse.dtype == torch.float32)
 
         tolerance = Tolerances(atol=2e-2, rtol=2e-2)
@@ -1754,7 +1753,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ref_outs, golden_outs = [], []
         for q, k, v in zip(querys, keys, values):
             q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-            q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
+            q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
             slice_block_mask = block_mask._adjust(1, k_ref.shape[2])
             slice_block_mask.seq_lengths = (1, k_ref.shape[2])
