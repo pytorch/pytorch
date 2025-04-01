@@ -11391,13 +11391,14 @@ def forward(self, x, y):
             5,
         )
         self.assertEqual(
-            ep.module()(torch.tensor([0, 0])).shape[0],
-            0,
-        )
-        self.assertEqual(
             ep.module()(torch.tensor([1, 1])).shape[0],
             1,
         )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(u1, u0\) .*",
+        ):
+            ep.module()(torch.tensor([1, 5]))
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607

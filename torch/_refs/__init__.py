@@ -2989,7 +2989,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -3008,14 +3008,15 @@ def expand(a: Tensor, *shape) -> Tensor:
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
 
-        # Similar to the note in fake_impls.py:infer_size, we check for the special path
-        # first, where requested_length == -1, and the expand result in this dimension
-        # is the input shape. If this is false, we follow the general case, where the result
-        # is the requested_length, and we can turn this condition into an expect_true,
-        # and wrap it with a sym_or(), as both cases work (input == 1 | input == requested_length).
+        # Similar to the note in fake_impls.py:infer_size, we check for special paths first:
+        # 1) requested_length == -1 -> size & stride are preserved
+        # 2) x == 1 -> size is expanded, and stride becomes 0
+        # if these aren't known to be true, we assume the general case, where x == requested_length
+        # and the size & stride are preserved, and we turn this condition into an expect_true.
         torch._check(
             guard_or_false(requested_length == -1)
-            or sym_or(x == 1, requested_length == x),
+            or guard_or_false(x == 1)
+            or requested_length == x,
             lambda: f"expand: attempting to expand a dimension of length {x}!",
         )
         if guard_or_false(requested_length == -1):

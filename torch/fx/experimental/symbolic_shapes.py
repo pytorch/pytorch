@@ -144,7 +144,6 @@ __all__ = [
     "has_free_symbols",
     "has_free_unbacked_symbols",
     "sym_eq",
-    "sym_or",
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
@@ -1294,18 +1293,6 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         return x == y
     else:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
-
-
-def sym_or(
-    x: Union[bool, SymBool], *others: Union[bool, SymBool]
-) -> Union[bool, SymBool]:
-    if len(others) == 0:
-        return x
-    assert isinstance(x, (bool, SymBool))
-    for y in others:
-        assert isinstance(y, (bool, SymBool))
-        x = operator.or_(x, y)
-    return x
 
 
 def guard_scalar(
