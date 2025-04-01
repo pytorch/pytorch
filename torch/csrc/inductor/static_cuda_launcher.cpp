@@ -83,30 +83,63 @@ CUdeviceptr getPointer(PyObject* obj) {
   return dev_ptr;
 }
 
+#define SHARED_MEM_STATIC_MAX 49152 // 48 KB
+
 CUfunction loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
+    CUdevice device,
     const std::optional<std::string>& cubinDir = std::nullopt) {
   if (cubinDir) {
     std::filesystem::path p1{*cubinDir};
     std::filesystem::path p2{filePath};
     filePath = (p1 / p2.filename()).string();
   }
-
   CUmodule mod = nullptr;
   CUfunction func = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
-  if (sharedMemBytes > 0) {
+  int shared_optin = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+      &shared_optin,
+      CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+      device));
+  // Shared memory logic from triton/third-party/nvidia/backend/driver.c
+  // If we're using more than 48 KB of shared memory, and we have
+  // access to more than 48 KB of shared memory on the device,
+  // we set maximum dynamic shared memory to the difference between
+  // the static shared memory and total max shared memory allowed on the device.
+  // This prevents us from setting shared memory above the maximum
+  TORCH_CHECK(
+      sharedMemBytes < static_cast<uint32_t>(shared_optin),
+      "out of resource: ",
+      funcName,
+      " Required: ",
+      sharedMemBytes,
+      " Hardware limit:",
+      shared_optin,
+      " Reducing block sizes or `num_stages` may help.");
+  if (sharedMemBytes > SHARED_MEM_STATIC_MAX &&
+      shared_optin > SHARED_MEM_STATIC_MAX) {
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc().cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED));
+    int shared_total = 0, shared_static = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+        &shared_total,
+        CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+        device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
-        func, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, sharedMemBytes));
+        func,
+        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+        shared_optin - shared_static));
   }
   return func;
 }
 
-template <size_t NUM_ARGS>
 inline void launchKernel(
     CUfunction func,
     uint32_t gridX,
@@ -114,7 +147,7 @@ inline void launchKernel(
     uint32_t gridZ,
     uint32_t numWarps,
     uint32_t sharedMemBytes,
-    std::array<void*, NUM_ARGS>& args,
+    void** args,
     cudaStream_t stream) {
   // cta_args is always 1 for inductor generated triton kernels,
   // so we don't need to figure out grid dimension here
@@ -128,7 +161,7 @@ inline void launchKernel(
       1, // blockDim.z
       sharedMemBytes,
       stream,
-      args.data(),
+      args,
       nullptr));
 }
 
@@ -221,16 +254,20 @@ void parseKernelArgs(
   sharedMemBytes)
 */
 PyObject* load_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
   const char* filePath = nullptr;
   const char* funcName = nullptr;
   int sharedMemBytes = 0;
   int n_regs = 0;
   int n_spills = 0;
-  if (!PyArg_ParseTuple(args, "ssi", &filePath, &funcName, &sharedMemBytes)) {
+  int device_ptr = 0;
+  if (!PyArg_ParseTuple(
+          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device_ptr)) {
     return nullptr;
   }
+  CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
   CUfunction func = nullptr;
-  func = loadKernel(filePath, funcName, sharedMemBytes);
+  func = loadKernel(filePath, funcName, sharedMemBytes, device);
   // Taken from triton/nvidia/backend/driver.c
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
@@ -240,6 +277,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Return a tuple of CUFunction, n_regs, n_spills
   return Py_BuildValue(
       "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* launch_kernel_inner(
@@ -268,7 +306,36 @@ PyObject* launch_kernel_inner(
       gridZ,
       numWarps,
       sharedMemBytes,
-      kernelArgs,
+      kernelArgs.data(),
+      cudaStream);
+  Py_RETURN_NONE;
+}
+
+PyObject* launch_kernel_slow(
+    CUfunction func,
+    int gridX,
+    int gridY,
+    int gridZ,
+    int numWarps,
+    int sharedMemBytes,
+    const char* argTypes,
+    PyObject* varArgs,
+    cudaStream_t cudaStream) {
+  /* For the slow case, allocate memory on the stack instead of the heap */
+  size_t numArgs = std::strlen(argTypes);
+  std::vector<uint64_t> argStorage(numArgs);
+  std::vector<void*> kernelArgs(numArgs);
+
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data());
+
+  launchKernel(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      kernelArgs.data(),
       cudaStream);
   Py_RETURN_NONE;
 }
@@ -289,6 +356,7 @@ PyObject* launch_kernel_inner(
 *
 */
 PyObject* launch_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
   // Pointer to CUfunction generated by load_kernel()
   uint64_t func_ptr = 0;
   int gridX = 0, gridY = 0, gridZ = 0, numWarps = 0, sharedMemBytes = 0;
@@ -319,19 +387,42 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
-  TORCH_CHECK(
-      num_args <= MAX_ARGS,
-      "Static Cuda Launcher only supports up to 120 arguments");
-  return launch_kernel_inner(
-      func,
-      gridX,
-      gridY,
-      gridZ,
-      numWarps,
-      sharedMemBytes,
-      argTypes,
-      varArgs,
-      cudaStream);
+  // Kernels with no arguments should just pass nullptr to cuLaunchKernel
+  if (num_args == 0) {
+    launchKernel(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        nullptr,
+        cudaStream);
+    Py_RETURN_NONE;
+  } else if (num_args <= MAX_ARGS) {
+    return launch_kernel_inner(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        argTypes,
+        varArgs,
+        cudaStream);
+  } else {
+    return launch_kernel_slow(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        argTypes,
+        varArgs,
+        cudaStream);
+  }
+  END_HANDLE_TH_ERRORS
 }
 
 std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
@@ -339,7 +430,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 120 args"},
+        "Statically launch triton compiled CUDA kernels"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,

@@ -336,13 +336,33 @@ def requires_nccl_version(version, msg):
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )    
+    
+def requires_nccl_version_or(version, msg, backends):
+    assert(isinstance(backends, list))
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle_if(
+            'xccl' not in backends if c10d.is_xccl_available() else True,
+            "c10d was not compiled with the NCCL backend and " + str(backends) + " backend.",
         )
-
+    else:
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )    
 
 def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
+    )
+
+def requires_nccl_or(backends):
+    assert(isinstance(backends, list))
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_nccl_available() and 
+        ( not c10d.is_xccl_available() if 'xccl' in backends else True ),
+        "c10d was not compiled with the NCCL backend or " + str(backends) + " backend.",
     )
 
 def requires_xccl():

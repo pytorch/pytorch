@@ -42,7 +42,7 @@ def get_cur_mem(rank, result, prefix):
 
 
 class Model(nn.Module):
-    def __init__(self, hidden_dim, fsdp_kwargs, with_fsdp=False, with_checkpoint=False):
+    def __init__(self, hidden_dim, with_fsdp=False, with_checkpoint=False):
         super().__init__()
         if with_fsdp:
             self.stem = nn.Sequential(
@@ -59,13 +59,13 @@ class Model(nn.Module):
         if with_fsdp:
             self.blocks = nn.Sequential(
                 nn.Conv2d(64, hidden_dim, kernel_size=5, padding=2),
-                FSDP(nn.BatchNorm2d(hidden_dim), fsdp_kwargs),
+                FSDP(nn.BatchNorm2d(hidden_dim)),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(hidden_dim, hidden_dim, kernel_size=5, padding=2),
-                FSDP(nn.BatchNorm2d(hidden_dim), fsdp_kwargs),
+                FSDP(nn.BatchNorm2d(hidden_dim)),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(hidden_dim, hidden_dim, kernel_size=5, padding=2),
-                FSDP(nn.BatchNorm2d(hidden_dim), fsdp_kwargs),
+                FSDP(nn.BatchNorm2d(hidden_dim)),
                 nn.ReLU(inplace=True),
                 nn.AdaptiveAvgPool2d(output_size=(1, 1)),
                 nn.Flatten(),
@@ -95,13 +95,13 @@ class Model(nn.Module):
             return self.head(self.blocks(self.stem(x)))
 
 
-def create_model(fsdp_kwargs, with_fsdp, with_checkpoint, model_hidden_dim):
+def create_model(with_fsdp, with_checkpoint, model_hidden_dim):
     torch.manual_seed(0)
-    model = Model(model_hidden_dim, fsdp_kwargs, with_fsdp, with_checkpoint)
+    model = Model(model_hidden_dim, with_fsdp, with_checkpoint)
     if with_fsdp:
-        model.stem = FSDP(model.stem, fsdp_kwargs)
-        model.blocks = FSDP(model.blocks, fsdp_kwargs)
-        model.head = FSDP(model.head, fsdp_kwargs)
+        model.stem = FSDP(model.stem)
+        model.blocks = FSDP(model.blocks)
+        model.head = FSDP(model.head)
 
     return model
 
@@ -109,19 +109,14 @@ def create_model(fsdp_kwargs, with_fsdp, with_checkpoint, model_hidden_dim):
 class TestFSDPMemory(FSDPTest):
     @property
     def world_size(self):
-        return 1
+        return 2
 
     def _dist_train(self, with_checkpoint, expected, model_hidden_dim, iterations):
         gpu_id = self.rank
        
         batch = torch.randn(size=(2, 3, 224, 224)).to(device=device_type)
 
-        fsdp_kwargs = {
-            "device_id": gpu_id,
-        }
-
         model = create_model(
-            fsdp_kwargs,
             with_fsdp=True,
             with_checkpoint=with_checkpoint,
             model_hidden_dim=model_hidden_dim,
@@ -129,7 +124,7 @@ class TestFSDPMemory(FSDPTest):
 
         model = model.to(device=device_type)
 
-        model = FSDP(model, fsdp_kwargs)
+        model = FSDP(model)
 
         # We enable momentum so that after the first iteration, the optimizer state is added
         # to the total memory used.
@@ -176,12 +171,8 @@ class TestFSDPMemory(FSDPTest):
         # hidden_dim 128: model size ~4MB
         model_hidden_dim = 128
 
-        fsdp_kwargs = {
-            "device_id": self.rank,
-        }
-
         model = create_model(
-            fsdp_kwargs, with_fsdp=False, with_checkpoint=False, model_hidden_dim=model_hidden_dim
+            with_fsdp=False, with_checkpoint=False, model_hidden_dim=model_hidden_dim
         ).to(device=device_type)
         model_size_mb = round(torch.get_device_module(device_type).memory_allocated() / 1024 / 1024)
         del model

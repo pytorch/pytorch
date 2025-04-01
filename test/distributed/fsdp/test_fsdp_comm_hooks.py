@@ -13,8 +13,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecis
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    requires_nccl_version,
+    requires_nccl_or,
+    requires_nccl_version_or,
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
 )
@@ -381,7 +381,7 @@ class TestCommunicationHooks(FSDPTest):
         ):
             self.assertEqual(hook_param.grad, mp_param.grad)
 
-    @requires_nccl()
+    @requires_nccl_or(['xccl',])
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
     @parametrize(
@@ -402,8 +402,8 @@ class TestCommunicationHooks(FSDPTest):
             state, hook, sharding_strategy, torch.float16, has_wrapping
         )
 
-    @requires_nccl_or('xccl')
-    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
+    @requires_nccl_or(['xccl',])
+    @requires_nccl_version_or((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS", ['xccl',])
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+ or XPU",
