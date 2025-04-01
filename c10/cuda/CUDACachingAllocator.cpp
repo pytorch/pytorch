@@ -3975,6 +3975,7 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
+    c10::CachingAllocator::getAllocatorConfig().set_allocator_loaded();
   }
 };
 

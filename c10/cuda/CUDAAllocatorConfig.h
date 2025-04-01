@@ -10,42 +10,35 @@ namespace c10::cuda::CUDACachingAllocator {
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
   static size_t max_split_size() {
-    return c10::CachingAllocator::getAllocatorConfig().max_split_size();
+    return getAllocatorConfig().max_split_size();
   }
   static double garbage_collection_threshold() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .garbage_collection_threshold();
+    return getAllocatorConfig().garbage_collection_threshold();
   }
 
   static bool expandable_segments() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .use_expandable_segments();
+    return getAllocatorConfig().use_expandable_segments();
   }
 
   static bool release_lock_on_cudamalloc() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .use_release_lock_on_device_malloc();
+    return getAllocatorConfig().use_release_lock_on_device_malloc();
   }
 
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .pinned_use_device_host_register();
+    return getAllocatorConfig().pinned_use_device_host_register();
   }
 
   static size_t pinned_num_register_threads() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .pinned_num_register_threads();
+    return getAllocatorConfig().pinned_num_register_threads();
   }
 
   static bool pinned_use_background_threads() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .pinned_use_background_threads();
+    return getAllocatorConfig().pinned_use_background_threads();
   }
 
   static size_t pinned_max_register_threads() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .pinned_max_register_threads();
+    return getAllocatorConfig().pinned_max_register_threads();
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
@@ -55,18 +48,15 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static size_t roundup_power2_divisions(size_t size);
 
   static std::vector<size_t> roundup_power2_divisions() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .roundup_power2_divisions();
+    return getAllocatorConfig().roundup_power2_divisions();
   }
 
   static size_t max_non_split_rounding_size() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .max_non_split_rounding_size();
+    return getAllocatorConfig().max_non_split_rounding_size();
   }
 
   static std::string last_allocator_settings() {
-    return c10::CachingAllocator::getAllocatorConfig()
-        .last_allocator_settings();
+    return getAllocatorConfig().last_allocator_settings();
   }
 
   static CUDAAllocatorConfig& instance() {
@@ -89,6 +79,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
  private:
   CUDAAllocatorConfig() = default;
+
+  c10::CachingAllocator::AllocatorConfig& getAllocatorConfig() {
+    return c10::CachingAllocator::getAllocatorConfig();
+  }
 };
 
 // Keep this for backwards compatibility

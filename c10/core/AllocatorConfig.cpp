@@ -242,6 +242,15 @@ size_t AllocatorConfig::parseDeviceAllocatorBackend(
          // Keep this for backwards compatibility
          || config[i] == "cudaMallocAsync"),
         "Unknown allocator backend, options are native, async or cudaMallocAsync");
+    if (is_allocator_loaded_) {
+      bool aync_allocator_at_runtime = (config[i] != "native");
+      TORCH_CHECK(
+          aync_allocator_at_runtime == use_async_allocator_,
+          "Allocator async backend parsed at runtime != allocator async backend parsed at load time, ",
+          aync_allocator_at_runtime,
+          " != ",
+          use_async_allocator_);
+    }
     use_async_allocator_ = (config[i] != "native");
   } else {
     TORCH_CHECK(false, "Error parsing allocator backend value");
@@ -380,8 +389,8 @@ void AllocatorConfig::parseArgs(const char* env) {
         || config_item_view ==
             "release_lock_on_c"
             "udamalloc") {
-      used_native_specific_option = true;
       i = parseReleaseLockOnDeviceMalloc(config, i);
+      used_native_specific_option = true;
     } else if (
         config_item_view == "pinned_use_host_register"
     // Keep this for backwards compatibility
@@ -413,8 +422,16 @@ void AllocatorConfig::parseArgs(const char* env) {
 
     if (use_async_allocator_ && used_native_specific_option) {
       TORCH_WARN(
-          "backend:",
-          "MallocAsync ignores max_split_size_mb, roundup_power2_divisions, and garbage_collect_threshold.");
+          "backend: async ignores ",
+          "max_split_size_mb, ",
+          "max_non_split_rounding_mb, ",
+          "garbage_collection_threshold, ",
+          "roundup_power2_divisions, ",
+          "expandable_segments, ",
+          "release_lock_on_device_malloc, ",
+          "pinned_use_host_register, ",
+          "pinned_num_register_threads, ",
+          "and pinned_use_background_threads.");
     }
   }
 }
