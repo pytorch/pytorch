@@ -222,35 +222,19 @@ static size_t _getWorkspaceSize() {
   return workspace_size;
 }
 
-static at::DataPtr _getNewWorkspace() {
-  return c10::cuda::CUDACachingAllocator::get()->allocate(_getWorkspaceSize());
-}
-
-// See Note [hipblaslt handles].
-// ROCm's hipblas and hipblaslt do not share handles, unlike with CUDA.
-// Using getCurrentCUDABlasLtHandle is on purpose. For CUDA it's the same as
-// getCurrentCUDABlasHandle, but for ROCm it's a unique handle.
 void* _getWorkspaceWithoutHandle() {
-  cublasLtHandle_t handle = at::cuda::getCurrentCUDABlasLtHandle();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
-#ifdef USE_ROCM
-  // The first call to _getWorkspaceWithoutHandle could be empty, so allocate and store.
-  if (workspace_it == at::cuda::cublas_handle_stream_to_workspace().end()) {
-    workspace_it = at::cuda::cublas_handle_stream_to_workspace().insert(workspace_it, {key, _getNewWorkspace()});
-  }
-#else
   TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
-#endif
   return workspace_it->second.mutable_get();
 }
 
 void* _getWorkspace(size_t& workspaceSize) {
+// #ifdef (defined(USE_ROCM) || defined(FBCODE_CAFFE2))
   workspaceSize = _getWorkspaceSize();
-#ifndef USE_ROCM
-  // See Note [hipblaslt handles].
   auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
   if (cublasWorkspaceSize < workspaceSize) {
     TORCH_WARN_ONCE("Requested CUBLASLT workspace size of ", workspaceSize,
@@ -261,7 +245,9 @@ void* _getWorkspace(size_t& workspaceSize) {
                     " size will be limited to the CUBLAS workspace size.");
     workspaceSize = cublasWorkspaceSize;
   }
-#endif
+// #else
+//   workspaceSize = at::cuda::getChosenWorkspaceSize();
+// #endif
   auto workspace_ptr = _getWorkspaceWithoutHandle();
   return workspace_ptr;
 }
