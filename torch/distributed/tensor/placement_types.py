@@ -513,7 +513,8 @@ class _StridedShard(Shard):
 
         fsdp+tp sharded tensor
         ----------------------
-        `dp_tp = ...` (the process of creating a strided-shard tensor is skipped over as it is hacky and complicated #TODO put an example somewhre and ref to it)
+        `dp_tp = ...` (the process of creating a strided-shard tensor is skipped over as it is hacky and complicated
+        #TODO put an example somewhre and ref to it)
         dp_tp has placement (_StridedShard(0, split_factor=2), Shard(0))
         local_tensors:
         rank0: [0,1]  rank1: [3]
@@ -574,7 +575,7 @@ class _StridedShard(Shard):
         # this reverses our 'all_gather' but gives every rank a copy
         dp_shards = torch.chunk(result, num_chunks, dim=self.dim)
         # this undoes the 'Shard(0)' -> Replicate() that happened over the wrong mesh dim in the first place
-        tp_shards = []
+        tp_shards: list[torch.Tensor] = []
         for p in dp_shards:
             tp_shards.extend(torch.chunk(p, self.split_factor, dim=self.dim))
         # now we just have to correctly stride the shards
