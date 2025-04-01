@@ -51,13 +51,14 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "AdditionalInputs",
 ]
 
 # To make sure export specific custom ops are loaded
 import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
-from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
+from .dynamic_shapes import AdditionalInputs, Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
     default_decompositions,
     ExportedProgram,

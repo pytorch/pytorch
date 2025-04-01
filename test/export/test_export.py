@@ -3888,6 +3888,62 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    def test_dynamic_shapes_inferred_basic(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                # x and y[0] must have same dynamic shape (say `dim`) >= 3
+                tmp = (x + y[0])[:3]
+                # z["k"] must have static shape = 3
+                return tmp * z["k"]
+
+        m = M()
+        args = (torch.randn(4), [torch.randn(4)], {"k": torch.randn(3)})
+
+        additional_inputs = torch.export.AdditionalInputs()
+        # 4->5, 4->5, 3->3
+        good_args = (torch.randn(5), [torch.randn(5)], {"k": torch.randn(3)})
+        additional_inputs.add(good_args)
+
+        ep = export(m, args, dynamic_shapes=additional_inputs)
+        got_shapes = [
+            str(tuple(node.meta["val"].shape))
+            for node in ep.graph.find_nodes(op="placeholder")
+        ]
+        dim = next(iter(ep.range_constraints.keys()))
+        expected_shapes = [f"({dim},)", f"({dim},)", "(3,)"]
+        self.assertEqual(got_shapes, expected_shapes)
+
+        def expect_error(bad_args, run_time_msg, compile_time_msg):
+            with self.assertRaisesRegex(RuntimeError, run_time_msg):
+                ep.module()(*bad_args)
+
+            additional_inputs = torch.export.AdditionalInputs()
+            additional_inputs.add(bad_args)
+
+            with self.assertRaisesRegex(RuntimeError, compile_time_msg):
+                export(m, args, dynamic_shapes=additional_inputs)
+
+        expect_error(
+            # 4->2, 4->2, 3->3
+            bad_args=(torch.randn(2), [torch.randn(2)], {"k": torch.randn(3)}),
+            run_time_msg="Expected input.*to be >= 3, but got 2",
+            compile_time_msg="Expected input.*to be >= 3, but got 2",
+        )
+
+        expect_error(
+            # 4->6, 4->7, 3->3
+            bad_args=(torch.randn(6), [torch.randn(7)], {"k": torch.randn(3)}),
+            run_time_msg="Expected input.*to be equal to 6, but got 7",
+            compile_time_msg="Expected input.*to be equal to 6, but got 7",
+        )
+
+        expect_error(
+            # 4->5, 4->5, 3->4
+            bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
+            run_time_msg="Expected input.*to be equal to 3, but got 4",
+            compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
+        )
+
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
