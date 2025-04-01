@@ -4,6 +4,7 @@
 import functools
 import gc
 import math
+import os
 import sys
 import unittest
 
@@ -17,6 +18,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import (
     run_and_get_code,
@@ -35,10 +37,18 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
-    skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+
+
+if TEST_WITH_ROCM:
+    config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+
+
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 requires_multigpu = functools.partial(
@@ -182,7 +192,6 @@ class CudaReproTests(TestCase):
 
             self.assertEqual(out, f(*inputs))
 
-    @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -314,6 +323,32 @@ class CudaReproTests(TestCase):
                     torch.randn((6, 6), device="cuda"),
                 )
                 self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
+
+    def _test_split_reduction_impl(self, x):
+        def max(x):
+            return torch.max(x)
+
+        max_c = torch.compile(max)
+
+        out, code = run_and_get_code(max_c, x)
+        self.assertEqual(out, max(x))
+
+        if DO_PERF_TEST:
+            ms_c = benchmarker.benchmark_gpu(lambda: max_c(x))
+            ms_eager = benchmarker.benchmark_gpu(lambda: max(x))
+            print(f"compile {ms_c=:.03f}, eager {ms_eager=:.03f}")
+
+    def test_split_reduction_transposed(self):
+        x = torch.randn(4096, 8192, dtype=torch.bfloat16, device="cuda")
+        x = x.t().contiguous().t()
+
+        self._test_split_reduction_impl(x)
+
+    def test_split_reduction_channels_last(self):
+        x = torch.randn(4096, 8192, dtype=torch.bfloat16, device="cuda")
+        x = x.reshape([256, 256, 256, 2]).to(memory_format=torch.channels_last)
+
+        self._test_split_reduction_impl(x)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
@@ -550,7 +585,7 @@ class CudaReproTests(TestCase):
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         def autotune(configs, meta):
@@ -570,6 +605,7 @@ class CudaReproTests(TestCase):
                     reset_to_zero_arg_names=[],
                     optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
+                    inductor_meta={"grid_type": "Grid1D"},
                 )
 
             return decorator
@@ -609,8 +645,8 @@ class CudaReproTests(TestCase):
         inout2 = inout1.clone()
 
         stream0 = get_cuda_stream(0)
-        kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)
-        kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)
+        kernel.run(inout1, in0, xnumel, stream=stream0)
+        kernel.run(inout2, in0, xnumel, stream=stream0)
 
         assert same(
             inout1, inout2, tol=0.001, equal_nan=True
@@ -1371,7 +1407,6 @@ class CudaReproTests(TestCase):
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
 
-    @skipIfRocm
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -1418,7 +1453,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
-    @skipIfRocm
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 
@@ -1651,6 +1685,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
+
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    def test_float8_e8m0fnu(self):
+        device = "cuda"
+        dtype = torch.float8_e8m0fnu
+        hp_dtype = torch.float32  # and torch.bfloat16
+
+        def foo(x0):
+            x1 = x0.to(dtype)
+            x2 = x1.to(hp_dtype)
+            return x2
+
+        x0 = torch.randn(16, 16, device=device, dtype=hp_dtype)
+        foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
+
+        with torch.no_grad():
+            y_c = foo_c(x0)
+
+        self.assertEqual(foo(x0), y_c)
+
+        dtype = torch.float8_e8m0fnu
+
+        def foo(x0):
+            x1 = x0 + 1
+            x2 = x1.view(dtype)
+            return x2
+
+        x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
+        foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
+
+        with torch.no_grad():
+            y_c = foo_c(x0)
+
+        self.assertEqual(foo(x0), y_c)
 
     @unittest.skipIf(
         not config.is_fbcode(),
