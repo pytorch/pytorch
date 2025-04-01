@@ -241,6 +241,71 @@ class BaseConfigHeuristic(metaclass=BaseConfigSingleton):
             Config(128, 128, 64, 4, 8),
         ]
 
+        self.scaled_grouped_mm_configs = [
+            Config(64, 64, 64, 3, 4),
+            Config(64, 64, 64, 3, 8),
+            Config(64, 64, 64, 4, 4),
+            Config(64, 64, 64, 4, 8),
+            Config(64, 64, 128, 3, 4),
+            Config(64, 64, 128, 3, 8),
+            Config(64, 64, 128, 4, 4),
+            Config(64, 64, 128, 4, 8),
+            Config(64, 64, 256, 3, 4),
+            Config(64, 64, 256, 3, 8),
+            Config(64, 64, 256, 4, 4),
+            Config(64, 64, 256, 4, 8),
+            Config(64, 128, 64, 3, 4),
+            Config(64, 128, 64, 3, 8),
+            Config(64, 128, 64, 4, 4),
+            Config(64, 128, 64, 4, 8),
+            Config(64, 128, 128, 3, 4),
+            Config(64, 128, 128, 3, 8),
+            Config(64, 128, 128, 4, 4),
+            Config(64, 128, 128, 4, 8),
+            Config(64, 128, 256, 3, 4),
+            Config(64, 128, 256, 3, 8),
+            Config(64, 128, 256, 4, 4),
+            Config(64, 128, 256, 4, 8),
+            Config(64, 256, 64, 3, 4),
+            Config(64, 256, 64, 3, 8),
+            Config(64, 256, 64, 4, 4),
+            Config(64, 256, 64, 4, 8),
+            Config(64, 256, 128, 3, 4),
+            Config(64, 256, 128, 3, 8),
+            Config(64, 256, 128, 4, 4),
+            Config(64, 256, 128, 4, 8),
+            Config(128, 64, 64, 3, 4),
+            Config(128, 64, 64, 3, 8),
+            Config(128, 64, 64, 4, 4),
+            Config(128, 64, 64, 4, 8),
+            Config(128, 64, 128, 3, 4),
+            Config(128, 64, 128, 3, 8),
+            Config(128, 64, 128, 4, 4),
+            Config(128, 64, 128, 4, 8),
+            Config(128, 64, 256, 3, 4),
+            Config(128, 64, 256, 3, 8),
+            Config(128, 64, 256, 4, 4),
+            Config(128, 64, 256, 4, 8),
+            Config(128, 128, 64, 3, 4),
+            Config(128, 128, 64, 3, 8),
+            Config(128, 128, 64, 4, 4),
+            Config(128, 128, 64, 4, 8),
+            Config(128, 128, 128, 3, 4),
+            Config(128, 128, 128, 3, 8),
+            Config(128, 128, 128, 4, 4),
+            Config(128, 128, 128, 4, 8),
+            Config(128, 128, 256, 3, 4),
+            Config(128, 128, 256, 3, 8),
+            Config(128, 256, 64, 3, 4),
+            Config(128, 256, 64, 3, 8),
+            Config(128, 256, 64, 4, 4),
+            Config(128, 256, 64, 4, 8),
+            Config(128, 256, 128, 3, 4),
+            Config(128, 256, 128, 3, 8),
+            Config(128, 256, 128, 4, 4),
+            Config(128, 256, 128, 4, 8),
+        ]
+
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
         # slightly different pattern than rest
         self.mm_plus_mm_configs = [
@@ -409,6 +474,13 @@ class BaseConfigHeuristic(metaclass=BaseConfigSingleton):
             self.preprocess_mm_configs, configs=self.scaled_persistent_mm_configs
         )
 
+    def get_scaled_grouped_mm_configs(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        return partial(
+            self.preprocess_mm_configs, configs=self.scaled_grouped_mm_configs
+        )
+
     def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self._finalize_mm_configs, configs=self.mm_plus_mm_configs)
 
@@ -553,6 +625,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     ) -> partial[Generator[TritonConfig, None, None]]:
         filtered_configs = self._filter_configs(
             self.scaled_persistent_mm_configs, self.default_num_stages
+        )
+        return partial(self.preprocess_mm_configs, configs=filtered_configs)
+
+    def get_scaled_grouped_mm_configs(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        filtered_configs = self._filter_configs(
+            self.scaled_grouped_mm_configs, self.default_num_stages
         )
         return partial(self.preprocess_mm_configs, configs=filtered_configs)
 
