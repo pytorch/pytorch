@@ -58,8 +58,7 @@ class TestPEP479(torch._dynamo.test_case.TestCase):
             self.assertTrue(exc.__suppress_context__)
         else:
             self.fail(
-                "__cause__, __context__, or __suppress_context__ "
-                "were not properly set"
+                "__cause__, __context__, or __suppress_context__ were not properly set"
             )
 
 

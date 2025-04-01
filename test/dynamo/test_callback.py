@@ -50,9 +50,10 @@ class CallbackTests(TestCase):
         callback_handler._CompilationCallbackHandler__prevent_duplicate_callbacks = True
         callback_handler._CompilationCallbackHandler__pending_callbacks_counter -= 1
 
-        with self.assertRaises(
-            AssertionError
-        ) as e, callback_handler.install_callbacks():
+        with (
+            self.assertRaises(AssertionError) as e,
+            callback_handler.install_callbacks(),
+        ):
             pass
 
         self.assertIn(

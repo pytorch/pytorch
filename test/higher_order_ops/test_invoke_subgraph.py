@@ -960,7 +960,9 @@ class GraphModule(torch.nn.Module):
         {"strict": False},
         {"strict": True},
     ],
-    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
     def test_simple_func(self):

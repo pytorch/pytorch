@@ -2099,11 +2099,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2165,11 +2166,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)

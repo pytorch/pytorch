@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 
 
 class CustomException(Exception):
-    ...
+    pass
 
 
 class CustomExceptionWithArgs(Exception):
@@ -322,7 +322,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -339,7 +339,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception_with_args(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):

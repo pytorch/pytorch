@@ -520,8 +520,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         # Check the order for normal 1 forward, 1 backward, 1 optimizer step
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for iter_idx in range(3):
                 loss = model(inp)
@@ -571,8 +572,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         # Check the order for multiple forwards before 1 backward
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             loss1 = model(inp)
             loss2 = model(inp)
@@ -648,8 +650,9 @@ class TestFullyShardPrefetch(FSDPTest):
         post_backward_with_record = self._get_post_backward_with_record(
             FSDPParamGroup.post_backward, events
         )
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             loss1, loss2 = model(inp)
             expected_events = [
@@ -738,9 +741,11 @@ class TestFullyShardPrefetch(FSDPTest):
             ("reshard", "", TrainingState.POST_BACKWARD),
             ("post_backward", "", TrainingState.POST_BACKWARD),
         ]
-        with patch_unshard(unshard_with_record), patch_reshard(
-            reshard_with_record
-        ), patch_post_backward(post_backward_with_record):
+        with (
+            patch_unshard(unshard_with_record),
+            patch_reshard(reshard_with_record),
+            patch_post_backward(post_backward_with_record),
+        ):
             set_forward_prefetch(model, num_to_prefetch=1)
             loss = model(inp)
             expected_forward_events = [
@@ -823,9 +828,11 @@ class TestFullyShardPrefetch(FSDPTest):
             ("unshard", "layers.3", TrainingState.FORWARD),
             ("reshard", "layers.3", TrainingState.FORWARD),
         ]
-        with patch_unshard(unshard_with_record), patch_reshard(
-            reshard_with_record
-        ), patch_post_backward(post_backward_with_record):
+        with (
+            patch_unshard(unshard_with_record),
+            patch_reshard(reshard_with_record),
+            patch_post_backward(post_backward_with_record),
+        ):
             set_backward_prefetch(model, num_to_prefetch=1)
             loss = model(inp)
             self.assertEqual(events, expected_forward_events)
@@ -903,8 +910,9 @@ class TestFullyShardPrefetch(FSDPTest):
         inp = torch.randint(
             0, model_args.vocab_size, (2, model_args.max_seq_len), device="cuda"
         )
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for _ in range(3):
                 loss = model(inp)
@@ -982,8 +990,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         inp = torch.randn((2, 16), device="cuda")
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for _ in range(3):
                 loss = model(inp)

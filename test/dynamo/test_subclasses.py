@@ -108,9 +108,10 @@ def get_view_test_cases():
         for requires_grad_1, requires_grad_2 in itertools.product(
             [True, False], repeat=2
         ):
-            yield partial(
-                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
-            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
+            yield (
+                partial(mk_leaf, base_is_nt, requires_grad_1, requires_grad_2),
+                f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}",
+            )
 
         # (3) obscure case:
         # view is not a leaf (implies requires_grad True)
@@ -118,9 +119,10 @@ def get_view_test_cases():
         yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
 
     # Subclass -> Dense
-    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
-        0
-    ].clone(), "subclass_dense"
+    yield (
+        lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone(),
+        "subclass_dense",
+    )
 
     # Dense -> Subclass -> Dense -> Subclass
     def mk_dense_subclass_dense_subclass():
@@ -772,9 +774,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with (
+            torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+        ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -796,9 +799,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with (
+            torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+        ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -829,9 +833,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with (
+            torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+        ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -856,11 +861,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
-        with torch._dynamo.config.patch(
-            traceable_tensor_subclasses={LocalSubclass}
-        ), self.assertRaisesRegex(
-            TypeError,
-            "'bool' object is not callable",
+        with (
+            torch._dynamo.config.patch(traceable_tensor_subclasses={LocalSubclass}),
+            self.assertRaisesRegex(
+                TypeError,
+                "'bool' object is not callable",
+            ),
         ):
             LocalSubclass.sigmoid = False
             fn(x)

@@ -1176,8 +1176,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.utils import fresh_inductor_cache
 
-        with fresh_inductor_cache(), _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
+        with (
+            fresh_inductor_cache(),
+            _dynamo_dist_per_rank_init(self.rank, self.world_size),
         ):
             torch._dynamo.utils.clear_compilation_metrics()
 
@@ -1788,9 +1789,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
 

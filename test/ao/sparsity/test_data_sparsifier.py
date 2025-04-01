@@ -500,9 +500,7 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -633,9 +631,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
