@@ -1037,9 +1037,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
-                            flat_arg_node
-                        )
+                        self.node_to_placeholder[
+                            self.seen_nodes[arg.name]
+                        ] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
