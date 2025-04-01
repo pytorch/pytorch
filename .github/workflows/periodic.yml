@@ -59,8 +59,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "nogpu_AVX512", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "nogpu_AVX512", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
@@ -203,19 +204,4 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
-    secrets: inherit
-
-  linux-focal-cuda12_6-py3_10-gcc11-bazel-test:
-    name: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
-    uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
-    with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
-      cuda-version: "12.6"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-        ]}
     secrets: inherit

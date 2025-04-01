@@ -33,23 +33,6 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
-cross_compile_arm64() {
-  # Cross compilation for arm64
-  # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
-  # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
-  USE_DISTRIBUTED=0 CMAKE_OSX_ARCHITECTURES=arm64 MACOSX_DEPLOYMENT_TARGET=11.0 USE_MKLDNN=OFF USE_QNNPACK=OFF WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
-}
-
-compile_arm64() {
-  # Compilation for arm64
-  # TODO: Compile with OpenMP support (but this causes CI regressions as cross-compilation were done with OpenMP disabled)
-  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
-}
-
-compile_x86_64() {
-  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel --plat-name=macosx_10_9_x86_64
-}
-
 build_lite_interpreter() {
     echo "Testing libtorch (lite interpreter)."
 
@@ -71,16 +54,12 @@ build_lite_interpreter() {
 print_cmake_info
 
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
-  if [[ $(uname -m) == "arm64" ]]; then
-    compile_arm64
-  else
-    cross_compile_arm64
-  fi
+  # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
+  # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
+  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
 elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
   export BUILD_LITE_INTERPRETER=1
   build_lite_interpreter
-else
-  compile_x86_64
 fi
 
 if which sccache > /dev/null; then
