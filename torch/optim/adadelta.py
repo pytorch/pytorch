@@ -14,6 +14,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -270,6 +271,9 @@ def _single_tensor_adadelta(
             f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
         )
 
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for param, grad, square_avg, acc_delta, step in zip(
         params, grads, square_avgs, acc_deltas, state_steps
     ):
@@ -330,6 +334,8 @@ def _multi_tensor_adadelta(
 
     if len(params) == 0:
         return
+
+    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, square_avgs, acc_deltas, state_steps]  # type: ignore[list-item]
