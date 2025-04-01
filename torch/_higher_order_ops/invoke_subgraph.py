@@ -31,6 +31,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 invoke_subgraph_counter = 0
@@ -195,6 +196,16 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                     grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
 
             num_fw_outs = len(grad_outputs)
+
+            # Collect the indexes of none in the output to check that the grad
+            # is None at the corresponding index in the backward. This check is
+            # performed in the autograd.Function - InvokeSubgraphAutogradOp.
+            none_indexes_in_fwd_out = set()
+
+            for idx, grad in enumerate(grad_outputs):
+                if grad is None:
+                    none_indexes_in_fwd_out.add(idx)
+
             grad_outputs = [grad for grad in grad_outputs if grad is not None]
 
             if any(
@@ -216,7 +227,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 fw_inputs,
                 grad_outputs,
             )
-            return fw_graph, bw_graph, num_fw_outs
+            return fw_graph, bw_graph, num_fw_outs, none_indexes_in_fwd_out
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -226,11 +237,20 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, fw_graph, bw_graph, identifier, num_fw_outs, *operands):
+    def forward(
+        ctx,
+        fw_graph,
+        bw_graph,
+        identifier,
+        num_fw_outs,
+        none_indexes_in_fwd_out,
+        *operands,
+    ):
         ctx._fw_graph = fw_graph
         ctx._bw_graph = bw_graph
         ctx._identifier = identifier
         ctx._num_fw_outs = num_fw_outs
+        ctx._none_indexes_in_fwd_out = none_indexes_in_fwd_out
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -240,6 +260,12 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             )
 
         save_tensors_and_symints_for_backward(ctx, operands)
+
+        # Check that None is at expected indexes.
+        for idx, o in enumerate(out):
+            if o is None:
+                assert idx in none_indexes_in_fwd_out
+
         return out
 
     @staticmethod
@@ -248,14 +274,18 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         identifier = ctx._identifier
         primals = saved_tensors_and_symints(ctx)
         num_fw_outs = ctx._num_fw_outs
+        none_indexes_in_fwd_out = ctx._none_indexes_in_fwd_out
 
         # While tracing we made the assumption that tangents are contiguous. So,
         # force the grad_outs to be contiguous. Some of the grads can be None,
         # because the forward outs could be None. Filter them out.
         contiguous_grad_outs = []
-        for o in grad_outs:
+        for idx, o in enumerate(grad_outs):
             if o is not None:
                 contiguous_grad_outs.append(o.contiguous())
+            else:
+                # Check that None is at expected indexes.
+                assert idx in none_indexes_in_fwd_out
         contiguous_grad_outs = tuple(contiguous_grad_outs)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
@@ -265,7 +295,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents
         )[:-num_fw_outs]
-        return None, None, None, None, *grads
+        return None, None, None, None, None, *grads
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -301,11 +331,13 @@ def _(subgraph, identifier, operands):
         ):
             return saved_autograd_fn(*operands)
 
-    fw_graph, bw_graph, num_fw_outs = create_fw_bw_graph(subgraph, operands)
+    fw_graph, bw_graph, num_fw_outs, none_indexes_in_fwd_out = create_fw_bw_graph(
+        subgraph, operands
+    )
 
     def autograd_fn_callable(*args):
         return InvokeSubgraphAutogradOp.apply(
-            fw_graph, bw_graph, identifier, num_fw_outs, *args
+            fw_graph, bw_graph, identifier, num_fw_outs, none_indexes_in_fwd_out, *args
         )
 
     # Save the autograd_fn_callable in the dispatch set cache.
@@ -343,6 +375,18 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
 
     if graph is None:
         graph = reenter_make_fx(subgraph)(*operands)
+
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(operands)
+        insert_deferred_runtime_asserts(
+            graph,
+            fake_mode.shape_env,
+            "invoke_subgraph_proxy_torch_dispatch_mode",
+            export=True,
+        )
+        graph.recompile()
+
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
         proxy_mode.tracer.root.register_module(qualname, graph)

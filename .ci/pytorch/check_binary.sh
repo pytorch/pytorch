@@ -60,16 +60,6 @@ else
 fi
 
 ###############################################################################
-# Setup XPU ENV
-###############################################################################
-if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
-  set +u
-  # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
-  source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  source /opt/intel/oneapi/pti/latest/env/vars.sh
-fi
-
-###############################################################################
 # Check GCC ABI
 ###############################################################################
 
@@ -311,6 +301,12 @@ if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-11 is ABI16
   # Though manylinux_2.28 should have been build with gcc-14, per
   # https://github.com/pypa/manylinux?tab=readme-ov-file#manylinux_2_28-almalinux-8-based
-  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
+  # On s390x gcc 14 is used because it contains fix for interaction
+  # between precompiled headers and vectorization builtins.
+  # This fix is not available in earlier gcc versions.
+  # gcc-14 uses ABI19.
+  if [[ "$(uname -m)" != "s390x" ]]; then
+    python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
+  fi
   popd
 fi
