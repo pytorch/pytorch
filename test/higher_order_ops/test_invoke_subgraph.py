@@ -956,6 +956,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked(self):
         @mark_compile_region
         def gn(x, y):
@@ -970,7 +971,6 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor(4)
         y = torch.randn(8)
         ref = fn(x, y)
-        torch._dynamo.config.capture_scalar_outputs = True
         opt_fn = torch.compile(
             fn, backend="eager", fullgraph=True
         )  # Inductor fails with assertion error when lowering aten.sym_constrain_range_for_size.default
