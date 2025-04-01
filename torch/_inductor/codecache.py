@@ -1047,9 +1047,12 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                # TODO: Clean up autograd cache integration
                 CompileEventLogger.try_add_pt2_compile(
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "AOTAutogradCache.inductor_load",
+                    cached_kernel_names=meta.cached_kernel_names,
                 )
                 if len(meta.cached_kernel_names) > 0:
                     CompileEventLogger.increment_toplevel("num_triton_bundles")

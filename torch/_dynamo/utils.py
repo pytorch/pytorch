@@ -579,9 +579,12 @@ class CompileEventLogger:
     @staticmethod
     def try_add_pt2_compile(event_name: str, **metadata: object):
         """
-        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
+        or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
+        if CHROMIUM_EVENT_LOG is None:
+            return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
 
