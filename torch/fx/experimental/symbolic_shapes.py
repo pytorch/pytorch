@@ -1303,9 +1303,9 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 def sym_and(
     x: Union[bool, SymBool], *others: Union[bool, SymBool]
 ) -> Union[bool, SymBool]:
+    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
-    assert isinstance(x, (bool, SymBool))
     for y in others:
         assert isinstance(y, (bool, SymBool))
         x = operator.and_(x, y)
@@ -1332,9 +1332,9 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 def sym_or(
     x: Union[bool, SymBool], *others: Union[bool, SymBool]
 ) -> Union[bool, SymBool]:
+    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
-    assert isinstance(x, (bool, SymBool))
     for y in others:
         assert isinstance(y, (bool, SymBool))
         x = operator.or_(x, y)
