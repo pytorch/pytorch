@@ -19,6 +19,22 @@ def scale_grad_(
     scaler: torch.Tensor,
     foreach: Optional[bool] = None,
 ) -> None:
+    r"""Scale gradients of iterable parameters.
+
+    This function is equivalent to :func:`torch.mul_` applied to each parameter.
+    Gradients are modified in-place, multiplying by specified scaler.
+
+    Args:
+        parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
+            single Tensor that will have gradients scaled
+        scaler (Tensor): multiplier to scale gradients
+        foreach (bool): use the faster foreach-based implementation.
+            If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
+            fall back to the slow implementation for other device types.
+            Default: ``None``
+    Returns:
+        None
+    """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
