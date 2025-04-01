@@ -844,6 +844,12 @@ def placeholder_naming_pass(
             These are named token, token_1, ...
     """
 
+    custom_meta: dict[str, Any] = {}
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if "custom" in node.meta:
+                custom_meta[node.name] = node.meta["custom"]
+
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
@@ -918,6 +924,8 @@ def placeholder_naming_pass(
         if node.op == "placeholder":
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
+            if node.name in custom_meta:
+                node.meta["custom"] = custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1111,16 +1119,16 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
 
 @functools.lru_cache(maxsize=1)
 def _collect_all_valid_cia_ops_for_aten_namespace() -> set["OperatorBase"]:
-    return _collect_all_valid_cia_ops_for_namespace("aten")
+    return _collect_all_valid_cia_ops_for_namespace(torch.ops.aten)
 
 
-def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_namespace(
+    op_namespace: torch._ops._OpNamespace,
+) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
 
     # Step 2: Query all ops from python dispatcher
-    assert hasattr(torch.ops, namespace)
-    op_namespace = getattr(torch.ops, namespace)
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
@@ -1150,7 +1158,10 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
         if op_namespace_name != "aten":
-            cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
+            assert hasattr(torch.ops, op_namespace_name)
+            op_namespace = getattr(torch.ops, op_namespace_name)
+            if isinstance(op_namespace, torch._ops._OpNamespace):
+                cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
         else:
             cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
     return cia_ops
