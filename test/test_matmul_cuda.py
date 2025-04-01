@@ -302,7 +302,7 @@ class TestMatmulCuda(TestCase):
         if a_row_major:
             a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
         else:
-            a = torch.randn(k * (1 + s_int), m * n_groups, device=device, dtype=dtype).t()[:, :k]
+            a = torch.randn(k, (m + 2 * s_int) * n_groups, device=device, dtype=dtype).t()[:m * n_groups, :]
 
         if b_row_major:
             b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
@@ -310,9 +310,9 @@ class TestMatmulCuda(TestCase):
             b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
         a_contig = a if a_row_major else a.t()
-        #self.assertTrue(a_contig.is_contiguous() is not strided)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
-        #self.assertTrue(b_contig.is_contiguous() is not strided)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
         offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
 
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
@@ -371,16 +371,15 @@ class TestMatmulCuda(TestCase):
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
             a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device, dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        #b = torch.arange(n * n_groups * k, device="cuda", dtype=dtype).view(n * n_groups, k)
         if b_row_major:
             b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
         else:
-            b = torch.randn(k * (1 + s_int), n * n_groups, device=device, dtype=dtype).transpose(-2, -1)[:, :k]
+            b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
 
         a_contig = a if a_row_major else a.transpose(-2, -1)
-        #self.assertTrue(a_contig.is_contiguous() is not strided)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
-        #self.assertTrue(b_contig.is_contiguous() is not strided)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
         offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
                                        out_dtype=torch.bfloat16)

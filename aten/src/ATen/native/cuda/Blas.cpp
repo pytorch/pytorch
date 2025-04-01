@@ -1426,13 +1426,16 @@ namespace {
     }
   }
 
-  bool transposed(const Tensor& mat) {
+  bool check_valid_strides_and_return_transposed(const Tensor& mat) {
     IntArrayRef tensor_strides = mat.strides();
     IntArrayRef tensor_sizes = mat.sizes();
     int end_dim = mat.dim() - 1;
+    int alignment = 16 / mat.element_size();
     if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
+      TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
       return true;
     } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
+      TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
       return false;
     } else {
       TORCH_CHECK(false, "Tensor should have a contiguous dimension and not be self-overlapping, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
@@ -1506,8 +1509,8 @@ bool use_fast_accum) {
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
-  TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
-  TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
+  TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
+  TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
   TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
@@ -1584,8 +1587,8 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
   // check that the strides are valid, the fn will throw an error if not
-  bool trans = transposed(mat_a);
-  trans = transposed(mat_b);
+  check_valid_strides_and_return_transposed(mat_a);
+  check_valid_strides_and_return_transposed(mat_b);
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
