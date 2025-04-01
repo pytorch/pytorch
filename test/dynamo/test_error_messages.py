@@ -629,7 +629,7 @@ Graph break under GenericContextWrappingVariable
   Hint: Move the offending context manager(s) to outside the compiled region.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
 
-  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr), GenericContextWrappingVariable(GenericCtxMgr)]
 
 
 from user code:
