@@ -32,7 +32,6 @@ def _device_constructors():
         torch.nested.nested_tensor,
         # This function doesn't actually take a device argument
         # torch.normal,
-        torch.ones,
         torch.rand,
         torch.randn,
         torch.randint,
@@ -51,8 +50,7 @@ def _device_constructors():
         # weird ones
         torch.tensor,
         torch.as_tensor,
-        torch.scalar_tensor,
-        torch.asarray,
+        torch.scalar_tensor
     }
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
