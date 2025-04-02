@@ -991,10 +991,10 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
-    CACHE_ALIGN VT expectedWithLeftScalar[el_count];
-    CACHE_ALIGN VT expectedWithRightScalar[el_count];
-    VT scalar0;
-    VT scalar1;
+    CACHE_ALIGN [[maybe_unused]] VT expectedWithLeftScalar[el_count];
+    CACHE_ALIGN [[maybe_unused]] VT expectedWithRightScalar[el_count];
+    [[maybe_unused]] VT scalar0;
+    [[maybe_unused]] VT scalar1;
     bool bitwise = testCase.isBitwise();
     UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
