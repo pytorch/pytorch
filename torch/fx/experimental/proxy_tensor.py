@@ -1124,14 +1124,19 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        if _should_save_arg_kwarg_vals(target):
+        if _should_save_arg_kwarg_vals(target, (args, kwargs)):
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
             node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
 
 
-def _should_save_arg_kwarg_vals(target: Any) -> bool:
+def _should_save_arg_kwarg_vals(
+    target: Any,
+    args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
+) -> bool:
+    if not callable(target):
+        return False
     if isinstance(
         target,
         (
@@ -1140,6 +1145,24 @@ def _should_save_arg_kwarg_vals(target: Any) -> bool:
         ),
     ):
         return True
+    if args_kwargs is not None and (
+        target is torch.ops.higher_order.auto_functionalized
+        or target is torch.ops.higher_order.auto_functionalized_v2
+    ):
+        args = args_kwargs[0]
+        assert isinstance(args[0], torch._ops.OpOverload)
+        return _should_save_arg_kwarg_vals(args[0], None)
+    if target is torch.ops.higher_order.with_effects:
+        # TODO: inductor lowering for with_effects needs to be updated to propagate
+        # the arg_kwarg_vals
+        return False
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        if pytree.tree_any(_should_save_arg_kwarg_vals, args_kwargs):
+            raise RuntimeError(
+                f"NYI: The HOP {target} has an input that is an OpOverload that "
+                f"needs exact strides. We probably need special logic to "
+                f"propagate the FakeTensor vals. Please file an issue."
+            )
     if isinstance(target, torch._ops.OpOverload):
         return torch._C.Tag.needs_exact_strides in target.tags
     return False

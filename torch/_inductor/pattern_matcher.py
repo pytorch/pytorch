@@ -260,6 +260,8 @@ class Match:
             return node.target in OrderedSet(
                 [
                     torch.ops.higher_order.triton_kernel_wrapper_functional,
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
                 ]
             )
 
