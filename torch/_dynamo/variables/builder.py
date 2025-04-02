@@ -140,7 +140,6 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import (
-    AttributeMutationNew,
     typestr,
     ValueMutationExisting,
     ValueMutationNew,
@@ -2471,9 +2470,7 @@ def _wrap_fx_preexisting_tensor(
                 f"wrapped by this instance of Dynamo. Found: {tensor}"
             )
 
-    return construct_tensor_variable(
-        target_cls, tx, proxy, tensor, subclass_type, options
-    )
+    return handle_traced_output(tensor, tx, proxy, options, subclass_type, target_cls)
 
 
 # This is 2 in the above comment (wrapping the output of a traced op)
@@ -2507,23 +2504,36 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
-        var = construct_tensor_variable(
-            target_cls, tx, proxy, example_value, subclass_type, options
-        )
-        # NOTE: [Side effect tracking for newly constructed tensor]
-        # For newly constructed objects that have mutable attributes, we usually
-        # construct their VariableTracker via `track_object_new`, but since
-        # tensor variable construction is a bit different, we handle them
-        # speically here. This ensures that codegen will actually generate the
-        # attribute mutations on this tensor.
-        #
-        # NOTE we pass a dummy object as the `item` argument to avoid
-        # constructing a dummy _tensor_ object. The object isn't used for
-        # newly constructed VTs anyways.
-        tx.output.side_effects._track_obj(
-            proxy, var, mutation_type_cls=AttributeMutationNew
-        )
-        return var
+        is_parameter = isinstance(example_value, torch.nn.Parameter)
+        is_buffer = isinstance(example_value, torch.nn.Buffer)
+
+        # NB: In most (all?) cases, this does not actually do a clone.
+        # (WARNING: this means that if we mutate metadata on the fake
+        # tensor, the stored example value will update too!)
+        example_value = _clone_input(example_value, tx.fake_mode)
+        set_example_value(proxy.node, example_value)
+        # We bind the unbacked symints in sizes/trdies of tensor lazily.
+        # So that subgraphs can access the unbacked symbol's proxy in parent graph
+        # when lifting unbacked symbols of input tensors to subgraph inputs.
+        # We do it lazily because the tensor may not be used in subgraphs.
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
+        specialized_props = target_cls.specialize(example_value)
+        # TODO: not sure about this fake mode test
+        if (
+            isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+            and example_value.fake_mode is tx.fake_mode
+        ):
+            tensor_type = subclass_type if subclass_type else torch.Tensor
+            specialized_props["class_type"] = (
+                torch.nn.Parameter
+                if is_parameter
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
+            )
+
+        options.update(specialized_props)
+        return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"
@@ -2690,43 +2700,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}",
             case_name="unsupported_operator",
         )
-
-
-def construct_tensor_variable(
-    target_cls, tx, proxy, example_value, subclass_type, options
-):
-    """
-    Actually construct a tensor variable after all the pre-processing from
-    wrapping a pre-existing or newly created tensor value.
-    """
-    # NB: In most (all?) cases, this does not actually do a clone.
-    # (WARNING: this means that if we mutate metadata on the fake
-    # tensor, the stored example value will update too!)
-    example_value = _clone_input(example_value, tx.fake_mode)
-    set_example_value(proxy.node, example_value)
-    # We bind the unbacked symints in sizes/trdies of tensor lazily.
-    # So that subgraphs can access the unbacked symbol's proxy in parent graph
-    # when lifting unbacked symbols of input tensors to subgraph inputs.
-    # We do it lazily because the tensor may not be used in subgraphs.
-    tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
-    specialized_props = target_cls.specialize(example_value)
-    # TODO: not sure about this fake mode test
-    if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
-    ):
-        if subclass_type:
-            tensor_type = subclass_type
-        elif isinstance(example_value, torch.nn.Parameter):
-            tensor_type = torch.nn.Parameter
-        elif isinstance(example_value, torch.nn.Buffer):
-            tensor_type = torch.nn.Buffer
-        else:
-            tensor_type = torch.Tensor
-        specialized_props["class_type"] = tensor_type
-
-    options.update(specialized_props)
-    return target_cls(proxy, **options)
 
 
 def get_automatic_dynamic_shapes_mark_as():
