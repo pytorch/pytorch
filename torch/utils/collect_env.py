@@ -331,12 +331,13 @@ def get_intel_gpu_onboard(run_lambda):
         if txt:
             try:
                 obj = json.loads(txt)
-                if type(obj["device_list"]) is list:
-                    for o in obj["device_list"]:
-                        lst.append(f'* {o["device_name"]}')
+                device_list = obj.get("device_list", [])
+                if isinstance(device_list, list) and device_list:
+                    lst.extend(f'* {device["device_name"]}' for device in device_list)
                 else:
                     lst.append("N/A")
             except (ValueError, TypeError) as e:
+                lst.append(txt)
                 lst.append(str(e))
         else:
             lst.append("N/A")
@@ -346,31 +347,31 @@ def get_intel_gpu_onboard(run_lambda):
             'powershell.exe "gwmi -Class Win32_PnpSignedDriver | where{$_.DeviceClass -eq \\"DISPLAY\\"\
             -and $_.Manufacturer -match \\"Intel\\"} | Select-Object -Property DeviceName | ConvertTo-Json"',
         )
-        try:
-            obj = json.loads(txt)
-            if type(obj) is list:
-                for o in obj:
-                    lst.append(f'* {o["DeviceName"]}')
-            else:
-                lst.append(f'* {obj["DeviceName"]}')
-        except ValueError as e:
-            lst.append(txt)
-            lst.append(str(e))
+        if txt:
+            try:
+                obj = json.loads(txt)
+                if isinstance(obj, list) and obj:
+                    lst.extend(f'* {device["DeviceName"]}' for device in obj)
+                else:
+                    lst.append(f'* {obj.get("DeviceName", "N/A")}')
+            except ValueError as e:
+                lst.append(txt)
+                lst.append(str(e))
+        else:
+            lst.append("N/A")
     return "\n".join(lst)
 
 
 def get_intel_gpu_detected(run_lambda):
-    if TORCH_AVAILABLE:
-        devices = [
-            f"* [{i}] {torch.xpu.get_device_properties(i)}"
-            for i in range(torch.xpu.device_count())
-        ]
-        if len(devices) > 0:
-            return "\n".join(devices)
-        else:
-            return "N/A"
-    else:
+    if not TORCH_AVAILABLE:
         return "N/A"
+
+    device_count = torch.xpu.device_count()
+    if device_count == 0:
+        return "N/A"
+
+    devices = [f"* [{i}] {torch.xpu.get_device_properties(i)}" for i in range(device_count)]
+    return "\n".join(devices)
 
 
 # example outputs of CPU infos
