@@ -139,7 +139,6 @@ class TestFP8Types(TestCase):
         actual = torch.compile(f)(x)
         torch.testing.assert_close(expected.half(), actual.half(), rtol=1e-2, atol=1e-2)
 
-
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("device", ("cuda", "cpu"))
     def test_eager_fallback(self, dtype: torch.dtype, device: torch.device):
@@ -262,7 +261,6 @@ class TestFP8Types(TestCase):
 
         torch.testing.assert_close(y_compiled.half(), y.half(), rtol=5e-1, atol=5e-1)
 
-
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
@@ -327,7 +325,6 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
-
 
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("amax_keep_dim", (True, False))
