@@ -6007,29 +6007,20 @@ class SubgraphBuffer(ExternKernel):
         self.gm = gm
         self.real_inputs = real_inputs
         self.name = V.graph.register_buffer(self)
-
         V.graph.register_operation(self)
 
     def codegen(self, wrapper):
-        from torch._inductor.compile_fx import compile_fx
-        import torch._inductor.config as inductor_config
-
-        # with inductor_config.patch(
-        #     max_autotune_gemm_backends="ATEN",
-        # ):
-        #     output = compile_fx(self.gm, self.real_inputs)
-        # How do I inline the IR here? Make the node call the result of 
-        # compile_fx the gm
-
         subgraph = V.graph.make_subgraph(self.gm, self.real_inputs, "mm_decompose_k")
         with V.set_graph_handler(subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune_gemm_backends="ATEN",
-            ):
-                subgraph.run(*self.real_inputs)
+            subgraph.run(*self.real_inputs)
 
-        subgraph.codegen_subgraph(V.graph)
+        class CodegenGraph:
+            def __init__(self, graph):
+                self.graph = graph
+                self.name = graph.name
+    
+
+        wrapper.codegen_subgraph(CodegenGraph(subgraph), [*[buffer.get_name() for buffer in self.inputs], self.real_inputs[2]], [self.name])
         return
             
 

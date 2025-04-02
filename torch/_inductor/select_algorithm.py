@@ -648,7 +648,6 @@ class TritonTemplateKernel(TritonKernel):
         num = 0
         out = None
         scatters = []
-        import pdb; pdb.set_trace()
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):

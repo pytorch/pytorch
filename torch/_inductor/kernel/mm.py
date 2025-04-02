@@ -46,11 +46,7 @@ from .mm_common import (
     mm_config_kwargs,
     mm_grid,
     mm_options,
-<<<<<<< HEAD
-=======
     partition_k_mm_grid,
-    persistent_mm_configs,
->>>>>>> 92a913af043 (Add PartitionK)
     persistent_mm_grid,
     persistent_mm_options,
     should_fallback_to_aten,
@@ -450,12 +446,7 @@ def decomposeK(a, b, kPartitions):
     result = torch.bmm(a_reshaped, b_reshaped)
     result_fp32 = result.to(torch.float32)
     reduced_buf = torch.sum(result_fp32, 0)
-    return reduced_buf.to(a.dtype)
-
-decompose_k_subgraph_template = SubgraphTemplate(
-    name="decompose_k_mm",
-    graph=make_fx(decomposeK),
-)
+    return (reduced_buf.to(a.dtype), )
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
@@ -483,47 +474,51 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
 
     # options to tune from
-    choices = []
-    
+    choices = (
+        [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
+    )
+    mm_configs = V.choices.get_base_mm_configs(device_type)
+    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+
     static_shape, is_nonzero = _is_static_problem(layout)
-    # if is_nonzero and use_triton_template(layout):
-        # for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
-            # mm_template.maybe_append_choice(
-            #     choices,
-            #     input_nodes=(mat1, mat2),
-            #     layout=layout,
-            #     **mm_options(config, m, n, k, layout),
-            # )
+    if is_nonzero and use_triton_template(layout):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
+            )
 
-            # Enforce accumulation in float32 for accuracy
+        if use_triton_tma_template(mat1, mat2):
+            for config in persistent_mm_configs(
+                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)
+            ):
+                persistent_tma_mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    workspace_arg=get_tma_workspace_arg(
+                        num_tma_descriptors=2,
+                        device=mat1.get_device(),
+                    ),
+                    **mm_options(config, m, n, k, layout),
+                    **persistent_mm_options(mat1, mat2),
+                )
 
-            # kPartitions = 256
-            # assert k % kPartitions == 0, "K must be divisible by Kmini"
-            # B = k // kPartitions
+    from ..decomposition import select_decomp_table
+    from torch._dispatch.python import enable_python_dispatcher
 
-            # a_reshaped = lowerings[aten.permute](lowerings[aten.reshape](mat1, (m, B, kPartitions)), (1, 0, 2))
-            # b_reshaped = lowerings[aten.reshape](mat2, (B, kPartitions, n))
-            # result = lowerings[aten.bmm](a_reshaped, b_reshaped)  # Shape: (B, M, N)
-            # result_fp32 = lowerings[prims.convert_element_type](result, torch.float32)
-            # reduced_buf = lowerings[aten.sum](result_fp32, 0)
-            # output = lowerings[prims.convert_element_type](reduced_buf, mat1.get_dtype())
+    with enable_python_dispatcher():
+        decompositions = (
+            select_decomp_table()
+        )
 
-        # if use_triton_tma_template(mat1, mat2):
-        #     for config in persistent_mm_configs(
-        #         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
-        #     ):
-        #         persistent_tma_mm_template.maybe_append_choice(
-        #             choices,
-        #             input_nodes=(mat1, mat2),
-        #             layout=layout,
-        #             workspace_arg=get_tma_workspace_arg(
-        #                 num_tma_descriptors=2,
-        #                 device=mat1.get_device(),
-        #             ),
-        #             **mm_options(config, m, n, k, layout),
-        #             **persistent_mm_options(mat1, mat2),
-        #         )
-
+        decompose_k_subgraph_template = SubgraphTemplate(
+            name="decompose_k_mm",
+            graph=make_fx(decomposeK, decompositions, tracing_mode="real"),
+        )
+    
     decompose_k_subgraph_template.maybe_append_choice(
         choices,
         input_nodes=(mat1, mat2),
