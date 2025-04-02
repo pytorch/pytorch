@@ -105,7 +105,7 @@ inline void _exp_reduce_sum_fusion_kernel(
         return x + y;
       },
       vec_tmp_sum);
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  for (long i = vec_size * (static_cast<long>(size) / vec_size); i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 - val;
     auto tmp2 = exp(tmp1);
@@ -134,7 +134,7 @@ inline void _mul_reduce_max_fusion_kernel(
     vec_tmp_max = vec::maximum(vec_tmp_max, tmp1);
     _store(out + i, tmp1);
   }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  for (long i = vec_size * (static_cast<long>(size) / vec_size); i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 * scale;
     tmp_max = std::max(tmp_max, tmp1);
@@ -158,7 +158,7 @@ static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
 
 template <typename scalar_t,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-static inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
+static inline scalar_t* conditional_data_ptr(float* /*ptr*/, scalar_t* ptr2) {
   return ptr2;
 }
 
@@ -171,6 +171,7 @@ inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
     data_vec.store(data + d);
   }
   #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+  // NOLINTNEXTLINE(clang-diagnostic-unknown-pragmas)
   # pragma unroll
   #endif
   for (; d < size; d++) {
@@ -293,7 +294,6 @@ inline void pad_remain_row_col_zero(
 
 }
 
-
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size, bool with_pack=false>
 void cpu_flash_attention(
     const Tensor& output,
@@ -301,7 +301,7 @@ void cpu_flash_attention(
     const at::Tensor& q,
     const at::Tensor& k,
     const at::Tensor& v,
-    double dropout_p,
+    double /*dropout_p*/,
     bool is_causal,
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
@@ -388,10 +388,10 @@ void cpu_flash_attention(
     // When the number of gemm is greater than the number of pack,
     // the pack overhead can be overlaped.
     if (need_pack) {
-      double pack_size = batchSize * num_head * kvSize * headSize;
-      double qs_per_thread = (batchSize * num_head * qSlice + num_thread - 1) / num_thread;
-      double gemm_size_per_thread = qs_per_thread * qSplitSize *
-          (is_causal ? std::min(qSize, kvSize) : kvSize) * headSize;
+      double pack_size = static_cast<double>(batchSize * num_head * kvSize * headSize);
+      double qs_per_thread = static_cast<double>(batchSize * num_head * qSlice + num_thread - 1) / static_cast<double>(num_thread);
+      double gemm_size_per_thread = qs_per_thread * static_cast<double>(qSplitSize) *
+          static_cast<double>(is_causal ? std::min(qSize, kvSize) : kvSize) * static_cast<double>(headSize);
       need_pack = gemm_size_per_thread / pack_size >= (dtype == at::ScalarType::BFloat16 ? 4 : 1);
     }
   }
@@ -752,7 +752,7 @@ void cpu_flash_attention_backward(
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
-    double dropout_p,
+    double /*dropout_p*/,
     bool is_causal,
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
