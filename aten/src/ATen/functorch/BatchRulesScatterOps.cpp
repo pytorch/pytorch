@@ -385,9 +385,11 @@ namespace {
     // next broadcast all index tensors together
     try {
       indices = at::expand_outplace(indices);
-    } catch (std::exception &e) {
-      TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                               " with shapes ");
+    } catch (std::exception&) {
+      TORCH_CHECK_INDEX(
+          false,
+          "shape mismatch: indexing tensors could not be broadcast together"
+          " with shapes ");
     }
     // add missing null Tensors so that it matches self.dim()
     while (indices.size() < static_cast<size_t>(self.dim())) {

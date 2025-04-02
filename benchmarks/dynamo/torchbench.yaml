@@ -242,6 +242,16 @@ skip:
     - opacus_cifar10
     - speech_transformer
 
+  export_not_supported:
+    - doctr_reco_predictor
+    - doctr_det_predictor
+    - drq
+    - llama
+    - sam_fast
+    - soft_actor_critic
+    - timm_efficientdet
+    - vision_maskrcnn
+
   # Models that should only run in --multiprocess mode
   multiprocess:
     - simple_gpt
