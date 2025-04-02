@@ -50,7 +50,7 @@ __global__ void prepare_grouped_gemm_data(
     int align = 16 / sizeof(DtypeA);
     CUDA_KERNEL_ASSERT(
         delta % align == 0 &&
-        "expected dynamic dimension to be multiple of 16\n");
+        "expected dynamic dimension byte size to be multiple of 16 \n");
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {
