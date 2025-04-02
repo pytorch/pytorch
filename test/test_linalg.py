@@ -4725,10 +4725,11 @@ class TestLinalg(TestCase):
                 self.check_single_matmul(x, y)
 
             filename1 = torch.cuda.tunable.get_filename()
-            filename2 = "tunableop_results_tmp1.csv"
-            filename3 = "tunableop_results_tmp2.csv"
+            unique_id = self.id().split(".")[-1]
+            filename2 = f"tunableop_results_{unique_id}_{ordinal}_tmp1.csv"
+            filename3 = f"tunableop_results_{unique_id}_{ordinal}_tmp2.csv"
             ordinal = torch.cuda.current_device()
-            assert filename1 == f"tunableop_results{ordinal}.csv"
+            assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
             assert len(torch.cuda.tunable.get_results()) > 0
 
             assert torch.cuda.tunable.write_file()  # use default filename
@@ -4746,6 +4747,10 @@ class TestLinalg(TestCase):
             assert file1_contents == file2_contents
             assert file1_contents == file3_contents
 
+            # We need to reset the filename to the default value so we can properly
+            # clean up intermediate files
+            self._set_tunableop_defaults()
+
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.half)
@@ -4754,7 +4759,6 @@ class TestLinalg(TestCase):
         # NOTE: The offline tuning does not support certain tensor
         # shapes as noted below. Submatrics / matrix slices are
         # not supported at all.
-        import os
 
         def has_any_dim_size_one(tensor: torch.Tensor):
             """Check if any dimension of a PyTorch tensor has size 1."""
@@ -4776,7 +4780,6 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
             ordinal = torch.cuda.current_device()
-            result_filename = f"tunableop_results{ordinal}.csv"
 
             # record GEMM
             torch.cuda.tunable.tuning_enable(False)
@@ -4847,8 +4850,8 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            untuned_filename = f"tunableop_untuned{ordinal}.csv"
-            self.assertTrue(os.path.exists(untuned_filename))
+            unique_id = self.id().split(".")[-1]
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -4865,12 +4868,8 @@ class TestLinalg(TestCase):
             self.assertGreater(new_results - ref_results, 0)
             self.assertTrue(torch.cuda.tunable.write_file())
 
-            # Make sure the results file exists and that it is not zero
-            self.assertTrue(os.path.exists(result_filename))
-            self.assertGreater(os.path.getsize(result_filename), 0)
-
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
+            ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
     @onlyCUDA
@@ -4879,13 +4878,10 @@ class TestLinalg(TestCase):
     @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
     def test_scaled_gemm_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_scaled_gemm_tunableop
-        import os
 
         with self._tunableop_ctx():
             ordinal = torch.cuda.current_device()
             torch.cuda.tunable.set_rotating_buffer_size(0)
-
-            result_filename = f"tunableop_results{ordinal}.csv"
 
             # record GEMM
             torch.cuda.tunable.tuning_enable(False)
@@ -4936,8 +4932,8 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            untuned_filename = f"tunableop_untuned{ordinal}.csv"
-            self.assertTrue(os.path.exists(untuned_filename))
+            unique_id = self.id().split(".")[-1]
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -4963,12 +4959,8 @@ class TestLinalg(TestCase):
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
-            # Make sure the results file exists and that it is not zero
-            self.assertTrue(os.path.exists(result_filename))
-            self.assertGreater(os.path.getsize(result_filename), 0)
-
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
+            ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
@@ -4986,7 +4978,12 @@ class TestLinalg(TestCase):
             total_gpus = torch.cuda.device_count()
 
             ordinal = torch.cuda.current_device()
-            untuned_filename = f"tunableop_untuned{ordinal}.csv"
+
+            # Untuned filename has unique id, but results file
+            # does not because it is executed in a subprocess
+            unique_id = self.id().split(".")[-1]
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
             #  turn on untuned GEMM recording and turn off tuning
             torch.cuda.tunable.tuning_enable(False)
@@ -5032,7 +5029,7 @@ class TestLinalg(TestCase):
             # Lastly, check that all tunableop_results_full{i} have
             # the same size as tunableop_results_full0.
             for i in range(total_gpus):
-                result_full_filename = f"tunableop_results_{unique_id}_full{i}.csv"
+                result_full_filename = f"tunableop_results_full{i}.csv"
                 self.assertTrue(os.path.exists(result_full_filename))
                 if i == 0:  # Store for next subsequent iterations
                     result_full_size = os.path.getsize(result_full_filename)
@@ -5044,7 +5041,7 @@ class TestLinalg(TestCase):
     def test_rotating_buffer_tunableop(self, device, dtype):
         # Test the TunableOp rotating buffer API
         # Test the default value, will return the l2_cache_size
-        set_tunableop_defaults()
+        self._set_tunableop_defaults()
         l2_cache_size = torch.cuda.tunable.get_rotating_buffer_size()
         self.assertGreater(l2_cache_size, 0)
         # Test zero
@@ -5335,13 +5332,10 @@ class TestLinalg(TestCase):
     @dtypes(torch.bfloat16)
     def test_gemm_bias_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_gemm_bias_tunableop
-        import os
         ordinal = torch.cuda.current_device()
 
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
-
-            result_filename = f"tunableop_results{ordinal}.csv"
 
             # record GEMM
             torch.cuda.tunable.tuning_enable(False)
@@ -5360,8 +5354,8 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            untuned_filename = f"tunableop_untuned{ordinal}.csv"
-            self.assertTrue(os.path.exists(untuned_filename))
+            unique_id = self.id().split(".")[-1]
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -5383,12 +5377,8 @@ class TestLinalg(TestCase):
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
-            # Make sure the results file exists and that it is not zero
-            self.assertTrue(os.path.exists(result_filename))
-            self.assertGreater(os.path.getsize(result_filename), 0)
-
             # Compare Param Signature of untuned and tuned results
-            ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
+            ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
     @onlyCUDA
@@ -5550,8 +5540,6 @@ class TestLinalg(TestCase):
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
-                result_filename = f"tunableop_results{ordinal}.csv"
-
                 # record GEMM
                 torch.cuda.tunable.tuning_enable(False)
                 torch.cuda.tunable.record_untuned_enable(True)
@@ -5566,7 +5554,8 @@ class TestLinalg(TestCase):
                 torch.backends.cuda.matmul.allow_tf32 = False
                 C = torch.matmul(A, B)
 
-                untuned_filename = f"tunableop_untuned{ordinal}.csv"
+                unique_id = self.id().split(".")[-1]
+                untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
                 self.assertTrue(os.path.exists(untuned_filename))
 
                 # tuning the untuned GEMMs in file
@@ -5600,12 +5589,8 @@ class TestLinalg(TestCase):
 
                 self.assertTrue(torch.cuda.tunable.write_file())
 
-                # Make sure the results file exists and that it is not zero
-                self.assertTrue(os.path.exists(result_filename))
-                self.assertGreater(os.path.getsize(result_filename), 0)
-
                 # Compare Param Signature of untuned and tuned results
-                ok = compare_untuned_tuned_entries(untuned_filename, result_filename)
+                ok = self._compare_untuned_tuned_entries()
                 self.assertTrue(ok)
 
         finally:
@@ -5639,8 +5624,12 @@ class TestLinalg(TestCase):
 
             ordinal = torch.cuda.current_device()
 
-            result_filename = f"tunableop_results{ordinal}.csv"
-            untuned_filename = f"tunableop_untuned{ordinal}.csv"
+            # TunableOp is running in a subprocess
+            # online tuning needs filename set through API
+            # offline tuning needs filename set through environment variableq
+            unique_id = self.id().split(".")[-1]
+            result_filename = f"tunableop_results_{unique_id}_{ordinal}.csv"
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
 
             # Offline Tuning case in a subprocess
 
@@ -5650,7 +5639,7 @@ class TestLinalg(TestCase):
             # already set the start method
             mp.set_start_method("spawn", force=True)
 
-            p = mp.Process(target=tunableop_matmul, args=(device, dtype, True))
+            p = mp.Process(target=tunableop_matmul, args=(device, dtype, None, True))
             p.start()
             p.join()
 
@@ -5677,7 +5666,7 @@ class TestLinalg(TestCase):
             # already set the start method
             mp.set_start_method("spawn", force=True)
 
-            p = mp.Process(target=tunableop_matmul, args=(device, dtype, False))
+            p = mp.Process(target=tunableop_matmul, args=(device, dtype, result_filename, False))
             p.start()
             p.join()
 
