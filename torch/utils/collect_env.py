@@ -281,7 +281,7 @@ def get_pkg_version(run_lambda, pkg):
                 cmd = f"{mgr_name} -l | grep {pkg_name}"
             if cmd != "":
                 ret = run_and_read_all(run_lambda, cmd)
-    lst = []
+    lst: list[str] = []
     if ret:
         lst += re.sub(" +", " ", ret).split(" ")
     if len(lst) > index and index != -1:
@@ -292,7 +292,7 @@ def get_pkg_version(run_lambda, pkg):
 
 
 def get_intel_gpu_driver_version(run_lambda):
-    lst = []
+    lst: list[str] = []
     platform = get_platform()
     if platform == "linux":
         for pkg in ["intel_opencl", "level_zero"]:
@@ -320,7 +320,7 @@ def get_intel_gpu_driver_version(run_lambda):
 
 
 def get_intel_gpu_onboard(run_lambda):
-    lst = []
+    lst: list[str] = []
     platform = get_platform()
     if platform == "linux":
         txt = run_and_read_all(run_lambda, "xpu-smi discovery -j")
@@ -456,7 +456,7 @@ def get_cpu_info(run_lambda):
             | ConvertTo-Json"'
         )
         if rc == 0:
-            lst = []
+            lst: list[str] = []
             try:
                 obj = json.loads(out)
                 if type(obj) is list:
