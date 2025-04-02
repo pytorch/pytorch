@@ -262,7 +262,9 @@ def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
 ) -> torch.Tensor:
-    if config.coordinate_descent_tuning and self.device.type != "cpu":
+    # TODO: Re-enable for mps once our reductions are performant enough
+    # (https://github.com/pytorch/pytorch/issues/150121)
+    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
         if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
             batch2.shape[2] == 1
         ):
@@ -316,7 +318,10 @@ def mm(
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
-    if config.coordinate_descent_tuning and self.device.type != "cpu":
+
+    # TODO: Re-enable for mps once our reductions are performant enough
+    # (https://github.com/pytorch/pytorch/issues/150121)
+    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
         if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
             input2.shape[1] == 1
         ):
