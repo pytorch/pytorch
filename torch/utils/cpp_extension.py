@@ -1307,7 +1307,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.
     There is also a case where `-dlink` is used without `-rdc`:
     when an extension is linked against a static lib containing rdc-compiled objects
-    like the `NVSHMEM library <https://developer.nvidia.com/nvshmem>`__.
+    like the `NVSHMEM library <https://developer.nvidia.com/nvshmem>`_.
 
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
