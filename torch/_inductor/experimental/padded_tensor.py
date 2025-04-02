@@ -9,6 +9,8 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 # Enable graph partitioning, so that meta tensors are hoisted out of the graph, enabling cudagraphs
 torch._inductor.config.graph_partition = True
 
+log = torch._logging.getArtifactLogger(__name__, "padded_tensor")
+
 
 def slice_nd(
     input: torch.Tensor, start_idxs: List[int], end_idxs: List[int]
@@ -183,9 +185,8 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=..., kwargs=None):
-        # print("Dispatching function %s" % func.__name__)
-        # print("-" * 40)
-        # print("args: ", args)
+        log.debug("Dispatching function %s" % func.__name__)
+        log.debug("- args: ", args)
         if func.__name__ in [
             "linear",
             "embedding",
@@ -201,11 +202,10 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        # print("Dispatching %s" % func._overloadpacket.__name__)
-        # print("-" * 40)
-        # print("args: ", args)
+        log.debug("Dispatching %s" % func._overloadpacket.__name__)
+        log.debug("args: ", args)
         out = cls.execute_padded(func, types, args, kwargs)
-        # print("out: ", out)
+        log.debug("out: ", out)
         return return_and_correct_aliasing(func, args, kwargs, out)
 
     def unpad(self) -> torch.Tensor:
