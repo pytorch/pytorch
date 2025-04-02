@@ -3808,7 +3808,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while not guard_or_false(accum % length == 0):
+        while guard_or_true(accum % length != 0):
             if end == a_.ndim - 1:
                 msg = f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
                 raise ValueError(msg)
