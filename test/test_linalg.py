@@ -137,9 +137,13 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.enable(False)
 
             # clean up, remove any files that were generated
-            unique_id = self.id().split(".")[-1]
-            patterns = [f"tunableop_results_{unique_id}_?.csv", f"tunableop_untuned_{unique_id}_?.csv",
-                        "tunableop_results?.csv", "tunableop_results_full?.csv", "tunableop_untuned?.csv"]
+            results_filename = torch.cuda.tunable.get_filename()
+            dot_index = results_filename.rfind(".")
+            results_filename_pattern = results_filename[:dot_index-1]
+            untuned_filename = os.getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME")
+            dot_index = untuned_filename.rfind(".")
+            untuned_filename_pattern = untuned_filename[:dot_index]
+            patterns = [f"{results_filename_pattern}*.csv", f"{untuned_filename_pattern}*.csv"]
             files = [f for pattern in patterns for f in glob.glob(pattern)]
             for file in files:
                 try:
