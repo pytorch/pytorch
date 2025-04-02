@@ -68,7 +68,11 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -612,11 +616,30 @@ class VariableBuilder:
             return id_dispatch(self, value)
 
         # Everything else (NB: order matters!)
-        if is_traceable_wrapper_subclass(value) or istype(
-            value, config.traceable_tensor_subclasses
+        if (
+            isinstance(value, torch.Tensor)
+            and type(value)
+            not in (
+                # These torch-native subclasses have overly restrictive
+                # `__torch_function__` which prevents Dynamo from reading their
+                # tensor attributes like `is_nested` or calling methods like
+                # `_is_view`.
+                torch.nn.parameter.UninitializedBuffer,
+                torch.nn.parameter.UninitializedParameter,
+                ExpandedWeight,
+            )
+            and type(value) not in config.nontraceable_tensor_subclasses
         ):
-            return self.wrap_tensor(value)
-        elif is_namedtuple(value):
+            if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
+                # This case it's either tensor or subclass with default
+                # torch_dispatch (they might override torch_function or not),
+                # and we can always trace into them.
+                return self.wrap_tensor(value)
+            elif is_traceable_wrapper_subclass(value):
+                # For non-default torch_dispatch, we have more requirements.
+                return self.wrap_tensor(value)
+
+        if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             output = [
                 LazyVariableTracker.create(
@@ -931,11 +954,6 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            isinstance(value, torch._C._TensorMeta)
-            and value in config.traceable_tensor_subclasses
-        ):
-            return TensorSubclassVariable(value, source=self.source)
-        elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
         ):
@@ -1187,6 +1205,20 @@ class VariableBuilder:
             if value is torch.autograd._unsafe_preserve_version_counter:
                 self.install_guards(GuardBuilder.FUNCTION_MATCH)
                 return PreserveVersionContextVariable.constructor(self.tx)
+            if (
+                # `value` must be a strict subclass of `torch.Tensor`
+                issubclass(value, torch.Tensor)
+                and value is not torch.Tensor
+                # `TensorSubclassVariable` is not for subclass that overrides
+                # `torch_dispatch`.
+                and value.__torch_dispatch__ is torch.Tensor.__torch_dispatch__
+                # `TensorSubclassVariable` would lead to construction of
+                # `TensorWithTFOverrideVariable`, but we don't want that for
+                # traceable wrapper subclasses (we wrap those subclass instances
+                # into `TensorVariable`).
+                and not is_traceable_wrapper_subclass_type(value)
+            ):
+                return TensorSubclassVariable(value, source=self.source)
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1729,7 +1761,22 @@ class VariableBuilder:
                 # Guards are added inside register_attr_or_module
             )
 
-        if type(value) in config.traceable_tensor_subclasses:
+        # NB: this just says we accessed a tensor from the same source again
+        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
+        # This is distinct from two distinct sources mapping to the same
+        # Tensor (per id())!  No guard is necessary here.  See below for the
+        # other case.
+        is_duplicate_tensor = source in self.tx.output.input_source_to_var
+        if is_duplicate_tensor:
+            return self.tx.output.input_source_to_var[source]
+
+        options = {}
+        if type(value) in (
+            torch.Tensor,
+            torch.nn.Parameter,
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ) or is_traceable_wrapper_subclass(value):
             # Ordinarily, we would fakeify a tensor so that it can get dynamic
             # shapes and be computed on without triggering actual operations.
             # However, how can we fakeify a tensor subclass?  Ordinary
@@ -1747,37 +1794,19 @@ class VariableBuilder:
             # To simplify things for now, the __dict__ tracking bits haven't
             # been implemented yet, but they can be added into this design at
             # a later point in time.
-            subclass_type = type(value)
-        else:
-            assert type(value) in (
-                torch.Tensor,
-                torch.nn.Parameter,
-                torch._subclasses.fake_tensor.FakeTensor,
-                torch._subclasses.functional_tensor.FunctionalTensor,
-            ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
-
-        # NB: this just says we accessed a tensor from the same source again
-        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
-        # This is distinct from two distinct sources mapping to the same
-        # Tensor (per id())!  No guard is necessary here.  See below for the
-        # other case.
-        is_duplicate_tensor = source in self.tx.output.input_source_to_var
-        if is_duplicate_tensor:
-            return self.tx.output.input_source_to_var[source]
+        else:
+            subclass_type = type(value)
+            options["torch_function_fn"] = build_torch_function_fn(
+                self.tx, value, self.source
+            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
             self.install_guards(GuardBuilder.ID_MATCH)
 
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
-
-        options = {}
-        if type(value) in config.traceable_tensor_subclasses:
-            options["torch_function_fn"] = build_torch_function_fn(
-                self.tx, value, self.source
-            )
-            self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if (
             isinstance(value, torch.Tensor)
