@@ -1659,8 +1659,29 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
 
+        new_attrs = _get_attributes(mod)
+        if len(new_attrs) != len(snapshot):
+            added_attrs = new_attrs.keys() - snapshot.keys()
+            deleted_attrs = snapshot.keys() - new_attrs.keys()
+
+            if len(added_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
+
+            if len(deleted_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
+
         pytree.tree_map_with_path(
-            _collect_assigned_tensor_attributes, snapshot, _get_attributes(mod)
+            _collect_assigned_tensor_attributes, snapshot, new_attrs
         )
         # restore state of all attributes (including, e.g., of primitive types)
         mod.__dict__.update(snapshot)

@@ -123,23 +123,20 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
-    def test_pointwise_zeta(self):
+    @parametrize(
+        "op_name",
+        [
+            "zeta",
+            "xlog1py",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+        ],
+    )
+    def test_pointwise_binary_op(self, op_name):
         self.common(
-            torch.special.zeta,
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
-    def test_pointwise_xlog1py(self):
-        self.common(
-            torch.special.xlog1py,
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
-    def chebyshev_polynomial_t(self):
-        self.common(
-            torch.special.chebyshev_polynomial_t,
+            lambda x, y: getattr(torch.special, op_name)(x, y),
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
@@ -165,6 +162,7 @@ class MPSBasicTests(TestCase):
 # Copy tests
 for test_name in [
     "test_min_max_reduction",
+    "test_add_complex4",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -198,6 +196,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_large_broadcast_reduction",
     "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
@@ -209,6 +208,7 @@ for test_name in [
     "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
+    "test_neg_max_uint8",
     "test_pow2",
     "test_prod",
     "test_randint_int64_mod",
