@@ -797,15 +797,6 @@ class TensorVariable(VariableTracker):
                 object(), var, mutation_type_cls=AttributeMutationNew
             )
             return var
-        unimplemented_v2(
-            gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
-            context=f"{self}.as_subclass({cls})",
-            explanation="Currently not supported",
-            hints=[
-                "Avoid this call or move it outside `torch.compile` regione",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def method_get_device(self):
         if isinstance(self.device, torch.device):
@@ -1457,46 +1448,32 @@ class TensorSubclassVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Handle `Subclass(existing_tensor, ...)` calls.
-        from .torch_function import TensorWithTFOverrideVariable
+        # Handle `Subclass(existing_tensor)` calls.
+        def impl():
+            if len(args) == 1 and isinstance(args[0], TensorVariable):
+                from .torch_function import TensorWithTFOverrideVariable
 
-        new_func = self.value.__new__
-        if new_func is torch.Tensor.__new__:
-            if (
-                len(args) == 1
-                and isinstance(args[0], TensorVariable)
-                and len(kwargs) == 0
-            ):
-                data = args[0]
-                # Simulate `torch.Tensor.__new__` as shallow-copying the input
-                # tensor data with a new type. TODO polyfill?
+                # This simulates `__new__` and _assumes_ it doesn't have
+                # side-effects that matters to Dynamo tracing. TODO trace through
+                # `__new__`.
                 var = TensorWithTFOverrideVariable.from_tensor_var(
-                    tx, data, self.value, self.source
+                    tx, args[0], self.value, self.source
                 )
-            else:
-                unimplemented_v2(
-                    gb_type="Calling subclass default constructor with more than tensor argument",
-                    context=f"{self.value}(args={args}, kwargs={kwargs})",
-                    explanation="Currently not supported",
-                    hints=[
-                        "Avoid this constructor call or move it outside "
-                        "`torch.compile` regione",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-        else:
-            # Let Dynamo trace through custom `__new__`
-            var = VariableTracker.build(tx, new_func).call_function(
-                tx, [self] + args, kwargs
-            )
 
-        # Let Dynamo trace through custom `__init__`
-        init_func = self.value.__init__
-        # TODO builder should be able to handle `torch.Tensor.__init__`,
-        # which is `object.__init__`, so that we can remove this check.
-        if init_func is not torch.Tensor.__init__:
-            VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
+                # Let Dynamo trace through custom `__init__`
+                init_func = self.value.__init__
+                # TODO builder should be able to handle `torch.Tensor.__init__`,
+                # which is `object.__init__`, so that we can remove this check.
+                if init_func is not torch.Tensor.__init__:
+                    cls_kwargs = kwargs or {}
+                    VariableTracker.build(tx, init_func).call_function(
+                        tx, [var], cls_kwargs
+                    )
+                return var
 
+            return super().call_function(tx, args, kwargs)
+
+        var = impl()
         # See NOTE [Side effect tracking for newly constructed tensor]
         tx.output.side_effects._track_obj(
             object(), var, mutation_type_cls=AttributeMutationNew
