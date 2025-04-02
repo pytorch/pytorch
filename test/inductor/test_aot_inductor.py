@@ -4114,7 +4114,7 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "buf3, u0",
             "buf4, u0",
-            "buf3, buf4, buf2, u0",
+            "buf4, buf5, buf3, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
