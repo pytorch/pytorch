@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+from collections.abc import Iterable
 from typing import Any, Callable, Optional
 
 import torch
@@ -8,7 +9,6 @@ import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
@@ -23,14 +23,11 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-
-from .utils import _from_fun, create_fw_bw_graph
 
 
 aten = torch._ops.ops.aten
@@ -95,50 +92,17 @@ def mask_list(
         return [i for m, i in zip(mask, inp) if m]
 
 
-def create_fw_bw_graph_combinefn(combine_fn, xs, additional_inputs):
-    # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
+def first_slice_copy_with_grad(li):
+    # First_slice_copy does not keep the original requires_grad flag,
+    # but we need it for materialize_as_graph
+    # in order to compute the correct gradients
+    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
+    return slc
 
-    # Helper wrapper for the autograd forward.
-    # This wrapper ensures that the forward returns all carries
-    # instead of only the last one
-    # The gradients of the carries forwarded to the output are
-    # detached in order not to raise problems with the function aliasing outputs
 
-    with suspend_functionalization(), disable_functional_mode():
-        with disable_proxy_modes_tracing():
-            fw_xs_1 = [first_slice_copy(pytree.tree_map(_from_fun, x)) for x in xs]
-            fw_xs_2 = [first_slice_copy(pytree.tree_map(_from_fun, x)) for x in xs]
-            fw_additional_inputs = [
-                pytree.tree_map(_from_fun, a) for a in additional_inputs
-            ]
-
-            outs = combine_fn(*fw_xs_1, *fw_xs_2, *fw_additional_inputs)
-
-            # TODO: Support partial Autograd for associative_scan later
-            if pytree.tree_any(
-                lambda t: not t.requires_grad,  # type: ignore[union-attr]
-                (outs),
-            ):
-                raise RuntimeError(
-                    "gradient flags of the combine_fn output differ from the xs. "
-                    "Consider checking for `torch.no_grad()` statements?"
-                )
-
-            fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
-            if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
-                raise RuntimeError(
-                    "Expect outputs produced by combine_fn to only contains tensors. "
-                    f"Got types {[type(out) for out in fw_outputs]}."
-                )
-
-            fw_graph, joint_graph = create_fw_bw_graph(
-                combine_fn,
-                False,
-                (*fw_xs_1, *fw_xs_2),
-                (*fw_outputs,),
-            )
-
-        return fw_graph, joint_graph
+def split_into_chunks(iterable: Iterable[Any], chunk_sizes: list[int]) -> list[Any]:
+    it = iter(iterable)
+    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 class AssociativeScanOp(HigherOrderOperator):
@@ -479,31 +443,29 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
 
 class AssociativeScanAutogradOp(torch.autograd.Function):
     @staticmethod
-    def first_slice_copy_with_grad(li):
-        slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-        return slc
-
-    @staticmethod
     def forward(
         ctx,
         combine_fn,
         num_xs,
+        num_additional_inputs,
         *operands,
     ):
         ctx._num_xs = num_xs
-        xs, additional_inputs = operands[:num_xs], operands[num_xs:]
+        ctx._num_additional_inputs = num_additional_inputs
+        xs, additional_inputs = split_into_chunks(
+            operands, [num_xs, num_additional_inputs]
+        )
 
         scan_length = xs[0].shape[0]
         ctx._scan_length = scan_length
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correct gradients
-        xs_slice_1 = AssociativeScanAutogradOp.first_slice_copy_with_grad(xs)
-        xs_slice_2 = AssociativeScanAutogradOp.first_slice_copy_with_grad(xs)
+        xs_slices = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
 
         ctx._combine_fn_bw = create_bw_fn(
             combine_fn,
-            (*xs_slice_1, *xs_slice_2, *additional_inputs),
+            (*xs_slices, *additional_inputs),
         )
 
         # We snapshot the dispatch keys in forward for materializing the
@@ -623,31 +585,29 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             grads = [33, 16, 10, 6]
         """
 
+        # The backward of associative_scan is always performed on the first dimension
         dim = 0
         scan_length = ctx._scan_length
         num_xs = ctx._num_xs
+        num_additional_inputs = ctx._num_additional_inputs
 
         # Extract the inputs to the forward path and outputs from the forward path
         flat_args = saved_tensors_and_symints(ctx)
-        xs, outs, additional_inputs = (
-            flat_args[:num_xs],
-            flat_args[num_xs : 2 * num_xs],
-            flat_args[2 * num_xs :],
+        xs, outs, additional_inputs = split_into_chunks(
+            flat_args, [num_xs, num_xs, num_additional_inputs]
         )
         ndim = outs[0].ndim
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
-        xs_slice_1 = AssociativeScanAutogradOp.first_slice_copy_with_grad(xs)
-        xs_slice_2 = AssociativeScanAutogradOp.first_slice_copy_with_grad(xs)
+        xs_slices = first_slice_copy_with_grad(itertools.chain(xs, xs))
 
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
         combine_fn_bw_gm = materialize_as_graph(
             ctx._combine_fn_bw,
             (
-                *xs_slice_1,
-                *xs_slice_2,
+                *xs_slices,
                 *additional_inputs,
                 *[first_slice_copy(o) for o in outs],
             ),
@@ -657,53 +617,60 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
 
         # vmap joint graph over scan dimension to compute the individual
-        # gradients for each time slice
+        # gradients for each time slice ``t`` in parallel.
+        # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
 
-        # Step 1.: Compute the gradients at every scan element with respect to y and x
-        # For the assoc. op A(x, y), get the derivatives dA(x_i, y_{i-1})/dy_{i-1} and
-        # dA(x_i,y_{i-1})/dx_i for all i, with invalid index values giving derivatives equal to 1.
+        # Step 1.: Compute the gradients at every scan element ``t`` with respect to y and x
+        # For the assoc. op f(x, y), get the derivatives df(x_i, y_{i-1})/dy_{i-1} and
+        # df(x_i,y_{i-1})/dx_i for all i, with invalid index values giving derivatives equal to 1.
+        dummy_upstream_grad = (torch.ones_like(x) for x in xs)
         grads = mapped_combine_fn_bw_gm(
-            *(o.roll(1, dim) for o in outs), *xs, *(torch.ones_like(x) for x in xs)
+            *(o.roll(1, dim) for o in outs), *xs, *dummy_upstream_grad
         )
-        op_grad_y, op_grad_x = grads[:num_xs], grads[num_xs:]
-
-        def expand_masks(mask):
-            for _ in range(ndim - 1):
-                mask = mask.unsqueeze(-1)
-            return mask
+        grad_y_t, grad_x_t = split_into_chunks(grads, [num_xs, num_xs])
 
         def compute_grad_y_mat(x: torch.Tensor) -> torch.Tensor:
-            # Prepare a ones and a zero mask in order to easily compute the y_mat
-            ones_mask = torch.tril(
-                torch.ones(scan_length, scan_length, device=x.device, dtype=torch.bool),
-                diagonal=0,
-            )
-            ones_mask = expand_masks(ones_mask)
-            ones_mask = ones_mask.expand(-1, -1, *x.shape[1:])
+            # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
+            def compute_helper_tril_mask(diagonal):
+                def expand_masks(mask):
+                    for _ in range(ndim - 1):
+                        mask = mask.unsqueeze(-1)
+                    return mask
 
-            zeros_mask = torch.tril(
-                torch.ones(scan_length, scan_length, device=x.device, dtype=torch.bool),
-                diagonal=-1,
-            )
-            zeros_mask = expand_masks(zeros_mask)
-            zeros_mask = zeros_mask.expand(-1, -1, *x.shape[1:])
+                tril_mask = torch.tril(
+                    torch.ones(
+                        scan_length, scan_length, device=x.device, dtype=torch.bool
+                    ),
+                    diagonal=diagonal,
+                )
+                tril_mask = expand_masks(tril_mask)
+                tril_mask = tril_mask.expand(-1, -1, *x.shape[1:])
+                return tril_mask
+
+            # The ones mask is used to fill the main diagonal and all elements below it with 1s
+            # The elements on the main diagonal are 1 because of do_0/dy_0 = do_1/dy_1 = ... = 1
+            # and the elements below it are set to 1, in order for the cumprod can be computed properly.
+            ones_mask = compute_helper_tril_mask(0)
+
+            # The zero mask is used to set all elements below the main diagonal to 0, because do_0/dy_1 = do_0/dy_2 = ... = 0
+            zeros_mask = compute_helper_tril_mask(-1)
 
             y_mat = x.unsqueeze(dim).repeat_interleave(scan_length, dim)
 
-            # Fill the unpopulated parts with 1s
+            # Fill the parts of the ones_mask with 1s.
             y_mat.masked_fill_(ones_mask, 1.0)
 
             # Compute the individual products across dim + 1
             y_mat = y_mat.cumprod(dim=dim + 1)
 
-            # Finally replace the 1s with 0s again
+            # Fill the zeros_mask with 0s again
             y_mat.masked_fill_(zeros_mask, 0.0)
 
             return y_mat
 
         def compute_grad(grad_x, grad_y, fg):
-            # Set the i=0 component of dA(x_i,y_{i-1})/dx_i to 1.0
+            # Set the i=0 component of df(x_i,y_{i-1})/dx_i to 1.0
             # i.e., the first gradient component is always 1.0
             torch.select(grad_x, dim, 0).fill_(1.0)
 
@@ -714,30 +681,38 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             scaled_y_mat = y_mat * fg
 
             # Step 4.: Reduce the matrix with sum along the columns to get the total contributions for x_i
-            sum_y_mat = scaled_y_mat.sum(dim + 1)
+            summed_y_mat = scaled_y_mat.sum(dim + 1)
 
             # Step 5.: Scale with the grads_x, e.g., do_i/dx_i, to obtain the final gradients
-            grad = sum_y_mat * grad_x
+            grad_xs = summed_y_mat * grad_x
 
-            return grad
+            return grad_xs
 
+        # Stack all elements of the gradients along the first dimension.
+        # This is useful as later the gradients of those elements can be computed in parallel.
+        grad_x_stacked = torch.stack(grad_x_t)
+        grad_y_stacked = torch.stack(grad_y_t)
+        flat_grads_stacked = torch.stack(flat_grads)
+
+        # The compute_grad function is parallelized across all individual elements of xs
+        # as these gradients can be computed independently from each other
         compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
 
-        op_grad_x = torch.stack(op_grad_x)
-        op_grad_y = torch.stack(op_grad_y)
-        flat_grads_stack = torch.stack(flat_grads)
+        grads_xs = compute_grad_mapped(
+            grad_x_stacked, grad_y_stacked, flat_grads_stacked
+        )
 
-        grads = compute_grad_mapped(op_grad_x, op_grad_y, flat_grads_stack)
-
-        return *[None] * 2, *grads, *additional_inputs
+        # TODO: Currently the gradients for the additional_inputs are not computed properly
+        return *[None] * 3, *grads_xs, *[None] * num_additional_inputs
 
 
 @associative_scan_op.py_impl(DispatchKey.Autograd)
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
     num_xs = len(xs)
+    num_additional_inputs = len(additional_inputs)
 
     flat_out = AssociativeScanAutogradOp.apply(
-        combine_fn, num_xs, *(tuple(xs) + additional_inputs)
+        combine_fn, num_xs, num_additional_inputs, *(tuple(xs) + additional_inputs)
     )
     return (*flat_out,)
 
