@@ -393,6 +393,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
+    @unittest.expectedFailure  # deprecating this option with backed_size_oblivious
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
         counter = torch._dynamo.testing.CompileCounter()
@@ -408,7 +409,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         for i in [3, 2, 1, 0]:
             self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
 
-        self.assertEqual(counter.frame_count, 3)
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
