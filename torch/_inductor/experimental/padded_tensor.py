@@ -164,12 +164,11 @@ class PaddedTensor(torch.Tensor):
         out_shapes = func(*shapes_args, **shapes_kwargs)
 
         # In: Multipliers
-        # args_multipliers, kwargs_multipliers = pytree.tree_map_only(
-        #    PaddedTensor, lambda x: x.multipliers, (args, kwargs)
-        # )
-        # multipliers = pytree.tree_leaves(args_multipliers, lambda x: type(x) == dict)
-        # multipliers = next(filter(lambda x: type(x) == dict, multipliers))
-        multipliers = {n: 1 for n in range(5)}
+        args_multipliers, kwargs_multipliers = pytree.tree_map_only(
+            PaddedTensor, lambda x: x.multipliers, (args, kwargs)
+        )
+        multipliers = pytree.tree_leaves(args_multipliers, lambda x: type(x) == dict)
+        multipliers = next(filter(lambda x: type(x) == dict, multipliers))
 
         # Out: Padded tensor
         out_flat, spec = pytree.tree_flatten(out)
@@ -187,25 +186,32 @@ class PaddedTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args=..., kwargs=None):
         log.debug("Dispatching function %s" % func.__name__)
         log.debug("- args: ", args)
-        if func.__name__ in [
+
+        # Ops that decompose into ops with fixed, shape dependent arguments need to be handled at the
+        # __torch_function__ level, so they decompose into ops with valid shape arguments.
+        shape_decomp_ops = [
             "linear",
             "embedding",
             "split_with_sizes",
             "flatten",
             "scaled_dot_product_attention",
-        ]:
+        ]
+        if func.__name__ in shape_decomp_ops:
             out = cls.execute_padded(func, types, args, kwargs)
         else:
             out = super().__torch_function__(func, types, args, kwargs)
-        # print("out: ", out)
+        log.debug("out: ", out)
+
         return out
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         log.debug("Dispatching %s" % func._overloadpacket.__name__)
         log.debug("args: ", args)
+
         out = cls.execute_padded(func, types, args, kwargs)
         log.debug("out: ", out)
+
         return return_and_correct_aliasing(func, args, kwargs, out)
 
     def unpad(self) -> torch.Tensor:
