@@ -97,6 +97,14 @@ def find_tunableop_result(results, OpSig, ParamSig):
             return inner_tuple
     return None
 
+def get_tunableop_untuned_filename():
+    import os
+    ordinal = torch.cuda.current_device()
+    untuned_filename_env = os.getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME")
+    untuned_filename_base, _, _ = untuned_filename_env.rpartition('.')
+    untuned_filename = f"{untuned_filename_base}{ordinal}.csv"
+    return untuned_filename
+
 class TestLinalg(TestCase):
     @contextlib.contextmanager
     def _hip_allow_tf32(self):
