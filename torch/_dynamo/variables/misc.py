@@ -32,7 +32,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, trace_rules, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
@@ -297,14 +297,6 @@ class SuperVariable(VariableTracker):
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     tx_old
                 )
-        elif (
-            isinstance(inner_fn, types.MethodDescriptorType)
-            and inner_fn in trace_rules.get_tensor_method()
-        ):
-            # FunctionType but implementation is in C, we support some of these,
-            # e.g., tensor ops like `torch.Tensor.to`.
-            fn_var = VariableTracker.build(tx, inner_fn, source)
-            return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -677,10 +669,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ):
+        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if trace_rules.is_callable_allowed(self.fn_cls):
+            if is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -698,6 +691,8 @@ class AutogradFunctionVariable(VariableTracker):
         elif name == "backward":
             return self.call_backward(tx, args, kwargs)
         else:
+            from .. import trace_rules
+
             source = AttrSource(self.source, name) if self.source is not None else None
             try:
                 obj = inspect.getattr_static(self.fn_cls, name)
