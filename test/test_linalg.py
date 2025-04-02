@@ -124,7 +124,7 @@ class TestLinalg(TestCase):
         # Inialize and then tear down TunableOp
         import glob
         import os
-        set_tunableop_defaults()
+        self._set_tunableop_defaults()
         torch.cuda.tunable.enable(True)
 
         try:
@@ -134,7 +134,11 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.enable(False)
 
             # clean up, remove any files that were generated
-            for file in glob.glob("tunableop*.csv"):
+            unique_id = self.id().split(".")[-1]
+            patterns = [f"tunableop_results_{unique_id}_?.csv", f"tunableop_untuned_{unique_id}_?.csv",
+                        "tunableop_results?.csv", "tunableop_results_full?.csv", "tunableop_untuned?.csv"]
+            files = [f for pattern in patterns for f in glob.glob(pattern)]
+            for file in files:
                 try:
                     os.remove(file)
                 # NB: The file is locked on Windows
