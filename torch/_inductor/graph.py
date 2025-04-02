@@ -246,6 +246,14 @@ def mark_nodes_dislike_padding(
             cur.meta["dislike_padding"] = True
             continue
 
+        if (
+            isinstance(cur.target, torch._ops.OpOverload)
+            and get_layout_constraint_tag(cur.target)
+            == torch._C.Tag.needs_exact_strides
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
         op = _get_overload_packet(cur)
         if not op:
             continue
