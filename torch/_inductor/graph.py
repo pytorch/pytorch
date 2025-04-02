@@ -1199,8 +1199,8 @@ class GraphLowering(torch.fx.Interpreter):
                     # otherwise, no constraints at all: the implication is
                     # that this operator was inserted by a custom pass
                     # so we'll give them the freedom.
-                    if "arg_kwarg_vals" in n.meta:
-                        fake_args, fake_kwargs = n.meta["arg_kwarg_vals"]
+                    if "eager_input_vals" in n.meta:
+                        fake_args, fake_kwargs = n.meta["eager_input_vals"]
 
                         # (fake_args, fake_kwargs) might not align with (args, kwargs).
                         # we need to normalize them based on the schema
@@ -1535,9 +1535,9 @@ class GraphLowering(torch.fx.Interpreter):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
-                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
-                        inp_args = arg_kwarg_vals[0]
-                        inp_kwargs = arg_kwarg_vals[1]
+                    if eager_input_vals := n.meta.get("eager_input_vals"):
+                        inp_args = eager_input_vals[0]
+                        inp_kwargs = eager_input_vals[1]
                         args, kwargs = constrain_to_fake_tensors(
                             args, kwargs, inp_args, inp_kwargs
                         )

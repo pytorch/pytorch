@@ -720,14 +720,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
-            if "arg_kwarg_vals" in node.meta:
-                # We changed the kwargs, so we need to update arg_kwarg_vals
+            if "eager_input_vals" in node.meta:
+                # We changed the kwargs, so we need to update eager_input_vals
                 # to something sane.
-                args, kwargs = node.meta["arg_kwarg_vals"]
+                args, kwargs = node.meta["eager_input_vals"]
                 new_kwargs = {**kwargs}
                 new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
                 new_kwargs = immutable_dict(new_kwargs)
-                node.meta["arg_kwarg_vals"] = (args, new_kwargs)
+                node.meta["eager_input_vals"] = (args, new_kwargs)
         elif (
             inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
         ) is not None:
