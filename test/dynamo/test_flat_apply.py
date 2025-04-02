@@ -24,7 +24,7 @@ def distance(a, b, norm):
         return (a.x - b.x).abs() + (a.y - b.y).abs()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Norm:
     typ: str
 
