@@ -5283,8 +5283,7 @@ class TestLinalg(TestCase):
         import multiprocessing as mp
 
         with self._tunableop_ctx():
-            ordinal = torch.cuda.current_device()
-            filename = f"tunableop_results{ordinal}.csv"
+            filename = torch.cuda.tunable.get_filename()
 
             # force=True needed according to:
             # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.set_start_method
@@ -5292,7 +5291,7 @@ class TestLinalg(TestCase):
             # already set the start method
             mp.set_start_method("spawn", force=True)
 
-            p = mp.Process(target=tunableop_matmul, args=(device, dtype))
+            p = mp.Process(target=tunableop_matmul, args=(device, dtype, filename, False))
             p.start()
             p.join()
 
