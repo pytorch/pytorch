@@ -32,7 +32,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, trace_rules, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
@@ -161,14 +161,6 @@ class SuperVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
-        # This essentially simulates CPython's `super_getattro`:
-        # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
-        # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
-        #
-        # However, `res`'s type needs to be checked for `tp_descr_get`, and
-        # applied if it has one. We currently don't have polyfills for all the
-        # relevant `tp_descr_get`, so we explicitly handle the cases we care
-        # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
@@ -274,37 +266,6 @@ class SuperVariable(VariableTracker):
 
             source = self.source and AttrSource(self.source, attr_name)
             return VariableTracker.build(tx, attr_value, source)
-        elif inner_fn is torch._C._disabled_torch_function_impl:
-            # See `THPModule_disable_torch_function` for the C impl.
-            # The signature of _disabled_torch_function_impl is similar to
-            # `__torch_function__`, just without the first `cls` argument:
-            #  * (func, types, args, kwargs)
-            func = args[0]
-            tf_kwargs = {}
-            tf_args = args[2].items
-            for hash_key_vt, value_vt in args[3].items.items():
-                key_str = hash_key_vt.vt.as_python_constant()
-                tf_kwargs[key_str] = value_vt
-
-            output_old = tx.output.torch_function_enabled
-            tx_old = tx.symbolic_torch_function_state.torch_function_subclass_enabled
-            tx.output.torch_function_enabled = False
-            tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
-            try:
-                return func.call_function(tx, tf_args, tf_kwargs)
-            finally:
-                tx.output.torch_function_enabled = output_old
-                tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
-                    tx_old
-                )
-        elif (
-            isinstance(inner_fn, types.MethodDescriptorType)
-            and inner_fn in trace_rules.get_tensor_method()
-        ):
-            # FunctionType but implementation is in C, we support some of these,
-            # e.g., tensor ops like `torch.Tensor.to`.
-            fn_var = VariableTracker.build(tx, inner_fn, source)
-            return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -677,10 +638,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ):
+        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if trace_rules.is_callable_allowed(self.fn_cls):
+            if is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -698,6 +660,8 @@ class AutogradFunctionVariable(VariableTracker):
         elif name == "backward":
             return self.call_backward(tx, args, kwargs)
         else:
+            from .. import trace_rules
+
             source = AttrSource(self.source, name) if self.source is not None else None
             try:
                 obj = inspect.getattr_static(self.fn_cls, name)

@@ -67,7 +67,7 @@ class TestLazyCloneDeviceType(TestCase):
             "from_1_to_0",
         ],
     )
-    def test_lazy_clone_to_device(self, device, materialize_first, case):
+    def test_interdevice_materialize(self, device, materialize_first, case):
         src_device, dest_device = self.get_src_dest_devices(case, device)
 
         src_device_check = torch.empty(0, device=src_device).device
@@ -156,7 +156,7 @@ class TestLazyCloneDeviceType(TestCase):
             "from_1_to_0",
         ],
     )
-    def test_lazy_clone_to_device_read(self, device, case):
+    def test_interdevice_read(self, device, case):
         src_device, dest_device = self.get_src_dest_devices(case, device)
 
         src_device_check = torch.empty(0, device=src_device).device
