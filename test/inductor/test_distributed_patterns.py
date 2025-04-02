@@ -3,7 +3,6 @@ import dataclasses
 import functools
 
 import torch
-import torch.distributed.fsdp
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
@@ -17,6 +16,8 @@ WORLD_SIZE = 2
 
 
 def init_fake_distributed(device="cpu"):
+    import torch.distributed.fsdp
+
     @torch.no_grad
     def all_gather(t):
         return torch.cat([t] * WORLD_SIZE, 0)
