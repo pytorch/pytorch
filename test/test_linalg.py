@@ -146,12 +146,10 @@ class TestLinalg(TestCase):
 
             # clean up, remove any files that were generated
             results_filename = torch.cuda.tunable.get_filename()
-            dot_index = results_filename.rfind(".")
-            results_filename_pattern = results_filename[:dot_index-1]
-            untuned_filename = os.getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME")
-            dot_index = untuned_filename.rfind(".")
-            untuned_filename_pattern = untuned_filename[:dot_index]
-            patterns = [f"{results_filename_pattern}*.csv", f"{untuned_filename_pattern}*.csv"]
+            results_filename_pattern, _, _ = results_filename.rpartition('.')
+            untuned_filename = get_tunableop_untuned_filename()
+            untuned_filename_pattern, _, _ = untuned_filename.rpartition('.')
+            patterns = [f"{results_filename_pattern[:-1]}*.csv", f"{untuned_filename_pattern[:-1]}*.csv"]
             files = [f for pattern in patterns for f in glob.glob(pattern)]
             for file in files:
                 try:
@@ -199,12 +197,11 @@ class TestLinalg(TestCase):
         # there is a matching one in the tuned results file.
         import csv
         ok = False
-        unique_id = self.id().split(".")[-1]
         ordinal = torch.cuda.current_device()
         if untuned_filename is None:
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            untuned_filename = get_tunableop_untuned_filename()
         if tuned_filename is None:
-            tuned_filename = f"tunableop_results_{unique_id}_{ordinal}.csv"
+            tuned_filename = torch.cuda.tunable.get_filename()
 
         with open(untuned_filename) as file1:
             with open(tuned_filename) as file2:
@@ -4733,8 +4730,8 @@ class TestLinalg(TestCase):
 
             filename1 = torch.cuda.tunable.get_filename()
             unique_id = self.id().split(".")[-1]
-            filename2 = f"tunableop_results_{unique_id}_{ordinal}_tmp1.csv"
-            filename3 = f"tunableop_results_{unique_id}_{ordinal}_tmp2.csv"
+            filename2 = f"{filename1}_tmp1.csv"
+            filename3 = f"{filename1}_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
             assert len(torch.cuda.tunable.get_results()) > 0
@@ -4857,8 +4854,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            unique_id = self.id().split(".")[-1]
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            untuned_filename = get_tunableop_untuned_filename()
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -4939,8 +4935,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            unique_id = self.id().split(".")[-1]
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            untuned_filename = get_tunableop_untuned_filename()
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -4988,8 +4983,7 @@ class TestLinalg(TestCase):
 
             # Untuned filename has unique id, but results file
             # does not because it is executed in a subprocess
-            unique_id = self.id().split(".")[-1]
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            untuned_filename = get_tunableop_untuned_filename()
             torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
             #  turn on untuned GEMM recording and turn off tuning
@@ -5355,8 +5349,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            unique_id = self.id().split(".")[-1]
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            untuned_filename = get_tunableop_untuned_filename()
 
             # tuning the untuned GEMMs in file
             torch.cuda.tunable.tuning_enable(True)
@@ -5555,8 +5548,7 @@ class TestLinalg(TestCase):
                 torch.backends.cuda.matmul.allow_tf32 = False
                 C = torch.matmul(A, B)
 
-                unique_id = self.id().split(".")[-1]
-                untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+                untuned_filename = get_tunableop_untuned_filename()
                 self.assertTrue(os.path.exists(untuned_filename))
 
                 # tuning the untuned GEMMs in file
@@ -5623,14 +5615,11 @@ class TestLinalg(TestCase):
         with self._tunableop_ctx():
             os.putenv("PYTORCH_TUNABLEOP_BLAS_LOG", "1")
 
-            ordinal = torch.cuda.current_device()
-
             # TunableOp is running in a subprocess
             # online tuning needs filename set through API
             # offline tuning needs filename set through environment variableq
-            unique_id = self.id().split(".")[-1]
-            result_filename = f"tunableop_results_{unique_id}_{ordinal}.csv"
-            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+            result_filename = torch.cuda.tunable.get_filename()
+            untuned_filename = get_tunableop_untuned_filename()
 
             # Offline Tuning case in a subprocess
 
