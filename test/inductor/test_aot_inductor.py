@@ -438,6 +438,9 @@ class AOTInductorTestsTemplate:
                 self.check_model(model, example_inputs)
 
     def test_linear_dynamic_maxautotune(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -554,6 +557,9 @@ class AOTInductorTestsTemplate:
 
     @skip("Test was marked as expected failure, but does not fail always anymore.")
     def test_dynamic_smem_above_default_limit(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         class Model(torch.nn.Module):
             def forward(self, x, y):
                 return x @ y
@@ -878,6 +884,9 @@ class AOTInductorTestsTemplate:
         "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
     )
     def test_addmm_multiple_dynamic(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
                 super().__init__()
@@ -919,6 +928,9 @@ class AOTInductorTestsTemplate:
         "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
     )
     def test_bmm_multiple_dynamic(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1818,6 +1830,7 @@ class AOTInductorTestsTemplate:
 
     @skipCUDAIf(True, "Test for x86 backend")
     @skipIfXpu
+    @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
         class Model(nn.Module):
             def __init__(self):
@@ -2965,6 +2978,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), inputs)
 
     def test_convolution(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
