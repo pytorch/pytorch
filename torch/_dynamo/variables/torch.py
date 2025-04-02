@@ -76,6 +76,7 @@ from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
+    TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
 
@@ -1350,7 +1351,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        if is_traceable_wrapper_subclass_type(data.class_type):
+        if isinstance(
+            data, TensorWithTFOverrideVariable
+        ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented("Parameter constructor with tensor subclass NYI")
 
         if not can_convert_to_tracable_parameter():

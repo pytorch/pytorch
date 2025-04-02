@@ -1408,6 +1408,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "reorderable_logging_functions",
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
+            "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
         }
 

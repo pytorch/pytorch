@@ -40,6 +40,10 @@ def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
 
 
+def nontraceable_subclass(c):
+    return torch._dynamo.config.patch("nontraceable_tensor_subclasses", {c})
+
+
 def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
     actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
     self.assertEqual(actual_recompiles, expected_recompiles)
@@ -1187,6 +1191,30 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(res.elem, ref.elem)
         self.assertEqual(type(res), type(ref))
+
+    def test_nontraceable_tensor_subclass(self):
+        # This will error if Dynamo tries to wrap it as a tensor variable,
+        # because that involves calling certain methods to inspect the tensor
+        # property, which will blow up in the overriden `__torch_function__`.
+        class MySubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("one shall not pass")
+
+        def f(t):
+            return t.foo + torch.ones(10)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=False)
+
+        t = MySubclass(torch.ones(2))
+        t.foo = 42
+        # Make sure the `nontraceable_tensor_subclasses` config prevents Dynamo
+        # from wrapping `t`.
+        with nontraceable_subclass(MySubclass):
+            res = f(t)
+            ref = opt_f(t)
+
+        self.assertEqual(res, ref)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
