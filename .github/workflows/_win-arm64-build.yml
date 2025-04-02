@@ -96,6 +96,17 @@ jobs:
           aws-region: us-east-1
           role-duration-seconds: 18000
           
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          echo %PYTORCH_FINAL_PACKAGE_DIR%
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
