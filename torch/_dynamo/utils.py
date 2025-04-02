@@ -598,6 +598,7 @@ def dynamo_timed(
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -674,13 +675,23 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    cx_managers: list[typing.Any] = [
+        torch.profiler.record_function(f"{key} (dynamo_timed)")
+    ]
+    wait_counter_name = key
+    if waitcounter_name_override:
+        wait_counter_name = waitcounter_name_override
+
+    if log_waitcounter:
+        cx_managers.append(
+            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
+        )
+
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            if log_waitcounter:
-                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
-                    yield
-            else:
-                yield
+        with contextlib.ExitStack() as stack:
+            for cx in cx_managers:
+                stack.enter_context(cx)
+            yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
@@ -3751,10 +3762,11 @@ def build_checkpoint_variable(**options):
 def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4072,6 +4084,14 @@ def is_tensor_base_attr_getter(value):
     )
 
 
+def is_tensor_getset_descriptor(name):
+    try:
+        attr = inspect.getattr_static(torch.Tensor, name)
+        return type(attr) is types.GetSetDescriptorType
+    except AttributeError:
+        return False
+
+
 def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
@@ -4351,7 +4371,9 @@ def does_not_override_dict_iter_methods(user_cls):
 # compiled bytecode
 # They will be skipped which is the desired result
 def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.size(i)
 
@@ -4359,7 +4381,9 @@ def call_size(x, i):
 
 
 def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.stride(i)
 
@@ -4367,7 +4391,9 @@ def call_stride(x, i):
 
 
 def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x):
         return x.storage_offset()
 
