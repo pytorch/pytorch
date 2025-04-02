@@ -33,7 +33,7 @@ namespace at::native {
 
 namespace {
 
-inline bool is_block_start(int index, int BLOCK_SIZE) {
+[[maybe_unused]] inline bool is_block_start(int index, int BLOCK_SIZE) {
   return !(index & (BLOCK_SIZE -1));
 }
 
@@ -480,13 +480,13 @@ inline void tinygemm_kernel(
 
 template<int BLOCK_N>
 inline float convert_int4_to_float(const uint8_t* b, int n) {
-  static constexpr float lut[16] = {
+  static constexpr std::array<float, 16> lut = {
     -8.0f, -7.0f, -6.0f, -5.0f,
     -4.0f, -3.0f, -2.0f, -1.0f,
     0.0f, 1.0f, 2.0f, 3.0f,
     4.0f, 5.0f, 6.0f, 7.0f
   };
-  int index;
+  int index{0};
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
   if constexpr (BLOCK_N == 64) {
     const int nb = n/BLOCK_N;
@@ -541,7 +541,7 @@ inline void tinygemm_kernel(
         const auto scale = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2]);
         const auto zero = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2 + 1]);
         const auto a_val = static_cast<float>(A[m * lda + k]);
-        float b_val = convert_int4_to_float<BLOCK_N>(B + k *ldb, n);
+        float b_val = convert_int4_to_float<BLOCK_N>(B + static_cast<ptrdiff_t>(k) * ldb, n);
         b_val = b_val * scale + zero;
 
         c_val += a_val * b_val;
@@ -621,8 +621,8 @@ void weight_to_int4pack_kernel(
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
   const auto weight_data = weight.data_ptr<int32_t>();
 
-  int N = weight.size(0);
-  int K = weight.size(1);
+  int N = static_cast<int>(weight.size(0));
+  int K = static_cast<int>(weight.size(1));
 
   // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
@@ -633,8 +633,8 @@ void weight_to_int4pack_kernel(
     for (const auto i : c10::irange(begin, end)) {
       int nb_size = std::min(BLOCK_N, N - i * BLOCK_N);
 
-      const int32_t* src = weight_data + i * BLOCK_N * K;
-      uint8_t* dst = weight_packed_data + i * K * BLOCK_N / 2;
+      const int32_t* src = weight_data + static_cast<ptrdiff_t>(i) * BLOCK_N * K;
+      uint8_t* dst = weight_packed_data + static_cast<ptrdiff_t>(i) * K * BLOCK_N / 2;
       for (const auto k : c10::irange(K)) {
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
@@ -707,9 +707,9 @@ void int4pack_mm_kernel_(
   auto* C_data = C.data_ptr<T>();
   const auto* S_data = qScaleAndZeros.const_data_ptr<T>();
 
-  int M = A.size(0);
-  int N = B.size(0);
-  int K = A.size(1);
+  int M = static_cast<int>(A.size(0));
+  int N = static_cast<int>(B.size(0));
+  int K = static_cast<int>(A.size(1));
 
   constexpr int BLOCK_M = 4;
   // 64 for avx512 and 32 for avx2/non-vectorized
@@ -813,9 +813,9 @@ void dyn_quant_pack_4bit_weight_kernel(
     const Tensor& weights,
     const Tensor& scales_zeros,
     const std::optional<Tensor>& bias,
-    const int64_t N,
-    const int64_t K,
-    const int64_t block_size) {
+    [[maybe_unused]] const int64_t N,
+    [[maybe_unused]] const int64_t K,
+    [[maybe_unused]] const int64_t block_size) {
 #if AT_KLEIDIAI_ENABLED()
   if (can_use_kleidiai(scales_zeros, K, block_size)) {
     const int64_t weight_packed_size =
@@ -850,6 +850,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
     float scalar_max) {
   const size_t input_size_8bit = m * (k + sizeof(int32_t) + sizeof(float));
 
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   auto lhs_qa8dx_buffer = std::make_unique<uint8_t[]>(input_size_8bit);
   uint8_t* lhs_qa8dx = lhs_qa8dx_buffer.get();
 
@@ -887,7 +888,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
               rmin0 == rmax0 ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
 
           // Reciprocal to quantize
-          const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
+          const float recip_scale0 = (scale0 != 0.0f) ? 1.0f / scale0 : 0.0f;
 
           const float descaled_min0 = rmin0 * scale0;
           const float descaled_max0 = rmax0 * scale0;
@@ -904,7 +905,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           zero_point0 = (std::min)(zero_point0, qmax);
 
           // Round to nearest integer
-          const int32_t nudged_zero_point0 = lrintf(zero_point0);
+          const int32_t nudged_zero_point0 = static_cast<int32_t>(lrintf(zero_point0));
 
           int8_t* dst_ptr = (int8_t*)lhs_qa8dx + m_idx * dst_stride;
 
@@ -958,6 +959,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
 
       for (size_t k_idx = 0; k_idx < k; ++k_idx) {
         // Get the LHS values
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         const int32_t lhs_v0 = (int32_t)lhs_ptr[0];
 
         // Get the RHS values
@@ -983,7 +985,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
       // Get the RHS scale
       const float rhs_scale = rhs_scales_f32[n_idx];
 
-      float main_acc = iacc * rhs_scale;
+      float main_acc = static_cast<float>(iacc) * rhs_scale;
 
       main_acc = main_acc * lhs_scale;
 
@@ -1035,7 +1037,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       const float rmax0 = (std::max)(0.0f, max0);
       const float scale0 =
           (rmin0 == rmax0) ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
-      const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
+      const float recip_scale0 = (scale0 != 0.0f) ? 1.0f / scale0 : 0.0f;
 
       const float descaled_min0 = rmin0 * scale0;
       const float descaled_max0 = rmax0 * scale0;
@@ -1046,7 +1048,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 
       zero_point0 = (std::max)(zero_point0, qmin);
       zero_point0 = (std::min)(zero_point0, qmax);
-      const int32_t nudged_zero_point0 = lrintf(zero_point0);
+      const int32_t nudged_zero_point0 = static_cast<int32_t>(lrintf(zero_point0));
 
       int8_t* dst_ptr = (int8_t*)lhs_qa8dx + row_idx * dst_stride;
 
@@ -1068,6 +1070,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     }
   };
 
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   auto lhs_qa8dx_buffer = std::make_unique<int8_t[]>(
       m * (k + sizeof(float) + sizeof(int32_t))); // Allocate for LHS
   int8_t* lhs_qa8dx = lhs_qa8dx_buffer.get();
@@ -1102,6 +1105,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
             break;
           }
 
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           const int32_t lhs_v0 = (int32_t)lhs_ptr[0];
           const uint8_t rhs_byte = rhs_ptr[0];
           int32_t rhs_v0 = (k_idx % 2 == 0) ? (((int32_t)(rhs_byte & 0x0F)) - 8)
@@ -1114,7 +1118,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
           rhs_ptr += (k_idx % 2);
         }
 
-        main_acc += iacc * rhs_scale;
+        main_acc += static_cast<float>(iacc) * rhs_scale;
       }
 
       main_acc = main_acc * lhs_scale;
