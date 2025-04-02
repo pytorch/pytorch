@@ -991,8 +991,8 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
-    CACHE_ALIGN [[maybe_unused]] VT expectedWithLeftScalar[el_count];
-    CACHE_ALIGN [[maybe_unused]] VT expectedWithRightScalar[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithLeftScalar[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithRightScalar[el_count];
     [[maybe_unused]] VT scalar0;
     [[maybe_unused]] VT scalar1;
     bool bitwise = testCase.isBitwise();
