@@ -7660,10 +7660,6 @@ class InvokeSubgraph(ExternKernel):
                 device = operand.get_device()
                 break
         assert device is not None
-
-        assert all(isinstance(o, (TensorBox, StorageBox)) for o in operands), [
-            type(o) for o in operands
-        ]
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
             operands=operands,
