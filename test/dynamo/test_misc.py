@@ -103,16 +103,6 @@ else:
     cxx_pytree = None
 
 
-try:
-    import torch.utils.pytree as pytree
-except ImportError:
-    # Just re-test the python implementation
-    pytree = python_pytree
-else:
-    if not IS_FBCODE or not pytree.PYTORCH_USE_CXX_PYTREE:
-        pytree_modules["generic"] = pytree
-
-
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
