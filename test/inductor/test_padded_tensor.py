@@ -76,6 +76,11 @@ class PaddedTensorFunctionalTests(TestCase):
         multipliers = {0: 16, 1: 16}
 
         for i in range(3, 9):
+            # Set error_on_recompile to True after 3rd iteration.
+            # TODO: We don't need this if we mark padded dimensions as dynamic.
+            if i == 5:
+                torch._dynamo.config.error_on_recompile = True
+
             a = PaddedTensor.from_tensor(torch.randn([3, 5]), multipliers)
             b = PaddedTensor.from_tensor(torch.randn([5, i]), multipliers)
             c = PaddedTensor.from_tensor(torch.randn([3, i]), multipliers)
