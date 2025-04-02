@@ -458,6 +458,7 @@ class MetalKernel(SIMDKernel):
     suffix = ";"
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
+    simd_group_size = 32
     pexpr = PythonPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
@@ -551,24 +552,21 @@ class MetalKernel(SIMDKernel):
         if reduction_type in ["prod", "sum"]:
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             if self.multistage_reduction:
+                val = self._new_accvar(dtype)
                 default_val, reduction_op = (
                     (0, "+") if reduction_type == "sum" else (1, "*")
                 )
-                self.indexing_code.writeline(
-                    f"{acc_buf}[{reduction_dim.name}] = {default_val};"
-                )
-                self.compute.splice(
-                    f"{acc_buf}[{reduction_dim.name}] {reduction_op}= {value};"
-                )
+                self.indexing_code.writeline(f"{val} = {default_val};")
+                self.compute.splice(f"{val} {reduction_op}= {value};")
             else:
-                self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+                val = value
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_dim.name}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmin", "argmax"]:
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
+            acc_buf = self._new_accvar(src_dtype, acc_buf_size / self.simd_group_size)
             acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             if not self.multistage_reduction:
