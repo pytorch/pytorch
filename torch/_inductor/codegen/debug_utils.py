@@ -23,6 +23,9 @@ def _print_debugging_tensor_value_info(msg, arg):
     # at jit inductor level codegen
     max_numel_to_print = 64
     print(msg)
+    if not isinstance(arg, torch.Tensor):
+        print("Value: ", arg)
+        return
     numel = arg.float().numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
@@ -251,7 +254,7 @@ class DebugPrinterManager:
                 continue
             if V.graph.cpp_wrapper:
                 if arg_signatures is not None and isinstance(
-                    arg_signatures[i], (torch_dtype)
+                    arg_signatures[i], torch_dtype
                 ):
                     # infer from the arg data type (has torch.dtype) to see if it is a tensor type
                     V.graph.wrapper_code.writeline(
