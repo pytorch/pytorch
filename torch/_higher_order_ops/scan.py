@@ -36,15 +36,6 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 aten = torch._ops.ops.aten
 
 
-def split_into_chunks(iterable: Iterable[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
-
-
-def call_operator(operator, *args):
-    return pytree.tree_leaves(operator(*args))
-
-
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
@@ -60,6 +51,19 @@ def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
     return split_into_chunks(flat_out, [num_carry, len(flat_out) - num_carry])
 
 
+# We also do a clone with contiguous_format. This is to be consistent with
+# eager semantic of scan, which stacks the outputs. The result is contiguous
+# as a result of the stack operation.
+def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
+    return (
+        y.unsqueeze(0)
+        .repeat(*([scan_length] + [1] * y.ndim))
+        .clone(memory_format=torch.contiguous_format)
+    )
+
+
+# NOTE: These functions can be reused in associative_scan and eventually moved to
+# torch._higher_order_ops.utils
 def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
     # Returns a mask whether a list element is a tensor or not
     return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
@@ -78,15 +82,21 @@ def mask_list(
         return [i for m, i in zip(mask, inp) if m]
 
 
-# We also do a clone with contiguous_format. This is to be consistent with
-# eager semantic of scan, which stacks the outputs. The result is contiguous
-# as a result of the stack operation.
-def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
-    return (
-        y.unsqueeze(0)
-        .repeat(*([scan_length] + [1] * y.ndim))
-        .clone(memory_format=torch.contiguous_format)
-    )
+def first_slice_copy_with_grad(li):
+    # First_slice_copy does not keep the original requires_grad flag,
+    # but we need it for materialize_as_graph
+    # in order to compute the correct gradients
+    slc = [x[0] for x in li]
+    return slc
+
+
+def split_into_chunks(iterable: Iterable[Any], chunk_sizes: list[int]) -> list[Any]:
+    it = iter(iterable)
+    return [list(itertools.islice(it, size)) for size in chunk_sizes]
+
+
+def call_operator(operator, *args):
+    return pytree.tree_leaves(operator(*args))
 
 
 def scan(
@@ -396,11 +406,6 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs):
 
 class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
-    def first_slice_copy_with_grad(li):
-        slc = [x[0] for x in li]
-        return slc
-
-    @staticmethod
     def forward(
         ctx,
         combine_fn,
@@ -545,9 +550,7 @@ class ScanAutogradOp(torch.autograd.Function):
             ],
         )
 
-        # First_slice_copy does not keep the original requires_grad flag,
-        # but we need it here in order to compute the correcte gradients
-        fw_xs_slice = ScanAutogradOp.first_slice_copy_with_grad(fw_xs)
+        fw_xs_slice = first_slice_copy_with_grad(fw_xs)
 
         # 4.) Create the BW wrapper
         def combine_fn_bw_wrapped(*args):
