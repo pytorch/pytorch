@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
@@ -298,6 +299,12 @@ class MetalOverrides(OpOverrides):
         return f"metal::sqrt({x})"
 
     @staticmethod
+    def neg(x: CSEVariable) -> str:
+        # TODO: Does it rely on undefined behavior?
+        # If so, add special logic for unsigned types
+        return f"static_cast<decltype({x})>(-{x})"
+
+    @staticmethod
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::rsqrt({x})"
 
@@ -426,6 +433,22 @@ class MetalOverrides(OpOverrides):
     def scaled_modified_bessel_k1(x: CSEVariable) -> str:
         return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
 
+    @staticmethod
+    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_u(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_u_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_v(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_v_forward({x}, {n})"
+
+    @staticmethod
+    def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -469,6 +492,16 @@ class MetalKernel(SIMDKernel):
             self.compute.writeline(DeferredLine(name, line))
         else:
             self.stores.writeline(DeferredLine(name, line))
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        var = self.args.output(name)
+        index = self.prepare_indexing(index)
+        dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
+        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+        # Only one thread in the reduction group needs to store the results
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
+        line = f"if ({reduction_dim.name} == 0) {line}"
+        self.stores.writeline(DeferredLine(name, line))
 
     def _new_accvar(
         self,
@@ -661,6 +694,14 @@ class MetalKernel(SIMDKernel):
             )
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
+            if self.inside_reduction:
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
+                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
