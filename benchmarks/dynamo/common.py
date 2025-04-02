@@ -3735,6 +3735,10 @@ def run(runner, args, original_dir=None):
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
             runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
+
+            # For AOTI, we only measure the memory compression ratio at the run time
+            # instead of the compile time, so use a warmup run to trigger AOTI compilation.
+            args.use_warm_peak_memory = True
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
