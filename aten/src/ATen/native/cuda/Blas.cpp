@@ -1528,7 +1528,7 @@ bool use_fast_accum) {
     ").");
 
 
-
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
@@ -1576,7 +1576,6 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-
   bool allowed_device = _scaled_mm_allowed_device();
   TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
 
@@ -1589,13 +1588,16 @@ std::optional<c10::ScalarType> out_dtype) {
   // check that the strides are valid, the fn will throw an error if not
   check_valid_strides_and_return_transposed(mat_a);
   check_valid_strides_and_return_transposed(mat_b);
-  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d");
 
   if (offs.has_value()) {
     TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high output type is supported for grouped gemm");
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+
   const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
   Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
   at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);

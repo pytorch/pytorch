@@ -254,10 +254,15 @@ class TestMatmulCuda(TestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
-    def grouped_mm_helper(self, alist, blist, outlist):
-        for a, b, out in zip(alist, blist, outlist):
+    def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
+        for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
+            a = a.clone().detach().requires_grad_()
+            b = b.clone().detach().requires_grad_()
             out_ref = torch.mm(a, b.t())
+            out_ref.backward(gO)
             self.assertEqual(out, out_ref)
+            self.assertEqual(agrad, a.grad)
+            self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
@@ -277,17 +282,24 @@ class TestMatmulCuda(TestCase):
             b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
         else:
             b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         out = torch._grouped_mm(a, b.t(), offs=offs,
                                 out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
         offs_cpu = offs.cpu()
-        alist, blist = [], []
+        alist, blist, agradlist, bgradlist = [], [], [], []
         start = 0
         for i in range(n_groups):
             alist.append(a[:, start:offs_cpu[i]])
             blist.append(b[:, start:offs_cpu[i]])
+            agradlist.append(a.grad[:, start:offs_cpu[i]])
+            bgradlist.append(b.grad[:, start:offs_cpu[i]])
             start = offs_cpu[i]
-        self.grouped_mm_helper(alist, blist, out)
+        self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
@@ -310,6 +322,9 @@ class TestMatmulCuda(TestCase):
             b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
 
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
         a_contig = a if a_row_major else a.t()
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
@@ -318,15 +333,18 @@ class TestMatmulCuda(TestCase):
 
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
                                 out_dtype=torch.bfloat16)
-
+        gO = torch.rand_like(out)
+        out.backward(gO)
         offs_cpu = offs.cpu()
-        alist, outlist = [], []
+        alist, agradlist, gOlist, outlist = [], [], [], []
         start = 0
         for i in range(n_groups):
             alist.append(a[start:offs_cpu[i]])
+            agradlist.append(a.grad[start:offs_cpu[i]])
             outlist.append(out[start:offs_cpu[i]])
+            gOlist.append(gO[start:offs_cpu[i]])
             start = offs_cpu[i]
-        self.grouped_mm_helper(alist, b, outlist)
+        self.grouped_mm_helper(alist, b, gOlist, agradlist, b.grad, outlist)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
@@ -349,14 +367,18 @@ class TestMatmulCuda(TestCase):
         else:
             b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+  
         a_contig = a if a_row_major else a.transpose(-2, -1)
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
         out = torch._grouped_mm(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
-        self.grouped_mm_helper(a, b, out)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
@@ -378,6 +400,9 @@ class TestMatmulCuda(TestCase):
         else:
             b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
 
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
         a_contig = a if a_row_major else a.transpose(-2, -1)
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
@@ -385,14 +410,18 @@ class TestMatmulCuda(TestCase):
         offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
         out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
                                 out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
         offs_cpu = offs.cpu()
-        blist, outlist = [], []
+        blist, outlist, bgradlist, gOlist = [], [], [], []
         start = 0
         for i in range(n_groups):
             blist.append(b[start:offs_cpu[i]])
+            bgradlist.append(b.grad[start:offs_cpu[i]])
             outlist.append(out[:, start:offs_cpu[i]])
+            gOlist.append(gO[:, start:offs_cpu[i]])
             start = offs_cpu[i]
-        self.grouped_mm_helper(a, blist, outlist)
+        self.grouped_mm_helper(a, blist, gOlist, a.grad, bgradlist, outlist)
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
