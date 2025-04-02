@@ -6714,6 +6714,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_full_like_stride(self):
+        def fn(a):
+            return torch.full_like(a, 3)
+
+        self.common(fn, (torch.randn(4, 5, 6).transpose(1, -1),))
+
     def test_full_truncation(self):
         def fn(a):
             return a + torch.full_like(a, 7.777)
