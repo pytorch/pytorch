@@ -213,7 +213,6 @@ class TestLinalg(TestCase):
 
                 if missing:
                     ok = False
-                    print(missing)
                 else:
                     ok = True
 
