@@ -57,17 +57,17 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     TestCase,
-    MI300_ARCH,
-    runOnRocmArch,
 )
 
 

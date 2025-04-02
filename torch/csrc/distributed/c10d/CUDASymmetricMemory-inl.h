@@ -37,12 +37,12 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
 #elif defined(USE_ROCM)
-  if (Sem == std::memory_order_acquire || Sem == std::memory_order_acq_rel){
-      __threadfence_system();
+  if (Sem == std::memory_order_acquire || Sem == std::memory_order_acq_rel) {
+    __threadfence_system();
   }
   uint32_t old_val = atomicCAS_system(addr, compare, val);
-  if (Sem == std::memory_order_release || Sem == std::memory_order_acq_rel){
-      __threadfence_system();
+  if (Sem == std::memory_order_release || Sem == std::memory_order_acq_rel) {
+    __threadfence_system();
   }
   return old_val;
 #else
@@ -53,7 +53,7 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 
 __device__ __forceinline__ void trap() {
 #if defined(USE_ROCM)
-    abort();
+  abort();
 #else
   __trap();
 #endif
@@ -61,7 +61,8 @@ __device__ __forceinline__ void trap() {
 
 __device__ __forceinline__ size_t global_timer_ns() {
 #if defined(USE_ROCM)
-  return __builtin_amdgcn_s_memtime() / 2.1; //@TODO hardcoded GPU freq as 2.1GHz on MI300x 
+  static constexpr double MI300_FREQ_GHZ = 2.1;
+  return __builtin_amdgcn_s_memtime() / MI300_FREQ_GHZ;
 #else
   size_t val;
   asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");

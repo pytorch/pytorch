@@ -21,6 +21,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_shard_for_fused_all_gather_matmul,
 )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_multicast_support,
@@ -28,18 +29,17 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     requires_cuda,
     run_tests,
+    runOnRocmArch,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
-    MI300_ARCH,
-    runOnRocmArch,
     TEST_WITH_ROCM,
     TestCase,
 )
 
-from torch.testing._internal.common_device_type import e4m3_type
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -360,7 +360,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm #this requires async_input_mm support
+    @skipIfRocm  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -488,9 +488,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         torch.manual_seed(42 + rank)
 
         A_shard = torch.rand(*leading_dims, K, device="cuda").to(e4m3_type)
-        Bs = [
-            torch.rand(N, K, device="cuda").to(e4m3_type).T for _ in range(3)
-        ]
+        Bs = [torch.rand(N, K, device="cuda").to(e4m3_type).T for _ in range(3)]
 
         if scale_mode == "tensor-wise":
             A_scale = torch.tensor(0.1, device="cuda")
@@ -579,7 +577,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm #AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
+    @skipIfRocm  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
