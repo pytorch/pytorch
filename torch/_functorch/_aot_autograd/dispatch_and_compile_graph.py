@@ -71,80 +71,94 @@ def _detach_and_copy_item_memo(t):
     return detached_t
 
 
+class Context(NamedTuple):
+    aot_config: AOTConfig
+    fw_only: Callable[..., Any]
+    functionalized_inputs: Optional[list[list[Any]]]
+    is_joint_structure: bool
+    meta: ViewAndMutationMeta
+    trace_joint: bool
+
+
 class FnArgs(NamedTuple):
     """Wrap a function, its tensor arguments, and some extra data"""
 
     fn: Callable[..., Any]
     args: Sequence[Tensor]
-    extra: dict[str, Any]
+    maybe_subclass_meta: Optional[SubclassMeta]
 
     def replace(
         self,
         fn: Callable[..., Any],
         args: Optional[Sequence[Tensor]] = None,
-        extra: Optional[dict[str, Any]] = None,
+        maybe_subclass_meta: Optional[SubclassMeta] = None,
     ) -> "FnArgs":
         if args is None:
             args = self.args
-        return FnArgs(fn, args, self.extra | (extra or {}))
+        return FnArgs(fn, args, maybe_subclass_meta or self.maybe_subclass_meta)
 
 
 class Wrapper(Protocol):
-    def __call__(self, fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
+    def __call__(self, fn_args: FnArgs, context: Context) -> FnArgs:
         pass
 
 
-def _aot_dispatch_subclass(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
+def _aot_dispatch_subclass(fn_args: FnArgs, context: Context) -> FnArgs:
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
     # into CompilerWrappers.
     subclass_tracing_info = aot_dispatch_subclass(
         fn_args.fn,
         fn_args.args,  # type: ignore[arg-type]
-        is_joint_structure=context["is_joint_structure"],
-        meta=context["meta"],
-        fw_only=context["fw_only"],
+        is_joint_structure=context.is_joint_structure,
+        meta=context.meta,
+        fw_only=context.fw_only,
     )
-    fn, args, _ = subclass_tracing_info
-    return fn_args.replace(fn, args, {"subclass_tracing_info": subclass_tracing_info})
+    fn, args, maybe_subclass_meta = subclass_tracing_info
+    return fn_args.replace(fn, args, maybe_subclass_meta)
 
 
-def _create_functionalized_fn(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
+def _create_functionalized_fn(fn_args: FnArgs, context: Context) -> FnArgs:
+    if context.functionalized_inputs is None:
+        args: Sequence[Any] = fn_args.args
+    else:
+        args = context.functionalized_inputs
+
     fn, args = create_functionalized_fn(
         fn_args.fn,
-        context.get("functionalized_inputs", fn_args.args),
-        aot_config=context["aot_config"],
-        meta=context["meta"],
-        trace_joint=context["trace_joint"],
+        args,
+        aot_config=context.aot_config,
+        meta=context.meta,
+        trace_joint=context.trace_joint,
     )
     return fn_args.replace(fn, args)
 
 
-def _create_joint(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
-    fn = create_joint(fn_args.fn, aot_config=context["aot_config"])
+def _create_joint(fn_args: FnArgs, context: Context) -> FnArgs:
+    fn = create_joint(fn_args.fn, aot_config=context.aot_config)
     return fn_args.replace(fn)
 
 
-def _fn_input_mutations_to_outputs(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
+def _fn_input_mutations_to_outputs(fn_args: FnArgs, context: Context) -> FnArgs:
     fn = fn_input_mutations_to_outputs(
         fn=fn_args.fn,
-        keep_data_input_mutations=context["aot_config"].keep_inference_input_mutations,
-        meta=context["meta"],
+        keep_data_input_mutations=context.aot_config.keep_inference_input_mutations,
+        meta=context.meta,
     )
     return fn_args.replace(fn)
 
 
-def _fn_prepped_for_autograd(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
-    fn = fn_prepped_for_autograd(fn_args.fn, context["meta"])
+def _fn_prepped_for_autograd(fn_args: FnArgs, context: Context) -> FnArgs:
+    fn = fn_prepped_for_autograd(fn_args.fn, context.meta)
     return fn_args.replace(fn)
 
 
-def _handle_effect_tokens_fn(fn_args: FnArgs, context: dict[str, Any]) -> FnArgs:
+def _handle_effect_tokens_fn(fn_args: FnArgs, context: Context) -> FnArgs:
     fn, args = handle_effect_tokens_fn(
         fn_args.fn,
         fn_args.args,
-        meta=context["meta"],
-        trace_joint=context["trace_joint"],
+        meta=context.meta,
+        trace_joint=context.trace_joint,
     )
     return fn_args.replace(fn, args)
 
@@ -163,26 +177,25 @@ def aot_dispatch_base_graph(
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    context = {
-        "aot_config": aot_config,
-        "is_joint_structure": False,
-        "fw_only": flat_fn,
-        "meta": fw_metadata,
-        "trace_joint": False,
-    }
+    context = Context(
+        aot_config=aot_config,
+        functionalized_inputs=None,
+        is_joint_structure=False,
+        fw_only=flat_fn,
+        meta=fw_metadata,
+        trace_joint=False,
+    )
     wrappers: Sequence[Wrapper] = (
         _fn_input_mutations_to_outputs,
         _create_functionalized_fn,
         _aot_dispatch_subclass,
         _handle_effect_tokens_fn,
     )
-    fn_args = FnArgs(flat_fn, flat_args, {})
+    fn_args = FnArgs(flat_fn, flat_args, None)
     for wrapper in wrappers:
         fn_args = wrapper(fn_args, context)
 
-    fn_to_trace, updated_flat_args_subclasses_desugared, _ = fn_args
-    subclass_tracing_info = fn_args.extra["subclass_tracing_info"]
-    maybe_subclass_meta = subclass_tracing_info[-1] if subclass_tracing_info else None
+    fn_to_trace, updated_flat_args_subclasses_desugared, maybe_subclass_meta = fn_args
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
@@ -325,14 +338,14 @@ def aot_dispatch_autograd_graph(
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
 
-    context = {
-        "aot_config": aot_config,
-        "functionalized_inputs": [flat_args, fw_metadata.traced_tangents],
-        "fw_only": flat_fn,
-        "is_joint_structure": True,
-        "meta": fw_metadata,
-        "trace_joint": True,
-    }
+    context = Context(
+        aot_config=aot_config,
+        functionalized_inputs=[flat_args, fw_metadata.traced_tangents],
+        fw_only=flat_fn,
+        is_joint_structure=True,
+        meta=fw_metadata,
+        trace_joint=True,
+    )
     wrappers: Sequence[Wrapper] = (
         _fn_prepped_for_autograd,
         _create_joint,
@@ -340,12 +353,11 @@ def aot_dispatch_autograd_graph(
         _aot_dispatch_subclass,
         _handle_effect_tokens_fn,
     )
-    fn_args = FnArgs(flat_fn, flat_args, {})
+    fn_args = FnArgs(flat_fn, flat_args, None)
     for wrapper in wrappers:
         fn_args = wrapper(fn_args, context)
 
-    joint_fn_to_trace, updated_joint_inputs, _ = fn_args
-    subclass_tracing_info = fn_args.extra["subclass_tracing_info"]
+    joint_fn_to_trace, updated_joint_inputs, maybe_subclass_meta = fn_args
 
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
@@ -365,9 +377,6 @@ def aot_dispatch_autograd_graph(
         saved_updated_joint_inputs = pytree.tree_map_only(
             torch.Tensor, lambda t: t.detach(), updated_joint_inputs
         )
-    maybe_subclass_meta = (
-        subclass_tracing_info.maybe_subclass_meta if subclass_tracing_info else None
-    )
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 

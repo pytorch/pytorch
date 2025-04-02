@@ -62,7 +62,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   // Case 1: a is a tuple.
   if (PyTuple_Check(a)) {
     Py_ssize_t n = PyTuple_GET_SIZE(a);
-    if (n == 0) {
+    if (n == 0 && PyTuple_CheckExact(a)) {
       return Py_NewRef(a);
     }
     THPObjectPtr new_tuple(PyTuple_New(n));
@@ -612,7 +612,7 @@ static int NodeIter_init_fn(NodeIter* self, PyObject* args, PyObject* kwargs) {
 }
 
 template <bool reversed>
-PyObject* NodeIter_iternext_helper(NodeIter* self) {
+static PyObject* NodeIter_iternext_helper(NodeIter* self) {
   // It should be possible to relax the ref counting here
   // but in practice, we do not have that many _erased Nodes,
   // so probably not worth it.
@@ -644,7 +644,7 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
   return nullptr;
 }
 
-PyObject* NodeIter_iternext(PyObject* _self) {
+static PyObject* NodeIter_iternext(PyObject* _self) {
   NodeIter* self = (NodeIter*)_self;
   if (self->_reversed) {
     return NodeIter_iternext_helper<true>(self);
