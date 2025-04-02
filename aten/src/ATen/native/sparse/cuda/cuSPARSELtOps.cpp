@@ -106,7 +106,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       break;
 #endif
     default:
-      TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
+      TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
       break;
   }
 
@@ -219,7 +219,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       break;
 #endif
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       input_type = CUDA_R_8F_E4M3;
       output_type = CUDA_R_8F_E4M3;
@@ -282,7 +282,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       }
     }
 // cslt 0.6.2+: fp8 fp8 -> {fp8, fp16, bf16, fp32} support
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
     else if (input_type == CUDA_R_8F_E4M3) {
       switch (out_dtype) {
         case at::ScalarType::Float8_e4m3fn:
