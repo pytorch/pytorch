@@ -68,12 +68,6 @@ from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTrack
 from .constant import ConstantVariable
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None
-
-
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._higher_order_ops.triton_kernel_wrap import (
@@ -870,6 +864,11 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        try:
+            from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+        except ModuleNotFoundError:
+            _fsdp_param_group = None
+
         # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
         # a `nonstrict_trace`-ed function will be wrapped by
         # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,

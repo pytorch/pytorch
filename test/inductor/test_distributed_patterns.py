@@ -16,6 +16,8 @@ WORLD_SIZE = 2
 
 
 def init_fake_distributed(device="cpu"):
+    import torch.distributed.fsdp
+
     @torch.no_grad
     def all_gather(t):
         return torch.cat([t] * WORLD_SIZE, 0)

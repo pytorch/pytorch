@@ -86,12 +86,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -291,6 +285,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
+
+        try:
+            from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+        except ModuleNotFoundError:
+            _fsdp_param_group = None  # type: ignore[assignment]
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(

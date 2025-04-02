@@ -52,6 +52,7 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     ProcessLocalGroup,
 )
 import operator
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1362,7 +1363,7 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
         if fake_pg:
-            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            store = FakeStore()
             c10d.init_process_group(
                 backend="fake",
                 world_size=world_size,
