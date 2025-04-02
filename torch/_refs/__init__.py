@@ -4185,6 +4185,12 @@ def split_with_sizes(
             split_sizes[i],
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
+    if len(split_sizes) > 0:
+        split_size_acc = split_sizes[0]
+        torch._check(split_size_acc <= self.shape[dim])
+        for new_size in split_sizes[1:]:
+            split_size_acc += new_size
+            torch._check(split_size_acc <= self.shape[dim])
     torch._check_with(
         ValueError,
         builtins.sum(split_sizes) == self.shape[dim],

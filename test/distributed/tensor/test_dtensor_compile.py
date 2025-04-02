@@ -114,6 +114,43 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 2
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_dtensor_split_cat_unbacked(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x_local, indices, weights):
+            x = DTensor.from_local(x_local, mesh, [Shard(1)], run_check=False)
+            weights = [
+                DTensor.from_local(w, mesh, [Shard(0)], run_check=False)
+                for w in weights
+            ]
+            x_splits = torch.split(x, split_size_or_sections=indices.tolist(), dim=0)
+            outs = []
+            for x_split, w in zip(x_splits, weights):
+                outs.append(torch.matmul(x_split, w))
+            out = torch.cat(outs)
+            out_local = out.redistribute(
+                device_mesh=out.device_mesh, placements=(Replicate(),)
+            ).to_local()
+            token_indices = torch.ones_like(x_local, dtype=torch.long)
+            # Do this to ensure out final output does not have unbacked symints
+            new_out = x_local.clone().scatter_add_(
+                dim=0, index=token_indices, src=out_local
+            )
+            return new_out
+
+        x = torch.randn(16, 32, device="cuda")
+        indices = torch.tensor([3, 5, 3, 5])
+        weights = [
+            torch.randn(32, 32, device="cuda", requires_grad=True),
+            torch.randn(32, 32, device="cuda", requires_grad=True),
+            torch.randn(32, 32, device="cuda", requires_grad=True),
+            torch.randn(32, 32, device="cuda", requires_grad=True),
+        ]
+        out = f(x, indices, weights)
+        out.sum().backward()
+
     def test_dtensor_basic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
