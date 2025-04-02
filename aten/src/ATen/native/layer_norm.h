@@ -138,4 +138,11 @@ using backward_fn = void (*)(
 DECLARE_DISPATCH(forward_fn, LayerNormKernel)
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel)
 
+using rmsnorm_fn = Tensor (*)(
+    const Tensor& /* input */,
+    c10::SymIntArrayRef /* normalized_shape */,
+    const std::optional<Tensor>& /* weight_opt */,
+    std::optional<double> /* eps */);
+DECLARE_DISPATCH(rmsnorm_fn, RMSNormKernel)
+
 } // namespace at::native
