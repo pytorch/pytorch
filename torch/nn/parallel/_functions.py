@@ -1,4 +1,5 @@
 import warnings
+from itertools import chain
 from typing import Optional
 
 import torch
@@ -25,7 +26,7 @@ class Broadcast(Function):
             if not input_requires_grad:
                 non_differentiables.extend(output[idx] for output in outputs)
         ctx.mark_non_differentiable(*non_differentiables)
-        return tuple([t for tensors in outputs for t in tensors])
+        return tuple(chain.from_iterable(outputs))
 
     @staticmethod
     def backward(ctx, *grad_outputs):
