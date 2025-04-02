@@ -297,7 +297,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
      while (crnt_msk != 0) {
         if (crnt_msk & 1) {
             punner add_val = { .l[0] = __shfl(pnr.l[0] ,crnt_idx) };
-	        add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
+            add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
             crnt_val += add_val.s;
         }
         crnt_idx++;
