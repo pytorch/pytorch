@@ -9,9 +9,9 @@ import sys
 import time
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import auto
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -36,16 +36,6 @@ if not IS_FBCODE:
 else:
     # optree is not yet enabled in fbcode, so just re-test the python implementation
     cxx_pytree = python_pytree
-
-
-try:
-    import torch.utils.pytree as pytree
-except ImportError:
-    # Just re-test the python implementation
-    pytree = python_pytree
-else:
-    if not IS_FBCODE or not pytree.PYTORCH_USE_CXX_PYTREE:
-        pytree_modules["generic"] = pytree
 
 
 parametrize_pytree_module = parametrize(
@@ -1251,16 +1241,55 @@ if "optree" in sys.modules:
 
     def test_dataclass(self):
         @dataclass
-        class Point:
-            x: torch.Tensor
-            y: torch.Tensor
+        class Data:
+            a: torch.Tensor
+            b: str = "moo"
+            c: Optional[str] = None
+            d: str = field(init=False, default="")
 
-        python_pytree.register_dataclass(Point)
+        python_pytree.register_dataclass(Data)
+        old_data = Data(torch.tensor(3), "b", "c")
+        old_data.d = "d"
+        new_data = python_pytree.tree_map(lambda x: x, old_data)
+        self.assertEqual(new_data.a, torch.tensor(3))
+        self.assertEqual(new_data.b, "b")
+        self.assertEqual(new_data.c, "c")
+        self.assertEqual(new_data.d, "")
+        python_pytree._deregister_pytree_node(Data)
 
-        point = Point(torch.tensor(0), torch.tensor(1))
-        point = python_pytree.tree_map(lambda x: x + 1, point)
-        self.assertEqual(point.x, torch.tensor(1))
-        self.assertEqual(point.y, torch.tensor(2))
+        with self.assertRaisesRegex(ValueError, "Missing fields"):
+            python_pytree.register_dataclass(Data, field_names=["a", "b"])
+
+        with self.assertRaisesRegex(ValueError, "Unexpected fields"):
+            python_pytree.register_dataclass(Data, field_names=["a", "b", "e"])
+
+        with self.assertRaisesRegex(ValueError, "Unexpected fields"):
+            python_pytree.register_dataclass(Data, field_names=["a", "b", "c", "d"])
+
+        python_pytree.register_dataclass(
+            Data, field_names=["a"], drop_field_names=["b", "c"]
+        )
+        old_data = Data(torch.tensor(3), "b", "c")
+        new_data = python_pytree.tree_map(lambda x: x, old_data)
+        self.assertEqual(new_data.a, torch.tensor(3))
+        self.assertEqual(new_data.b, "moo")
+        self.assertEqual(new_data.c, None)
+        python_pytree._deregister_pytree_node(Data)
+
+    def test_register_dataclass_class(self):
+        class CustomClass:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertRaisesRegex(ValueError, "field_names must be specified"):
+            py_pytree.register_dataclass(CustomClass)
+
+        py_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
+        c = CustomClass(torch.tensor(0), torch.tensor(1))
+        mapped = py_pytree.tree_map(lambda x: x + 1, c)
+        self.assertEqual(mapped.x, torch.tensor(1))
+        self.assertEqual(mapped.y, torch.tensor(2))
 
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
