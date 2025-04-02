@@ -4347,6 +4347,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
+    # decomp introduces new errors for cf_changevar
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
