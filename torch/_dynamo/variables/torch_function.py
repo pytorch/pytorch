@@ -24,6 +24,9 @@ Supported features:
 
 See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
 for more information on the design.
+
+To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses
+in torch/_dynamo/config.py
 """
 
 import collections
