@@ -9,8 +9,11 @@ class TestUnsqueezeInplace(torch._dynamo.test_case.TestCase):
     Test that torch methods for view/reshape/unsqueeze/squeeze work consistently
     with torch.compile
     """
+
     def test_unsqueeze_inplace(self):
-        inputs: dict[str, torch.Tensor] = {'v0_0': torch.rand([3], device='cpu')}
+
+        inputs: dict[str, torch.Tensor] = {"v0_0": torch.rand([3], device="cpu")}
+
         class Model(torch.nn.Module):
             def forward(self, v0_0):
                 v1_0 = v0_0.unsqueeze_(dim=1)
@@ -26,10 +29,8 @@ class TestUnsqueezeInplace(torch._dynamo.test_case.TestCase):
 
         # Should not crash when compiled, instead inserts
         # graph break
-        model_exported = torch.compile(model)(**inputs)
-        torch_tensor_model_exported = torch.compile(torch_tensor_model)(**inputs)
-
-
+        torch.compile(model)(**inputs)
+        torch.compile(torch_tensor_model)(**inputs)
 
 
 if __name__ == "__main__":
