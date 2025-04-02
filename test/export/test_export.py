@@ -4429,9 +4429,20 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             },
         )
         self.assertEqual(
-            ep.module()(torch.arange(20), torch.tensor([2, -3])),
-            5,
-        )
+            ep.module()(torch.arange(20), torch.tensor([-1, -2])),
+            19 + 1,
+        )  # negative indexing is ok
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r".* expression 0 <= s.* \+ u0 .*",
+        ):  # unless it's out of bounds
+            ep.module()(torch.randn(5), torch.tensor([-6, 0]))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r".* expression u0 \+ 1 <= s.*",
+        ):  # out of bounds at end
+            ep.module()(torch.randn(5), torch.tensor([5, 0]))
+        
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
