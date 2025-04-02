@@ -4060,6 +4060,10 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+
+            # check if the triton kernel is printed as comment
+            self.assertEqual("def triton_" in code, True)
+
             # check the codegen for debug printing around aoti model inputs is expected
             for kernel_call, count in kernel_calls:
                 FileCheck().check_count(
