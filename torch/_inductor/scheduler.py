@@ -76,8 +76,8 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
-T = TypeVar("T")
-P = ParamSpec("P")
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @dataclasses.dataclass
@@ -994,7 +994,7 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
-        recompute_sizes_body_func: Optional[Callable[P, T]] = None,
+        recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
         self._sizes, body = self.node.simplify_and_reorder(
@@ -2162,7 +2162,7 @@ class Scheduler:
         mutation properly.
         """
 
-        class DedupList(Generic[T]):
+        class DedupList(Generic[_T]):
             """
             This data structure behaves like a list except it makes sure the
             elements remain unique.
@@ -2174,19 +2174,19 @@ class Scheduler:
 
             def __init__(
                 self,
-                items: Optional[list[T]] = None,
-                membership: Optional[OrderedSet[T]] = None,
+                items: Optional[list[_T]] = None,
+                membership: Optional[OrderedSet[_T]] = None,
             ) -> None:
                 self.items = items or []
                 self.membership = membership or OrderedSet()
 
-            def append(self, node_user: T) -> None:
+            def append(self, node_user: _T) -> None:
                 if node_user in self.membership:
                     return
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: DedupList[T]) -> DedupList[T]:
+            def __add__(self, other: DedupList[_T]) -> DedupList[_T]:
                 new_membership = OrderedSet.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
