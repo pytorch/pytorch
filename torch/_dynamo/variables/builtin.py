@@ -1933,6 +1933,20 @@ class BuiltinVariable(VariableTracker):
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
                     )
                 elif name == "data":
+                    # See comments on `test_set_data_on_scoped_tensor` for plans
+                    # to support this.
+                    if obj.source is None:
+                        unimplemented_v2(
+                            gb_type="Failed to mutate tensor data attribute",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dyanmo only supports mutating `.data`"
+                            " of tensor created outside `torch.compile` region",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
