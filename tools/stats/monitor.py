@@ -413,7 +413,7 @@ class UsageLogger:
                 self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
-            self._num_of_cpus = psutil.cpu_count(logical=False)
+            self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
             self._metadata.gpu_type = self._gpu_lib_detected
             self._metadata.gpu_count = len(self._gpu_handles)

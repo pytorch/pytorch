@@ -289,6 +289,14 @@ def _full_qual_class_name(qualname: str) -> str:
     return "__torch__.torch.classes." + ns + "." + name
 
 
+def _is_script_object(obj: Any) -> bool:
+    return isinstance(
+        obj, torch.ScriptObject
+    ) and obj._type().qualified_name().startswith(  # type: ignore[attr-defined]
+        "__torch__.torch.classes"
+    )
+
+
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")

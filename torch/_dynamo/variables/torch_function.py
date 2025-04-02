@@ -261,9 +261,9 @@ class SymbolicTorchFunctionState:
 
         TorchFunctionModeStackVariable.reset()
 
-        self.mode_stack: collections.deque[
-            TorchFunctionModeVariable
-        ] = collections.deque()
+        self.mode_stack: collections.deque[TorchFunctionModeVariable] = (
+            collections.deque()
+        )
 
         for i, val in enumerate(py_stack):
             self.mode_stack.append(
@@ -516,16 +516,22 @@ def call_torch_function(
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
-def build_torch_function_fn(tx: "InstructionTranslator", value, source):
+def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
     from types import FunctionType
 
-    func = value.__torch_function__.__func__
+    # If we reach here, the target `__torch_function__` should have been
+    # annotated with `@classmethod`, so accessing it always yield a bound
+    # method, and the actual `__torch_function__` impl is inside the bound
+    # `__func__`.
+    func = cls_or_obj.__torch_function__.__func__
 
     if not isinstance(func, FunctionType):
         unimplemented("Builtin/C++ torch function implementations NYI")
 
-    source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.build(tx, func, source)
+    func_source = None
+    if source:
+        func_source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
+    return VariableTracker.build(tx, func, func_source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -583,14 +589,21 @@ class TensorWithTFOverrideVariable(TensorVariable):
         super().__init__(*args, **kwargs)
 
     @classmethod
-    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+    def from_tensor_var(cls, tx, tensor_var, class_type, cls_source):
+        # [Note: __torch_function__] coerce `tensor_var` into a
+        # TensorWithTFOverrideVariable. In eager, this is just a type change.
+        # This isn't sound if a __torch_function__ tensor subclass defines a
+        # constructor, but if only a __torch_function__ impl is defined, this is
+        # okay to call.  It is up to the user whether this is correct behavior
+        # or not.
         import torch
 
         kwargs = dict(tensor_var.__dict__)
-        assert (
-            kwargs.pop("class_type") is torch.Tensor
-        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
-        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+        assert kwargs.pop("class_type") is torch.Tensor, (
+            "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        )
+        torch_fn_var = build_torch_function_fn(tx, class_type, cls_source)
+        var = cls(torch_function_fn=torch_fn_var, class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
 

@@ -1,5 +1,4 @@
 # Owner(s): ["module: functorch"]
-from typing import Dict, List, Tuple
 from unittest.mock import MagicMock, patch
 
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
@@ -33,17 +32,17 @@ class TestAcLogging(TestCase):
 
         self.graph.nodes = [self.node1, self.node2]
 
-        self.all_recomputable_banned_nodes: List[Node] = [self.node1]
-        self.saved_node_idxs: List[int] = [0]
-        self.recomputable_node_idxs: List[int] = []
+        self.all_recomputable_banned_nodes: list[Node] = [self.node1]
+        self.saved_node_idxs: list[int] = [0]
+        self.recomputable_node_idxs: list[int] = []
         self.expected_runtime: int = 100
-        self.memories_banned_nodes: List[int] = [50]
-        self.runtimes_banned_nodes: List[int] = [10]
-        self.min_cut_saved_values: List[Node] = [self.node1]
+        self.memories_banned_nodes: list[int] = [50]
+        self.runtimes_banned_nodes: list[int] = [10]
+        self.min_cut_saved_values: list[Node] = [self.node1]
 
     def test_create_joint_graph_node_information(self) -> None:
-        recomputable_node_info: Dict[str, int] = {"node1": 0}
-        expected_output: Dict[str, Dict] = {
+        recomputable_node_info: dict[str, int] = {"node1": 0}
+        expected_output: dict[str, dict] = {
             "node1": {
                 "index": 0,
                 "name": "node1",
@@ -68,12 +67,12 @@ class TestAcLogging(TestCase):
         self.assertEqual(result, expected_output)
 
     def test_create_joint_graph_edges(self) -> None:
-        expected_edges: List[Tuple[str, str]] = [("node1", "node2")]
+        expected_edges: list[tuple[str, str]] = [("node1", "node2")]
         result = create_joint_graph_edges(self.graph)
         self.assertEqual(result, expected_edges)
 
     def test_create_activation_checkpointing_logging_structure_payload(self) -> None:
-        input_joint_graph_node_information: Dict[str, Dict] = {
+        input_joint_graph_node_information: dict[str, dict] = {
             "node1": {
                 "index": 0,
                 "name": "node1",
@@ -85,8 +84,8 @@ class TestAcLogging(TestCase):
                 "recomputable_candidate_info": {"recomputable_node_idx": 0},
             }
         }
-        joint_graph_edges: List[Tuple[str, str]] = [("node1", "node2")]
-        expected_payload: Dict[str, any] = {
+        joint_graph_edges: list[tuple[str, str]] = [("node1", "node2")]
+        expected_payload: dict[str, any] = {
             "Joint Graph Size": 2,
             "Joint Graph Edges": {"Total": 1, "Edges": joint_graph_edges},
             "Joint Graph Node Information": input_joint_graph_node_information,

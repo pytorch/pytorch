@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
 
+from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_impls import (
@@ -462,12 +463,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 else:
                     retracing_args.append(node.meta["val"])
 
+        tx = TracingContext(fake_mode)
+
         with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
         ), _enable_graph_inputs_of_type_nn_module(
             ep.example_inputs
+        ), tracing(
+            tx
         ):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
@@ -1303,10 +1308,11 @@ class ExportedProgram:
         graph_module = self.graph_module.print_readable(
             print_output=False, colored=False
         ).replace("\n", "\n    ")
+        graph_signature = str(self.graph_signature).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {self.graph_signature}\n"
+            f"Graph signature: {graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string
@@ -1530,7 +1536,13 @@ class ExportedProgram:
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
+        self,
+        graph_module,
+        graph_signature,
+        *,
+        state_dict=None,
+        constants=None,
+        verifiers=None,
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
@@ -1540,7 +1552,7 @@ class ExportedProgram:
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            constants=self.constants,
+            constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
