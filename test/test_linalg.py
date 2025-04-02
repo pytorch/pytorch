@@ -65,7 +65,7 @@ def blaslt_supported_device():
             return True
     return False
 
-def tunableop_matmul(device, dtype, offline=False):
+def tunableop_matmul(device, dtype, result_filename=None, offline=False):
     # Helper function to test TunableOp in a subprocess
     # requires helper function since lambda function
     # not supported by multiprocessing module
@@ -75,6 +75,9 @@ def tunableop_matmul(device, dtype, offline=False):
     if offline:
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.record_untuned_enable(True)
+    else:
+        if result_filename is not None:
+            torch.cuda.tunable.set_filename(result_filename)
 
     torch.cuda.tunable.set_max_tuning_duration(1)
     A = torch.randn((17, 17), device=device, dtype=dtype)
