@@ -6994,7 +6994,7 @@ def forward(self, x):
                 torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
                 return u0 + u1 + u2
 
-        ep = export(Foo(), (torch.tensor([2, 6, 5]),))
+        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
         ep.module()(torch.tensor([2, 6, 5]))
         ep.module()(torch.tensor([4, 7, 5]))
         ep.module()(torch.tensor([6, 5, 5]))
