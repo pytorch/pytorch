@@ -486,6 +486,7 @@ class ListVariable(CommonListMethodsVariable):
 
             if not all(k.is_python_constant() for k in keys):
                 unimplemented("sort with non-constant keys")
+
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
                 (
