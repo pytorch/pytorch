@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
 TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_expanded_stacks_mangled);
 
 namespace torch::jit {
 
@@ -227,7 +228,7 @@ struct CodeImpl {
   NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
     NodeSourceInfo nodeSource;
     SourceRange r = range;
-    if (range.source()) {
+    if (!FLAGS_torch_jit_expanded_stacks_mangled && range.source()) {
       if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
         r = *orig;
       }
