@@ -227,7 +227,10 @@ def compare_pypi_to_torch_versions(
 
 
 def smoke_test_cuda(
-    package: str, runtime_error_check: str, torch_compile_check: str
+    package: str,
+    runtime_error_check: str,
+    torch_compile_check: str,
+    pypi_pkg_check: str,
 ) -> None:
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
@@ -268,13 +271,14 @@ def smoke_test_cuda(
         print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
+        torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+        print(f"Torch nccl; version: {torch_nccl_version}")
 
         # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
-        if sys.platform in ["linux", "linux2"]:
+        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
             )
-            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             compare_pypi_to_torch_versions(
                 "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
             )
@@ -436,6 +440,13 @@ def parse_args():
         choices=["enabled", "disabled"],
         default="enabled",
     )
+    parser.add_argument(
+        "--pypi-pkg-check",
+        help="Check pypi package versions cudnn and nccl",
+        type=str,
+        choices=["enabled", "disabled"],
+        default="enabled",
+    )
     return parser.parse_args()
 
 
@@ -460,7 +471,10 @@ def main() -> None:
         smoke_test_modules()
 
     smoke_test_cuda(
-        options.package, options.runtime_error_check, options.torch_compile_check
+        options.package,
+        options.runtime_error_check,
+        options.torch_compile_check,
+        options.pypi_pkg_check,
     )
 
 
