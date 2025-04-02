@@ -16,7 +16,6 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-# TODO(whc) add tests for this util
 def _explicit_order_placements(
     mesh_shape: ShapeType, placements: Sequence[Placement]
 ) -> Sequence[tuple[int, Placement]]:
@@ -76,7 +75,6 @@ def _explicit_order_placements(
     return ordered
 
 
-# TODO(whc) the big huge NOTE below- can we change it now or is it all still relevant?
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
