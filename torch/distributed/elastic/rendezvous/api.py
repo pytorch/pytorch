@@ -86,7 +86,7 @@ class RendezvousStoreInfo:
         """
         # TODO swap to collectives comms API
         if rank == 0:
-            addr = local_addr or socket.getfqdn()
+            addr = local_addr or socket.gethostbyname(socket.getfqdn())
             # When TCPStore is not shared, we fallback to get_free_port.
             port = server_port or get_free_port()
             store.set(

@@ -265,7 +265,8 @@ class _NodeDescGenerator:
 
             self._local_id += 1
 
-        return _NodeDesc(local_addr or socket.getfqdn(), os.getpid(), local_id)
+        addr = local_addr or socket.gethostbyname(socket.getfqdn())
+        return _NodeDesc(addr, os.getpid(), local_id)
 
 
 class _RendezvousState:
