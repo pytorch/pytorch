@@ -196,9 +196,25 @@ class SymNode:
         return self._hint is not None
 
     def require_hint(self, fallback=None):
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
         if self._hint is None:
             if fallback is not None:
-                return fallback
+                # Say we have some expr like 2*u0 + s0
+                # The hint will be None, since the expr contains at least 1 unbacked.
+                # We will:
+                # - replace every backed free symbol with its corresponding hint
+                # - replace every unbacked free symbol with the fallback
+                # - regenerate the expression with those symbol replacements
+                # Note: this is not really complete either, since right now
+                # this logic does not take into account any value ranges
+                # for the unbacked symints, we may need to beef it up at some point.
+                unbacked_symbols = free_unbacked_symbols(self.expr)
+                replacements = {
+                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    for s in self.expr.free_symbols
+                }
+                return self.expr.xreplace(replacements)
             # NB: we expect this to raise
             return self.shape_env.size_hint(self.expr)
         return self._hint
@@ -576,6 +592,18 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
+    def guard_or_false(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        assert self.is_bool()
+        return guard_or_false(SymBool(self))
+
+    def guard_or_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        assert self.is_bool()
+        return guard_or_true(SymBool(self))
+
     def bool_(self):
         return self.guard_bool("", 0)
 
@@ -852,6 +880,12 @@ def _optimized_add(
         #  (a2+a3..) + (a0+a1..) => (a0+a1+a2+a3)
         if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
             return make_optimized(rhs._args + lhs._args)
+
+        #  (a1+a3) + (a0+a2) => (a0+a1+a2+a3)
+        new_args = list(lhs._args)
+        for a in rhs._args:
+            new_args = _binary_search_insert_arg(new_args, a)
+        return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
