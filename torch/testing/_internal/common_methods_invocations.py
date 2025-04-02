@@ -19342,6 +19342,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           inplace_variant=torch.Tensor.scatter_add_,
            sample_inputs_func=sample_inputs_scatter_add,
            error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_forward_ad=True,
