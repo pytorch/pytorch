@@ -1397,7 +1397,7 @@ class AOTInductorModelCache:
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
-            if pytree._is_namedtuple_instance(example_outputs):
+            if pytree.is_namedtuple_instance(example_outputs):
                 typ = type(example_outputs)
                 pytree._register_namedtuple(
                     typ,
@@ -3542,6 +3542,8 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.devices == ["xpu"]:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         # TODO(eqy): revisit when cuBLASLt workspace size is bumped
         # if args.only is not None and args.only in {
