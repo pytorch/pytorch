@@ -444,8 +444,6 @@ class _StridedShard(Shard):
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
 
-    # TODO(whc) (we should update this to match the uneven shard behavior in `to_replicate_tensor
-    # but this only matters for unit tests
     def _split_tensor(
         self,
         tensor: torch.Tensor,
