@@ -65,21 +65,6 @@ def blaslt_supported_device():
             return True
     return False
 
-def set_tunableop_defaults():
-    if not torch.cuda.is_available():
-        # TunableOp not supported on CPU at this time.
-        return
-
-    # disable TunableOp and restore to default values
-    torch.cuda.tunable.enable(False)
-    torch.cuda.tunable.record_untuned_enable(False)
-    torch.cuda.tunable.tuning_enable(True)
-    torch.cuda.tunable.set_max_tuning_duration(30)
-    torch.cuda.tunable.set_max_tuning_iterations(100)
-    torch.cuda.tunable.set_rotating_buffer_size(-1)
-    ordinal = torch.cuda.current_device()
-    torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
-
 def tunableop_matmul(device, dtype, offline=False):
     # Helper function to test TunableOp in a subprocess
     # requires helper function since lambda function
@@ -108,32 +93,6 @@ def find_tunableop_result(results, OpSig, ParamSig):
         if OpSig in inner_tuple and ParamSig in inner_tuple:
             return inner_tuple
     return None
-
-def compare_untuned_tuned_entries(untuned_filename, tuned_filename):
-    # Compare the entries of untuned and tuned Tunableop results
-    # file. Verify that for each Op+Param Signature in the untuned file
-    # there is a matching one in the tuned results file.
-    import csv
-    ok = False
-    with open(untuned_filename) as file1:
-        with open(tuned_filename) as file2:
-            untuned_reader = csv.reader(file1)
-            untuned_csv_entries = {(row[0], row[1]) for row in untuned_reader}
-
-            tuned_reader = csv.reader(file2)
-            for _ in range(5):  # Skip the first 5 lines for the validator
-                next(tuned_reader, None)
-
-            result_csv_entries = {(row[0], row[1]) for row in tuned_reader}
-
-            missing = untuned_csv_entries - result_csv_entries
-
-            if missing:
-                ok = False
-            else:
-                ok = True
-
-    return ok
 
 class TestLinalg(TestCase):
     @contextlib.contextmanager
@@ -193,6 +152,61 @@ class TestLinalg(TestCase):
                     del os.environ[env]
                 except KeyError:
                     pass
+
+    def _set_tunableop_defaults(self):
+        if not torch.cuda.is_available():
+            # TunableOp not supported on CPU at this time.
+            return
+
+        # disable TunableOp and restore to default values
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.record_untuned_enable(False)
+        torch.cuda.tunable.tuning_enable(True)
+        torch.cuda.tunable.set_max_tuning_duration(30)
+        torch.cuda.tunable.set_max_tuning_iterations(100)
+        torch.cuda.tunable.set_rotating_buffer_size(-1)
+        ordinal = torch.cuda.current_device()
+
+        # Set filenames to be unique on a per test basis
+        import os
+        unique_id = self.id().split(".")[-1]
+        torch.cuda.tunable.set_filename(f"tunableop_results_{unique_id}_{ordinal}.csv")
+        # ordinal gets automatically appended
+        os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"] = f"tunableop_untuned_{unique_id}_.csv"
+
+    def _compare_untuned_tuned_entries(self, untuned_filename=None, tuned_filename=None):
+        # Compare the entries of untuned and tuned Tunableop results
+        # file. Verify that for each Op+Param Signature in the untuned file
+        # there is a matching one in the tuned results file.
+        import csv
+        ok = False
+        unique_id = self.id().split(".")[-1]
+        ordinal = torch.cuda.current_device()
+        if untuned_filename is None:
+            untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
+        if tuned_filename is None:
+            tuned_filename =  f"tunableop_results_{unique_id}_{ordinal}.csv"
+
+        with open(untuned_filename) as file1:
+            with open(tuned_filename) as file2:
+                untuned_reader = csv.reader(file1)
+                untuned_csv_entries = {(row[0], row[1]) for row in untuned_reader}
+
+                tuned_reader = csv.reader(file2)
+                for _ in range(5):  # Skip the first 5 lines for the validator
+                    next(tuned_reader, None)
+
+                result_csv_entries = {(row[0], row[1]) for row in tuned_reader}
+
+                missing = untuned_csv_entries - result_csv_entries
+
+                if missing:
+                    ok = False
+                    print(missing)
+                else:
+                    ok = True
+
+        return ok
 
     exact_dtype = True
 
@@ -5007,7 +5021,7 @@ class TestLinalg(TestCase):
             # Lastly, check that all tunableop_results_full{i} have
             # the same size as tunableop_results_full0.
             for i in range(total_gpus):
-                result_full_filename = f"tunableop_results_full{i}.csv"
+                result_full_filename = f"tunableop_results_{unique_id}_full{i}.csv"
                 self.assertTrue(os.path.exists(result_full_filename))
                 if i == 0:  # Store for next subsequent iterations
                     result_full_size = os.path.getsize(result_full_filename)
