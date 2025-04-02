@@ -5306,7 +5306,7 @@ def meta_zeros(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
-    from torch.fx.experimental.symbolic_shapes import guard_or_true, sym_and
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
     ndim = self.dim()
     torch._check_index(
@@ -5318,10 +5318,12 @@ def meta_select(self, dim, index):
     size = self.size(dim)
 
     torch._check_index(
-        sym_and(
-            -index <= size,
-            index <= size - 1,
-        ),
+        -index <= size,
+        lambda: f"select(): index {index} out of range for tensor of size "
+        f"{self.size()} at dimension {dim}",
+    )
+    torch._check_index(
+        index <= size - 1,
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
     )

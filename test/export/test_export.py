@@ -4418,7 +4418,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, x, ys):
                 u0, u1 = ys.tolist()
-                return x[u0] + x[(u0-u1+1)//2]
+                return x[u0] + x[(u0 - u1 + 1) // 2]
 
         ep = export(
             Foo(),
