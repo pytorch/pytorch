@@ -376,7 +376,7 @@ class MpsInterface(DeviceInterface):
     def is_dtype_supported(
         cls, dtype: torch.dtype, including_emulation: bool = False
     ) -> bool:
-        if dtype == torch.float64:
+        if dtype in [torch.float64, torch.complex128]:
             return False
         return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
