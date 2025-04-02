@@ -1061,6 +1061,22 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_const_tensor(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.tensor(64, dtype=torch.float32) * x
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(64, requires_grad=True)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 @parameterized_class(
     [
