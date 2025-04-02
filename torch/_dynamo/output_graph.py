@@ -1351,7 +1351,7 @@ class OutputGraph:
                 "Expect only one device type but got {}".format("+".join(device_types))
             )
             with (
-                get_interface_for_device(device_types.pop()).device(
+                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
                     compile_pg.rank() % torch.accelerator.device_count()
                 ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
