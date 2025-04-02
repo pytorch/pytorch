@@ -17,7 +17,7 @@ class PaddedTensorFunctionalTests(TestCase):
         def f(a, b, c):
             return a @ b + c
 
-        f = torch.compile(f)
+        f = torch.compile(f, fullgraph=True)
         multipliers = {0: 16, 1: 16}
 
         for i in range(3, 9):
@@ -45,7 +45,7 @@ class PaddedTensorFunctionalTests(TestCase):
         def f(a, b, c):
             return a @ b + c
 
-        f = torch.compile(f)
+        f = torch.compile(f, fullgraph=True)
         multipliers = {0: 16, 1: 16}
 
         for i in range(3, 9):
@@ -72,7 +72,7 @@ class PaddedTensorFunctionalTests(TestCase):
         def f(a, b, c):
             return a @ b + c
 
-        f = torch.compile(f, mode="reduce-overhead")
+        f = torch.compile(f, fullgraph=True)
         multipliers = {0: 16, 1: 16}
 
         for i in range(3, 9):
