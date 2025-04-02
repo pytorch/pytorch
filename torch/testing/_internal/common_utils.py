@@ -3246,13 +3246,16 @@ class TestCase(expecttest.TestCase):
             method = getattr(self, self._testMethodName)
             if TEST_WITH_AOT_EAGER:
                 method = torch._dynamo.optimize("aot_eager_decomp_partition")(method)
+                setattr(self, self._testMethodName, method)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
                     method = torch._dynamo.optimize("inductor")(method)
+                    setattr(self, self._testMethodName, method)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
                     method = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(method)
+                    setattr(self, self._testMethodName, method)
 
                 key = self._dynamo_test_key()
 

@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -78,7 +79,7 @@ class Context:
         return True
 
 
-class TestRaise(unittest.TestCase):
+class TestRaise(__TestCase):
     def test_invalid_reraise(self):
         try:
             raise
@@ -203,7 +204,7 @@ class TestRaise(unittest.TestCase):
 
 
 
-class TestCause(unittest.TestCase):
+class TestCause(__TestCase):
 
     def testCauseSyntax(self):
         try:
@@ -276,7 +277,7 @@ class TestCause(unittest.TestCase):
             self.fail("No exception raised")
 
 
-class TestTraceback(unittest.TestCase):
+class TestTraceback(__TestCase):
 
     def test_sets_traceback(self):
         try:
@@ -297,7 +298,7 @@ class TestTraceback(unittest.TestCase):
             self.fail("No exception raised")
 
 
-class TestTracebackType(unittest.TestCase):
+class TestTracebackType(__TestCase):
 
     def raiser(self):
         raise ValueError
@@ -363,7 +364,7 @@ class TestTracebackType(unittest.TestCase):
             types.TracebackType(other_tb, frame, 1, "nuh-uh")
 
 
-class TestContext(unittest.TestCase):
+class TestContext(__TestCase):
     def test_instance_context_instance_raise(self):
         context = IndexError()
         try:
@@ -553,7 +554,7 @@ class TestContext(unittest.TestCase):
             self.assertEqual(ZeroDivisionError, cm.unraisable.exc_type)
 
 
-class TestRemovedFunctionality(unittest.TestCase):
+class TestRemovedFunctionality(__TestCase):
     def test_tuples(self):
         try:
             raise (IndexError, KeyError) # This should be a tuple!

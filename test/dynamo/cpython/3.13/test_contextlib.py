@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -69,7 +70,7 @@ from test.support.testcase import ExceptionIsLikeMixin
 import weakref
 
 
-class TestAbstractContextManager(unittest.TestCase):
+class TestAbstractContextManager(__TestCase):
 
     def test_enter(self):
         class DefaultEnter(AbstractContextManager):
@@ -122,7 +123,7 @@ class TestAbstractContextManager(unittest.TestCase):
         self.assertFalse(issubclass(NoExit, AbstractContextManager))
 
 
-class ContextManagerTestCase(unittest.TestCase):
+class ContextManagerTestCase(__TestCase):
 
     def test_contextmanager_plain(self):
         state = []
@@ -451,7 +452,7 @@ def woohoo():
         self.assertEqual(depth, 0)
 
 
-class ClosingTestCase(unittest.TestCase):
+class ClosingTestCase(__TestCase):
 
     @support.requires_docstrings
     def test_instance_docs(self):
@@ -485,7 +486,7 @@ class ClosingTestCase(unittest.TestCase):
         self.assertEqual(state, [1])
 
 
-class NullcontextTestCase(unittest.TestCase):
+class NullcontextTestCase(__TestCase):
     def test_nullcontext(self):
         class C:
             pass
@@ -494,7 +495,7 @@ class NullcontextTestCase(unittest.TestCase):
             self.assertIs(c_in, c)
 
 
-class FileContextTestCase(unittest.TestCase):
+class FileContextTestCase(__TestCase):
 
     def testWithOpen(self):
         tfn = tempfile.mktemp()
@@ -514,7 +515,7 @@ class FileContextTestCase(unittest.TestCase):
         finally:
             os_helper.unlink(tfn)
 
-class LockContextTestCase(unittest.TestCase):
+class LockContextTestCase(__TestCase):
 
     def boilerPlate(self, lock, locked):
         self.assertFalse(locked())
@@ -577,7 +578,7 @@ class mycontext(ContextDecorator):
         return self.catch
 
 
-class TestContextDecorator(unittest.TestCase):
+class TestContextDecorator(__TestCase):
 
     @support.requires_docstrings
     def test_instance_docs(self):
@@ -1198,7 +1199,7 @@ class TestBaseExitStack:
         self.assertIs(exc.__cause__, exc.__context__)
 
 
-class TestExitStack(TestBaseExitStack, unittest.TestCase):
+class TestExitStack(TestBaseExitStack, __TestCase):
     exit_stack = ExitStack
     callback_error_internal_frames = [
         ('__exit__', 'raise exc'),
@@ -1263,19 +1264,19 @@ class TestRedirectStream:
         self.assertEqual(s, "Hello World!\n")
 
 
-class TestRedirectStdout(TestRedirectStream, unittest.TestCase):
+class TestRedirectStdout(TestRedirectStream, __TestCase):
 
     redirect_stream = redirect_stdout
     orig_stream = "stdout"
 
 
-class TestRedirectStderr(TestRedirectStream, unittest.TestCase):
+class TestRedirectStderr(TestRedirectStream, __TestCase):
 
     redirect_stream = redirect_stderr
     orig_stream = "stderr"
 
 
-class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
+class TestSuppress(ExceptionIsLikeMixin, __TestCase):
 
     @support.requires_docstrings
     def test_instance_docs(self):
@@ -1372,7 +1373,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
         )
 
 
-class TestChdir(unittest.TestCase):
+class TestChdir(__TestCase):
     def make_relative_path(self, *parts):
         return os.path.join(
             os.path.dirname(os.path.realpath(__file__)),

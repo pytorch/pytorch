@@ -8,16 +8,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     xfailIfTorchDynamo,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -99,7 +100,7 @@ class BrokenStrException(Exception):
 # XXX This is not really enough, each *operation* should be tested!
 
 
-class ExceptionTests(unittest.TestCase):
+class ExceptionTests(__TestCase):
 
     def raise_catch(self, exc, excname):
         with self.subTest(exc=exc, excname=excname):
@@ -1877,7 +1878,7 @@ class ExceptionTests(unittest.TestCase):
         self.assertIn(b'MemoryError', err)
 
 
-class NameErrorTests(unittest.TestCase):
+class NameErrorTests(__TestCase):
     def test_name_error_has_name(self):
         try:
             bluch
@@ -1925,7 +1926,7 @@ class NameErrorTests(unittest.TestCase):
     # Note: name suggestion tests live in `test_traceback`.
 
 
-class AttributeErrorTests(unittest.TestCase):
+class AttributeErrorTests(__TestCase):
     def test_attributes(self):
         # Setting 'attr' should not be a problem.
         exc = AttributeError('Ouch!')
@@ -1968,7 +1969,7 @@ class AttributeErrorTests(unittest.TestCase):
     # Note: name suggestion tests live in `test_traceback`.
 
 
-class ImportErrorTests(unittest.TestCase):
+class ImportErrorTests(__TestCase):
 
     def test_attributes(self):
         # Setting 'name' and 'path' should not be a problem.
@@ -2045,7 +2046,7 @@ class ImportErrorTests(unittest.TestCase):
                 self.assertEqual(exc.path, orig.path)
 
 
-class AssertionErrorTests(unittest.TestCase):
+class AssertionErrorTests(__TestCase):
     def tearDown(self):
         unlink(TESTFN)
 
@@ -2166,7 +2167,7 @@ class AssertionErrorTests(unittest.TestCase):
                 self.assertEqual(result[-len(expected):], expected)
 
 
-class SyntaxErrorTests(unittest.TestCase):
+class SyntaxErrorTests(__TestCase):
     @force_not_colorized
     def test_range_of_offsets(self):
         cases = [
@@ -2334,7 +2335,7 @@ class SyntaxErrorTests(unittest.TestCase):
         self.assertRaises(TypeError, SyntaxError, "bad bad", args)
 
 
-class TestInvalidExceptionMatcher(unittest.TestCase):
+class TestInvalidExceptionMatcher(__TestCase):
     def test_except_star_invalid_exception_type(self):
         with self.assertRaises(TypeError):
             try:
@@ -2349,7 +2350,7 @@ class TestInvalidExceptionMatcher(unittest.TestCase):
                 pass
 
 
-class PEP626Tests(unittest.TestCase):
+class PEP626Tests(__TestCase):
 
     def lineno_after_raise(self, f, *expected):
         try:

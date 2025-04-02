@@ -8,16 +8,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     xfailIfTorchDynamo,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -796,13 +797,13 @@ class OrderedDictTests:
         # when it's mutated and returned from __next__:
         self.assertTrue(gc.is_tracked(next(it)))
 
-class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+class PurePythonOrderedDictTests(OrderedDictTests, __TestCase):
 
     module = py_coll
     OrderedDict = py_coll.OrderedDict
 
 
-class CPythonBuiltinDictTests(unittest.TestCase):
+class CPythonBuiltinDictTests(__TestCase):
     """Builtin dict preserves insertion order.
 
     Reuse some of tests in OrderedDict selectively.
@@ -822,7 +823,7 @@ del method
 
 
 @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
-class CPythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+class CPythonOrderedDictTests(OrderedDictTests, __TestCase):
 
     module = c_coll
     OrderedDict = c_coll.OrderedDict
@@ -931,7 +932,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
         pass
 
 
-class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
+class PurePythonOrderedDictWithSlotsCopyingTests(__TestCase):
 
     module = py_coll
     class OrderedDict(py_coll.OrderedDict):
@@ -940,7 +941,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
 
 
 @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
-class CPythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
+class CPythonOrderedDictWithSlotsCopyingTests(__TestCase):
 
     module = c_coll
     class OrderedDict(c_coll.OrderedDict):
@@ -1069,14 +1070,14 @@ class SimpleLRUCacheTests:
         self.assertEqual(list(c), [1, 3, 2])
 
 
-class PySimpleLRUCacheTests(SimpleLRUCacheTests, unittest.TestCase):
+class PySimpleLRUCacheTests(SimpleLRUCacheTests, __TestCase):
 
     class type2test(SimpleLRUCache, py_coll.OrderedDict):
         pass
 
 
 @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
-class CSimpleLRUCacheTests(SimpleLRUCacheTests, unittest.TestCase):
+class CSimpleLRUCacheTests(SimpleLRUCacheTests, __TestCase):
 
     @classmethod
     def setUpClass(cls):

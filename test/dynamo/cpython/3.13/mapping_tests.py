@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -59,7 +60,7 @@ import collections
 from test.support import get_c_recursion_limit
 
 
-class BasicTestMappingProtocol(unittest.TestCase):
+class BasicTestMappingProtocol(__TestCase):
     # This base class can be used to check that an object conforms to the
     # mapping protocol
 

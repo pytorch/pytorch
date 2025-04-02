@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -87,7 +88,7 @@ class FloatSubclass(float):
 class OtherFloatSubclass(float):
     pass
 
-class GeneralFloatCases(unittest.TestCase):
+class GeneralFloatCases(__TestCase):
 
     def test_float(self):
         self.assertEqual(float(3.14), 3.14)
@@ -672,7 +673,7 @@ class GeneralFloatCases(unittest.TestCase):
 
 
 @unittest.skipUnless(hasattr(float, "__getformat__"), "requires __getformat__")
-class FormatFunctionsTestCase(unittest.TestCase):
+class FormatFunctionsTestCase(__TestCase):
     def test_getformat(self):
         self.assertIn(float.__getformat__('double'),
                       ['unknown', 'IEEE, big-endian', 'IEEE, little-endian'])
@@ -697,7 +698,7 @@ LE_FLOAT_NAN = bytes(reversed(BE_FLOAT_NAN))
 # is accident (today).
 # let's also try to guarantee that -0.0 and 0.0 don't get confused.
 
-class IEEEFormatTestCase(unittest.TestCase):
+class IEEEFormatTestCase(__TestCase):
 
     @support.requires_IEEE_754
     def test_double_specials_do_unpack(self):
@@ -722,7 +723,7 @@ class IEEEFormatTestCase(unittest.TestCase):
         self.assertEqual(struct.pack("<f", 3.40282356e38), struct.pack("<f", FLT_MAX))
         self.assertEqual(struct.pack("<f", -3.40282356e38), struct.pack("<f", -FLT_MAX))
 
-class FormatTestCase(unittest.TestCase):
+class FormatTestCase(__TestCase):
 
     def test_format(self):
         # these should be rewritten to use both format(x, spec) and
@@ -819,7 +820,7 @@ class FormatTestCase(unittest.TestCase):
         self.assertEqual(format(-123.34, '00.10e'), '-1.2334000000e+02')
         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
 
-class ReprTestCase(unittest.TestCase):
+class ReprTestCase(__TestCase):
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
                   'mathdata',
@@ -884,7 +885,7 @@ class ReprTestCase(unittest.TestCase):
             self.assertEqual(repr(float(negs)), str(float(negs)))
 
 @support.requires_IEEE_754
-class RoundTestCase(unittest.TestCase):
+class RoundTestCase(__TestCase):
 
     def test_inf_nan(self):
         self.assertRaises(OverflowError, round, INF)
@@ -1007,7 +1008,7 @@ class RoundTestCase(unittest.TestCase):
 
 # Beginning with Python 2.6 float has cross platform compatible
 # ways to create and represent inf and nan
-class InfNanTest(unittest.TestCase):
+class InfNanTest(__TestCase):
     def test_inf_from_str(self):
         self.assertTrue(isinf(float("inf")))
         self.assertTrue(isinf(float("+inf")))
@@ -1108,7 +1109,7 @@ class InfNanTest(unittest.TestCase):
 
 fromHex = float.fromhex
 toHex = float.hex
-class HexFloatTestCase(unittest.TestCase):
+class HexFloatTestCase(__TestCase):
     MAX = fromHex('0x.fffffffffffff8p+1024')  # max normal
     MIN = fromHex('0x1p-1022')                # min normal
     TINY = fromHex('0x0.0000000000001p-1022') # min subnormal

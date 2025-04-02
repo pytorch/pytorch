@@ -8,16 +8,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     skipIfTorchDynamo,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -158,7 +159,7 @@ class EmptyIterClass:
 
 # Main test suite
 
-class TestCase(unittest.TestCase):
+class TestCase(__TestCase):
 
     # Helper to check that an iterator returns a given sequence
     def check_iterator(self, it, seq, pickle=True):

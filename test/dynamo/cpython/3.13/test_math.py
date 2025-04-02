@@ -8,16 +8,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     xfailIfTorchDynamo,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -295,7 +296,7 @@ class BadDescr:
     def __get__(self, obj, objtype=None):
         raise ValueError
 
-class MathTests(unittest.TestCase):
+class MathTests(__TestCase):
 
     def ftest(self, name, got, expected, ulp_tol=5, abs_tol=0.0):
         """Compare arguments expected and got, as floats, if either
@@ -2548,7 +2549,7 @@ class MathTests(unittest.TestCase):
         self.assertEqual(math.copysign(1.0, x), math.copysign(1.0, y))
 
 
-class IsCloseTests(unittest.TestCase):
+class IsCloseTests(__TestCase):
     isclose = math.isclose  # subclasses should override this
 
     def assertIsClose(self, a, b, *args, **kwargs):
@@ -2671,7 +2672,7 @@ class IsCloseTests(unittest.TestCase):
         self.assertAllNotClose(fraction_examples, rel_tol=1e-9)
 
 
-class FMATests(unittest.TestCase):
+class FMATests(__TestCase):
     """ Tests for math.fma. """
 
     def test_fma_nan_results(self):

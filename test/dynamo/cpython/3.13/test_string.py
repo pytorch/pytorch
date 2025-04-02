@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -58,7 +59,7 @@ import string
 from string import Template
 
 
-class ModuleTest(unittest.TestCase):
+class ModuleTest(__TestCase):
 
     def test_attrs(self):
         # While the exact order of the items in these attributes is not
@@ -259,7 +260,7 @@ class Mapping:
         return obj
 
 
-class TestTemplate(unittest.TestCase):
+class TestTemplate(__TestCase):
     def test_regular_templates(self):
         s = Template('$who likes to eat a bag of $what worth $$100')
         self.assertEqual(s.substitute(dict(who='tim', what='ham')),

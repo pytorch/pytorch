@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -411,7 +412,7 @@ class TestJointOps:
     def test_free_after_iterating(self):
         support.check_free_after_iterating(self, iter, self.thetype)
 
-class TestSet(TestJointOps, unittest.TestCase):
+class TestSet(TestJointOps, __TestCase):
     thetype = set
     basetype = set
 
@@ -731,7 +732,7 @@ class TestSetSubclass(TestSet):
             subclass_with_new([1, 2], newarg=3)
 
 
-class TestFrozenSet(TestJointOps, unittest.TestCase):
+class TestFrozenSet(TestJointOps, __TestCase):
     thetype = frozenset
     basetype = frozenset
 
@@ -867,7 +868,7 @@ class TestFrozenSetSubclass(TestFrozenSet):
 class SetSubclassWithSlots(set):
     __slots__ = ('x', 'y', '__dict__')
 
-class TestSetSubclassWithSlots(unittest.TestCase):
+class TestSetSubclassWithSlots(__TestCase):
     thetype = SetSubclassWithSlots
     test_pickling = TestJointOps.test_pickling
 
@@ -997,7 +998,7 @@ class TestBasicOps:
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
+class TestBasicOpsEmpty(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "empty set"
         self.values = []
@@ -1009,7 +1010,7 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+class TestBasicOpsSingleton(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "unit set (number)"
         self.values = [3]
@@ -1027,7 +1028,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+class TestBasicOpsTuple(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "unit set (tuple)"
         self.values = [(0, "zero")]
@@ -1045,7 +1046,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
+class TestBasicOpsTriple(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "triple set"
         self.values = [0, "zero", operator.add]
@@ -1057,7 +1058,7 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsString(TestBasicOps, unittest.TestCase):
+class TestBasicOpsString(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "string set"
         self.values = ["a", "b", "c"]
@@ -1071,7 +1072,7 @@ class TestBasicOpsString(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsBytes(TestBasicOps, unittest.TestCase):
+class TestBasicOpsBytes(TestBasicOps, __TestCase):
     def setUp(self):
         self.case   = "bytes set"
         self.values = [b"a", b"b", b"c"]
@@ -1085,7 +1086,7 @@ class TestBasicOpsBytes(TestBasicOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
+class TestBasicOpsMixedStringBytes(TestBasicOps, __TestCase):
     def setUp(self):
         self.enterContext(warnings_helper.check_warnings())
         warnings.simplefilter('ignore', BytesWarning)
@@ -1108,7 +1109,7 @@ def baditer():
 def gooditer():
     yield True
 
-class TestExceptionPropagation(unittest.TestCase):
+class TestExceptionPropagation(__TestCase):
     """SF 628246:  Set constructor should not trap iterator TypeErrors"""
 
     def test_instanceWithException(self):
@@ -1135,7 +1136,7 @@ class TestExceptionPropagation(unittest.TestCase):
 
 #==============================================================================
 
-class TestSetOfSets(unittest.TestCase):
+class TestSetOfSets(__TestCase):
     def test_constructor(self):
         inner = frozenset([1])
         outer = set([inner])
@@ -1148,7 +1149,7 @@ class TestSetOfSets(unittest.TestCase):
 
 #==============================================================================
 
-class TestBinaryOps(unittest.TestCase):
+class TestBinaryOps(__TestCase):
     def setUp(self):
         self.set = set((2, 4, 6))
         super().setUp()
@@ -1222,7 +1223,7 @@ class TestBinaryOps(unittest.TestCase):
 
 #==============================================================================
 
-class TestUpdateOps(unittest.TestCase):
+class TestUpdateOps(__TestCase):
     def setUp(self):
         self.set = set((2, 4, 6))
         super().setUp()
@@ -1309,7 +1310,7 @@ class TestUpdateOps(unittest.TestCase):
 
 #==============================================================================
 
-class TestMutate(unittest.TestCase):
+class TestMutate(__TestCase):
     def setUp(self):
         self.values = ["a", "b", "c"]
         self.set = set(self.values)
@@ -1422,7 +1423,7 @@ class TestSubsets:
                 self.assertEqual(result, expected)
 #------------------------------------------------------------------------------
 
-class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEqualEmpty(TestSubsets, __TestCase):
     left  = set()
     right = set()
     name  = "both empty"
@@ -1430,7 +1431,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEqualNonEmpty(TestSubsets, __TestCase):
     left  = set([1, 2])
     right = set([1, 2])
     name  = "equal pair"
@@ -1438,7 +1439,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEmptyNonEmpty(TestSubsets, __TestCase):
     left  = set()
     right = set([1, 2])
     name  = "one empty, one non-empty"
@@ -1446,7 +1447,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestSubsetPartial(TestSubsets, unittest.TestCase):
+class TestSubsetPartial(TestSubsets, __TestCase):
     left  = set([1])
     right = set([1, 2])
     name  = "one a non-empty proper subset of other"
@@ -1454,7 +1455,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
+class TestSubsetNonOverlap(TestSubsets, __TestCase):
     left  = set([1])
     right = set([2])
     name  = "neither empty, neither contains"
@@ -1578,7 +1579,7 @@ class TestOnlySetsInBinaryOps:
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         self.set   = set((1, 2, 3))
         self.other = 19
@@ -1587,7 +1588,7 @@ class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsDict(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsDict(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         self.set   = set((1, 2, 3))
         self.other = {1:2, 3:4}
@@ -1596,7 +1597,7 @@ class TestOnlySetsDict(TestOnlySetsInBinaryOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsOperator(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsOperator(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         self.set   = set((1, 2, 3))
         self.other = operator.add
@@ -1605,7 +1606,7 @@ class TestOnlySetsOperator(TestOnlySetsInBinaryOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsTuple(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsTuple(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         self.set   = set((1, 2, 3))
         self.other = (2, 4, 6)
@@ -1614,7 +1615,7 @@ class TestOnlySetsTuple(TestOnlySetsInBinaryOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsString(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsString(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         self.set   = set((1, 2, 3))
         self.other = 'abc'
@@ -1623,7 +1624,7 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, unittest.TestCase):
 
 #------------------------------------------------------------------------------
 
-class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, __TestCase):
     def setUp(self):
         def gen():
             for i in range(0, 10, 2):
@@ -1656,42 +1657,42 @@ class TestCopying:
 
 #------------------------------------------------------------------------------
 
-class TestCopyingEmpty(TestCopying, unittest.TestCase):
+class TestCopyingEmpty(TestCopying, __TestCase):
     def setUp(self):
         self.set = set()
         super().setUp()
 
 #------------------------------------------------------------------------------
 
-class TestCopyingSingleton(TestCopying, unittest.TestCase):
+class TestCopyingSingleton(TestCopying, __TestCase):
     def setUp(self):
         self.set = set(["hello"])
         super().setUp()
 
 #------------------------------------------------------------------------------
 
-class TestCopyingTriple(TestCopying, unittest.TestCase):
+class TestCopyingTriple(TestCopying, __TestCase):
     def setUp(self):
         self.set = set(["zero", 0, None])
         super().setUp()
 
 #------------------------------------------------------------------------------
 
-class TestCopyingTuple(TestCopying, unittest.TestCase):
+class TestCopyingTuple(TestCopying, __TestCase):
     def setUp(self):
         self.set = set([(1, 2)])
         super().setUp()
 
 #------------------------------------------------------------------------------
 
-class TestCopyingNested(TestCopying, unittest.TestCase):
+class TestCopyingNested(TestCopying, __TestCase):
     def setUp(self):
         self.set = set([((1, 2), (3, 4))])
         super().setUp()
 
 #==============================================================================
 
-class TestIdentities(unittest.TestCase):
+class TestIdentities(__TestCase):
     def setUp(self):
         self.a = set('abracadabra')
         self.b = set('alacazam')
@@ -1812,7 +1813,7 @@ def L(seqn):
     'Test multiple tiers of iterators'
     return chain(map(lambda x:x, R(Ig(G(seqn)))))
 
-class TestVariousIteratorArgs(unittest.TestCase):
+class TestVariousIteratorArgs(__TestCase):
 
     def test_constructor(self):
         for cons in (set, frozenset):
@@ -1870,7 +1871,7 @@ class bad_dict_clear:
     def __hash__(self):
         return 0
 
-class TestWeirdBugs(unittest.TestCase):
+class TestWeirdBugs(__TestCase):
     def test_8420_set_merge(self):
         # This used to segfault
         global be_bad, set2, dict2
@@ -2018,19 +2019,19 @@ class TestBinaryOpsMutating(TestOperationsMutating):
         self.check_set_op_does_not_crash(f3)
 
 
-class TestBinaryOpsMutating_Set_Set(TestBinaryOpsMutating, unittest.TestCase):
+class TestBinaryOpsMutating_Set_Set(TestBinaryOpsMutating, __TestCase):
     constructor1 = set
     constructor2 = set
 
-class TestBinaryOpsMutating_Subclass_Subclass(TestBinaryOpsMutating, unittest.TestCase):
+class TestBinaryOpsMutating_Subclass_Subclass(TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = SetSubclass
 
-class TestBinaryOpsMutating_Set_Subclass(TestBinaryOpsMutating, unittest.TestCase):
+class TestBinaryOpsMutating_Set_Subclass(TestBinaryOpsMutating, __TestCase):
     constructor1 = set
     constructor2 = SetSubclass
 
-class TestBinaryOpsMutating_Subclass_Set(TestBinaryOpsMutating, unittest.TestCase):
+class TestBinaryOpsMutating_Subclass_Set(TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = set
 
@@ -2071,27 +2072,27 @@ class TestMethodsMutating(TestOperationsMutating):
         self.check_set_op_does_not_crash(set.update)
 
 
-class TestMethodsMutating_Set_Set(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Set_Set(TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = set
 
-class TestMethodsMutating_Subclass_Subclass(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Subclass_Subclass(TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = SetSubclass
 
-class TestMethodsMutating_Set_Subclass(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Set_Subclass(TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = SetSubclass
 
-class TestMethodsMutating_Subclass_Set(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Subclass_Set(TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = set
 
-class TestMethodsMutating_Set_Dict(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Set_Dict(TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = dict.fromkeys
 
-class TestMethodsMutating_Set_List(TestMethodsMutating, unittest.TestCase):
+class TestMethodsMutating_Set_List(TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = list
 
@@ -2153,7 +2154,7 @@ def faces(G):
     return f
 
 
-class TestGraphs(unittest.TestCase):
+class TestGraphs(__TestCase):
 
     def test_cube(self):
 

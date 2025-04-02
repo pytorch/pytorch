@@ -8,15 +8,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
+    skipIfTorchDynamo,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -91,7 +93,7 @@ L = [
 class IntSubclass(int):
     pass
 
-class IntTestCases(unittest.TestCase):
+class IntTestCases(__TestCase):
 
     def test_basic(self):
         self.assertEqual(int(314), 314)
@@ -660,7 +662,7 @@ class IntTestCases(unittest.TestCase):
         self.assertEqual(int('1_2_3_4_5_6_7', 32), 1144132807)
 
 
-class IntStrDigitLimitsTests(unittest.TestCase):
+class IntStrDigitLimitsTests(__TestCase):
 
     int_class = int  # Override this in subclasses to reuse the suite.
 
@@ -871,7 +873,7 @@ class IntSubclassStrDigitLimitsTests(IntStrDigitLimitsTests):
     int_class = IntSubclass
 
 
-class PyLongModuleTests(unittest.TestCase):
+class PyLongModuleTests(__TestCase):
     # Tests of the functions in _pylong.py.  Those get used when the
     # number of digits in the input values are large enough.
 
@@ -894,6 +896,7 @@ class PyLongModuleTests(unittest.TestCase):
         s4 = b'%d' % n
         self.assertEqual(s4, s.encode('ascii'))
 
+    @skipIfTorchDynamo("infinite loop")
     def test_pylong_int_to_decimal(self):
         self._test_pylong_int_to_decimal((1 << 100_000), '9883109376')
         self._test_pylong_int_to_decimal((1 << 100_000) - 1, '9883109375')
@@ -901,6 +904,7 @@ class PyLongModuleTests(unittest.TestCase):
         self._test_pylong_int_to_decimal(10**30_000 - 1, '9999999999')
         self._test_pylong_int_to_decimal(3**60_000, '9313200001')
 
+    @skipIfTorchDynamo("infinite loop")
     @support.requires_resource('cpu')
     def test_pylong_int_to_decimal_2(self):
         self._test_pylong_int_to_decimal(2**1_000_000, '2747109376')

@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -94,7 +95,7 @@ def check(tag, expected, raw, compare=None):
             nerrors += 1
             return
 
-class TestBase(unittest.TestCase):
+class TestBase(__TestCase):
     def testStressfully(self):
         # Try a variety of sizes at and around powers of 2, and at powers of 10.
         sizes = [0]
@@ -206,7 +207,7 @@ class TestBase(unittest.TestCase):
                 self.assertEqual(forced, native)
 #==============================================================================
 
-class TestBugs(unittest.TestCase):
+class TestBugs(__TestCase):
 
     def test_bug453523(self):
         # bug 453523 -- list.sort() crasher.
@@ -243,7 +244,7 @@ class TestBugs(unittest.TestCase):
 
 #==============================================================================
 
-class TestDecorateSortUndecorate(unittest.TestCase):
+class TestDecorateSortUndecorate(__TestCase):
 
     def test_decorated(self):
         data = 'The quick Brown fox Jumped over The lazy Dog'.split()
@@ -364,7 +365,7 @@ def check_against_PyObject_RichCompareBool(self, L):
             self.assertIs(opt, ref)
             #note: not assertEqual! We want to ensure *identical* behavior.
 
-class TestOptimizedCompares(unittest.TestCase):
+class TestOptimizedCompares(__TestCase):
     def test_safe_object_compare(self):
         heterogeneous_lists = [[0, 'foo'],
                                [0.0, 'foo'],

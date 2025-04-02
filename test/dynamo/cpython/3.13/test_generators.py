@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -76,7 +77,7 @@ except ImportError:
 @unittest.skipUnless(_testcapi is not None and
                      hasattr(_testcapi, "raise_SIGINT_then_send_None"),
                      "needs _testcapi.raise_SIGINT_then_send_None")
-class SignalAndYieldFromTest(unittest.TestCase):
+class SignalAndYieldFromTest(__TestCase):
 
     def generator1(self):
         return (yield from self.generator2())
@@ -100,7 +101,7 @@ class SignalAndYieldFromTest(unittest.TestCase):
         self.assertEqual(exc.value, "PASSED")
 
 
-class FinalizationTest(unittest.TestCase):
+class FinalizationTest(__TestCase):
 
     def test_frame_resurrect(self):
         # A generator frame can be resurrected by a generator's finalization.
@@ -164,7 +165,7 @@ class FinalizationTest(unittest.TestCase):
             self.assertEqual(cm.exception.value, 2)
 
 
-class GeneratorTest(unittest.TestCase):
+class GeneratorTest(__TestCase):
 
     def test_name(self):
         def func():
@@ -297,7 +298,7 @@ class GeneratorTest(unittest.TestCase):
         #This should not raise
         loop()
 
-class ExceptionTest(unittest.TestCase):
+class ExceptionTest(__TestCase):
     # Tests for the issue #23353: check that the currently handled exception
     # is correctly saved/restored in PyEval_EvalFrameEx().
 
@@ -506,7 +507,7 @@ class ExceptionTest(unittest.TestCase):
         self.assertEqual(cm.exception.value.value, 2)
 
 
-class GeneratorCloseTest(unittest.TestCase):
+class GeneratorCloseTest(__TestCase):
 
     def test_close_no_return_value(self):
         def f():
@@ -608,7 +609,7 @@ class GeneratorCloseTest(unittest.TestCase):
         self.assertIsNone(f_wr())
 
 
-class GeneratorThrowTest(unittest.TestCase):
+class GeneratorThrowTest(__TestCase):
 
     def test_exception_context_with_yield(self):
         def f():
@@ -707,7 +708,7 @@ class GeneratorThrowTest(unittest.TestCase):
             gen.throw(ValueError)
 
 
-class GeneratorStackTraceTest(unittest.TestCase):
+class GeneratorStackTraceTest(__TestCase):
 
     def check_stack_names(self, frame, expected):
         names = []
@@ -756,7 +757,7 @@ class GeneratorStackTraceTest(unittest.TestCase):
         self.check_yield_from_example(call_throw)
 
 
-class YieldFromTests(unittest.TestCase):
+class YieldFromTests(__TestCase):
     def test_generator_gi_yieldfrom(self):
         def a():
             self.assertEqual(inspect.getgeneratorstate(gen_b), inspect.GEN_RUNNING)

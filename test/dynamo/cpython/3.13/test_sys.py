@@ -8,15 +8,16 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
+from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
-
+    __TestCase = CPythonTestCase
+else:
+    __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -89,7 +90,7 @@ def requires_subinterpreters(meth):
 
 DICT_KEY_STRUCT_FORMAT = 'n2BI2n'
 
-class DisplayHookTest(unittest.TestCase):
+class DisplayHookTest(__TestCase):
 
     def test_original_displayhook(self):
         dh = sys.__displayhook__
@@ -135,7 +136,7 @@ class DisplayHookTest(unittest.TestCase):
             code = compile("42", "<string>", "single")
             self.assertRaises(ValueError, eval, code)
 
-class ActiveExceptionTests(unittest.TestCase):
+class ActiveExceptionTests(__TestCase):
     def test_exc_info_no_exception(self):
         self.assertEqual(sys.exc_info(), (None, None, None))
 
@@ -199,7 +200,7 @@ class ActiveExceptionTests(unittest.TestCase):
         self.assertIs(exc, e)
 
 
-class ExceptHookTest(unittest.TestCase):
+class ExceptHookTest(__TestCase):
 
     @force_not_colorized
     def test_original_excepthook(self):
@@ -242,7 +243,7 @@ class ExceptHookTest(unittest.TestCase):
     # Python/pythonrun.c::PyErr_PrintEx() is tricky.
 
 
-class SysModuleTest(unittest.TestCase):
+class SysModuleTest(__TestCase):
 
     def tearDown(self):
         test.support.reap_children()
@@ -1294,7 +1295,7 @@ class SysModuleTest(unittest.TestCase):
 
 
 @test.support.cpython_only
-class UnraisableHookTest(unittest.TestCase):
+class UnraisableHookTest(__TestCase):
     def test_original_unraisablehook(self):
         _testcapi = import_helper.import_module('_testcapi')
         from _testcapi import err_writeunraisable, err_formatunraisable
@@ -1451,7 +1452,7 @@ class UnraisableHookTest(unittest.TestCase):
 
 
 @test.support.cpython_only
-class SizeofTest(unittest.TestCase):
+class SizeofTest(__TestCase):
 
     def setUp(self):
         self.P = struct.calcsize('P')
