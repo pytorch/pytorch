@@ -516,7 +516,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         decompose_k_subgraph_template = SubgraphTemplate(
             name="decompose_k_mm",
-            make_fx_graph=make_fx(decomposeK, decompositions, tracing_mode="real"),
+            make_fx_graph=make_fx(functools.partial(decomposeK, kPartitions=kPartitions), decompositions, tracing_mode="real"),
         )
     
     mat1_tensor, mat2_tensor = AlgorithmSelectorCache.benchmark_example_value(mat1), AlgorithmSelectorCache.benchmark_example_value(mat2)
@@ -524,7 +524,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         choices,
         input_nodes=(mat1, mat2),
         layout=layout,
-        example_inputs=[mat1_tensor, mat2_tensor, kPartitions],
+        example_inputs=[mat1_tensor, mat2_tensor],
     )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):

@@ -6001,18 +6001,18 @@ class TMADescriptor(ExternKernel):
 
 class SubgraphBuffer(ExternKernel):
     def __init__(
-        self, layout, inputs, gm, real_inputs
+        self, layout, input_nodes, gm, example_inputs
     ):
-        super().__init__(None, layout, inputs)
+        super().__init__(None, layout, input_nodes)
         self.gm = gm
-        self.real_inputs = real_inputs
+        self.example_inputs = example_inputs
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
     def codegen(self, wrapper):
         import torch._inductor.config as inductor_config
 
-        subgraph = V.graph.make_subgraph(self.gm, self.real_inputs, "mm_decompose_k")
+        subgraph = V.graph.make_subgraph(self.gm, self.example_inputs, "mm_decompose_k")
         with V.set_graph_handler(subgraph):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
@@ -6020,15 +6020,14 @@ class SubgraphBuffer(ExternKernel):
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
-                subgraph.run(*self.real_inputs)
+                subgraph.run(*self.example_inputs)
 
         class CodegenGraph:
             def __init__(self, graph):
                 self.graph = graph
                 self.name = graph.name
-    
 
-        wrapper.codegen_subgraph(CodegenGraph(subgraph), [*[buffer.get_name() for buffer in self.inputs], self.real_inputs[2]], [self.name])
+        wrapper.codegen_subgraph(CodegenGraph(subgraph), [*[buffer.get_name() for buffer in self.inputs]], [self.name])
         return
             
 

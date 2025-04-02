@@ -95,9 +95,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
-                inputs=self.input_nodes,
+                input_nodes=self.input_nodes,
                 gm=self.gm,
-                real_inputs=self.example_inputs,
+                example_inputs=self.example_inputs,
             )
         )
 
@@ -137,6 +137,7 @@ class SubgraphTemplate(KernelTemplate):
 
     def generate(self, input_nodes, layout, example_inputs, **kwargs: Any) -> SubgraphChoiceCaller:
         gm = self.make_fx_graph(*example_inputs)
+
 
         return SubgraphChoiceCaller(
             name=self.name,
