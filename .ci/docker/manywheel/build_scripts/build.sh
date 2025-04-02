@@ -39,7 +39,36 @@ yum -y install bzip2 make git patch unzip bison yasm diffutils \
     ${PYTHON_COMPILE_DEPS}
 
 # Install newest autoconf
-build_autoconf $AUTOCONF_ROOT $AUTOCONF_HASH
+# If the architecture is not ppc64le, use the existing build_autoconf function
+if [ "$(uname -m)" != "ppc64le" ] ; then
+    build_autoconf $AUTOCONF_ROOT $AUTOCONF_HASH
+else
+    # Download and extract Autoconf
+    curl -sLO http://ftp.gnu.org/gnu/autoconf/$AUTOCONF_ROOT.tar.gz
+    
+    # Verify the integrity of the downloaded file using SHA-256 checksum
+    echo "$AUTOCONF_HASH  $AUTOCONF_ROOT.tar.gz" | sha256sum -c -
+    
+    # Extract the downloaded tarball 
+    tar -xzf $AUTOCONF_ROOT.tar.gz
+    cd $AUTOCONF_ROOT
+
+    # Update config.guess and config.sub scripts to ensure proper architecture detection
+    curl -o build-aux/config.guess http://git.savannah.gnu.org/cgit/config.git/plain/config.guess
+    curl -o build-aux/config.sub http://git.savannah.gnu.org/cgit/config.git/plain/config.sub
+    chmod +x build-aux/config.guess build-aux/config.sub
+
+    # Configure the Autoconf build system with the correct host type for ppc64le
+    ./configure --host=powerpc64le-pc-linux-gnu
+
+    # Build and install
+    make -j$(nproc)
+    make install
+
+    # Clean up
+    cd ..
+    rm -rf $AUTOCONF_ROOT $AUTOCONF_ROOT.tar.gz
+fi
 autoconf --version
 
 # Compile the latest Python releases.

@@ -38,6 +38,8 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
+CPU_PPC64LE_ARCH = ["cpu-ppc64le"]
+
 CUDA_AARCH64_ARCHES = ["12.8-aarch64"]
 
 
@@ -150,6 +152,8 @@ def arch_type(arch_version: str) -> str:
         return "cpu-s390x"
     elif arch_version in CUDA_AARCH64_ARCHES:
         return "cuda-aarch64"
+    elif arch_version in CPU_PPC64LE_ARCH:
+        return "cpu-ppc64le"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
@@ -174,6 +178,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
+    "cpu-ppc64le": f"pytorch/manylinuxppc64le-builder:cpu-ppc64le-{DEFAULT_TAG}",
 }
 
 RELEASE = "release"
@@ -199,6 +204,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu": "cpu",
         "cpu-aarch64": "cpu",
         "cpu-s390x": "cpu",
+        "cpu-ppc64le": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
         "cuda-aarch64": f"cu{gpu_arch_version.replace('-aarch64', '').replace('.', '')}",
         "rocm": f"rocm{gpu_arch_version}",
@@ -269,7 +275,7 @@ def generate_wheels_matrix(
     use_split_build: bool = False,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
-    if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
+    if os == "linux" or os == "linux-aarch64" or os == "linux-s390x" or os == "linux-ppc64le":
         # NOTE: We only build manywheel packages for x86_64 and aarch64 and s390x linux
         package_type = "manywheel"
 
@@ -291,6 +297,10 @@ def generate_wheels_matrix(
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
             arches = ["cpu-s390x"]
+        elif os == "linux-ppc64le":
+            # Only want the one arch as the CPU type is different and
+            # uses different build/test scripts
+            arches = ["cpu-ppc64le"]
 
     ret: list[dict[str, str]] = []
     for python_version in python_versions:
@@ -302,11 +312,12 @@ def generate_wheels_matrix(
                 or arch_version == "cpu-aarch64"
                 or arch_version == "cpu-s390x"
                 or arch_version == "xpu"
+                or arch_version == "cpu-ppc64le"
                 else arch_version
             )
 
             # TODO: Enable python 3.13t on cpu-s390x
-            if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
+            if (gpu_arch_type == "cpu-s390x" or gpu_arch_type == "cpu-ppc64le") and python_version == "3.13t":
                 continue
 
             if use_split_build and (

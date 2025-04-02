@@ -75,9 +75,38 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 # Configure git to avoid safe directory issues
 RUN git config --global --add safe.directory "*"
 
+# installed python doesn't have development parts. Rebuild it from scratch
+RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
+
+# EPEL for cmake
+FROM base as patchelf
+# Install patchelf
+ADD ./common/install_patchelf.sh install_patchelf.sh
+RUN bash ./install_patchelf.sh && rm install_patchelf.sh
+RUN cp $(which patchelf) /patchelf
+
+FROM patchelf as python
+# build python
+COPY manywheel/build_scripts /build_scripts
+ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+ENV SSL_CERT_FILE=
+RUN bash build_scripts/build.sh && rm -r build_scripts
+#RUN bash build_scripts/build.sh || (echo "Checksum verification failed!" && exit 1)
+
+FROM base as final
+COPY --from=python             /opt/python                           /opt/python
+COPY --from=python             /opt/_internal                        /opt/_internal
+COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
+COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+
+RUN alternatives --set python /usr/bin/python3.12
+RUN alternatives --set python3 /usr/bin/python3.12
+
+RUN pip-3.12 install typing_extensions
+
 # Install required Python packages
-RUN pip install --upgrade pip
-RUN pip install typing_extensions pyyaml setuptools
+#RUN pip install --upgrade pip
+#RUN pip install typing_extensions pyyaml setuptools
  
 # Install test dependencies
 RUN dnf install -y \

@@ -66,7 +66,7 @@ case ${GPU_ARCH_TYPE} in
         MANY_LINUX_VERSION="s390x"
         ;;
     cpu-ppc64le)
-        TARGET=base
+        TARGET=final
         DOCKER_TAG=ppc64le
         GPU_IMAGE=redhat/ubi9
         DOCKER_GPU_BUILD_ARG=""
