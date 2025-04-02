@@ -91,6 +91,8 @@ class CppCompileError(RuntimeError):
     def __init__(self, cmd: list[str], output: str) -> None:
         if isinstance(output, bytes):
             output = output.decode("utf-8")
+        self.cmd = cmd
+        self.output = output
 
         super().__init__(
             textwrap.dedent(
