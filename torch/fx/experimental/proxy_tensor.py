@@ -1171,7 +1171,7 @@ def _should_save_eager_input_vals(
     if isinstance(target, torch._ops.OpOverload):
         from torch._inductor.lowering import get_layout_constraint_tag
 
-        return get_layout_constraint_tag(target)
+        return get_layout_constraint_tag(target) == torch._C.Tag.needs_exact_strides
     return False
 
 
