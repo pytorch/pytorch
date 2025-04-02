@@ -13,7 +13,7 @@ import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from ..utils import get_bounds_index_expr, get_kernel_metadata
+from ..utils import get_bounds_index_expr, get_kernel_metadata, ceildiv
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
@@ -550,7 +550,7 @@ class MetalKernel(SIMDKernel):
             )
             return acc
         if reduction_type in ["prod", "sum"]:
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
+            acc_buf = self._new_accvar(src_dtype, ceildiv(acc_buf_size, self.simd_group_size))
             if self.multistage_reduction:
                 val = self._new_accvar(dtype)
                 default_val, reduction_op = (
@@ -566,7 +566,7 @@ class MetalKernel(SIMDKernel):
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmin", "argmax"]:
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size / self.simd_group_size)
+            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             if not self.multistage_reduction:
