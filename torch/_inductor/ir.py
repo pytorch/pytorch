@@ -6010,9 +6010,17 @@ class SubgraphBuffer(ExternKernel):
         V.graph.register_operation(self)
 
     def codegen(self, wrapper):
+        import torch._inductor.config as inductor_config
+
         subgraph = V.graph.make_subgraph(self.gm, self.real_inputs, "mm_decompose_k")
         with V.set_graph_handler(subgraph):
-            subgraph.run(*self.real_inputs)
+            # Don't bother autotuning on Triton here
+            with inductor_config.patch(
+                max_autotune=False,
+                max_autotune_gemm=False,
+                max_autotune_gemm_backends="ATEN",
+            ):
+                subgraph.run(*self.real_inputs)
 
         class CodegenGraph:
             def __init__(self, graph):

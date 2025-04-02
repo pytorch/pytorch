@@ -45,7 +45,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             # Reset output strides with nested compilation
             context.output_strides = []
 
-        benchmark_gm([*args, self.real_inputs[2]])
+            benchmark_gm([*args, self.real_inputs[2]])
 
         # inductor benchmarker
         return benchmarker.benchmark_gpu(lambda: benchmark_gm([*args, self.real_inputs[2]]))
