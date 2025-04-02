@@ -775,8 +775,7 @@ def forward(self, x_1):
         self.assertEqual(y.size(0), 1)
         self.assertEqual(z.size(0), 1)
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression u1 <= u0 .*"
+            RuntimeError, r"Runtime assertion failed for expression u1 <= u0 .*"
         ):
             fn(torch.tensor([5, 6, -2]))
 
