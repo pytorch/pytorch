@@ -7584,7 +7584,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             n = x.item()
-            return torch.empty((n-1)//2)
+            return torch.empty((n - 1) // 2)
 
         self.assertEqual(fn(torch.tensor([4])).size(0), 1)
         self.assertEqual(fn(torch.tensor([1])).size(0), 0)
