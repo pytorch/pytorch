@@ -519,13 +519,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
                 # one-step training to modify state dict
-                inp = torch.randn(
-                    (
-                        1,
-                        mlp_dim,
-                    ),
-                    device=self.rank,
-                )
+                inp = torch.randn((mlp_dim,), device=self.rank)
                 base_model(inp).sum().backward()
                 base_optim.step()
                 fsdp2_tp_model(inp).sum().backward()
