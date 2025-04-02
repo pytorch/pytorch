@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+from torch.testing._internal.common_device_type import e4m3_type
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -486,16 +487,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         torch.manual_seed(42 + rank)
 
-        if TEST_WITH_ROCM:
-            A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fnuz)
-            Bs = [
-                torch.rand(N, K, device="cuda").to(torch.float8_e4m3fnuz).T for _ in range(3)
-            ]
-        else:
-            A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fn)
-            Bs = [
-                torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
-            ]
+        A_shard = torch.rand(*leading_dims, K, device="cuda").to(e4m3_type)
+        Bs = [
+            torch.rand(N, K, device="cuda").to(e4m3_type).T for _ in range(3)
+        ]
 
         if scale_mode == "tensor-wise":
             A_scale = torch.tensor(0.1, device="cuda")
@@ -584,7 +579,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @runOnRocmArch(MI300_ARCH)
+    @skipIfRocm #AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
@@ -601,12 +596,8 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         rank = self.rank
 
         torch.manual_seed(42 + rank)
-        if TEST_WITH_ROCM:
-            A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fnuz)
-            B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fnuz).T
-        else:
-            A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
-            B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
+        A = torch.rand(BATCH, M, K, device="cuda").to(e4m3_type)
+        B = torch.rand(N, K, device="cuda").to(e4m3_type).T
 
         if rowwise:
             A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")

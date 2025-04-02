@@ -1,8 +1,7 @@
-#include "hip/hip_runtime.h"
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
-#include <ATen/hip/HIPContext.h>
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -71,7 +70,7 @@ namespace {
 using namespace c10d::symmetric_memory;
 
 size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
-  const size_t min_alignment = ::max(4l, input.element_size());
+  const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
   // 128-bit aligned
   const size_t ptr_alignment = at::native::memory::get_alignment(
@@ -95,7 +94,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
       ">: input size must be at least ",
       min_alignment,
       "-byte aligned.");
-  return ::min(ptr_alignment, size_alignment);
+  return std::min(ptr_alignment, size_alignment);
 }
 
 void init_elementwise_launch_config(
@@ -118,13 +117,14 @@ void init_elementwise_launch_config(
         at::ceil_div(numel_per_split, numel_per_thread),
         static_cast<size_t>(C10_WARP_SIZE));
   } else {
-    num_blocks = ::min(
+    num_blocks = std::min(
         at::ceil_div(numel_per_split, max_num_threads * numel_per_thread),
         max_num_blocks);
     num_threads = max_num_threads;
   }
 }
 
+#if !defined(USE_ROCM) //No multi-cast support on ROCm yet
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -195,7 +195,7 @@ at::Tensor multimem_all_reduce_(
               <<<num_blocks,
                  num_threads,
                  0,
-                 at::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+                 at::cuda::getCurrentCUDAStream()>>>(
                   reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
                       input.storage_offset(),
                   input.numel(),
@@ -203,7 +203,7 @@ at::Tensor multimem_all_reduce_(
                       symm_mem->get_signal_pad_ptrs_dev()),
                   symm_mem->get_rank(),
                   symm_mem->get_world_size());
-          C10_HIP_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
   return input;
@@ -281,7 +281,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
               <<<num_blocks,
                  num_threads,
                  0,
-                 at::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+                 at::cuda::getCurrentCUDAStream()>>>(
                   reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
                       input.storage_offset(),
                   out.data_ptr<scalar_t>(),
@@ -290,7 +290,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
                       symm_mem->get_signal_pad_ptrs_dev()),
                   symm_mem->get_rank(),
                   symm_mem->get_world_size());
-          C10_HIP_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
   return out;
@@ -383,7 +383,7 @@ at::Tensor multimem_all_gather_out(
 
   DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
     multimem_all_gather_kernel<k_alignment>
-        <<<num_blocks, num_threads, 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+        <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<char*>(input.data_ptr()),
             reinterpret_cast<char*>(symm_mem->get_multicast_ptr()) +
                 out.storage_offset() * out.element_size(),
@@ -391,10 +391,12 @@ at::Tensor multimem_all_gather_out(
             reinterpret_cast<uint32_t**>(symm_mem->get_signal_pad_ptrs_dev()),
             symm_mem->get_rank(),
             symm_mem->get_world_size());
-    C10_HIP_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
   return out;
 }
+
+#endif //no multi-cast support on ROCm
 
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
@@ -503,7 +505,7 @@ at::Tensor one_shot_all_reduce_out_impl(
                 <<<num_blocks,
                    num_threads,
                    0,
-                   at::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+                   at::cuda::getCurrentCUDAStream()>>>(
                     reinterpret_cast<scalar_t**>(
                         symm_mem->get_buffer_ptrs_dev()),
                     out.data_ptr<scalar_t>(),
@@ -515,7 +517,7 @@ at::Tensor one_shot_all_reduce_out_impl(
                         symm_mem->get_signal_pad_ptrs_dev()),
                     symm_mem->get_rank(),
                     symm_mem->get_world_size());
-            C10_HIP_KERNEL_LAUNCH_CHECK();
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
         });
       });
@@ -1088,15 +1090,15 @@ at::Tensor memset32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+  c10::cuda::CUDAGuard guard(input.device());
 
-  c10::hip::HIPGuardMasqueradingAsCUDA guard(input.device());
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::hip::DriverAPI::get();
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemsetD32Async_(
-      reinterpret_cast<hipDeviceptr_t>(addr),
+      reinterpret_cast<CUdeviceptr>(addr),
       val,
       count,
-      at::hip::getCurrentHIPStreamMasqueradingAsCUDA()));
+      at::cuda::getCurrentCUDAStream()));
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
                                    val,
@@ -1142,17 +1144,17 @@ at::Tensor stream_write_value32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
-  c10::hip::HIPGuardMasqueradingAsCUDA guard(input.device());
+  c10::cuda::CUDAGuard guard(input.device());
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::hip::DriverAPI::get();
-  // According to the documentation of hipStreamWriteValueFlags,
-  // hipStreamWriteValue32 will provide a memory fence before the write, which
+  auto driver_api = c10::cuda::DriverAPI::get();
+  // According to the documentation of CUstreamWriteValue_flags,
+  // cuStreamWriteValue32 will provide a memory fence before the write, which
   // has similar semantics to __threadfence_system() but is scoped to the
   // stream rather than a CUDA thread.
   C10_CUDA_DRIVER_CHECK(driver_api->cuStreamWriteValue32_(
-      at::hip::getCurrentHIPStreamMasqueradingAsCUDA(),
-      reinterpret_cast<hipDeviceptr_t>(addr),
+      at::cuda::getCurrentCUDAStream(),
+      reinterpret_cast<CUdeviceptr>(addr),
       val,
       0));
 #elif defined(USE_ROCM)
@@ -1170,6 +1172,17 @@ at::Tensor stream_write_value32_(
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
+#if defined(USE_ROCM) || defined(CUDART_VERSION)
+  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
+  m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
+  m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
+  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
+  m.impl("reduce_scatter_out", ::reduce_scatter_out);
+
+  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
+#endif
 #if defined(CUDART_VERSION)
   m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
 
@@ -1184,15 +1197,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
-  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
-  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
-  m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
-  m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
-  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
-  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
-  m.impl("reduce_scatter_out", ::reduce_scatter_out);
-
-  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
