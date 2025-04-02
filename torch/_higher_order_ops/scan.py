@@ -34,7 +34,10 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 aten = torch._ops.ops.aten
 
-def split_into_chunks(iterable: list[Any] | tuple[Any], chunk_sizes: list[int]) -> list[Any]:
+
+def split_into_chunks(
+    iterable: list[Any] | tuple[Any], chunk_sizes: list[int]
+) -> list[Any]:
     it = iter(iterable)
     return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
@@ -48,10 +51,6 @@ def wrap_combine_fn_flat(
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
     return combine_fn(carry, xs)
-
-
-def call_operator(operator, *args):
-    return pytree.tree_leaves(operator(*args))
 
 
 def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
@@ -237,6 +236,9 @@ scan_op = ScanOp()
 
 
 def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
+    def call_operator(*args):
+        return pytree.tree_leaves(operator(*args))
+
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -257,7 +259,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             ),
             num_init_leaves,
         )
-        
+
         out_tensor_mask = get_tensor_mask(dummy_out)
 
         # Pre-alocate
@@ -271,17 +273,16 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 dtype=e.dtype,
                 device=e.device,
             )
-            for i, (out_m, e) in enumerate(zip(out_tensor_mask, dummy_out)) if out_m
+            for i, e in enumerate(mask_list(out_tensor_mask, dummy_out))
         ]
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0)
-            for i, (out_m, e) in enumerate(zip(out_tensor_mask, dummy_out)) if out_m
+            for i, e in enumerate(mask_list(out_tensor_mask, dummy_out))
         ]
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
-            # for o, x, idx in zip(outs, out, idxs):
-            for o, x, idx in zip(outs, [o for o in out if isinstance(o, torch.Tensor)], idxs):
+            for o, x, idx in zip(outs, out, idxs):
                 # o: (num_elems, M, N ...)
                 # x: (M, N, ...) -> (1, M, N)
                 # ind * idx: (1, M, N,) with values to be ind
@@ -301,9 +302,9 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             )
 
             # Store the inits in the outs matrix.
-            store_out_in_outs(out, ind)
-            
-        # Expand outs with None depending on the tensor mask of the output 
+            store_out_in_outs(mask_list(out_tensor_mask, out), ind)
+
+        # Expand outs with None depending on the tensor mask of the output
         outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
 
         return [*carry, *outs_expanded]
@@ -346,7 +347,6 @@ def trace_scan(
 
     outputs = None
     for node in combine_graph.graph.nodes:
-        print((node, node.meta))
         if node.op == "output":
             assert outputs is None
             assert len(node.args) == 1
@@ -408,11 +408,12 @@ class ScanAutogradOp(torch.autograd.Function):
         num_additional_inputs,
         *operands,
     ):
-        
         ctx._num_leaves_init = num_leaves_init
         ctx._num_leaves_xs = num_leaves_xs
         ctx._num_additional_inputs = num_additional_inputs
-        init, xs, additional_inputs = split_into_chunks(operands, [num_leaves_init, num_leaves_xs, num_additional_inputs])
+        init, xs, additional_inputs = split_into_chunks(
+            operands, [num_leaves_init, num_leaves_xs, num_additional_inputs]
+        )
         additional_inputs_tensor_mask = get_tensor_mask(additional_inputs)
         ctx._additional_inputs_tensor_mask = additional_inputs_tensor_mask
 
@@ -420,13 +421,14 @@ class ScanAutogradOp(torch.autograd.Function):
         # The wrapper of the forward graph returns carries from all iterations,
         # not just from the last iteration. These are required in the backward path
         def combine_fn_with_carry_checkpoint(*args):
-            new_carry, y = _extract_carry_and_out(
-                combine_fn(*args), num_leaves_init
-            )
+            new_carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
             return [
                 *new_carry,
                 # We additionally checkpoint all the intemediate carry outputs for backward.
-                *[n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c for n_c in new_carry],
+                *[
+                    n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c
+                    for n_c in new_carry
+                ],
                 *y,
             ]
 
@@ -469,7 +471,7 @@ class ScanAutogradOp(torch.autograd.Function):
         Example::
 
             NOTE: This example does not include additional inputs for simplicity
-            
+
             The ``combine_fn``, is the operator used during the scan. For example
             def combine_fn(x: torch.Tensor, y: torch.Tensor):
                 next_carry = y = x * y
@@ -488,19 +490,19 @@ class ScanAutogradOp(torch.autograd.Function):
                 return next_carry, (next_carry, y)
 
             With the function defined above, and the forward carries and the outputs computed in step 3.) above:
-            
+
             3.) carries, outs = scan(combine_fn_wrapped, init, xs)
-            
+
             the backward of scan can be computed as:
-            
+
             4.) Create the wrapper of the ``combine_fn_bw`` that takes care of accumulating the gradients for the additional inputs
             5.) Materialize the ``combine_fn_bw_wrapped``
             6.) Perform the backwrad scan as
             g_additional_inputs, g_init, g_xs = scan_op(combine_fn_bw_wrapped, bw_init, bw_xs), where
             bw_init is the last carry from the forward and
             bw_xs is the combination of the upstream gradients g_ys, the forward carries prepended with the fw_init and the fw_xs
-            
-            Note: The scan_op in the backward needs to operate always reverse over time, i.e., starting from the last time step and 
+
+            Note: The scan_op in the backward needs to operate always reverse over time, i.e., starting from the last time step and
             moving to the first. Therefore, the bwd_xs and the resulting gradients g_xs need to be flipped
         """
 
@@ -531,7 +533,16 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Retrieve the forward inputs and the forward outputs and dissect them
         flat_args = saved_tensors_and_symints(ctx)
-        fw_init, fw_xs, additional_inputs, fw_carries, fw_ys = split_into_chunks(flat_args, [num_leaves_init, num_leaves_xs, num_additional_inputs, num_leaves_init, num_leaves_ys])
+        fw_init, fw_xs, additional_inputs, fw_carries, fw_ys = split_into_chunks(
+            flat_args,
+            [
+                num_leaves_init,
+                num_leaves_xs,
+                num_additional_inputs,
+                num_leaves_init,
+                num_leaves_ys,
+            ],
+        )
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
@@ -539,19 +550,34 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # 4.) Create the BW wrapper
         def combine_fn_bw_wrapped(*args):
-            
             # Dissect arguments
-            carried_g_additional_input, carries_g, outs_g, init, xs, additional_inputs = split_into_chunks(args, [num_additional_inputs, num_leaves_init, num_leaves_ys, num_leaves_init, num_leaves_xs, num_additional_inputs])
-            
+            (
+                carried_g_additional_input,
+                carries_g,
+                outs_g,
+                init,
+                xs,
+                additional_inputs,
+            ) = split_into_chunks(
+                args,
+                [
+                    num_additional_inputs,
+                    num_leaves_init,
+                    num_leaves_ys,
+                    num_leaves_init,
+                    num_leaves_xs,
+                    num_additional_inputs,
+                ],
+            )
+
             # Adjust the order of the variables in args.
             # We get tangents gradients + inputs, but the joint function expects inputs + gradients
-            rearranged_args = [*init,
-                             *xs,
-                             *additional_inputs,
-                             *carries_g,
-                             *outs_g]
+            rearranged_args = [*init, *xs, *additional_inputs, *carries_g, *outs_g]
 
-            g_c, g_xs, current_g_additional_inputs = split_into_chunks(ctx._combine_fn_bw(*rearranged_args), [num_leaves_init, num_leaves_xs, num_additional_inputs])
+            g_c, g_xs, current_g_additional_inputs = split_into_chunks(
+                ctx._combine_fn_bw(*rearranged_args),
+                [num_leaves_init, num_leaves_xs, num_additional_inputs],
+            )
 
             new_g_additional_inputs = [
                 # If the additional inputs are ints or SymInts, those values are taken as is and no gradients are added
@@ -570,32 +596,33 @@ class ScanAutogradOp(torch.autograd.Function):
         # trace through the joint function when torch.compile torch.autograd.grad.
         ctx._combine_fn_bw_wrapped = materialize_as_graph(
             combine_fn_bw_wrapped,
-            (*[
-                a.clone() if add_inp_tm else a
-                for add_inp_tm, a in zip(
-                    additional_inputs_tensor_mask, additional_inputs
-                )
-            ],
-            *[first_slice_copy(c) for c in fw_carries],
-            *[first_slice_copy(o) for o in fw_ys],
-            *fw_init,
-            *fw_xs_slice,
-            *additional_inputs,),
+            (
+                *[
+                    a.clone() if add_inp_tm else a
+                    for add_inp_tm, a in zip(
+                        additional_inputs_tensor_mask, additional_inputs
+                    )
+                ],
+                *[first_slice_copy(c) for c in fw_carries],
+                *[first_slice_copy(o) for o in fw_ys],
+                *fw_init,
+                *fw_xs_slice,
+                *additional_inputs,
+            ),
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
         combine_fn_bw_wrapped = ctx._combine_fn_bw_wrapped
 
-        # with torch._C._AutoDispatchBelowAutograd():
         # Decompose the flat_grads into g_c_T, g_ys
         g_c_T, g_ys = split_into_chunks(flat_grads, [num_leaves_init, num_leaves_ys])
-        
+
         # Initialize the g_additional_inputs with zero-tensors.
-        # This step is necessary because the gradients of the additional inputs are accumulated in the 
+        # This step is necessary because the gradients of the additional inputs are accumulated in the
         # ``wrapper_bwd_combine_fn`` and thus need a zero-initialized starting point
         initial_g_additional_inputs = initialize_g_additional_inputs(additional_inputs)
-        
+
         # Prepend the inits to the carries.
         # This is needed, because when computing the gradients, the last carry is not needed
         # but the first carry, the init, is required.
@@ -603,16 +630,16 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Prepare the xs for the backward scan.
         bwd_xs = [*g_ys, *bw_carries, *fw_xs]
-        
+
         # The flipping of the ``bwd_xs`` is necessary because the scan_op in the backward is always performed in reverse
         bwd_xs = [torch.flip(elem, [0]) for elem in bwd_xs]
-        
+
         # Prepare the bwd_init
         bwd_init = [*initial_g_additional_inputs, *g_c_T]
 
-        # 6.) Perform the backwrad scan: 
-        # The ``combine_fn_bw_wrapped`` receives the 
-        # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the 
+        # 6.) Perform the backwrad scan:
+        # The ``combine_fn_bw_wrapped`` receives the
+        # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
         gradients = scan_op(
             combine_fn_bw_wrapped,
@@ -622,7 +649,9 @@ class ScanAutogradOp(torch.autograd.Function):
         )
 
         # Unpack the computed gradients
-        g_additional_inputs, g_init, g_xs = split_into_chunks(gradients, [num_additional_inputs, num_leaves_init, num_leaves_xs])
+        g_additional_inputs, g_init, g_xs = split_into_chunks(
+            gradients, [num_additional_inputs, num_leaves_init, num_leaves_xs]
+        )
 
         # The flipping back along the scan dimension is required to get the gradients in the right order for ``xs``
         g_xs = [torch.flip(elem, [0]) for elem in g_xs]
@@ -633,7 +662,7 @@ class ScanAutogradOp(torch.autograd.Function):
             g_additional_inputs,
             [None] * num_additional_inputs,
         )
-        
+
         return *[None] * 4, *g_init, *g_xs, *g_additional_inputs
 
 

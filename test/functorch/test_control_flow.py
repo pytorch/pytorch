@@ -1554,8 +1554,7 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # @parametrize("autograd", [False, True])
-    @parametrize("autograd", [True])
+    @parametrize("autograd", [False, True])
     def test_scan_compile(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
