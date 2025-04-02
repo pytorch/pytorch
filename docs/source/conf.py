@@ -184,7 +184,7 @@ html_context = {
     "feedback_url": "https://github.com/pytorch/pytorch",
     "github_version": "main",
     "pytorch_project": "docs",
-    "doc_path": "docs/cpp/source",
+    "doc_path": "docs/source",
     "theme_variables": theme_variables,  # noqa: F601
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
