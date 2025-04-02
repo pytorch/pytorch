@@ -228,6 +228,12 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 grad_outputs = [grad for grad in grad_outputs if grad is not None]
                 grad_outputs = [grad for grad in grad_outputs if grad.requires_grad]
 
+                # Force grad_out to be contiguous. This is because at runtime,
+                # grad_out could have different strides than fw_outs. So, we
+                # force the grad_outs to be contiguous for both tracing and
+                # runtime.
+                grad_outputs = [grad.contiguous() for grad in grad_outputs]
+
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in grad_outputs
