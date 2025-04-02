@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+from collections.abc import Iterable
 from typing import Any, Callable, Optional
 
 import torch
@@ -35,11 +36,13 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 aten = torch._ops.ops.aten
 
 
-def split_into_chunks(
-    iterable: list[Any] | tuple[Any], chunk_sizes: list[int]
-) -> list[Any]:
+def split_into_chunks(iterable: Iterable[Any], chunk_sizes: list[int]) -> list[Any]:
     it = iter(iterable)
     return [list(itertools.islice(it, size)) for size in chunk_sizes]
+
+
+def call_operator(operator, *args):
+    return pytree.tree_leaves(operator(*args))
 
 
 def wrap_combine_fn_flat(
@@ -73,6 +76,17 @@ def mask_list(
         return [i if m else o for m, i, o in zip(mask, inp, other)]
     else:
         return [i for m, i in zip(mask, inp) if m]
+
+
+# We also do a clone with contiguous_format. This is to be consistent with
+# eager semantic of scan, which stacks the outputs. The result is contiguous
+# as a result of the stack operation.
+def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
+    return (
+        y.unsqueeze(0)
+        .repeat(*([scan_length] + [1] * y.ndim))
+        .clone(memory_format=torch.contiguous_format)
+    )
 
 
 def scan(
@@ -236,9 +250,6 @@ scan_op = ScanOp()
 
 
 def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
-    def call_operator(*args):
-        return pytree.tree_leaves(operator(*args))
-
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -261,6 +272,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         )
 
         out_tensor_mask = get_tensor_mask(dummy_out)
+        dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
 
         # Pre-alocate
         # outs -> Output matrix
@@ -273,11 +285,11 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 dtype=e.dtype,
                 device=e.device,
             )
-            for i, e in enumerate(mask_list(out_tensor_mask, dummy_out))
+            for i, e in enumerate(dummy_out_masked)
         ]
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0)
-            for i, e in enumerate(mask_list(out_tensor_mask, dummy_out))
+            for i, e in enumerate(dummy_out_masked)
         ]
 
         def store_out_in_outs(out, ind):
@@ -311,17 +323,6 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 
     scans = _scan(init, xs)
     return scans
-
-
-# We also do a clone with contiguous_format. This is to be consistent with
-# eager semantic of scan, which stacks the outputs. The result is contiguous
-# as a result of the stack operation.
-def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
-    return (
-        y.unsqueeze(0)
-        .repeat(*([scan_length] + [1] * y.ndim))
-        .clone(memory_format=torch.contiguous_format)
-    )
 
 
 def trace_scan(
@@ -594,7 +595,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # 5.) Materialize the ``combine_fn_bw_wrapped``
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-        ctx._combine_fn_bw_wrapped = materialize_as_graph(
+        combine_fn_bw_wrapped_gm = materialize_as_graph(
             combine_fn_bw_wrapped,
             (
                 *[
@@ -613,7 +614,6 @@ class ScanAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
-        combine_fn_bw_wrapped = ctx._combine_fn_bw_wrapped
 
         # Decompose the flat_grads into g_c_T, g_ys
         g_c_T, g_ys = split_into_chunks(flat_grads, [num_leaves_init, num_leaves_ys])
@@ -642,7 +642,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
         gradients = scan_op(
-            combine_fn_bw_wrapped,
+            combine_fn_bw_wrapped_gm,
             bwd_init,
             bwd_xs,
             additional_inputs,
