@@ -189,7 +189,7 @@ class TestLinalg(TestCase):
         if untuned_filename is None:
             untuned_filename = f"tunableop_untuned_{unique_id}_{ordinal}.csv"
         if tuned_filename is None:
-            tuned_filename =  f"tunableop_results_{unique_id}_{ordinal}.csv"
+            tuned_filename = f"tunableop_results_{unique_id}_{ordinal}.csv"
 
         with open(untuned_filename) as file1:
             with open(tuned_filename) as file2:
