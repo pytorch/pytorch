@@ -506,7 +506,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     from ..decomposition import select_decomp_table
     from torch._dispatch.python import enable_python_dispatcher
-
+    from torch._inductor.select_algorithm import AlgorithmSelectorCache
+    
+    kPartitions = 256
     with enable_python_dispatcher():
         decompositions = (
             select_decomp_table()
@@ -514,13 +516,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         decompose_k_subgraph_template = SubgraphTemplate(
             name="decompose_k_mm",
-            graph=make_fx(decomposeK, decompositions, tracing_mode="real"),
+            make_fx_graph=make_fx(decomposeK, decompositions, tracing_mode="real"),
         )
     
+    mat1_tensor, mat2_tensor = AlgorithmSelectorCache.benchmark_example_value(mat1), AlgorithmSelectorCache.benchmark_example_value(mat2)
     decompose_k_subgraph_template.maybe_append_choice(
         choices,
         input_nodes=(mat1, mat2),
         layout=layout,
+        example_inputs=[mat1_tensor, mat2_tensor, kPartitions],
     )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
