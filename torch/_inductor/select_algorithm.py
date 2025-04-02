@@ -1177,7 +1177,6 @@ class TritonTemplate(KernelTemplate):
                 template = kernel.render(self.template, kwargs)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                     code = template.finalize_all()
-
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
@@ -1773,6 +1772,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def precompile(choices) -> Callable[[], None]:
             log.debug("Starting precompilation")
+
             def no_op(*args, **kwargs):
                 return
 

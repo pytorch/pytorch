@@ -16,7 +16,6 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 from torch.torch_version import TorchVersion
 
-from ..lowering import lowerings
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -46,7 +45,6 @@ from .mm_common import (
     mm_config_kwargs,
     mm_grid,
     mm_options,
-    partition_k_mm_grid,
     persistent_mm_grid,
     persistent_mm_options,
     should_fallback_to_aten,
@@ -310,87 +308,87 @@ persistent_tma_mm_template = TritonTemplate(
 )
 
 
-partition_k_mm_template = TritonTemplate(
-    name="partition_k_mm",
-    grid=partition_k_mm_grid,
-    source=r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
+# partition_k_mm_template = TritonTemplate(
+#     name="partition_k_mm",
+#     grid=partition_k_mm_grid,
+#     source=r"""
+# {{def_kernel("A", "B")}}
+#     M = {{size("A", 0)}}
+#     N = {{size("B", 1)}}
+#     K = {{size("A", 1)}}
+#     if M * N == 0:
+#         # early exit due to zero-size input(s)
+#         return
 
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
+#     stride_am = {{stride("A", 0)}}
+#     stride_ak = {{stride("A", 1)}}
+#     stride_bk = {{stride("B", 0)}}
+#     stride_bn = {{stride("B", 1)}}
 
-    pid = tl.program_id(0)
-    num_pid_m = (M + BLOCK_M - 1) // BLOCK_M
-    num_pid_n =  (N + BLOCK_N - 1) // BLOCK_N
-    num_pid_pk = PK
-    num_pid_nk = num_pid_n * num_pid_pk
-    num_pid_in_group = GROUP_M * num_pid_nk
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_nk = (pid % num_pid_in_group) // group_size_m
-    pid_n = pid_nk // num_pid_pk
-    pid_pk = pid_nk % num_pid_pk
+#     pid = tl.program_id(0)
+#     num_pid_m = (M + BLOCK_M - 1) // BLOCK_M
+#     num_pid_n =  (N + BLOCK_N - 1) // BLOCK_N
+#     num_pid_pk = PK
+#     num_pid_nk = num_pid_n * num_pid_pk
+#     num_pid_in_group = GROUP_M * num_pid_nk
+#     group_id = pid // num_pid_in_group
+#     first_pid_m = group_id * GROUP_M
+#     group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+#     pid_m = first_pid_m + (pid % group_size_m)
+#     pid_nk = (pid % num_pid_in_group) // group_size_m
+#     pid_n = pid_nk // num_pid_pk
+#     pid_pk = pid_nk % num_pid_pk
 
-    pk_size = K // PK
+#     pk_size = K // PK
 
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    else:
-        offs_a_m = rm % M
-    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    else:
-        offs_b_n = rn % N
+#     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+#     if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+#         offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+#     else:
+#         offs_a_m = rm % M
+#     if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+#         offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+#     else:
+#         offs_b_n = rn % N
 
-    offs_k = (pid_pk * BLOCK_K + tl.arange(0, BLOCK_K)) % K
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+#     offs_k = (pid_pk * BLOCK_K + tl.arange(0, BLOCK_K)) % K
+#     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 
-    for k_idx in range(0, tl.cdiv(pk_size, BLOCK_K)):
-        {% if not EVEN_K %}
-        a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
-        b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
-        {% endif %}
-        a_k_idx_vals = offs_k[None, :] + (k_idx * pk_size)
-        b_k_idx_vals = offs_k[:, None] + (k_idx * pk_size)
+#     for k_idx in range(0, tl.cdiv(pk_size, BLOCK_K)):
+#         {% if not EVEN_K %}
+#         a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
+#         b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
+#         {% endif %}
+#         a_k_idx_vals = offs_k[None, :] + (k_idx * pk_size)
+#         b_k_idx_vals = offs_k[:, None] + (k_idx * pk_size)
 
-        idx_m = offs_a_m[:, None]
-        idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+#         idx_m = offs_a_m[:, None]
+#         idx_n = a_k_idx_vals
+#         {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
 
-        idx_m = b_k_idx_vals
-        idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+#         idx_m = b_k_idx_vals
+#         idx_n = offs_b_n[None, :]
+#         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+#         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
 
-    # rematerialize rm and rn to save registers
-    offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    offs_ck = pid_pk
+#     # rematerialize rm and rn to save registers
+#     offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+#     offs_ck = pid_pk
 
-    idx_m = offs_cm[:, None, None]
-    idx_n = offs_cn[None, :, None]
-    idx_k = offs_ck[None, None, :]
+#     idx_m = offs_cm[:, None, None]
+#     idx_n = offs_cn[None, :, None]
+#     idx_k = offs_ck[None, None, :]
 
-    acc_reshaped = acc[:, :, None]
-    mask = (idx_m < M) & (idx_n < N)
+#     acc_reshaped = acc[:, :, None]
+#     mask = (idx_m < M) & (idx_n < N)
 
-    # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n", "idx_k"), "acc_reshaped", "mask")}}
-""",
-)
+#     # inductor generates a suffix
+#     {{store_output(("idx_m", "idx_n", "idx_k"), "acc_reshaped", "mask")}}
+# """,
+# )
 
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
