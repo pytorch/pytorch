@@ -611,18 +611,28 @@ class TestCuda(TestCase):
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
+
         _check_default()
         # "Default" can be set but is immediately reset internally to the actual default value.
-        self.assertTrue(torch.backends.cuda.preferred_blas_library("default") != torch._C._BlasBackend.Default)
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("default")
+            != torch._C._BlasBackend.Default
+        )
         _check_default()
-        self.assertTrue(torch.backends.cuda.preferred_blas_library("cublas") == torch._C._BlasBackend.Cublas)
-        self.assertTrue(torch.backends.cuda.preferred_blas_library("hipblas") == torch._C._BlasBackend.Cublas)
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("cublas")
+            == torch._C._BlasBackend.Cublas
+        )
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("hipblas")
+            == torch._C._BlasBackend.Cublas
+        )
         # check env var override
         custom_envs = [
             {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
             {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
         ]
-        test_script = f"import torch;print(torch.backends.cuda.preferred_blas_library())"
+        test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
         for env_config in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
