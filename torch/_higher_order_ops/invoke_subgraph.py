@@ -199,11 +199,8 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
             )
 
-            if grad_outputs is None:
-                # Infer grad_outputs to be the same properties as the fw_outputs
-                # if they're not passed in
-                with context:
-                    fw_outs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+            with context:
+                fw_outs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
 
             num_fw_outs = len(fw_outs)
 
@@ -219,14 +216,17 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                     filter_tangent_info.indexes_with_none.add(idx)
                 elif not fw_out.requires_grad:
                     filter_tangent_info.indexes_with_no_grad.add(idx)
-            
-            # Although fw_outs are equivalent to grad_outputs for tracing
-            # purposes, we have to carefully handle the None and fw_out that do
-            # not have require_grad. At those indexes, we will have None in the
-            # backward graph.
-            grad_outputs = fw_outs
-            grad_outputs = [grad for grad in grad_outputs if grad is not None]
-            grad_outputs = [grad for grad in grad_outputs if grad.requires_grad]
+
+            if grad_outputs is None:
+                # Infer grad_outputs to be the same properties as the fw_outputs
+                # if they're not passed in
+                # Although fw_outs are equivalent to grad_outputs for tracing
+                # purposes, we have to carefully handle the None and fw_out that do
+                # not have require_grad. At those indexes, we will have None in the
+                # backward graph.
+                grad_outputs = fw_outs
+                grad_outputs = [grad for grad in grad_outputs if grad is not None]
+                grad_outputs = [grad for grad in grad_outputs if grad.requires_grad]
 
             if any(
                 not isinstance(out, torch.Tensor)
