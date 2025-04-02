@@ -30,12 +30,9 @@ triton_scaled_grouped_mm_source = r"""
 
     dtype = tl.float8e4nv
     TMA_SIZE: tl.constexpr = tl.constexpr(128)
-    if USE_TMA_STORE:
-        workspace_base = ws_ptr + tidx * 3 * TMA_SIZE
-        c_desc_ptr = worspace_base + 2 * TMA_SIZE
-    else:
-        workspace_base = ws_ptr + tidx * 2 * TMA_SIZE
-        c_desc_ptr = None
+
+    workspace_base = ws_ptr + tidx * 2 * TMA_SIZE
+    c_desc_ptr = None
 
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
@@ -71,18 +68,6 @@ triton_scaled_grouped_mm_source = r"""
             num_m_tiles = tl.cdiv(m_size, BLOCK_M)
             num_n_tiles = tl.cdiv(n_size, BLOCK_N)
             num_tiles = num_m_tiles * num_n_tiles
-
-            if USE_TMA_STORE:
-                # pyre-ignore
-                tl.extra.cuda.experimental_device_tensormap_create2d(
-                    desc_ptr=c_desc_ptr,
-                    global_address=c_ptr + M_start_offset * N,
-                    load_size=[BLOCK_M, BLOCK_N],
-                    global_size=[m_size, n_size],
-                    element_ty=c_ptr.dtype.element_ty,
-                )
-                # pyre-ignore
-                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(c_desc_ptr)
 
             # Move across tiles
             while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
@@ -146,19 +131,10 @@ triton_scaled_grouped_mm_source = r"""
                 )
                 c = accumulator.to(tl.float32) * a_scale * b_scale
 
-                if USE_TMA_STORE:
-                    m_offset = (tile_m_idx * BLOCK_M).to(tl.int32)
-                    n_offset = (tile_n_idx * BLOCK_N).to(tl.int32)
-                    tl._experimental_descriptor_store(
-                        c_desc_ptr,
-                        c.to(c_ptr.dtype.element_ty),
-                        [m_offset, n_offset],
-                    )
-                else:
-                    idx_m = (M_start_offset + offs_am[:, None])
-                    idx_n = offs_bn[None, :]
-                    mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
-                    {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=20)}}
+                idx_m = (M_start_offset + offs_am[:, None])
+                idx_n = offs_bn[None, :]
+                mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
+                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
                 tidx += NUM_SMS
 
             iterated_tiles += num_tiles
@@ -174,28 +150,48 @@ triton_scaled_grouped_mm_template = TritonTemplate(
 def grouped_mm_args(
     mat1,
     mat2,
+    offs,
     layout=None,
     out_dtype=None,
 ):
-    mat1, mat2 = realize_inputs(mat1, mat2)
-    m, k1 = mat1.get_size()
-    g, k2, n = mat2.get_size()
-    k = V.graph.sizevars.guard_equals(k1, k2)
+    mat1, mat2, offs = realize_inputs(mat1, mat2, offs)
+    mat1_size = mat1.get_size()
+    mat2_size = mat2.get_size()
+
+    m1dim, m2dim = len(mat1_size), len(mat2_size)
+
+    assert m1dim == 2 or m1dim == 3
+    assert m2dim == 2 or m2dim == 3
+
+    scale_multiplier = 1 if m1dim == 3 or m2dim == 3 else offs.get_size()
+
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
         if out_dtype is None:
             out_dtype = mat1.get_dtype()
 
+        dims = []
+        if m1dim == 2:
+            if m2dim == 2:
+                assert offs is not None
+                dims = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
+            else:
+                dims = [mat1_size[0], mat2_size[-1]]
+        else:
+            if m2dim == 2:
+                dims = [mat1_size[1], mat2_size[1]]
+            else:
+                dims = [mat1_size[0], mat1_size[1], mat2_size[-1]]
         layout = FixedLayout(
             mat1.get_device(),
             out_dtype,
-            [m, n],
+            dims,
         )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
-    return (g, m, n, k, layout, mat1, mat2)
+    return (mat1_size, mat2_size, layout, mat1, mat2, offs)
 
 
 aten__scaled_grouped_mm = ExternKernelChoice(
@@ -204,6 +200,10 @@ aten__scaled_grouped_mm = ExternKernelChoice(
     op_overload=aten._scaled_grouped_mm,
     has_out_variant=False,
 )
+
+
+def can_use_triton_kernel(offs, bias, m1_size, m2_size):
+    return offs is not None and bias is None and has_triton_tma_device() and len(m1_size) == 2 and len(m2_size) == 3
 
 
 @register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
@@ -219,17 +219,15 @@ def tuned_scaled_grouped_mm(
     use_fast_accum: bool = False,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
-    g, m, n, k, layout, mat_a, mat_b = grouped_mm_args(
-        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    m1_size, m2_size, layout, mat_a, mat_b, offs = grouped_mm_args(
+        mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
     )
 
-    counters["aten_mm_info"][f"aten._scaled_grouped_mm.default_{g}_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten._scaled_grouped_mm.default"] += 1
     log.info(
-        "Tuned aten._scaled_grouped_mm.default: g=%s m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
-        g,
-        m,
-        n,
-        k,
+        "Tuned aten._scaled_grouped_mm.default: mat1_shape=%s, mat2_shape=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m1_size,
+        m2_size,
         mat_a.get_dtype(),
         mat_b.get_dtype(),
         layout,
@@ -262,7 +260,10 @@ def tuned_scaled_grouped_mm(
 
     scaled_grouped_mm_configs = V.choices.get_scaled_grouped_mm_configs(device_type)
 
-    if is_nonzero and offs is not None and bias is None and has_triton_tma_device():
+    if is_nonzero and can_use_triton_kernel(offs, bias, m1_size, m2_size):
+        m, k1 = m1_size
+        g, k2, n = m2_size
+        k = V.graph.sizevars.guard_equals(k1, k2)
         for config in scaled_grouped_mm_configs(m, n, k):
             kwargs = {
                 "G": g,

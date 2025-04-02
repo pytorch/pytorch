@@ -1268,16 +1268,22 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_2d_2d(self, fast_accum, strided):
+    @parametrize("use_torch_compile", [False, True])
+    def test_grouped_gemm_2d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         scale_a = torch.arange(m * n_groups, device=device, dtype=torch.float32) / 4
         scale_b = torch.arange(n * n_groups, device=device, dtype=torch.float32) / 4
+        for name in ["a", "b", "scale_a", "scale_b"]:
+            print(name, locals()[name].shape)
+            print(locals()[name])
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        out = torch._scaled_grouped_mm(a, b.t(), scale_a, scale_b, offs=offs,
-                                       out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+        f = torch._scaled_grouped_mm
+        f = torch.compile(f) if use_torch_compile else f
+        out = f(a, b.t(), scale_a, scale_b, offs=offs,
+                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
         alist, blist, ascalelist, bscalelist = [], [], [], []
         start = 0
@@ -1287,6 +1293,12 @@ class TestFP8MatmulCuda(TestCase):
             ascalelist.append(scale_a[i * m : (i + 1) * m])
             bscalelist.append(scale_b[i * n : (i + 1) * n])
             start = offs_cpu[i]
+        print(a)
+        print("alist:", alist)
+        asplit = [x.squeeze(1) for x in a.view(m, n_groups, k).split(1, dim=1)]
+        print("asplit:", asplit)
+        for x, y in zip(alist, asplit):
+            torch.testing.assert_close(x.float(), y.float())
         self.grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
@@ -1294,7 +1306,8 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_2d_3d(self, fast_accum, strided):
+    @parametrize("use_torch_compile", [False, True])
+    def test_grouped_gemm_2d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1306,7 +1319,9 @@ class TestFP8MatmulCuda(TestCase):
         scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
         scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
-        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
+        f = torch._scaled_grouped_mm
+        f = torch.compile(f) if use_torch_compile else f
+        out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
         offs_cpu = offs.cpu()
@@ -1324,7 +1339,8 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_3d_3d(self, fast_accum, strided):
+    @parametrize("use_torch_compile", [False, True])
+    def test_grouped_gemm_3d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1335,7 +1351,9 @@ class TestFP8MatmulCuda(TestCase):
         scale_a = torch.ones(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
         scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
-        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b,
+        f = torch._scaled_grouped_mm
+        f = torch.compile(f) if use_torch_compile else f
+        out = f(a, b.transpose(-2, -1), scale_a, scale_b,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
         self.grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
@@ -1345,7 +1363,8 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_3d_2d(self, fast_accum, strided):
+    @parametrize("use_torch_compile", [False, True])
+    def test_grouped_gemm_3d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1357,7 +1376,9 @@ class TestFP8MatmulCuda(TestCase):
         scale_b = torch.arange(n_groups * n, device="cuda", dtype=torch.float32)
         offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
 
-        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
+        f = torch._scaled_grouped_mm
+        f = torch.compile(f) if use_torch_compile else f
+        out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
         blist, bscalelist, outlist = [], [], []
