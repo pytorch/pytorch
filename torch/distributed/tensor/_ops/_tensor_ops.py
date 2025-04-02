@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import operator
 from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
@@ -34,6 +35,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
 
 aten = torch.ops.aten
@@ -349,16 +351,22 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         start = 0
     if end is None or end > input_shape[dim]:
         end = input_shape[dim]
-    assert isinstance(start, int)
-    assert isinstance(end, int)
-    assert isinstance(step, int)
+    assert isinstance(start, (int, torch.SymInt))
+    assert isinstance(end, (int, torch.SymInt))
+    assert isinstance(step, (int, torch.SymInt))
 
     # normalize args
     slice_dim = normalize_dim(dim, input_ndim)
     start = normalize_dim(start, input_shape[dim])
     end = normalize_dim(end, input_shape[dim])
 
-    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
+    # if any of the below values are unbacked symints, just assume no redundant slice
+    redundant_slice = guard_or_false(
+        operator.and_(
+            operator.and_(sym_eq(start, 0), sym_eq(end, input_shape[dim])),
+            sym_eq(step, 1),
+        )
+    )
 
     slice_strategy = OpStrategy([])
 

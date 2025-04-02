@@ -24,6 +24,12 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.distributed.tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -46,6 +52,102 @@ class LocalLRUCache(threading.local):
 
     def cache_info(self):
         return self.cache.cache_info()
+
+
+# This is a fast-path for sharding prop. The idea is as follows:
+# (1) normally, sharding prop is "smarter". It proposes several different sharding strategies,
+#     and tries all of them to find the optimal strategy. Some consequences:
+#      (a) these strategies can add collectives to get to the final output sharding
+#      (b) these strategies can be dependent on the input shape
+# (2) In basic TP/EP situations, we can do better:
+#     (a) the sharding strategy is "obvious": e.g. mm(replicate, shard(1)) -> shard(1)
+#     (b) the known output sharding does not require emiting any extra collectives inside DTensor
+#     (c) the decided output sharding is agnostic to the input shapes
+# This has some benefits for both compile and eager:
+# - in eager, we can skip expensive sharding prop, which would normally not be cacheable in cases
+#   where input shapes are constantly changing due to data dependencies
+# - in compile, if our shapes are data dependent and therefore not known at compile time,
+#   we wouldn't even be *able* to use the more complicated, shape-dependent strategies
+def _propagate_op_sharding_fast_path(op_info):
+    from torch._subclasses import FakeTensorMode
+
+    out_placements: Optional[tuple[Placement]] = None
+    if op_info.schema.op is torch.ops.aten.mm.default:
+        placements1 = op_info.flat_args_schema[0].placements
+        placements2 = op_info.flat_args_schema[1].placements
+        if len(placements1) == 1 and len(placements2) == 1:
+            if placements1[0] == Replicate() and placements2[0] == Shard(1):
+                # TP input projection case
+                out_placements = (Shard(1),)
+            elif placements1[0] == Shard(1) and placements2[0] == Shard(0):
+                # TP output projection case
+                out_placements = (Partial(),)
+            elif placements1[0] == Shard(0) and placements2[0] == Replicate():
+                # TP output project backwards case
+                out_placements = (Shard(0),)
+            elif placements1[0] == Replicate() and placements2[0] == Replicate():
+                # not sure (backward)
+                out_placements = (Replicate(),)
+            elif placements1[0] == Shard(0) and placements2[0] == Partial():
+                # not sure (backward)
+                out_placements = (Shard(0),)
+            elif placements1[0] == Partial() and placements2[0] == Shard(1):
+                # not sure (backward)
+                out_placements = (Shard(1),)
+        if out_placements is not None:
+            fake_mode = (
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+                or FakeTensorMode()
+            )
+            # I am doing fake prop here per-op. We could make this more general, but:
+            # (1) DTensor doesn't like pytrees due to the overhead
+            # (2) I can't actually generically map over the `op_info.local_args`, since I need the shapes of the outer dtensor
+            with fake_mode:
+                inp1_fake = torch.empty_strided(
+                    op_info.flat_args_schema[0].tensor_meta.shape,
+                    op_info.flat_args_schema[0].tensor_meta.stride,
+                    dtype=op_info.flat_args_schema[0].tensor_meta.dtype,
+                )
+                inp2_fake = torch.empty_strided(
+                    op_info.flat_args_schema[1].tensor_meta.shape,
+                    op_info.flat_args_schema[1].tensor_meta.stride,
+                    dtype=op_info.flat_args_schema[1].tensor_meta.dtype,
+                )
+                out_fake = op_info.schema.op(inp1_fake, inp2_fake)
+    elif op_info.schema.op is torch.ops.aten.cat.default:
+        if all(a.placements == (Partial(),) for a in op_info.flat_args_schema):
+            # EP case where we for-loop each expert matmul and cat the results
+            out_placements = (Partial(),)
+
+            fake_mode = (
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+                or FakeTensorMode()
+            )
+            with fake_mode:
+                inps_fake = [
+                    torch.empty_strided(
+                        a.tensor_meta.shape,
+                        a.tensor_meta.stride,
+                        dtype=a.tensor_meta.dtype,
+                    )
+                    for a in op_info.flat_args_schema
+                ]
+                out_fake = op_info.schema.op(inps_fake, **op_info.local_kwargs)
+
+    if out_placements is not None:
+        assert out_fake is not None
+        out_meta = TensorMeta(
+            shape=out_fake.shape, stride=out_fake.stride(), dtype=out_fake.dtype
+        )
+        out_spec = DTensorSpec(
+            mesh=op_info.flat_args_schema[0].mesh,
+            placements=out_placements,
+            tensor_meta=out_meta,
+        )
+        out_sharding = OutputSharding(output_spec=out_spec)
+        return out_sharding
+
+    return None
 
 
 class ShardingPropagator:
@@ -255,6 +357,11 @@ class ShardingPropagator:
         )
 
     def propagate(self, op_info: OpInfo) -> None:
+        maybe_output_sharding = _propagate_op_sharding_fast_path(op_info)
+        if maybe_output_sharding is not None:
+            op_info.output_sharding = maybe_output_sharding
+            return
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
