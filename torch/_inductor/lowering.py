@@ -1927,6 +1927,9 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         _warn_complex_not_supported()
         return True
 
+    if t.is_meta:
+        return True
+
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
             return True
@@ -1934,12 +1937,14 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            node.target
+            isinstance(parent.target, torch._ops.OpOverload)
+            and parent.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
+                aten._scaled_mm.default,
             )
-            or is_view(node.target)
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
 
     return False
@@ -3570,7 +3575,7 @@ def _unsafe_index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1235
 # and
 # https://github.com/pytorch/torchdynamo/issues/1863
-@register_lowering(aten.index_put)
+@register_lowering(aten.index_put, type_promotion_kind=None)
 def index_put(x, indices, values, accumulate=False):
     return index_put_impl_(
         clone(x), indices, values, accumulate, check=True, may_realize=False
