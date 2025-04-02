@@ -6988,6 +6988,8 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
+    # scan is not supported in sigmoid yet
+    @testing.expectedFailureCppRuntime
     def test_export_scan_pytree_output(self):
         def add(carry, accum):
             return carry + carry, (accum[0]["moo"] + 1, accum[0]["moo2"] + 1)
