@@ -6,6 +6,7 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
+# Enable graph partitioning, so that meta tensors are hoisted out of the graph, enabling cudagraphs
 torch._inductor.config.graph_partition = True
 
 
@@ -142,7 +143,7 @@ class PaddedTensor(torch.Tensor):
         )
 
     @classmethod
-    def foobar(cls, func, types, args=..., kwargs=None, shapeargs_to_meta=False):
+    def execute_padded(cls, func, types, args=..., kwargs=None):
         # In: Padded tensor
         if kwargs is None:
             kwargs = {}
@@ -155,10 +156,9 @@ class PaddedTensor(torch.Tensor):
         shapes_args, shapes_kwargs = pytree.tree_map_only(
             PaddedTensor, lambda x: x.original_tensor, (args, kwargs)
         )
-        if shapeargs_to_meta:
-            shapes_args = pytree.tree_map_only(
-                torch.Tensor, lambda x: x.to("meta"), shapes_args
-            )
+        shapes_args = pytree.tree_map_only(
+            torch.Tensor, lambda x: x.to("meta"), shapes_args
+        )
         out_shapes = func(*shapes_args, **shapes_kwargs)
 
         # In: Multipliers
@@ -193,7 +193,7 @@ class PaddedTensor(torch.Tensor):
             "flatten",
             "scaled_dot_product_attention",
         ]:
-            out = cls.foobar(func, types, args, kwargs, shapeargs_to_meta=True)
+            out = cls.execute_padded(func, types, args, kwargs)
         else:
             out = super().__torch_function__(func, types, args, kwargs)
         # print("out: ", out)
@@ -204,7 +204,7 @@ class PaddedTensor(torch.Tensor):
         # print("Dispatching %s" % func._overloadpacket.__name__)
         # print("-" * 40)
         # print("args: ", args)
-        out = cls.foobar(func, types, args, kwargs, shapeargs_to_meta=True)
+        out = cls.execute_padded(func, types, args, kwargs)
         # print("out: ", out)
         return return_and_correct_aliasing(func, args, kwargs, out)
 
