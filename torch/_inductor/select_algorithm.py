@@ -1498,10 +1498,10 @@ class ExternKernelCaller(ChoiceCaller):
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
-            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
+            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)  # type: ignore[assignment]
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
-            inner = cls(
+            inner = cls(  # type: ignore[assignment]
                 layout=self.layout,
                 inputs=self.input_nodes,
                 python_kernel_name=self.choice.call_name(),
