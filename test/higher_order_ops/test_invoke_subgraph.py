@@ -1071,7 +1071,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(64, requires_grad=True)
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
 
         ref = fn(x)
         res = opt_fn(x)
