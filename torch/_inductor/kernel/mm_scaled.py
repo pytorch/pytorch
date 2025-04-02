@@ -6,17 +6,16 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch.utils._triton import has_triton_tma_device
 
-from .. import config as inductor_config
 from ..config import triton as triton_config
-from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
+from ..ir import _IntLike, ChoiceCaller, get_device_type, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
@@ -28,13 +27,13 @@ from ..utils import (
     use_ck_gemm_template,
     use_triton_template,
 )
+from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     mm_args,
     mm_grid,
     persistent_mm_grid,
-    scaled_mm_configs,
-    scaled_persistent_mm_configs,
+    should_fallback_to_aten,
 )
 
 
@@ -509,6 +508,20 @@ def tuned_scaled_mm(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
 
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._scaled_mm.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+
+    device_type = get_device_type(mat_a)
+
     check_supported_striding(mat_a, mat_b)
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
@@ -532,6 +545,11 @@ def tuned_scaled_mm(
         choices.append(aten_choice)
 
     _, is_nonzero = _is_static_problem(layout)
+
+    scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)
+    scaled_persistent_mm_configs = V.choices.get_scaled_persistent_mm_configs(
+        device_type
+    )
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):
@@ -574,23 +592,10 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for scaled_mm, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_choice.output_node()
 
-    try:
-        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning(
-            "All choices for scaled_mm were invalid, using ATen backend as fallback"
-        )
-        return aten_choice.output_node()
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
 @functools.lru_cache

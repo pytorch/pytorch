@@ -89,8 +89,8 @@ _register_custom_builtin("fx_pytree", "import torch.fx._pytree as fx_pytree", fx
 _register_custom_builtin("pytree", "import torch.utils._pytree as pytree", pytree)
 
 
-# __add__ => add
-_strip_magic_method = functools.partial(re.compile(r"^__|__$").sub, "")
+def _is_magic(x: str) -> bool:
+    return x.startswith("__") and x.endswith("__")
 
 
 def _snake_case(s: str) -> str:
@@ -127,7 +127,7 @@ _torch_but_not_dynamo = re.compile(
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
-        return bool(_torch_but_not_dynamo(module_name))
+        return _torch_but_not_dynamo(module_name) is not None
 
     name = getattr(obj, "__name__", None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -221,6 +221,8 @@ dtype_abbrs = {
     torch.float8_e5m2: "f8e5m2",
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
+    torch.float8_e8m0fnu: "f8e8m0fnu",
+    torch.float4_e2m1fn_x2: "f4e2m1fnx2",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -234,6 +236,7 @@ dtype_abbrs = {
     torch.uint32: "u32",
     torch.uint64: "u64",
     torch.bits16: "b16",
+    torch.bits1x8: "b1x8",
 }
 
 
@@ -585,7 +588,7 @@ class CodeGen:
             """
             nonlocal prev_stacktrace
 
-            if node.op not in ("placeholder", "output"):
+            if node.op not in {"placeholder", "output"}:
                 stack_trace = node.stack_trace
                 if stack_trace:
                     if stack_trace != prev_stacktrace:
@@ -618,8 +621,10 @@ class CodeGen:
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
                 # use string as annotation, to make it valid python code
-
-                if isinstance(meta_val, torch.Tensor):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     stride_annotation = (
                         f"{stringify_shape(meta_val.stride())}"
                         if include_stride
@@ -1533,9 +1538,12 @@ class Graph:
         if callable(target):
             op = target.__name__
         else:
-            # target must be a str, regex will error if it's not
-            op = _strip_magic_method(target)
-        return _snake_case(op)
+            assert isinstance(target, str)
+            op = target
+            if _is_magic(op):
+                op = op[2:-2]
+        op = _snake_case(op)
+        return op
 
     @compatibility(is_backward_compatible=True)
     def python_code(
@@ -1719,8 +1727,6 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
-            num_warnings = 0
-            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == "call_function":
                     if not callable(node.target):
@@ -1752,29 +1758,8 @@ class Graph:
                                 f"Node {node} target {node.target} {atom} of {seen_qualname} does "
                                 "not reference an nn.Module"
                             )
-                        elif (
-                            node.op == "get_attr"
-                            and not isinstance(new_m_itr, torch.nn.Module)
-                            and not isinstance(new_m_itr, torch.nn.Parameter)
-                            and atom not in m_itr._buffers
-                        ):
-                            if num_warnings < MAX_WARNINGS:
-                                # Don't emit this warning too frequently,
-                                # for very large graphs this can become very expensive
-                                # from a performance perspective.
-                                warnings.warn(
-                                    f"Node {node} target {node.target} {atom} of {seen_qualname} does "
-                                    "not reference an nn.Module, nn.Parameter, or buffer, which is "
-                                    "what 'get_attr' Nodes typically target"
-                                )
-                            num_warnings += 1
-                        else:
-                            m_itr = new_m_itr
-            if num_warnings > MAX_WARNINGS:
-                warnings.warn(
-                    f"Additional {num_warnings - MAX_WARNINGS} warnings "
-                    "suppressed about get_attr references"
-                )
+
+                        m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
