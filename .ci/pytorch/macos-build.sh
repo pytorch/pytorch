@@ -33,34 +33,11 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
-build_lite_interpreter() {
-    echo "Testing libtorch (lite interpreter)."
-
-    CPP_BUILD="$(pwd)/../cpp_build"
-    # Ensure the removal of the tmp directory
-    trap 'rm -rfv ${CPP_BUILD}' EXIT
-    rm -rf "${CPP_BUILD}"
-    mkdir -p "${CPP_BUILD}/caffe2"
-
-    # It looks libtorch need to be built in "${CPP_BUILD}/caffe2 folder.
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd "${CPP_BUILD}/caffe2" || exit
-    VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
-    popd || exit
-
-    "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
-}
-
 print_cmake_info
 
-if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
-  # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
-  # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
-  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
-elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
-  export BUILD_LITE_INTERPRETER=1
-  build_lite_interpreter
-fi
+# Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
+# that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
+USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
 
 if which sccache > /dev/null; then
   print_sccache_stats

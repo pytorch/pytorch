@@ -162,6 +162,7 @@ class MPSBasicTests(TestCase):
 # Copy tests
 for test_name in [
     "test_min_max_reduction",
+    "test_add_complex4",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -207,6 +208,7 @@ for test_name in [
     "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
+    "test_neg_max_uint8",
     "test_pow2",
     "test_prod",
     "test_randint_int64_mod",
