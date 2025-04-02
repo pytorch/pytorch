@@ -146,18 +146,18 @@ def requires_cuda_with_enough_memory(min_mem_required):
 
     return inner
 
-def call_many(func: Callable[Any, None], ref, actual) -> None:
+def call_many(func: Callable[Any, None], *args) -> Any:
     """
-    Calls a function on program output(s). Supports sequences via pytree.
+    Maps a function across a number of pytrees. Traverses each element of `args` via
+    pytree, calling `func` on leaves in the same position in each tree. For example,
+    if `func` is `torch.allclose`, and `*args` is two lists of tensors, this checks for
+    list equality within some numerical tolerance.
     """
-    def flatten_tensors(tensors):
-        flat, spec = pytree.tree_flatten(tensors)
-        return flat
-
-    ref_tensors = flatten_tensors(ref)
-    actual_tensors = flatten_tensors(actual)
-    for ref, actual in zip(ref_tensors, actual_tensors):
-        func(ref, actual)
+    trees = [pytree.tree_flatten(arg)[0] for arg in args]
+    return [
+        func(*leaf_tuple)
+        for leaf_tuple in zip(*trees)
+    ]
 
 def allclose_many(test: TestCase, ref, actual, **kwargs) -> None:
     """
