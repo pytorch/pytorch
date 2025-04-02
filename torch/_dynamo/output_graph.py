@@ -240,6 +240,10 @@ class FakeRootModule(torch.nn.Module):
     def __repr__(self) -> str:
         return "FakeRootModule(...)"
 
+    def add_nn_modules(self, nn_modules: dict[str, torch.nn.Module]):
+        for k, v in nn_modules.items():
+            setattr(self, k, v)
+
 
 class WrapperBackend:
     def __init__(self, backend: CompilerFn):
@@ -1070,8 +1074,6 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
-        output_replacements = self.dedup_pass()
-
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1120,7 +1122,10 @@ class OutputGraph:
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
+            rand_fn = disable(
+                _get_gen_rand_values_fn(self.random_calls),
+                reason="do not trace into Dynamo rng recovery function",
+            )
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root, overridden_sources=overridden_sources)
             random_calls_instructions.extend(
@@ -1155,9 +1160,7 @@ class OutputGraph:
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(
-                    tx, list(reversed(stack_values)), root, output_replacements
-                )
+                self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
             # restore all the live local vars
@@ -1190,9 +1193,7 @@ class OutputGraph:
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(
-                        tx, pass2.graph_output_vars(), root, output_replacements
-                    )
+                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1356,7 +1357,7 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def compile_and_call_fx_graph(self, tx, rv, root, replaced_outputs):
+    def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
@@ -1379,9 +1380,8 @@ class OutputGraph:
                 (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
                 {},
             )
-
-            for old_node, new_node in replaced_outputs.items():
-                old_node.replace_all_uses_with(new_node)
+            sub_gms = self.dedup_pass()
+            root.add_nn_modules(sub_gms)
 
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
@@ -1473,7 +1473,9 @@ class OutputGraph:
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
-            compiled_fn = disable(compiled_fn)
+            compiled_fn = disable(
+                compiled_fn, reason="do not trace Dynamo-compiled graph"
+            )
 
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
@@ -1576,7 +1578,7 @@ class OutputGraph:
         if torch._dynamo.config.use_graph_deduplication:
             return apply_graph_deduplication(self)
         else:
-            return dict()
+            return {}
 
     def install_subgraph(self, name, sub_gm):
         next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
