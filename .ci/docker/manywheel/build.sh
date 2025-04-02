@@ -48,7 +48,7 @@ case ${GPU_ARCH_TYPE} in
         TARGET=final
         DOCKER_TAG=cpu-aarch64
         GPU_IMAGE=arm64v8/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     cpu-cxx11-abi)
@@ -97,7 +97,7 @@ case ${GPU_ARCH_TYPE} in
             DEVTOOLSET_VERSION="11"
             GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
         fi
-        PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102"
+        PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
         DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
         ;;
     xpu)
