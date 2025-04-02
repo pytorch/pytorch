@@ -240,13 +240,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
             return variables.GetAttrVariable(self, name, source=source)
-        import logging
-        logging.warning(f"searching {obj} with name {name} source {source}")
+
         if isinstance(obj, staticmethod):
-            logging.warning(f"In here now for static method")
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
-            logging.warning(f"class method")
             if isinstance(obj.__func__, property):
                 return variables.UserFunctionVariable(obj.__func__.fget).call_function(
                     tx, [self], {}
@@ -255,7 +252,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
             #       inspect.getattr_static(itertools.chain, "from_iterable")
-            logging.warning(f"Descriptor actually")
             func = obj.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
         elif source:
@@ -263,7 +259,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if inspect.ismemberdescriptor(obj) or (
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
-                logging.warning(f"Buiild source here")
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
         if ConstantVariable.is_literal(obj):
