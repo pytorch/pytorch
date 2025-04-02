@@ -369,7 +369,7 @@ class TestMatmulCuda(TestCase):
                             dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
         a.requires_grad_(True)
         b.requires_grad_(True)
-  
+
         a_contig = a if a_row_major else a.transpose(-2, -1)
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
