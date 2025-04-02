@@ -206,7 +206,7 @@ jobs:
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+          path: C:\${{ github.run_id }}\build-results
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
