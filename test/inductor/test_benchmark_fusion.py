@@ -27,6 +27,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 )
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
+from torch.testing._internal.common_cuda import IS_SM89
 
 
 class TestCase(InductorTestCase):
@@ -126,6 +127,10 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
+    )
     @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":
