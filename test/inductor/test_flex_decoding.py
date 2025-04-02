@@ -609,7 +609,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @expectedFailure
+    @expectedFailure  # tl.dot does not support embedding size less than 16
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_bw_decoding_fails(self, dtype):
         make_kv = functools.partial(
