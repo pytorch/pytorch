@@ -3376,7 +3376,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(z, (x + y) * 2)
 
     @requires_gpu
-    def test_preserves_strides(self):
+    @common_utils.parametrize("variant", ["triton_kernel", "custom_op"])
+    def test_preserves_strides(self, variant):
         import triton
         import triton.language as tl
 
@@ -3400,12 +3401,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
         other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
 
-        def f(x, other):
-            y = x.transpose(2, 3).contiguous().transpose(2, 3)
-            z = y.sin().transpose(2, 3)
+        def add_triton(y, z):
             grid = (z.numel(),)
-            out = torch.empty_like(other)
-            add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
+            out = torch.empty_like(z, memory_format=torch.contiguous_format)
+            add_kernel[grid](y, z, out, z.numel(), BLOCK_SIZE=16)
             return out
 
         class _CustomPass(PatternMatcherPass):
@@ -3427,8 +3426,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def decomp(*flat_args):
                 args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.aten.permute(*args, **kwargs).clone(
-                    memory_format=torch.channels_last
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
                 )
 
             nonlocal called
@@ -3437,12 +3436,47 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         from torch._inductor import config
 
-        with config.patch(
-            post_grad_custom_post_pass=g,
-        ):
-            f_compile = torch.compile(f)
-            self.assertEqual(f(x, other), f_compile(x, other))
-            self.assertTrue(called)
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+                tags=[torch._C.Tag.needs_exact_strides],
+            )
+
+            def impl(x, y):
+                return add_triton(x, y)
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            def f(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                if variant == "triton_kernel":
+                    return add_triton(y, z)
+                elif variant == "custom_op":
+                    return torch.ops.mylib.add_op.default(y, z)
+                else:
+                    raise AssertionError("should not be hit")
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
