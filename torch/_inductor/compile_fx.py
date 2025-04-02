@@ -866,7 +866,8 @@ def _compile_fx_inner(
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
-            name, m, n, k = key.split("_")
+            m, n, k = key.split("_")[-3:]
+            name = "_".join(key.split("_")[:3])
             mm_table_data.append([name, m, n, k, value])
         log.info("Overview info of inductor aten mms: ")
         log.info(
