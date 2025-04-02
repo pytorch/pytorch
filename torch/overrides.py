@@ -102,7 +102,7 @@ def get_ignored_functions() -> set[Callable]:
 
     Returns
     -------
-    Set[Callable]
+    set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.

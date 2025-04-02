@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from itertools import chain
 from typing import Any, cast, NamedTuple, no_type_check, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -313,11 +314,9 @@ def _unflatten_communicated_optim_state(
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
-        for state_name, zero_dim_tensor in sorted_items(zero_dim_tensor_state):
-            unflat_state_param[state_name] = zero_dim_tensor
+        unflat_state_param.update(sorted_items(zero_dim_tensor_state))
         # Add non-tensor state: take the target rank's value
-        for state_name, non_tensor in sorted_items(non_tensor_state):
-            unflat_state_param[state_name] = non_tensor
+        unflat_state_param.update(sorted_items(non_tensor_state))
         unflat_param_state.append(unflat_state_param)
     return unflat_param_state
 
@@ -1220,9 +1219,7 @@ def _map_param_key_to_optim_keys(
             [] for _ in range(dist.get_world_size(group))
         ]
         dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
-        merge_all_optim_state_keys = [
-            key for local_keys in all_keys for key in local_keys
-        ]
+        merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: list[Optional[list[_OptimStateKey]]] = (
@@ -1257,9 +1254,7 @@ def _unflatten_param_groups(
             param_to_fqns[param] for param in param_group_params
         ]
         unflat_param_group["params"] = [
-            unflat_param_name
-            for unflat_param_names in nested_unflat_param_names
-            for unflat_param_name in unflat_param_names
+            *chain.from_iterable(nested_unflat_param_names)
         ]  # flatten the list of lists
         param_groups.append(unflat_param_group)
     return param_groups
@@ -1830,11 +1825,12 @@ def _convert_state_with_flat_params(
             )
             if to_save:
                 assert len(unflat_state) == len(optim_state_key.unflat_param_names)
-                for unflat_param_name, unflat_param_state in zip(
-                    optim_state_key.unflat_param_names,
-                    unflat_state,
-                ):
-                    fsdp_osd_state[unflat_param_name] = unflat_param_state
+                fsdp_osd_state.update(
+                    zip(
+                        optim_state_key.unflat_param_names,
+                        unflat_state,
+                    )
+                )
         elif to_save:
             assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
