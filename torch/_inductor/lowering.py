@@ -6049,7 +6049,10 @@ def fill_(x, fill_value):
 @register_lowering(prims.fill)
 def prims_fill(x, fill_value):
     return Pointwise.create(
-            device=x.get_device(), dtype=x.get_dtype(), inner_fn=lambda _: ops.constant(fill_value, x.get_dtype()), ranges=list(x.get_size())
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=lambda _: ops.constant(fill_value, x.get_dtype()),
+        ranges=list(x.get_size()),
     )
 
 
