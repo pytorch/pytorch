@@ -6,6 +6,7 @@ import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
+from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import is_power_of_2
@@ -17,7 +18,6 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
-    allclose_many,
     GPU_TYPE,
     HAS_GPU,
     requires_gpu,
@@ -73,7 +73,7 @@ def run_and_compare(
     # Don't clobber the default tolerance values
     tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
     ref = func(*args)
-    allclose_many(self, ref, result, **tol)
+    self.assertTrue(same(ref, result, **tol))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)

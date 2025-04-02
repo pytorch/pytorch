@@ -352,6 +352,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         outputs = tuple(
             self.buffer_to_node[buffer.get_name()] for buffer in line.buffers
         )
+
+        # Single return elements don't use a tuple.
+        if len(outputs) == 1:
+            outputs = outputs[0]
+
         self.gm.graph.output(outputs)
 
     def _generate_reinterpret(self, line: Line) -> None:

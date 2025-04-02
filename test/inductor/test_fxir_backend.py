@@ -8,6 +8,8 @@ import unittest
 from typing import Callable
 
 import torch
+import torch.utils._pytree as pytree
+from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
@@ -16,8 +18,6 @@ from torch._inductor.codegen.wrapper_fxir import delete, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
-    allclose_many,
-    call_many,
     GPU_TYPE,
     HAS_GPU,
     requires_gpu,
@@ -74,14 +74,12 @@ class FxirTestCase(InductorTestCase):
         result = gm(*args)
         ref = func(*args)
         if metadata_only:
+            # When we only want to check metadata, fill in zeros for tensor data.
+            ref, result = tuple(
+                pytree.tree_map(torch.zeros_like, x) for x in (ref, result)
+            )
 
-            def check_metadata(x, y):
-                self.assertEqual(x.shape, y.shape)
-                self.assertEqual(x.dtype, y.dtype)
-
-            call_many(check_metadata, ref, result)
-        else:
-            allclose_many(self, ref, result)
+        self.assertTrue(same(ref, result))
 
         return gm
 
