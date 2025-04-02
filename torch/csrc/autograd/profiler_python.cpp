@@ -709,8 +709,6 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   const std::vector<PyThreadState*> interpreterThreads() const;
 
-  PyObject* get_callable_from_frame(PyFrameObject* frame);
-
   std::atomic<bool> active_lock_{false};
   bool active_{false};
 
@@ -789,13 +787,6 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
       recordPyCall(thread_local_results_.back(), it->get(), true);
-      PyFrameObject* frame = it->get();
-      PyObject* callable = get_callable_from_frame(frame);
-      if (callable) {
-        // Call recordCCall with the callable and the frame
-        recordCCall(thread_local_results_.back(), it->get(), callable);
-      }
-
       auto frame_refcount = Py_REFCNT(it->get());
 
       // We hold one reference in `current_stack`, and the interpreter holds
@@ -910,26 +901,6 @@ void PythonTracer::recordCCall(
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
 }
 
-PyObject* PythonTracer::get_callable_from_frame(PyFrameObject* frame) {
-  if (frame == nullptr) {
-    return nullptr;
-  }
-  // Get the code object associated with the frame
-  auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-  if (code == nullptr) {
-    return nullptr;
-  }
-  // Get the function name (if needed)
-  auto name = THPUtils_unpackStringView(code->co_name).data();
-  // To get the function object, you will need to look in the globals or the
-  // frame's f_globals
-  PyObject* func = PyDict_GetItemString(PyFrame_GetGlobals(frame), name);
-  if (func) {
-    Py_INCREF(func); // Make sure the returned function has a reference
-  }
-  return func; // Returns a PyObject* (the function)
-}
-
 // ============================================================================
 // == Post processing =========================================================
 // ============================================================================
@@ -1012,13 +983,9 @@ class PostProcess {
     using stack_t = std::vector<std::shared_ptr<Result>>;
     const auto initial_size = out.size();
     auto pop = [](stack_t& stack, c10::time_t t) {
-      if (!stack.empty()) {
-        std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
-        stack.pop_back();
-      } else {
-        TORCH_WARN_ONCE(
-            "Python replay stack is empty during pop operation! May result in incorrect stack tracing.");
-      }
+      TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
+      std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      stack.pop_back();
     };
 
     ska::flat_hash_map<size_t, stack_t> stacks;
