@@ -3831,8 +3831,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             a_ = flatten(a_, idx, end)
 
         # Splits the (possibly flattened) dimension to create the desired dim length
-        if guard_or_true(accum != length):
-            a_ = prims.split_dim(a_, idx, length)
+        a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
 
