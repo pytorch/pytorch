@@ -4795,6 +4795,24 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    def test_multidimensional_slicing(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+                torch._check(b >= 0)
+                torch._check(b < y.shape[0])
+                return y[0, b]
+
+        if is_non_strict_test(self._testMethodName):
+            m = M()
+            inp = (torch.tensor(4), torch.ones(10, 10))
+            r = m(*inp)
+
+            epm = export(m, inp).module()
+            er = epm(*inp)
+
+            self.assertTrue(torch.allclose(er, r))
+
     def test_sequential_slicing(self):
         # See https://github.com/pytorch/pytorch/issues/137455
 
