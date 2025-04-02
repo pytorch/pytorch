@@ -1346,7 +1346,10 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
-            device_type = compile_pg._device_types
+            device_types = compile_pg._device_types
+            assert len(device_types) == 1 "Expect only one device type but got {}".format(
+                "+".join(device_types)
+            )
             with (
                 get_interface_for_device(device_types.pop()).device(
                     compile_pg.rank() % torch.accelerator.device_count()
