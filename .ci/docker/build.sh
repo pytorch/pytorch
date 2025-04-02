@@ -463,7 +463,7 @@ fi
 no_cache_flag=""
 progress_flag=""
 # Do not use cache and progress=plain when in CI
-if [[ "${CI:-}" = "true" ]]; then
+if [[ -n "${CI:-}"]]; then
   no_cache_flag="--no-cache"
   progress_flag="--progress=plain"
 fi
