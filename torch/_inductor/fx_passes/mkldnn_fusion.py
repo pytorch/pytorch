@@ -248,7 +248,7 @@ if torch._C._has_mkldnn:
             computation_call,
             CallFunction(aten.mul, computation_call, KeywordArg("negative_slope")),
         )
-    
+
     def _pow_fusion(computation_call):
         return CallFunction(
             aten.pow.Tensor_Scalar,
@@ -781,7 +781,7 @@ if torch._C._has_mkldnn:
                         ],
                         UnaryAttr("abs"): [
                             _combined_fusion(u, aten.abs) for u in call_user1
-                        ]
+                        ],
                     }
                 )
 
@@ -804,16 +804,15 @@ if torch._C._has_mkldnn:
                 for call_fn in computation_call_fns
             ]
             _pow_patterns = [
-                _unary_fusion_pattern(_pow_fusion, call_fn, 1, lowp_dtype) for call_fn in computation_call_fns
+                _unary_fusion_pattern(_pow_fusion, call_fn, 1, lowp_dtype)
+                for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
                 _register_leaky_relu_fusion_lowering(
                     pattern, computation_op, lowp_dtype
                 )
             for pattern, computation_op in zip(_pow_patterns, computation_ops):
-                _register_pow_fusion_lowering(
-                    pattern, computation_op, lowp_dtype
-                )
+                _register_pow_fusion_lowering(pattern, computation_op, lowp_dtype)
             hardtanh_patterns = [
                 _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, lowp_dtype)
                 for call_fn in computation_call_fns
@@ -1099,13 +1098,13 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if meta_value is None or (meta_value.dim() != 4 and meta_value.dim() != 5):
                 return False
-        if (
+        if (not is_xpu) and (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-        if (
+        if (not is_xpu) and (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
@@ -1188,13 +1187,13 @@ if torch._C._has_mkldnn:
             ):
                 return False
 
-        if (
+        if (input_meta_value.device.type == "cpu") and (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-        if (
+        if (input_meta_value.device.type == "cpu") and (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
