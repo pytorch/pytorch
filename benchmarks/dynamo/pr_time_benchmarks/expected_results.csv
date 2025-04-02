@@ -2,7 +2,7 @@ add_loop_eager,compile_time_instruction_count,2866000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5689000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,5807000000,0.025
 
 
 
@@ -14,11 +14,11 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,40640000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25090000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,26040000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,964300000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,969600000,0.015
 
 
 
@@ -30,11 +30,11 @@ basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instructio
 
 
 
-basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,10240000000,0.2
+basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11000000000,0.2
 
 
 
-update_hint_regression,compile_time_instruction_count,1611000000,0.02
+update_hint_regression,compile_time_instruction_count,1712000000,0.02
 
 
 
