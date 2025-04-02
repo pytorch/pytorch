@@ -17,6 +17,7 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_lazy_clone.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
@@ -422,6 +423,25 @@ bool to_will_alias(
        self.suggest_memory_format() == memory_format);
 }
 
+static bool _only_device_differs(
+    const Tensor& self,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  bool device_differs = device.has_value() && device.value() != self.device();
+  bool dtype_differs = dtype.has_value() && dtype.value() != self.scalar_type();
+  bool layout_differs = layout.has_value() && layout.value() != self.layout();
+  bool pin_memory_differs =
+      pin_memory.has_value() && pin_memory.value() != self.is_pinned();
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  bool memory_format_differs = memory_format != MemoryFormat::Preserve &&
+      memory_format != self.suggest_memory_format();
+  return device_differs && !dtype_differs && !layout_differs &&
+      !pin_memory_differs && !memory_format_differs;
+}
+
 static inline Tensor to_impl(
     const Tensor& self,
     std::optional<ScalarType> dtype,
@@ -435,6 +455,26 @@ static inline Tensor to_impl(
   if (to_will_alias(
           self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
+  }
+  if (device.has_value()) {
+    c10::DeviceType src_device_type = self.device().type();
+    c10::DeviceType dst_device_type = device.value().type();
+    // Conversion between MPS and CPU is done lazily, as long as `device` is the
+    // only thing that is changed. Also, in order to lazy clone from CPU to MPS,
+    // the CPU data must be pinned.
+    if ((src_device_type == c10::kCPU && dst_device_type == c10::kMPS &&
+         self.is_pinned()) ||
+        (src_device_type == c10::kMPS && dst_device_type == c10::kCPU)) {
+      if (_only_device_differs(
+              self,
+              dtype,
+              layout,
+              device,
+              pin_memory,
+              optional_memory_format)) {
+        return at::_lazy_clone(self, device);
+      }
+    }
   }
   return at::_to_copy(
       self,
