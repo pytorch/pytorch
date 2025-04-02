@@ -1169,7 +1169,9 @@ def _should_save_eager_input_vals(
                 f"propagate the FakeTensor vals. Please file an issue."
             )
     if isinstance(target, torch._ops.OpOverload):
-        return torch._library.utils.needs_exact_strides(target)
+        from torch._inductor.lowering import get_layout_constraint_tag
+
+        return get_layout_constraint_tag(target)
     return False
 
 

@@ -215,16 +215,6 @@ def zip_schema(
     return
 
 
-def needs_exact_strides(op: torch._ops.OpOverload):
-    if torch._C.Tag.needs_exact_strides in op.tags:
-        return True
-    if torch._C.Tag.flexible_layout in op.tags:
-        return False
-    if torch._C.Tag.needs_fixed_stride_order in op.tags:
-        return False
-    return not is_builtin(op)
-
-
 def hop_schema_from_fx_node(node):
     from torchgen.gen_schema_utils import FunctionSchemaGen
 
