@@ -651,6 +651,10 @@ def _compile_fx_inner(
     """
     aot_mode: bool = V.aot_compilation
 
+    # Clean up Compiled Triton Kernels per inductor compile, as the future objects
+    # may not be valid for use after they are run/autotuned
+    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
+
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
@@ -879,8 +883,8 @@ def _compile_fx_inner(
             log.info("{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 100)
 
-    # Clear Compiled Triton Kernels per inductor compile, as the future objects
-    # may not be valid for use after they are run/autotuned
+    # Not strictly necessary, but good to clean up straggling futures
+    # that are unused to reclaim memory.
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
