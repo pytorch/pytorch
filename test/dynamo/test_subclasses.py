@@ -1030,7 +1030,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def f():
             x = MySubclass(torch.ones(2))
             x.bar = 42
-            return x
+            return x, x * x.bar
 
         opt_f = compile_full_eager(f)
 
@@ -1039,7 +1039,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ref = opt_f()
 
         self.assertEqual(res, ref)
-        self.assertEqual(res.bar, ref.bar)
+        self.assertEqual(res[0].bar, ref[0].bar)
 
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
@@ -1051,7 +1051,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def f():
             x = torch.ones(2).as_subclass(MySubclass)
             x.bar = 42
-            return x
+            return x, x * x.bar
 
         opt_f = compile_full_eager(f)
 
@@ -1060,7 +1060,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ref = opt_f()
 
         self.assertEqual(res, ref)
-        self.assertEqual(res.bar, ref.bar)
+        self.assertEqual(res[0].bar, ref[0].bar)
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between
