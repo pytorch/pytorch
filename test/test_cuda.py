@@ -627,6 +627,15 @@ class TestCuda(TestCase):
             torch.backends.cuda.preferred_blas_library("hipblas")
             == torch._C._BlasBackend.Cublas
         )
+        # check bad strings
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Unknown input value. Choose from: default, cublas, hipblas, cublaslt, hipblaslt, ck.",
+        ):
+            torch.backends.cuda.preferred_blas_library("unknown")
+        # check bad input type
+        with self.assertRaisesRegex(RuntimeError, "Unknown input value type."):
+            torch.backends.cuda.preferred_blas_library(1.0)
         # check env var override
         custom_envs = [
             {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
