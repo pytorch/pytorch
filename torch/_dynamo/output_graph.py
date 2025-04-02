@@ -1348,7 +1348,7 @@ class OutputGraph:
             )
             device_type = compile_pg._device_types
             with (
-                get_interface_for_device(*device_type).device(
+                get_interface_for_device(device_types.pop()).device(
                     compile_pg.rank() % torch.accelerator.device_count()
                 ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
