@@ -1007,6 +1007,56 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(x0, x1)
             self.assertEqual(x0.tensor_shape, x1.tensor_shape)
 
+    def test_subclass_dont_invoke_torch_function_on_overriden_method(self):
+        # We shouldn't fire `__torch_function__` for overriden tensor methods.
+        class MySubclass(torch.Tensor):
+            def to(self, device):
+                return self * len(device)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.to:
+                    torch._dynamo.graph_break()
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return x.to("cpu")
+
+        with traceable_subclass(MySubclass):
+            x = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+            self.assertEqual(res_exp, res_act)
+
+    def test_subclass_dont_invoke_torch_function_on_overriden_attr(self):
+        from types import MethodWrapperType
+
+        # We shouldn't fire `__torch_function__` for overriden tensor attrs.
+        class MySubclass(torch.Tensor):
+            def ndim(self):
+                return 42
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if type(func) is MethodWrapperType and func.__name__ == "ndim":
+                    torch._dynamo.graph_break()
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return x + x.ndim()
+
+        with traceable_subclass(MySubclass):
+            x = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+            self.assertEqual(res_exp, res_act)
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
@@ -1085,7 +1135,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def f():
             x = MySubclass(torch.ones(2))
             x.bar = 42
-            return x
+            return x, x * x.bar
 
         opt_f = compile_full_eager(f)
 
@@ -1094,7 +1144,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ref = opt_f()
 
         self.assertEqual(res, ref)
-        self.assertEqual(res.bar, ref.bar)
+        self.assertEqual(res[0].bar, ref[0].bar)
 
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
@@ -1106,7 +1156,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def f():
             x = torch.ones(2).as_subclass(MySubclass)
             x.bar = 42
-            return x
+            return x, x * x.bar
 
         opt_f = compile_full_eager(f)
 
@@ -1115,7 +1165,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ref = opt_f()
 
         self.assertEqual(res, ref)
-        self.assertEqual(res.bar, ref.bar)
+        self.assertEqual(res[0].bar, ref[0].bar)
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between
