@@ -79,6 +79,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
+from .device_interface import get_interface_for_device
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
@@ -1345,8 +1346,9 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
+            device_type = torch.accelerator.current_accelerator()
             with (
-                torch.accelerator.set_device_index(
+                get_interface_for_device(device_type).device(
                     compile_pg.rank() % torch.accelerator.device_count()
                 ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
