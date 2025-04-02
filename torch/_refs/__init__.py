@@ -3717,7 +3717,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
