@@ -37,7 +37,7 @@ static void THPCapturedTraceback_dealloc(PyObject* self_) {
   PyObject_GC_Del(self);
 }
 
-PyTypeObject THPCapturedTracebackType = {
+static PyTypeObject THPCapturedTracebackType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._profiler.CapturedTraceback", /* tp_name */
     sizeof(THPCapturedTraceback), /* tp_basicsize */

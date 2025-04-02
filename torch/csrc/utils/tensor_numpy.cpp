@@ -507,7 +507,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
 // Mutated only once (during module init); behaves as an immutable variable
 // thereafter.
-bool numpy_with_dlpack_deleter_bug_installed = false;
+static bool numpy_with_dlpack_deleter_bug_installed = false;
 
 // NumPy implemented support for Dlpack capsules in version 1.22.0. However, the
 // initial implementation did not correctly handle the invocation of
