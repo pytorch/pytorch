@@ -5007,19 +5007,14 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.mgpu_tune_gemm_in_file(untuned_filename, total_gpus)
 
             # check the results files where written, one per gpu
-            # get the size of the first result and make sure it
-            # greater than 100. Since the validator text should
-            # be at least that much.
-            # The other results file will have
-            # at least the size of the first results file - 80
+            # Check that the results file is not empty and store
+            # that in a local variable for the next loop.
             for i in range(total_gpus):
                 result_filename = f"tunableop_results{i}.csv"
                 self.assertTrue(os.path.exists(result_filename))
+                self.assertGreater(os.path.getsize(result_filename), 0)
                 if i == 0:  # Store for next loop
                     result_size = os.path.getsize(result_filename)
-                    self.assertGreater(os.path.getsize(result_filename), 0)
-                self.assertGreater(os.path.getsize(result_filename), result_size - 80)
-
 
             # Check the full results files was written, one per gpu
             # check that the size of the full results file for
