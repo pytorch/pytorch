@@ -281,9 +281,11 @@ class MPSHeapAllocatorImpl {
   void emptyCache();
   // free inactive buffers that are pending to be freed
   void freeInactiveBuffers();
-  // returns true if buffer was allocated from the shared pool
+  // returns true if buffer is in MPS address spaced and was allocated from the
+  // shared pool
   bool isSharedBuffer(const void* ptr);
-  // returns true if buffer was allocated from the shared pool
+  // returns true if buffer is in CPU address space and was allocated from the
+  // shared pool
   bool isSharedBufferCPUPtr(const void* ptr);
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(const void* ptr);

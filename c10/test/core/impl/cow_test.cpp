@@ -125,14 +125,20 @@ TEST(lazy_clone_storage_test, is_cow_data_ptr_device_type) {
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   ASSERT_TRUE(cow::is_cow_data_ptr(new_storage->data_ptr()));
-  ASSERT_TRUE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kCPU));
-  ASSERT_FALSE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kCUDA));
-  ASSERT_FALSE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kMPS));
+  ASSERT_TRUE(
+      cow::is_cow_data_ptr_on_device(new_storage->data_ptr(), c10::kCPU));
+  ASSERT_FALSE(
+      cow::is_cow_data_ptr_on_device(new_storage->data_ptr(), c10::kCUDA));
+  ASSERT_FALSE(
+      cow::is_cow_data_ptr_on_device(new_storage->data_ptr(), c10::kMPS));
 
   ASSERT_TRUE(cow::is_cow_data_ptr(original_storage.data_ptr()));
-  ASSERT_TRUE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kCPU));
-  ASSERT_FALSE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kCUDA));
-  ASSERT_FALSE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kMPS));
+  ASSERT_TRUE(
+      cow::is_cow_data_ptr_on_device(original_storage.data_ptr(), c10::kCPU));
+  ASSERT_FALSE(
+      cow::is_cow_data_ptr_on_device(original_storage.data_ptr(), c10::kCUDA));
+  ASSERT_FALSE(
+      cow::is_cow_data_ptr_on_device(original_storage.data_ptr(), c10::kMPS));
 }
 
 struct MyDeleterContext {

@@ -8,7 +8,6 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
 #include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/Storage.h>
 
 #include <iostream>
@@ -573,18 +572,18 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
-bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
-  std::lock_guard<std::recursive_mutex> lock(m_mutex);
-
-  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
-  // it's OK for the buffer_block to not exist yet
-  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
-}
-
 bool MPSHeapAllocatorImpl::isSharedBufferCPUPtr(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block_by_cpu_ptr(ptr);
+  // it's OK for the buffer_block to not exist yet
+  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
+}
+
+bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   // it's OK for the buffer_block to not exist yet
   return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
 }
@@ -815,7 +814,6 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   DataPtr allocate(const size_t nbytes) override {
-    std::cout << "[MPSAllocator::allocate] nbytes: " << nbytes << std::endl;
     return allocate_mps(nbytes);
   }
 
@@ -895,12 +893,9 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
-    std::cout << "[MPSAllocator::copy_data] dest: " << dest << ", src: " << src << ", count: " << count << std::endl;
     if (isSharedBuffer(dest)) {
-      std::cout << "[MPSAllocator::copy_data] dest ptr is in MPS space" << std::endl;
       TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
     } else if (isSharedBufferCPUPtr(dest)) {
-      std::cout << "[MPSAllocator::copy_data] dest ptr is in CPU space" << std::endl;
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
     }
 
@@ -913,61 +908,6 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     } else {
       default_copy_data(dest, src, count);
     }
-  }
-
-  // NOTE: Current not used, probably will remove
-  DataPtr clone_from_cpu(const void* data, std::size_t n) override {
-    std::cout << "[MPSAllocator::clone_from_cpu] data: " << data << ", n: " << n << std::endl;
-    TORCH_INTERNAL_ASSERT(m_has_unified_memory);
-    TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
-    TORCH_INTERNAL_ASSERT(isSharedBuffer(data));
-
-    DataPtr new_data = allocate_mps(n);
-
-    const void* src_mps_ptr = data;
-    std::cout << "[MPSAllocator::clone_from_cpu] src_mps_ptr: " << src_mps_ptr << std::endl;
-    TORCH_INTERNAL_ASSERT(src_mps_ptr);
-    void* dest_mps_ptr = new_data.mutable_get();
-    std::cout << "[MPSAllocator::clone_from_cpu] dest_mps_ptr: " << dest_mps_ptr << std::endl;
-
-    MPSStream* stream = _getAllocImpl().getStream();
-    stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
-      copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
-    });
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-    return new_data;
-  }
-
-  // NOTE: Current not used, probably will remove
-  DataPtr clone_to_cpu(const void* data, std::size_t n) override {
-    std::cout << "[MPSAllocator::clone_to_cpu] data: " << data << ", n: " << n << std::endl;
-    TORCH_INTERNAL_ASSERT(m_has_unified_memory);
-    TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
-    TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(data));
-
-    DataPtr new_data = allocate_cpu(n);
-
-    // const void* src_mps_ptr = get_device_ptr_from_cpu_ptr(data);
-    // std::cout << "[MPSAllocator::clone_to_cpu] src_mps_ptr: " << src_mps_ptr << std::endl;
-    // void* dest_mps_ptr = get_device_ptr_from_cpu_ptr(new_data.mutable_get());
-    // std::cout << "[MPSAllocator::clone_to_cpu] dest_mps_ptr: " << src_mps_ptr << std::endl;
-    // TORCH_INTERNAL_ASSERT(dest_mps_ptr);
-
-    // copy_data(dest_mps_ptr, src_mps_ptr, n, /*sync=*/true);
-
-    const void* src_cpu_ptr = data;
-    std::cout << "[MPSAllocator::clone_to_cpu] src_cpu_ptr: " << src_cpu_ptr << std::endl;
-    void* dest_cpu_ptr = new_data.mutable_get();
-    std::cout << "[MPSAllocator::clone_to_cpu] dest_cpu_ptr: " << src_cpu_ptr << std::endl;
-    TORCH_INTERNAL_ASSERT(dest_cpu_ptr);
-
-    MPSStream* stream = _getAllocImpl().getStream();
-    stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
-      copy_data(dest_cpu_ptr, src_cpu_ptr, n, /*sync=*/true);
-    });
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-
-    return new_data;
   }
 
   void* get_cpu_ptr_from_device_ptr(void* device_ptr) const override {
@@ -1001,13 +941,10 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   DataPtr allocate_cpu(const size_t nbytes) {
-    std::cout << "[MPSAllocator::allocate_cpu] nbytes: " << nbytes << std::endl;
     TORCH_INTERNAL_ASSERT(m_has_unified_memory);
     TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
-    std::cout << "[MPSAllocator::allocate_cpu] buf: " << buf << std::endl;
     void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
-    std::cout << "[MPSAllocator::allocate_cpu] cpu_ptr: " << cpu_ptr << std::endl;
     if (nbytes > 0) {
       TORCH_INTERNAL_ASSERT(cpu_ptr);
     }
@@ -1015,9 +952,7 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   DataPtr allocate_mps(const size_t nbytes) {
-    std::cout << "[MPSAllocator::allocate_mps] nbytes: " << nbytes << std::endl;
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
-    std::cout << "[MPSAllocator::allocate_mps] buf: " << buf << std::endl;
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
 };
@@ -1027,20 +962,10 @@ struct TORCH_API MPSPinnedAllocator : public MPSAllocator {
   explicit MPSPinnedAllocator() : MPSAllocator{HeapAllocator::UsageFlags::SHARED} {}
 
   DataPtr allocate(const size_t nbytes) override {
-    std::cout << "[MPSPinnedAllocator::allocate] nbytes: " << nbytes << std::endl;
     return allocate_cpu(nbytes);
   }
 
   DataPtr allocScalarBufferWithValue(void* value, size_t size) const override {
-    TORCH_INTERNAL_ASSERT(false);
-    return DataPtr();
-  }
-
-  DataPtr clone_from_cpu(const void* data, std::size_t n) override {
-    TORCH_INTERNAL_ASSERT(false);
-    return DataPtr();
-  }
-  DataPtr clone_to_cpu(const void* data, std::size_t n) override {
     TORCH_INTERNAL_ASSERT(false);
     return DataPtr();
   }
@@ -1083,10 +1008,6 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator, bool pinnedAllocator) {
 }
 
 at::Allocator* getPinnedMemoryAllocator() {
-  // TODO: Need to make a new allocator class that is almost exactly the same as
-  // the normal MPS allocator, except that after it creates a new MPS DataPtr,
-  // it modifies the device type to CPU and puts in the buffer_block->cpu_ptr
-  // for the pointer value.
   return getIMPSAllocator(true, true);
 }
 

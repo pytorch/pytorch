@@ -41,18 +41,6 @@ bool Allocator::has_unified_memory() const {
   return false;
 }
 
-DataPtr Allocator::clone_from_cpu(const void* data, std::size_t n) {
-  DataPtr new_data = allocate(n);
-  copy_data(new_data.mutable_get(), data, n, true);
-  return new_data;
-}
-
-DataPtr Allocator::clone_to_cpu(const void* data, std::size_t n) {
-  DataPtr new_data = allocate(n);
-  copy_data(new_data.mutable_get(), data, n, true);
-  return new_data;
-}
-
 bool Allocator::is_simple_data_ptr(const DataPtr& data_ptr) const {
   return data_ptr.get() == data_ptr.get_context();
 }

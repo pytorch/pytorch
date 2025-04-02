@@ -22,9 +22,9 @@
 namespace at::native {
 namespace mps {
 
-static bool is_not_cow_or_cow_mps_backed(const Tensor& self) {
+static bool is_cow_mps_backed_or_not_cow(const Tensor& self) {
   const DataPtr& data_ptr = self.storage().data_ptr();
-  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr(data_ptr, c10::kMPS);
+  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr_on_device(data_ptr, c10::kMPS);
 }
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self) {
@@ -39,7 +39,7 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self) {
         : ((self.is_view() && self._base().sizes().size()) ? self._base().sizes() : IntArrayRef(&shape_1d, 1));
 
     // base_shape will be retained in MPSAllocator until buffer gets recycled
-    if (self.storage().data() && is_not_cow_or_cow_mps_backed(self))
+    if (self.storage().data() && is_cow_mps_backed_or_not_cow(self))
       getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
   }
   return base_shape;

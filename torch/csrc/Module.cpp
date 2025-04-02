@@ -2512,8 +2512,9 @@ Call this whenever a new thread is created in order to propagate values from
         return reinterpret_cast<std::intptr_t>(data_ptr);
       },
       ("Gets the memory address of the Tensor's data pointer. If the device "
-       "is CPU and the allocator has unified memory, then the CPU data "
-       "address is resolved to the device address."));
+       "is CPU and the allocator has unified memory on some other device, then "
+       "the CPU data address is resolved to the address spce of the other "
+       "device."));
 
   py_module.def(
       "_is_cow_tensor",

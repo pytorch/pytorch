@@ -53,7 +53,7 @@ class TestLazyCloneDeviceType(TestCase):
 
         return src_device, dest_device
 
-    # TODO: Add test compatible with dynamo/inductor
+    @skipCUDAIf(True, "Does not work for CUDA")
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
     @parametrize("materialize_first", ("src", "dest"))

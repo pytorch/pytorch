@@ -9,7 +9,6 @@
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 
-#include <iostream>
 #include <memory>
 #include <optional>
 
@@ -46,17 +45,19 @@ bool has_simple_data_ptr(const c10::StorageImpl& storage) {
   }
 }
 
-bool is_cow_data_ptr(
-    const c10::DataPtr& data_ptr,
-    optional<DeviceType> device_type_opt) {
-  bool is_cow = (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
+  return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+}
 
-  if (is_cow && device_type_opt.has_value()) {
+bool is_cow_data_ptr_on_device(
+    const c10::DataPtr& data_ptr,
+    DeviceType device_type) {
+  if (is_cow_data_ptr(data_ptr)) {
     COWDeleterContext* context =
         data_ptr.cast_context<COWDeleterContext>(cow_deleter);
-    return context->original_device().type() == device_type_opt.value();
+    return context->original_device().type() == device_type;
   } else {
-    return is_cow;
+    return false;
   }
 }
 
@@ -142,8 +143,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
 
     DeviceGuard device_guard(device_opt.value());
     Device dst_device = device_guard.current_device();
-    std::cout << "[lazy_clone_storage] src_device: " << storage.device_type()
-              << ", dst_device: " << dst_device.type() << std::endl;
 
     // If a different target device was given, then convert the data pointer to
     // that device.
@@ -157,9 +156,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       void* ptr_value = new_data_ptr.get();
 
       new_data_ptr.release_context();
-
-      std::cout << "[lazy_clone_storage] ptr_value before translation: "
-                << ptr_value << std::endl;
 
       if (storage.device_type() == c10::kCPU &&
           dst_device.type() == c10::kMPS) {
@@ -176,15 +172,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
         ptr_value = storage.allocator()->get_cpu_ptr_from_device_ptr(ptr_value);
       }
 
-      std::cout << "[lazy_clone_storage] ptr_value after translation: "
-                << ptr_value << std::endl;
-
       new_data_ptr_opt =
           c10::DataPtr(ptr_value, ctx, c10::impl::cow::cow_deleter, dst_device);
-      std::cout << "[lazy_clone_storage] dst_device: " << dst_device.type()
-                << ", dst ptr_value: " << new_data_ptr_opt.value().get()
-                << std::endl;
-      ;
     }
   }
 
@@ -204,23 +193,10 @@ static c10::DataPtr clone_between_devices(
     Allocator* src_allocator,
     Device dst_device,
     Allocator* dst_allocator) {
-  std::cout << "[clone_between_devices] src_device: " << src_device.type()
-            << ", dst_device: " << dst_device.type() << std::endl;
   DeviceType src_type = src_device.type();
   DeviceType dst_type = dst_device.type();
   check_clone_between_devices(src_type, dst_type);
-
-  if (src_type == dst_type) {
-    return dst_allocator->clone(data, n, /*sync=*/true);
-  } else if (
-      (src_type == c10::kCPU && dst_type == c10::kMPS) ||
-      (src_type == c10::kMPS && dst_type == c10::kCPU)) {
-    return dst_allocator->clone(data, n, /*sync=*/true);
-  } else if (src_type == c10::kCPU) {
-    return dst_allocator->clone_from_cpu(data, n);
-  } else {
-    return src_allocator->clone_to_cpu(data, n);
-  }
+  return dst_allocator->clone(data, n, /*sync=*/true);
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
@@ -233,8 +209,6 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   Device src_device = ctx->original_device();
   Device dst_device = storage.device();
-  std::cout << "[materialize_cow_storage] src_device: " << src_device.type()
-            << ", dst_device: " << dst_device.type() << std::endl;
   bool devices_match = src_device == dst_device;
   auto result = ctx->decrement_refcount();
 
@@ -258,12 +232,11 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
           storage.allocator()->clone(data_ptr.get(), storage.nbytes());
     } else {
       new_data_ptr = clone_between_devices(
-          // KURT: This is potentially a point of confusion. For MPS-to-CPU,
-          // `data_ptr.get()` gives an address in CPU space even though
-          // `src_device` is MPS. Likewise, for CPU-to-MPS, `data_ptr.get()`
-          // gives an address in MPS space even though the `src_device` is CPU.
-          // So both the src and dest pointers are in the address space of the
-          // dest device!
+          // NOTE: For MPS-to-CPU, `data_ptr.get()` gives an address in CPU
+          // space even though `src_device` is MPS. Likewise, for CPU-to-MPS,
+          // `data_ptr.get()` gives an address in MPS space even though the
+          // `src_device` is CPU. So both the src and dest pointers will always
+          // be in the address space of the dest device.
           data_ptr.get(),
           storage.nbytes(),
           src_device,
