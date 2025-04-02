@@ -419,7 +419,7 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   if(b == at::ROCmFABackend::Ck) {
     static const bool ck_unsupported = []() {
       static const std::vector<std::string> archs = {
-          "gfx90a",  "gfx942"
+          "gfx90a",  "gfx942", "gfx950"
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
