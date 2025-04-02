@@ -224,10 +224,6 @@ class TestGenericPytree(TestCase):
                 (cxx_pytree, lambda tup: cxx_pytree.tree_structure((0,) * len(tup))),
                 name="cxx",
             ),
-            subtest(
-                (pytree, lambda tup: pytree.tree_structure((0,) * len(tup))),
-                name="generic",
-            ),
         ],
     )
     def test_flatten_unflatten_tuple(self, pytree, gen_expected_fn):
@@ -262,10 +258,6 @@ class TestGenericPytree(TestCase):
             subtest(
                 (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
                 name="cxx",
-            ),
-            subtest(
-                (pytree, lambda lst: pytree.tree_structure([0] * len(lst))),
-                name="generic",
             ),
         ],
     )
@@ -305,13 +297,6 @@ class TestGenericPytree(TestCase):
                     lambda dct: cxx_pytree.tree_structure(dict.fromkeys(dct, 0)),
                 ),
                 name="cxx",
-            ),
-            subtest(
-                (
-                    pytree,
-                    lambda dct: pytree.tree_structure(dict.fromkeys(dct, 0)),
-                ),
-                name="generic",
             ),
         ],
     )
@@ -355,13 +340,6 @@ class TestGenericPytree(TestCase):
                     ),
                 ),
                 name="cxx",
-            ),
-            subtest(
-                (
-                    pytree,
-                    lambda odict: pytree.tree_structure(OrderedDict.fromkeys(odict, 0)),
-                ),
-                name="generic",
             ),
         ],
     )
@@ -407,15 +385,6 @@ class TestGenericPytree(TestCase):
                 ),
                 name="cxx",
             ),
-            subtest(
-                (
-                    pytree,
-                    lambda ddct: pytree.tree_structure(
-                        defaultdict(ddct.default_factory, dict.fromkeys(ddct, 0))
-                    ),
-                ),
-                name="generic",
-            ),
         ],
     )
     def test_flatten_unflatten_defaultdict(self, pytree, gen_expected_fn):
@@ -457,13 +426,6 @@ class TestGenericPytree(TestCase):
                     ),
                 ),
                 name="cxx",
-            ),
-            subtest(
-                (
-                    pytree,
-                    lambda deq: pytree.tree_structure(deque(deq, maxlen=deq.maxlen)),
-                ),
-                name="generic",
             ),
         ],
     )
@@ -1283,11 +1245,11 @@ if "optree" in sys.modules:
                 self.y = y
 
         with self.assertRaisesRegex(ValueError, "field_names must be specified"):
-            py_pytree.register_dataclass(CustomClass)
+            python_pytree.register_dataclass(CustomClass)
 
-        py_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
+        python_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
         c = CustomClass(torch.tensor(0), torch.tensor(1))
-        mapped = py_pytree.tree_map(lambda x: x + 1, c)
+        mapped = python_pytree.tree_map(lambda x: x + 1, c)
         self.assertEqual(mapped.x, torch.tensor(1))
         self.assertEqual(mapped.y, torch.tensor(2))
 
