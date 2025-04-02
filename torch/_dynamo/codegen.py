@@ -71,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx: Optional["InstructionTranslator"] = None,
+        tx: "InstructionTranslator",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
