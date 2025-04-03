@@ -459,12 +459,13 @@ class TestControlFlow(TestCase):
         super().setUp()
 
     def check_autograd(self, result, result_exp, params):
-        result_flatten, _ = pytree.tree_flatten(result)
-        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+        params_flatten = pytree.tree_leaves(params)
+        result_flatten = pytree.tree_leaves(result)
+        result_exp_flatten = pytree.tree_leaves(result_exp)
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
-        expected_grads = torch.autograd.grad(result_exp_flatten, params, grad_exp_init)
+        expected_grads = torch.autograd.grad(result_exp_flatten, params_flatten, grad_exp_init)
         grad_init = [torch.ones_like(el) for el in result_flatten]
-        grads = torch.autograd.grad(result_flatten, params, grad_init)
+        grads = torch.autograd.grad(result_flatten, params_flatten, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def test_cond_no_trace(self):
@@ -1844,9 +1845,10 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_tuple(self, reverse, compile_mode, device):
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
+    @parametrize("autograd", [False, True])
+    def test_scan_tuple(self, reverse, compile_mode, device, autograd):
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = (x, y)
         init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp)
 
@@ -1867,6 +1869,9 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result_same, expected_result)
+        
+        if autograd:
+            self.check_autograd(result_same, expected_result, (init, inp))
 
         def fct_different_output_tuple(x, y):
             return ((x[0] + y[0], x[1] * y[1]), (x[1] * y[1]))
@@ -1882,6 +1887,9 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_diff, expected_result)
         self.assertEqual(result_diff[1], result_same[1][1])
+        
+        if autograd:
+            self.check_autograd(result_diff, expected_result, (init, inp))
 
     def test_scan_wrong_pytree(self):
         # Init and input have same pytree
@@ -1937,14 +1945,15 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_complex_pytree(self, reverse, compile_mode, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_complex_pytree(self, reverse, compile_mode, device, autograd):
         # Init and input have same pytree
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = {"i": x, "j": ([y], [{"o": z}])}
         inp_flat, inp_spec = pytree.tree_flatten(inp)
         init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
@@ -1965,6 +1974,9 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result, expected_result)
+        
+        if autograd:
+            self.check_autograd(result, expected_result, (init, inp))
 
     # TODO: Does not work because of the usage of vmap witin associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
@@ -2527,52 +2539,6 @@ def forward(self, pred_1, x_1):
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_carry_wrong_pytree(self, reverse, device):
-        def fct_pointwise_carry_wrong_pytree(x, y):
-            return (
-                (
-                    x["i"],
-                    {
-                        "i": x["i"] * y["i"],
-                        "j": (
-                            [x["j"][0][0] * y["j"][0][0]],
-                            [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                        ),
-                    },
-                ),
-                {
-                    "i": x["i"] * y["i"],
-                    "j": (
-                        [x["j"][0][0] * y["j"][0][0]],
-                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                    ),
-                },
-            )
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-        inp_flat, inp_spec = pytree.tree_flatten(inp)
-        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
-        init = pytree.tree_unflatten(init_flat, inp_spec)
-
-        # Wrong pytree of the carry produced by the operation
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same.*",
-        ):
-            scan(
-                fct_pointwise_carry_wrong_pytree,
-                init,
-                inp,
-                dim=0,
-                reverse=reverse,
-            )
-
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_pytree_complex(self, reverse, device):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
@@ -2873,17 +2839,13 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(add_input_grads, expected_add_input_grads)
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    def test_scan_closure_RNN_parameters_as_inputs(self, reverse, device, autograd):
-        x = torch.randn(3, 5, 10, device=device, requires_grad=autograd)
-        h = torch.randn(3, 7, device=device, requires_grad=autograd)
-        W_ih = torch.randn(5, 7, device=device, requires_grad=autograd)
-        b_ih = torch.randn(7, device=device, requires_grad=autograd)
-        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
-        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+    def test_scan_closure_RNN_parameters_as_inputs(self):
+        x = torch.randn(3, 5, 10, device=torch.device("cpu"))
+        h = torch.randn(3, 7, device=torch.device("cpu"))
+        W_ih = torch.randn(5, 7, device=torch.device("cpu"))
+        b_ih = torch.randn(7, device=torch.device("cpu"))
+        W_hh = torch.randn(7, 7, device=torch.device("cpu"))
+        b_hh = torch.randn(7, device=torch.device("cpu"))
 
         with self.assertRaisesRegex(RuntimeError, "All xs leaves must at least have.*"):
             scan(
@@ -2891,7 +2853,6 @@ class GraphModule(torch.nn.Module):
                 h,
                 [x, W_ih, b_ih, W_hh, b_hh],
                 dim=2,
-                reverse=reverse,
             )
 
     @unittest.skipIf(not SM70OrLater, "triton")
@@ -2984,23 +2945,42 @@ class GraphModule(torch.nn.Module):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [True])
+    @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_unequal_grad(
-        self, reverse, device, autograd
+        self, reverse, compile_mode, device, autograd
     ):
         dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
         x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
         h1 = torch.randn(3, 7, device=device, requires_grad=autograd)
         h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
-
-        scan(
+        
+        result = scan_fct(
             get_scan_combine_fn("fct_c1_no_grad", True),
             (h1, h2),
             x,
             dim=dim,
             reverse=reverse,
         )
+        result_exp = _fake_scan(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            # TODO: Ideally we should be able to select the results that require gradients like this
+            # [leaf for leaf in pytree.tree_leaves(result) if leaf.requires_grad == True]
+            # However, for the scan operator this does not work, as all outputs always have
+            # grad_fn=<ScanAutogradOpBackward>
+            res_req_grad_flat = pytree.tree_leaves(result)[1:]
+            res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
+            self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -3279,42 +3259,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @skipIfNoDynamoSupport
-    def test_scan_simple_graph_no_carry(self):
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Wrong number of returns from function
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
-        ):
-            make_fx(f, tracing_mode="symbolic")(
-                get_scan_combine_fn("add", True), init, x
-            )
-
-    @skipIfNoDynamoSupport
-    def test_scan_simple_graph_wrong_carry(self):
-        def add_wrong_carry(x: torch.Tensor, y: torch.Tensor):
-            return (x + y)[0, :], x + y
-
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Wrong carry shape
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",
-        ):
-            make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
-
-    @skipIfNoDynamoSupport
-    def test_scan_simple_graph_wrong_dtype_symbolic(self):
+    def test_scan_simple_graph_wrong_dtype(self):
         def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
             return torch.ones_like(x + y, dtype=torch.int64), x + y
 
@@ -3329,8 +3274,8 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected init and carry to have same metadata.*",
         ):
-            make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
-
+            f(add_wrong_dtype, init, x)
+            
     @skipIfNoDynamoSupport
     @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph(self):
@@ -3385,24 +3330,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     out_1 = out.flip([0]);  out = None
     return (carry, out_1)""",  # noqa: B950
         )
-
-    @skipIfNoDynamoSupport
-    def test_scan_simple_graph_wrong_dtype(self):
-        def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
-            return torch.ones_like(x + y, dtype=torch.int64), x + y
-
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Wrong dtype
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",
-        ):
-            f(add_wrong_dtype, init, x)
 
 
 class AssociativeScanModels:
