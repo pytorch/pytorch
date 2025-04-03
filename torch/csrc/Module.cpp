@@ -2513,7 +2513,7 @@ Call this whenever a new thread is created in order to propagate values from
       },
       ("Gets the memory address of the Tensor's data pointer. If the device "
        "is CPU and the allocator has unified memory on some other device, then "
-       "the CPU data address is resolved to the address spce of the other "
+       "the CPU data address is resolved to the address space of the other "
        "device."));
 
   py_module.def(

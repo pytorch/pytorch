@@ -96,20 +96,34 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
   optional<c10::Allocator*> allocator_opt = nullopt;
   if (device_opt.has_value()) {
-    if (self.device().type() == c10::kCPU && device_opt.value().type() == c10::kMPS) {
-      TORCH_CHECK(self.is_pinned(),
-        "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
-        "is pinned.");
-      TORCH_INTERNAL_ASSERT(self.storage().allocator()->has_unified_memory());
-    }
-    if (self.device().type() == c10::kMPS && device_opt.value().type() == c10::kCPU) {
+    c10::Device src_device = self.device();
+    c10::Device dst_device = device_opt.value();
+    c10::DeviceType src_device_type = src_device.type();
+    c10::DeviceType dst_device_type = dst_device.type();
+    TORCH_CHECK(
+      (src_device == dst_device)
+      || (src_device_type == c10::kCPU && dst_device_type == c10::kMPS)
+      || (src_device_type == c10::kMPS && dst_device_type == c10::kCPU),
+      "Lazy cloning is only supported in the following cases: ",
+      "cpu to mps, ",
+      "mps to cpu, ",
+      "or between the same device. Got ", src_device, " to ", dst_device
+    );
+
+    if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
       // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
       // the regular CPU allocator.
       allocator_opt = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
       TORCH_INTERNAL_ASSERT(allocator_opt.value()->has_unified_memory());
-
     } else {
-      allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
+      allocator_opt = at::empty({}, at::TensorOptions().device(dst_device)).storage().allocator();
+    }
+
+    if (src_device_type == c10::kCPU && dst_device_type == c10::kMPS) {
+      TORCH_CHECK(self.is_pinned(),
+        "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
+        "is pinned.");
+      TORCH_INTERNAL_ASSERT(self.storage().allocator()->has_unified_memory());
     }
   }
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
