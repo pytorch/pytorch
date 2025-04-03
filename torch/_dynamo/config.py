@@ -188,7 +188,7 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1
 rewrite_assert_with_torch_assert = True
 
 # Disable dynamo
-disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
+disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
