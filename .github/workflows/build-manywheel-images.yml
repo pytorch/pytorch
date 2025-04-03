@@ -65,7 +65,7 @@ jobs:
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@csl/unify_manywheel_docker_pull
         with:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}

@@ -40,7 +40,7 @@ jobs:
         cuda_version: ["11.8", "12.4", "12.6", "cpu"]
     steps:
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@csl/unify_manywheel_docker_pull
         with:
           docker-image-name: almalinux-builder
           custom-tag-prefix: ${{ matrix.cuda_version != 'cpu' && 'cuda' || '' }}${{matrix.cuda_version}}
