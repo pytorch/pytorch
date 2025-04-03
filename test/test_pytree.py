@@ -9,9 +9,9 @@ import sys
 import time
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import auto
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.utils._pytree as py_pytree
@@ -1103,9 +1103,8 @@ if "optree" in sys.modules:
             serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point1",
         )
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point1, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(Point1(1, 2))
+        self.assertIs(spec.type, namedtuple)
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
         self.assertEqual(spec, roundtrip_spec)
 
@@ -1118,18 +1117,28 @@ if "optree" in sys.modules:
             serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point2",
         )
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point2, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        spec = py_pytree.tree_structure(Point2(1, 2))
+        self.assertIs(spec.type, namedtuple)
+        roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
+        self.assertEqual(spec, roundtrip_spec)
+
+        class Point3(Point2):
+            pass
+
+        py_pytree._register_namedtuple(
+            Point3,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point3",
         )
+
+        spec = py_pytree.tree_structure(Point3(1, 2))
+        self.assertIs(spec.type, namedtuple)
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
         self.assertEqual(spec, roundtrip_spec)
 
     def test_pytree_serialize_namedtuple_bad(self):
         DummyType = namedtuple("DummyType", ["x", "y"])
 
-        spec = py_pytree.TreeSpec(
-            namedtuple, DummyType, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
 
         with self.assertRaisesRegex(
             NotImplementedError, "Please register using `_register_namedtuple`"
@@ -1148,9 +1157,7 @@ if "optree" in sys.modules:
             lambda xs, _: DummyType(*xs),
         )
 
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
         with self.assertRaisesRegex(
             NotImplementedError, "No registered serialization name"
         ):
@@ -1170,9 +1177,7 @@ if "optree" in sys.modules:
             to_dumpable_context=lambda context: "moo",
             from_dumpable_context=lambda dumpable_context: None,
         )
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
         serialized_spec = py_pytree.treespec_dumps(spec, 1)
         self.assertIn("moo", serialized_spec)
         roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
@@ -1210,9 +1215,7 @@ if "optree" in sys.modules:
             from_dumpable_context=lambda dumpable_context: None,
         )
 
-        spec = py_pytree.TreeSpec(
-            DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(DummyType(1, 2))
 
         with self.assertRaisesRegex(
             TypeError, "Object of type type is not JSON serializable"
@@ -1223,9 +1226,7 @@ if "optree" in sys.modules:
         import json
 
         Point = namedtuple("Point", ["x", "y"])
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
-        )
+        spec = py_pytree.tree_structure(Point(1, 2))
         py_pytree._register_namedtuple(
             Point,
             serialized_type_name="test_pytree.test_pytree_serialize_bad_protocol.Point",
@@ -1296,16 +1297,55 @@ if "optree" in sys.modules:
 
     def test_dataclass(self):
         @dataclass
-        class Point:
-            x: torch.Tensor
-            y: torch.Tensor
+        class Data:
+            a: torch.Tensor
+            b: str = "moo"
+            c: Optional[str] = None
+            d: str = field(init=False, default="")
 
-        py_pytree.register_dataclass(Point)
+        py_pytree.register_dataclass(Data)
+        old_data = Data(torch.tensor(3), "b", "c")
+        old_data.d = "d"
+        new_data = py_pytree.tree_unflatten(*py_pytree.tree_flatten(old_data))
+        self.assertEqual(new_data.a, torch.tensor(3))
+        self.assertEqual(new_data.b, "b")
+        self.assertEqual(new_data.c, "c")
+        self.assertEqual(new_data.d, "")
+        py_pytree._deregister_pytree_node(Data)
 
-        point = Point(torch.tensor(0), torch.tensor(1))
-        point = py_pytree.tree_map(lambda x: x + 1, point)
-        self.assertEqual(point.x, torch.tensor(1))
-        self.assertEqual(point.y, torch.tensor(2))
+        with self.assertRaisesRegex(ValueError, "Missing fields"):
+            py_pytree.register_dataclass(Data, field_names=["a", "b"])
+
+        with self.assertRaisesRegex(ValueError, "Unexpected fields"):
+            py_pytree.register_dataclass(Data, field_names=["a", "b", "e"])
+
+        with self.assertRaisesRegex(ValueError, "Unexpected fields"):
+            py_pytree.register_dataclass(Data, field_names=["a", "b", "c", "d"])
+
+        py_pytree.register_dataclass(
+            Data, field_names=["a"], drop_field_names=["b", "c"]
+        )
+        old_data = Data(torch.tensor(3), "b", "c")
+        new_data = py_pytree.tree_unflatten(*py_pytree.tree_flatten(old_data))
+        self.assertEqual(new_data.a, torch.tensor(3))
+        self.assertEqual(new_data.b, "moo")
+        self.assertEqual(new_data.c, None)
+        py_pytree._deregister_pytree_node(Data)
+
+    def test_register_dataclass_class(self):
+        class CustomClass:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertRaisesRegex(ValueError, "field_names must be specified"):
+            py_pytree.register_dataclass(CustomClass)
+
+        py_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
+        c = CustomClass(torch.tensor(0), torch.tensor(1))
+        mapped = py_pytree.tree_map(lambda x: x + 1, c)
+        self.assertEqual(mapped.x, torch.tensor(1))
+        self.assertEqual(mapped.y, torch.tensor(2))
 
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
