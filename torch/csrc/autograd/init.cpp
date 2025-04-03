@@ -1001,10 +1001,10 @@ static void visit_tensors(
     }
   }
   if (kwargs && PyDict_Check(kwargs)) {
-    auto vals = PyDict_Values(kwargs);
-    for (const auto i : c10::irange(PyList_GET_SIZE(vals))) {
+    auto vals = THPObjectPtr{PyDict_Values(kwargs)};
+    for (const auto i : c10::irange(PyList_Size(vals))) {
       if (visit<skip_tensors_in_non_tensorlist>(
-              PyList_GET_ITEM(vals, i), visit_tensor)) {
+              PyList_GetItem(vals, i), visit_tensor)) {
         return;
       }
     }
