@@ -588,6 +588,18 @@ class CompileEventLogger:
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
 
+    @staticmethod
+    def try_(method_fn, *args, **kwargs):
+        """
+        Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
+        """
+        if CHROMIUM_EVENT_LOG is None:
+            return
+        metrics_context = get_metrics_context()
+        if not metrics_context.in_progress():
+            return
+        method_fn(*args, **kwargs)
+
 
 @contextmanager
 def dynamo_timed(

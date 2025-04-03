@@ -1055,7 +1055,9 @@ class FxGraphCache:
                     cached_kernel_names=meta.cached_kernel_names,
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles")
+                    CompileEventLogger.try_(
+                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
+                    )
 
         try:
             artifact_path = graph.after_deserialization(constants)
