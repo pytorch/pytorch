@@ -127,6 +127,9 @@ class BaseConfigHeuristic(metaclass=BaseConfigSingleton):
             Config(128, 128, 128, 3, 8),
             Config(128, 128, 128, 3, 4),
             Config(128, 128, 64, 4, 8),
+            Config(128, 128, 64, 5, 8),
+            Config(256, 128, 64, 4, 8),
+            Config(128, 128, 64, 5, 4),
         ]
 
         self.scaled_mm_configs = [
