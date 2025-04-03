@@ -1804,10 +1804,10 @@ class BuiltinVariable(VariableTracker):
         name_var: VariableTracker,
         default=None,
     ):
-        name = name_var.as_python_constant()
-
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
+
+        name = name_var.as_python_constant()
 
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
