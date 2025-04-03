@@ -1833,7 +1833,6 @@ class TestSparseCSR(TestCase):
             for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
-    @skipCPUIfNoMklSparse
     @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
@@ -1932,7 +1931,6 @@ class TestSparseCSR(TestCase):
                     test_shape(i, j, k)
         test_shape(4, 4, 4, 0, 0)
 
-    @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
@@ -1983,7 +1981,6 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
-    @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
@@ -2063,7 +2060,6 @@ class TestSparseCSR(TestCase):
     @parametrize("k", [0, 1, 8])
     @parametrize("n", [0, 1, 10])
     @parametrize("m", [0, 1, 25])
-    @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
                                       *[torch.bfloat16] if SM80OrLater else [],
@@ -2087,7 +2083,6 @@ class TestSparseCSR(TestCase):
         self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
         self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
-    @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_addmm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
@@ -2127,7 +2122,6 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
-    @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_mm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
@@ -2293,7 +2287,6 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
-    @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
