@@ -426,7 +426,7 @@ enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
-use_graph_deduplication = False
+use_graph_deduplication = True
 
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True
