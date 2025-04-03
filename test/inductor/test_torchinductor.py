@@ -173,6 +173,15 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
+
+test_int_dtypes = [
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+]
+
 if SM80OrLater or MACOS_VERSION >= 14.0:
     test_dtypes.append(torch.bfloat16)
 
@@ -11265,12 +11274,16 @@ class CommonTemplate:
 
         self.common(fn, (input, offsets), check_lowp=False)
 
-    def test_bucketize_int(self):
+    @parametrize(
+        "dtype_input, dtype_boundaries",
+        list(itertools.product(test_int_dtypes, test_int_dtypes)),
+    )
+    def test_bucketize_int(self, dtype_input : torch.dtype, dtype_boundaries : torch.dtype):
         def fn(input, offsets, out_int32, right):
             return torch.bucketize(input, offsets, out_int32=out_int32, right=right)
 
-        input = torch.randint(0, 102, (64, 64))
-        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+        input = torch.randint(-(2**10), 2**10, (64, 64)).to(dtype_input)
+        offsets = (torch.arange(10, dtype=torch.int32) ** 2 - 512).to(dtype_boundaries)
 
         for out_int32 in [True, False]:
             for right in [True, False]:
