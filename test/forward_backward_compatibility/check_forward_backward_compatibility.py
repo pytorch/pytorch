@@ -13,7 +13,7 @@ FORMAT = "[%(levelname)s %(asctime)s %(filename)s:%(lineno)s] %(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 # How to run this test locally:
-# 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
+# 1 Have two virtual environments, one without PyTorch installed (venv_nightly)
 #   one with your local changes (venv_yours).
 # In venv_nightly:
 # 2. First ensure that Pytorch is uninstalled, but all prereqs are installed
