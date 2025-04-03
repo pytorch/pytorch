@@ -332,7 +332,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (conf.block_m, conf.block_n, conf.block_k, conf.num_stages, num_warps)
+            key: tuple[int, ...] = (
+                conf.block_m,
+                conf.block_n,
+                conf.block_k,
+                conf.num_stages,
+                num_warps,
+            )
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
@@ -409,7 +415,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 block_k=max(min(int(c.block_k * scale), k), min_block_size_k),
             )
 
-            if not exclude(scaled_config.block_m, scaled_config.block_n, scaled_config.block_k):
+            if not exclude(
+                scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
+            ):
                 scaled_configs.append(scaled_config)
 
         return scaled_configs
@@ -597,7 +605,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
             waves_per_eu = getattr(conf, "waves_per_eu", 0)
             kpack = getattr(conf, "kpack", 2)
-            
+
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
@@ -605,9 +613,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                 continue
 
-
             # Construct key for finding duplicate configs
-            key: tuple[int, ...]  = (
+            key: tuple[int, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
