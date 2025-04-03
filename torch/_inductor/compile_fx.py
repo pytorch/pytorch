@@ -752,7 +752,7 @@ def _compile_fx_inner(
                 assert mb_compiled_graph is not None
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
                 cache_key = key_info[0]
-                mb_compiled_graph._fx_graph_cache_key = cache_key
+                mb_compiled_graph._fx_graph_cache_key = key_info
                 (
                     triton_bundle,
                     triton_bundler_meta,
