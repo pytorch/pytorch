@@ -71,7 +71,6 @@ env:
   ENABLE_OPENBLAS: 0
   MSVC_VERSION: latest
   BUILD_TYPE: release
-  PYTORCH_FINAL_PACKAGE_DIR: c:\temp\artifacts
 
 permissions:
   id-token: write
