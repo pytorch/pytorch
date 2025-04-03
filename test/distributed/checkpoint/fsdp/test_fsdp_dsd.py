@@ -460,7 +460,9 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         """
         mlp_dim = 5
 
-        def _get_base_model(mlp_dim: int = mlp_dim):
+        def _get_base_model(mlp_dim):
+            # dim_multiplier=1 helps make it easier to hit corner cases in uneven sharding
+            # (e.g. in/out dim both=5 means unevenness is easier to hit depending on row/col sharding)
             base_model = nn.Sequential(
                 MLP(mlp_dim, dim_multiplier=1),
                 MLP(mlp_dim, dim_multiplier=1),
@@ -561,7 +563,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 )
 
                 # Load state dict into model with TP applied
-                tp_model = _get_base_model()
+                tp_model = _get_base_model(mlp_dim)
                 tp_model = parallelize_module(
                     tp_model,
                     device_mesh=global_mesh_1d,

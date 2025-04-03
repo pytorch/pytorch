@@ -82,6 +82,37 @@ def compute_local_shape_and_global_offset(
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
 
+    Example:
+    global_tensor = [[0, 1, 2, 3, 4], [10, 11, 12, 13, 14]] sharded on mesh (DP=2, TP=2) with (Shard(1), Shard(1))
+
+    This table shows the return value of local_shape and global_offset for each rank.
+    (`local_tensor` is for illustration only).
+
+    Note how the first coordinate of global_offset is always 0, corresponding to tensor dim 0 being replicated.
+
+    Rank        local_tensor        local_shape     global_offset
+    0           [[0, 1],            (2, 2)          (0, 0)
+                 [10, 11]]
+
+    1           [[2]                (2, 1)          (0, 2)
+                 [12]]
+
+    2           [[3]                (2, 1)          (0, 3)
+                 [13]]
+
+    3           [[4]                (2, 1)          (0, 4)
+                 [14]]
+
+    Args:
+        global_shape (ShapeType): The global shape of the DTensor.
+        mesh (:class:`DeviceMesh`): The device mesh this DTensor is distributed on.
+        placements (Sequence[:class:`Placement`]]): The placements of the DTensor.
+
+    Return:
+        local_shape: the shape of the DTensor's _local_tensor on the current rank.
+        global_offset: a tuple of offsets for each dimension of the global tensor shape,
+        identifying how this shard fits into the global tensor in each dimension.
+
     """
     ordered_placements = _explicit_order_placements(mesh.shape, placements)
 
