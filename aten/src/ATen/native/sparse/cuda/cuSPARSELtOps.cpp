@@ -25,8 +25,7 @@ std::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
 
 // Set of supported architectures
-//TODO: Verify gfx1200 and gfx1201 are supported
-const static std::unordered_set<std::string> supported_archs = {"gfx950", "gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+const static std::unordered_set<std::string> supported_archs = {"gfx950", "gfx942"};
 
 // Initialize the hipSparseLt support status once for the platform
 static void initHipSparseLtSupport() {
@@ -183,7 +182,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   TORCH_CHECK(
       isHipSparseLtSupported(sparse_input.device().index()),
       "hipSparseLt not supported on this device, supported architectures: "
-      "gfx950, gfx940, gfx941, gfx942, gfx1200, gfx1201. "
+      "gfx950, gfx942."
       "required ROCM version: 6.4.0 or later.");
 
   switch (compressed_A.scalar_type()) {
