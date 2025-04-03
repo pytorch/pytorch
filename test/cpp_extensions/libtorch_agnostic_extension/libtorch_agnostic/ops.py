@@ -66,6 +66,21 @@ def my_ones_like(tensor, device) -> Tensor:
     return torch.ops.libtorch_agnostic.my_ones_like.default(tensor, device)
 
 
+def stack_my_ones_like(tensor, device) -> Tensor:
+    """
+    Returns a new Tensor like the input tensor, but with all ones
+
+    Args:
+        tensor: any Tensor
+        device: a device string
+
+    Returns:
+        a ones Tensor with the same dtype and shape and other attributes
+        like the input tensor
+    """
+    return torch.ops.libtorch_agnostic.stack_my_ones_like.default(tensor, device)
+
+
 def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
     """
     Returns a Tensor, Tensor, bool tuple corresponding to the respective inputs
