@@ -665,10 +665,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export_for_training(
-            m,
-            example_inputs,
-        ).module()
+        m = export_for_training(m, example_inputs, strict=True).module()
 
         # QAT Model failed to deepcopy
         export_model = m if is_qat else copy.deepcopy(m)
@@ -2344,7 +2341,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = export_for_training(m, example_inputs).module()
+        m = export_for_training(m, example_inputs, strict=True).module()
         m = prepare_pt2e(m, quantizer)
         # Use a linear count instead of names because the names might change, but
         # the order should be the same.
