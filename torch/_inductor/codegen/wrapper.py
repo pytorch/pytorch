@@ -1492,7 +1492,6 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(value, torch.ScriptObject)
 
             output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
-
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
         )
