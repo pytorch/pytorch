@@ -354,7 +354,7 @@ def autograd_cache_key(
 
 @dataclass
 class FXGraphCacheLoadable:
-    fx_graph_cache_key: (str, list[str])
+    fx_graph_cache_key: tuple[str, list[str]]
 
     def is_backward(self) -> bool:
         return False
