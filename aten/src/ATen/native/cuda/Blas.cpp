@@ -943,7 +943,7 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
-static bool _scaled_mm_allowed_device() {
+static bool _scaled_mm_allowed_device(bool sm90_only=false) {
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
@@ -957,7 +957,11 @@ static bool _scaled_mm_allowed_device() {
     return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    if (sm90_only) {
+      return dprops->major == 9;
+    } else {
+      return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    }
 #endif
 }
 
@@ -1407,6 +1411,7 @@ namespace {
     IntArrayRef tensor_sizes = mat.sizes();
     int end_dim = mat.dim() - 1;
     int alignment = 16 / mat.element_size();
+    TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
     if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
       TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
       return true;
@@ -1480,8 +1485,8 @@ const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability = 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
@@ -1552,8 +1557,8 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability = 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
