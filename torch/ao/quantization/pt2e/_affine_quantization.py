@@ -878,15 +878,8 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
             assert (
                 self.original_dtype is not None
             ), "Expecting original_dtype to be populated"
-            if self.is_dynamic:
-                scale, zero_point = self.calculate_qparams()
-                scale_node = create_getattr_from_value(
-                    model, model.graph, "_scale", scale
-                )
-                zero_point_node = create_getattr_from_value(
-                    model, model.graph, "_zero_point", zero_point
-                )
-            else:
+            if hasattr(self, "is_dynamic") and self.is_dynamic:
+                print("is dynamic")
                 choose_qparams_affine = model.graph.call_function(
                     torch.ops.pt2e_quant.choose_qparams_affine,
                     (
@@ -909,6 +902,15 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
                 zero_point_node = model.graph.call_function(
                     operator.getitem, (choose_qparams_affine, 1)
                 )
+            else:
+                scale, zero_point = self.calculate_qparams()
+                scale_node = create_getattr_from_value(
+                    model, model.graph, "_scale", scale
+                )
+                zero_point_node = create_getattr_from_value(
+                    model, model.graph, "_zero_point", zero_point
+                )
+
             q_node = model.graph.call_function(
                 torch.ops.pt2e_quant.quantize_affine,
                 (
