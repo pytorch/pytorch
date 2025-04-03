@@ -43,11 +43,6 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
-try:
-    from easydict import EasyDict as edict
-except ModuleNotFoundError:
-    edict = None
-
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -520,13 +515,8 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
-        elif edict and self.user_cls is edict:
-            if name == "__setattr__":
-                return self.call_method(tx, "__setitem__", args, kwargs)
-            elif name == "__getattr__":
-                return self.call_method(tx, "__getitem__", args, kwargs)
-
-        return super().call_method(tx, name, args, kwargs)
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
         self.install_dict_keys_match_guard()
