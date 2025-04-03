@@ -1671,10 +1671,6 @@ void rmsnorm_backward_input_kernel(
       acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
       acc_t grad_val = inv_rms_val * ( static_cast<acc_t>(g_val) - static_cast<acc_t>(xnorm_row[j]) * (dot / static_cast<acc_t>(N)) );
       grad_in_row[j] = static_cast<scalar_t>(grad_val);
-      // grad_in_row[j] = static_cast<scalar_t>(grad_row[j]);
-      // printf("N=%lld M=%lld sample=%d j=%d grad_row[%d]=%f grad_val=%f grad_row=%p\n", N, M, sample, j, j, grad_row[1], grad_val, grad_row + 1);
-      // printf("grad_row=%p grad_row[%d]=%f\n", grad_row, j, grad_row[j]);
-      // printf("gg=%f j=%d\n", grad_row[j], j);
     }
     __syncthreads();
   }
