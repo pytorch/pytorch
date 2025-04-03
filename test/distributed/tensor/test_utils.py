@@ -76,6 +76,16 @@ class LocalTest(TestCase):
                 "exception_type": NotImplementedError,
                 "exception_text": "NYI",
             },
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [
+                    _StridedShard(0, split_factor=3),
+                    Shard(0),
+                    Shard(0),
+                ],
+                "exception_type": NotImplementedError,
+                "exception_text": r"Strided sharding does not allow Shard\(\) to appear after the strided part has ended",
+            },
         ]
         for test_case in error_cases:
             with self.assertRaisesRegex(
