@@ -1047,12 +1047,17 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                # TODO: Clean up autograd cache integration
                 CompileEventLogger.try_add_pt2_compile(
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
+                CompileEventLogger.try_add_pt2_compile(
+                    "AOTAutogradCache.inductor_load",
+                    cached_kernel_names=meta.cached_kernel_names,
+                )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles")
+                    CompileEventLogger.try_(
+                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
+                    )
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1306,17 +1311,22 @@ class FxGraphCache:
             cache_info["cache_state"] = "hit"
             if remote_cache:
                 # Count remote cache hit stats
-                CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count"
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "inductor_fx_remote_cache_hit_count",
                 )
-                CompileEventLogger.add_to_set_toplevel(
-                    "inductor_fx_remote_cache_hit_keys", key
+                CompileEventLogger.try_(
+                    CompileEventLogger.add_to_set_toplevel,
+                    "inductor_fx_remote_cache_hit_keys",
+                    key,
                 )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                CompileEventLogger.increment_toplevel(
-                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "distributed_ephemeral_timeout_us",
+                    time_saved_ns // 1000,
                 )
                 if (
                     ephemeral_increase
@@ -1326,11 +1336,14 @@ class FxGraphCache:
         else:
             if remote_cache:
                 # Count remote cache miss stats
-                CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count"
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "inductor_fx_remote_cache_miss_count",
                 )
-                CompileEventLogger.add_to_set_toplevel(
-                    "inductor_fx_remote_cache_miss_keys", key
+                CompileEventLogger.try_(
+                    CompileEventLogger.add_to_set_toplevel,
+                    "inductor_fx_remote_cache_miss_keys",
+                    key,
                 )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
