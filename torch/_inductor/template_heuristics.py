@@ -406,9 +406,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             c.block_n = max(min(int(c.block_n * scale), n), min_block_size)
             c.block_k = max(min(int(c.block_k * scale), k), min_block_size_k)
 
-            if not exclude(
-                c.block_m, c.block_n, c.block_k
-            ):
+            if not exclude(c.block_m, c.block_n, c.block_k):
                 scaled_configs.append(c)
 
         return scaled_configs
@@ -692,6 +690,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             self.conv_configs, self.default_num_stages
         )
         return partial(self.preprocess_mm_configs, configs=filtered_configs)
-    
+
+
 class XPUConfigHeuristic(BaseConfigHeuristic):
     pass
