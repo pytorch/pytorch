@@ -47,6 +47,12 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -74,6 +80,12 @@ _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  #
 
 if not PYTORCH_USE_CXX_PYTREE:
     from torch.utils._pytree import (
+        is_namedtuple as is_namedtuple,
+        is_namedtuple_class as is_namedtuple_class,
+        is_namedtuple_instance as is_namedtuple_instance,
+        is_structseq as is_structseq,
+        is_structseq_class as is_structseq_class,
+        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
@@ -95,6 +107,12 @@ if not PYTORCH_USE_CXX_PYTREE:
     PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)  # type: ignore[misc]
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
+        is_namedtuple as is_namedtuple,
+        is_namedtuple_class as is_namedtuple_class,
+        is_namedtuple_instance as is_namedtuple_instance,
+        is_structseq as is_structseq,
+        is_structseq_class as is_structseq_class,
+        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
@@ -131,6 +149,12 @@ __func_names = frozenset(
         "tree_structure",
         "tree_unflatten",
         "treespec_pprint",
+        "is_namedtuple",
+        "is_namedtuple_class",
+        "is_namedtuple_instance",
+        "is_structseq",
+        "is_structseq_class",
+        "is_structseq_instance",
     }
 )
 globals().update(
