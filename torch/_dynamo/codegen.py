@@ -340,7 +340,6 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                breakpoint()
                 unimplemented_v2(
                     gb_type="Reconstruction failure",
                     context=str(value),
