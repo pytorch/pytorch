@@ -325,13 +325,15 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         str += "Scalar";
       } else {
         if (exclude_shape) {
-          str += "[-1]";
+          str += "-1";
         } else {
           str +=
               std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
         }
       }
       str += "]";
+      if (tensor.is_conj())
+        str += "_conj";
     } else {
       str += "Undefined";
     }
@@ -543,7 +545,12 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       Tensor emptyShell = Tensor();
       // use "_tensor" from Placeholder to retain view's output during its usage in other ops
-      _tensor = gatherViewTensor(src, emptyShell);
+      // And preserve conjugated property here
+      if (!src.is_conj()) {
+        _tensor = gatherViewTensor(src, emptyShell);
+      } else {
+        _tensor = gatherViewTensor(src.conj(), emptyShell).conj();
+      }
       if (!_tensor.has_storage()) {
         // if we cannot gather, we make the tensor contiguous implicitly, and keep
         // it in placeholder to be able to retrieve it when we return from constructor
