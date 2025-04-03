@@ -1,7 +1,7 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
 
-#include <ATen/native/hip/ck_gemm.h>
-#include <ATen/native/hip/ck_gemm_template.h>
+#include <ATen/native/hip/ck_gemm/ck_gemm.h>
+#include <ATen/native/hip/ck_gemm/ck_gemm_template.h>
 
 #include <ck/utility/sequence.hpp>
 
