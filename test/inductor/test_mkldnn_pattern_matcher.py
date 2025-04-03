@@ -58,6 +58,7 @@ unary_list = {
     torch.nn.ReLU6(): 3,
     torch.nn.SiLU(): 3,
     torch.nn.Hardsigmoid(): 5,
+    lambda x : torch.clamp(x, min=-0.5, max=0.5): 3,
 }
 
 non_decomposed_unary_list = [
@@ -3517,7 +3518,6 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(
                     in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
                 )
-
             def forward(self, x, _):
                 pow_out = torch.pow(self.conv(x), 2)
                 other2 = F.relu(pow_out)
@@ -3525,6 +3525,7 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
                 res = torch.add(conv_out2, pow_out)
                 res = res + other2
                 return res
+
 
         # Written buffer is an ReinterpretView, we can't fuse inplace.
         class Model_v4(torch.nn.Module):

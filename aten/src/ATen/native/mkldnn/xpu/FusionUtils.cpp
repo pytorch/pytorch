@@ -19,6 +19,10 @@ onednn::Attr unary_attr_with_arg(
   } else if (unary == "leaky_relu") {
     auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
     return attr.append_post_eltwise(1.0, alpha, 0.f, attr.kind_with_relu);
+  } else if (unary == "clamp") {
+    auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+    auto beta = scalars[1].get().toOptional<at::Scalar>().value().to<float>();
+    return attr.append_post_eltwise(1.0f, alpha, beta, attr.kind_with_clip);
   } else if (unary == "hardtanh") {
     auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
     auto beta = scalars[1].get().toOptional<at::Scalar>().value().to<float>();

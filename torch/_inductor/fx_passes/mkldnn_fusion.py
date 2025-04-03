@@ -241,6 +241,17 @@ if torch._C._has_mkldnn:
             6,
         )
 
+    def _clamp_fusion(computation_call):
+        return CallFunction(
+            aten.clamp_max,
+            CallFunction(
+                aten.clamp_min,
+                computation_call,
+                KeywordArg("min")
+            ),
+            KeywordArg("max"),
+        )
+
     def _leaky_relu_fusion(computation_call):
         return CallFunction(
             aten.where,
@@ -331,6 +342,52 @@ if torch._C._has_mkldnn:
                 match.nodes
             )
             return L[computation_op](*computation_args)
+
+        return fn
+
+    def _register_clamp_fusion_lowering(pattern, computation_op, lowp_dtype=None):
+        @register_lowering_pattern(
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+        )
+        def fn(match, *args, **kwargs):
+            min = kwargs.get("min")
+            max = kwargs.get("max")
+            if isinstance(min, ir.TensorBox) or isinstance(max, ir.TensorBox):
+                matched = False
+            else:  # inp is a Number
+                matched = True
+            if lowp_dtype:
+                dtype1 = kwargs.get("to_float")
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
+            computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
+            if matched:
+                computation_args = computation_args[:-3] + [
+                    "clamp",
+                    [min, max],
+                    "",
+                ]
+                return L[computation_op](*computation_args)
+            else:
+                # computation_args += ["none", [], ""]
+                out = L[computation_op](*computation_args)
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=torch.float)
+                out = L[aten.clamp_max](
+                    L[aten.clamp_min](out, min),
+                    max,
+                )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
+                return out
 
         return fn
 
@@ -798,6 +855,14 @@ if torch._C._has_mkldnn:
                 )
                 _register_unary_fusion_lowering(
                     patterns[2], unary_attr, computation_ops[2], lowp_dtype
+                )
+            _clamp_patterns = [
+                _unary_fusion_pattern(_clamp_fusion, call_fn, 1, lowp_dtype)
+                for call_fn in computation_call_fns
+            ]
+            for pattern, computation_op in zip(_clamp_patterns, computation_ops):
+                _register_clamp_fusion_lowering(
+                    pattern, computation_op, lowp_dtype
                 )
             _leaky_relu_patterns = [
                 _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lowp_dtype)
