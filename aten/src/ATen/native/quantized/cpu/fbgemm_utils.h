@@ -35,7 +35,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
         col_offsets(std::move(col_offsets)),
         w_scale(std::move(w_scale)),
         w_zp(std::move(w_zp)),
-        q_scheme(std::move(q_scheme)) {}
+        q_scheme(q_scheme) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
@@ -314,7 +314,7 @@ Tensor MakeStridedQTensorCPU(
     const IntArrayRef& sizes,
     const IntArrayRef& strides,
     const TensorOptions& options,
-    QuantizerPtr quantizer);
+    const QuantizerPtr& quantizer);
 
 Tensor MakeEmptyAffineQuantizedChannelsLast3dTensor(
     int64_t N,
