@@ -78,6 +78,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         elif size_dtype == "tl.int64":
             return "i64"
         elif size_dtype is None:
+            if arg.expr is True or arg.expr is False:
+                return "i1"
             # no hint: we'll see if we know that this is a 32-bit int, and guard if possible.
             int_max = torch.iinfo(torch.int32).max
             if expr_fits_within_32bit(arg.expr):
