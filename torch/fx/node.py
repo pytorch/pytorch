@@ -714,10 +714,13 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self) -> bool:
+    def is_impure(self, impure_random: bool = True) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
+
+        Args:
+            impure_random (bool): Whether to treat rand op as impure.
 
         Returns:
 
@@ -732,9 +735,10 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
-                return True
+            if impure_random:
+                if getattr(self.target, "_nondeterministic_seeded", False):
+                    # impure since it mutates RNG state
+                    return True
 
             return self.target in _side_effectful_functions
 
