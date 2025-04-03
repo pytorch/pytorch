@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Script used only in CD pipeline
 
-set -eou pipefail
+set -exou pipefail
 
 TOPDIR=$(git rev-parse --show-toplevel)
 
@@ -12,10 +12,6 @@ if [ -z "${image}" ]; then
   echo "Usage: $0 IMAGE:ARCHTAG"
   exit 1
 fi
-
-DOCKER_IMAGE="pytorch/${image}"
-
-DOCKER_REGISTRY="${DOCKER_REGISTRY:-docker.io}"
 
 # Go from imagename:tag to tag
 DOCKER_TAG_PREFIX=$(echo "${image}" | awk -F':' '{print $2}')
@@ -31,54 +27,46 @@ fi
 
 MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
-WITH_PUSH=${WITH_PUSH:-}
 
 case ${image} in
     manylinux2_28-builder:cpu)
         TARGET=cpu_final
-        DOCKER_TAG=cpu
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinuxaarch64-builder:cpu-aarch64)
         TARGET=final
-        DOCKER_TAG=cpu-aarch64
         GPU_IMAGE=arm64v8/centos:7
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=10"
         MANY_LINUX_VERSION="aarch64"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
         TARGET=final
-        DOCKER_TAG=cpu-aarch64
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinuxcxx11-abi-builder:cpu-cxx11-abi)
         TARGET=final
-        DOCKER_TAG=cpu-cxx11-abi
         GPU_IMAGE=""
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
         MANY_LINUX_VERSION="cxx11-abi"
         ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
-        DOCKER_TAG=cpu-s390x
         GPU_IMAGE=s390x/almalinux:8
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
     manylinux2_28-builder:cuda*)
         TARGET=cuda_final
-        DOCKER_TAG=cuda${GPU_ARCH_VERSION}
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinuxaarch64-builder:cuda*)
         TARGET=cuda_final
-        DOCKER_TAG=cuda${GPU_ARCH_VERSION}
         GPU_IMAGE=arm64v8/centos:7
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="aarch64"
@@ -86,7 +74,6 @@ case ${image} in
         ;;
     manylinux2_28-builder:rocm*)
         TARGET=rocm_final
-        DOCKER_TAG=rocm${GPU_ARCH_VERSION}
         GPU_IMAGE=rocm/dev-centos-7:${GPU_ARCH_VERSION}-complete
         DEVTOOLSET_VERSION="9"
         MANY_LINUX_VERSION="2_28"
@@ -97,7 +84,6 @@ case ${image} in
         ;;
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
-        DOCKER_TAG=xpu
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
@@ -108,29 +94,25 @@ case ${image} in
         ;;
 esac
 
-IMAGES=''
-
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
-(
-    set -x
+# Only activate this if in CI
+if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
+    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
+    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
+    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+fi
 
-    # Only activate this if in CI
-    if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
-        # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-        # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-        sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-        sudo systemctl daemon-reload
-        sudo systemctl restart docker
-    fi
+tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-    DOCKER_BUILDKIT=1 docker build  \
-        ${DOCKER_GPU_BUILD_ARG} \
-        --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
-        --target "${TARGET}" \
-        -t "${DOCKER_IMAGE}" \
-        $@ \
-        -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
-        "${TOPDIR}/.ci/docker/"
-)
+DOCKER_BUILDKIT=1 docker build  \
+    ${DOCKER_GPU_BUILD_ARG} \
+    --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+    --target "${TARGET}" \
+    -t "${tmp_tag}" \
+    $@ \
+    -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
+    "${TOPDIR}/.ci/docker/"
