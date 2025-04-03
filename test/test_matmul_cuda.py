@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM
+    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -32,6 +32,10 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     tol as xtol,
     toleranceOverride,
+    e4m3_type,
+    e5m2_type,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
 )
 
 from torch.testing._internal.common_utils import (
@@ -426,17 +430,6 @@ class TestMatmulCuda(TestCase):
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-
-if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
-    e4m3_type = torch.float8_e4m3fnuz
-    e5m2_type = torch.float8_e5m2fnuz
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
-else:
-    e4m3_type = torch.float8_e4m3fn
-    e5m2_type = torch.float8_e5m2
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -1564,6 +1557,35 @@ class TestFP8MatmulCuda(TestCase):
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        C = compiled_scaled_mm(
+            A,
+            B.t(),
+            A_scale,
+            B_scale,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+        )
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    def test_blockwise_nvfp4_compile(self) -> None:
+
+        device = "cuda"
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 16
+
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+
+        A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+        B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        C_ref = A_ref @ B_ref.t()
+
+        compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        # C = torch._scaled_mm(
         C = compiled_scaled_mm(
             A,
             B.t(),
