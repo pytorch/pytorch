@@ -227,6 +227,12 @@ def is_non_strict_legacy_test(test_name):
     return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
 
 
+def is_legacy_test(test_name):
+    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
+        LEGACY_EXPORT_STRICT_SUFFIX
+    )
+
+
 def is_retracebility_test(test_name):
     return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
         RETRACEABILITY_NON_STRICT_SUFFIX
@@ -5855,14 +5861,37 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
+        ):
+            # aten.to will just specialize by decomposing to a no-op
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        ep = ep.run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 1)
 
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
@@ -5873,14 +5902,37 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             Module(),
             (torch.tensor([1, 2], device="cpu"),),
             dynamic_shapes={"x": {0: Dim("i")}},
-        ).run_decompositions({})
+        )
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
+        ):
+            # aten.to will just specialize by decomposing to a no-op
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        ep = ep.run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 1)
 
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
@@ -5889,10 +5941,102 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 y.add_(1)
                 return y, x
 
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
         ):
-            export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+            # aten.to decomposes to no-op, add_ decomposes to functional variant
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.add.Tensor,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                    torch.ops.aten.add_.Tensor,
+                ],
+            )
+
+        # test mutation
+        x = torch.tensor(2, device="cpu")
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 3)
+        self.assertEqual(id(y), id(x))
+
+        # test decomp ep
+        ep = ep.run_decompositions({})
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, torch.ops.aten.to.dtype_layout)
+
+        # test mutation for decomposed program
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 4)
+        self.assertEqual(id(y), id(x))
+
+    @requires_gpu
+    @testing.expectedFailureCppRuntime
+    def test_device_to_gpu(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Foo(), (torch.randn(64).cuda(),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
+        ):
+            # aten.to decomposes to _to_copy
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten._to_copy.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        # Check device assertion
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+        ep = ep.run_decompositions()
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 2)
+        self.assertEqual(
+            ops,
+            [
+                torch.ops.aten._assert_tensor_metadata.default,
+                torch.ops.aten._to_copy.default,
+            ],
+        )
+
+        # Check device assertion again after decomp
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
 
     def test_tensor_constant_aten_to(self):
         class Module(torch.nn.Module):
@@ -5920,39 +6064,95 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.float()
 
-        ep = export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
-            {}
-        )
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
+        ):
+            # .float() decomposes to no-op
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype,
+                ],
+            )
+
+        ep = ep.run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 1)
+
+        # test aliasing
+        x = torch.tensor(1, dtype=torch.float)
+        out = ep.module()(x)
+        self.assertEqual(id(x), id(out))
 
     def test_float_conversion_from_int(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x.float()
 
-        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),)).run_decompositions(
-            {}
-        )
+        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        self.assertIn(torch.ops.aten._to_copy.default, ops)
-        self.assertIn(torch.ops.aten._assert_tensor_metadata.default, ops)
-
-        self.assertEqual(ep.module()(torch.tensor(1, dtype=torch.int32)), 1)
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
+        ):
+            # .float() decomposes to _to_copy()
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten._to_copy.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype,
+                ],
+            )
 
         # Raises error because the input dtype is not the same as the input
         # tensor when exporting.
         with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
             ep.module()(torch.tensor(1, dtype=torch.float32))
+
+        ep = ep.run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(
+            ops,
+            [
+                torch.ops.aten._assert_tensor_metadata.default,
+                torch.ops.aten._to_copy.default,
+            ],
+        )
+
+        # Check dtype assertion again after decomp
+        with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+            ep.module()(torch.tensor(1, dtype=torch.float32))
+
+        self.assertEqual(ep.module()(torch.tensor(1, dtype=torch.int32)), 1)
 
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
@@ -5961,12 +6161,48 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 y.add_(1)
                 return y, x
 
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_legacy_test(self._testMethodName) or is_training_ir_test(
+            self._testMethodName
         ):
-            export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
-                {}
+            # aten.to decomposes to no-op, add_ decomposes to functional variant
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.add.Tensor,
+                ],
             )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype,
+                    torch.ops.aten.add_.Tensor,
+                ],
+            )
+
+        # test mutation
+        x = torch.tensor(2, dtype=torch.float)
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 3.0)
+        self.assertEqual(id(y), id(x))
+
+        # test decomp ep
+        ep = ep.run_decompositions({})
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, torch.ops.aten.to.dtype)
+
+        # test mutation for decomposed program
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 4.0)
+        self.assertEqual(id(y), id(x))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):

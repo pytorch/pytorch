@@ -157,6 +157,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, b_buffer, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
     to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0
@@ -172,7 +173,8 @@ def forward(self, b_buffer, x):
             str(ep.run_decompositions({}).graph_module.code).strip(),
             """\
 def forward(self, b_parametrizations_buffer_original0, x):
-    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
+    _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
