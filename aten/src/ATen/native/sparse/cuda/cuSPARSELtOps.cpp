@@ -19,7 +19,7 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-#ifdef USE_ROCM && AT_HIPSPARSELT_ENABLED() 
+#ifdef USE_ROCM
 // Single global flag for platform-wide hipSparseLt support
 std::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
@@ -31,7 +31,7 @@ const static std::unordered_set<std::string> supported_archs = {"gfx950", "gfx94
 static void initHipSparseLtSupport() {
     // Default to not supported
     g_hipSparseLtSupported = false;
-    
+
     // Check the first available device
     try {
         int device_count = at::cuda::device_count();
@@ -39,9 +39,9 @@ static void initHipSparseLtSupport() {
             auto prop = at::cuda::getDeviceProperties(idx);
             std::string_view gcnArchName(prop->gcnArchName);
             size_t colonPos = gcnArchName.find(':');
-            std::string_view baseArch = (colonPos != std::string_view::npos) ? 
+            std::string_view baseArch = (colonPos != std::string_view::npos) ?
                                         gcnArchName.substr(0, colonPos) : gcnArchName;
-            
+
             if (supported_archs.count(std::string(baseArch)) > 0) {
                 g_hipSparseLtSupported = true;
                 break;
@@ -58,7 +58,7 @@ static void initHipSparseLtSupport() {
 static bool isHipSparseLtSupported(int idx) {
     // Initialize support check only once
     std::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
-    
+
     // Return cached result (platform-wide)
     return g_hipSparseLtSupported;
 }
