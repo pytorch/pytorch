@@ -11,13 +11,11 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
-      - '.ci/docker/almalinux/*'
-      - '.ci/docker/common/*'
+      - .ci/docker/**
       - .github/workflows/build-almalinux-images.yml
   pull_request:
     paths:
-      - '.ci/docker/almalinux/*'
-      - '.ci/docker/common/*'
+      - .ci/docker/**
       - .github/workflows/build-almalinux-images.yml
 
 env:
