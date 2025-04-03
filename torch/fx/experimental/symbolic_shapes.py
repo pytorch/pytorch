@@ -4546,10 +4546,6 @@ class ShapeEnv:
         elif (
             not duck
             or val not in self.val_to_var
-            or (
-                not specialize_zero_one
-                and val in (0, 1)
-            )
         ):
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular

@@ -1340,7 +1340,7 @@ class f(torch.nn.Module):
                 return b * 20
 
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            # always go to the true branch.
+            # always go to the >= 2 branch.
             self.assertEqual(
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
