@@ -705,7 +705,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
-      PyObject* arg);
+      PyObject* arg,
+      bool start_frame = false);
 
   const std::vector<PyThreadState*> interpreterThreads() const;
 
@@ -792,8 +793,11 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
       PyFrameObject* frame = it->get();
       PyObject* callable = get_callable_from_frame(frame);
       if (callable) {
-        // Call recordCCall with the callable and the frame
-        recordCCall(thread_local_results_.back(), it->get(), callable);
+        // If the frame has a callable, record it as a C call since
+        // PyEval_GetFrame only gets the python frame. We need to record this C
+        // call so that when exiting the profiler we don't have a mismatched C
+        // call.
+        recordCCall(thread_local_results_.back(), it->get(), callable, true);
       }
 
       auto frame_refcount = Py_REFCNT(it->get());
@@ -899,8 +903,13 @@ void PythonTracer::recordPyCall(
 void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
-    PyObject* arg) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
+    PyObject* arg,
+    bool start_frame) {
+  // for starting frames we duplicate callable python functions to avoid having
+  // empty C frames in trace when exiting
+  if (!start_frame) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
+  }
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
