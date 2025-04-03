@@ -332,6 +332,8 @@ do_not_emit_runtime_asserts: bool = (
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
 
+# Don't apply most trace_rules.py rules
+dont_skip_tracing = False
 
 # No longer used
 optimize_ddp_lazy_compile = False

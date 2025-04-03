@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -30,7 +30,11 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import get_nonrecursive_disable_wrapper, is_compiling
+from .external_utils import (
+    _dynamo_config_patch_proxy_dunder_call,
+    get_nonrecursive_disable_wrapper,
+    is_compiling,
+)
 from .utils import is_function
 
 
@@ -729,3 +733,54 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+
+
+# Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
+# created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
+class DynamoConfigPatchProxy:
+    def __init__(self, config_patch):
+        self.config_patch = config_patch
+
+    @property
+    def changes(self):
+        return self.config_patch.changes
+
+    __call__ = _dynamo_config_patch_proxy_dunder_call
+
+    def __enter__(self):
+        return self.config_patch.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.config_patch.__exit__(exc_type, exc_val, exc_tb)
+
+
+def patch_dynamo_config(
+    arg1: Optional[Union[str, dict[str, Any], tuple[str, Any]]] = None,
+    arg2: Any = None,
+    **kwargs: dict[str, Any],
+) -> DynamoConfigPatchProxy:
+    """
+    A restricted form of torch._dynamo.config.patch that can be traced by Dynamo to
+    temporarily change certain config values DURING tracing.
+
+    Can be used as a decorator or a context manager.
+
+    DO NOT MODIFY the returned context manager/decorated function/decorator wrapper.
+    """
+    if isinstance(arg1, tuple):
+        arg1 = dict(arg1)
+    config_patch = torch._dynamo.config.patch(arg1, arg2, **kwargs)
+    # check for valid patching using config_patch.changes
+    return DynamoConfigPatchProxy(config_patch)
+
+
+def dont_skip_tracing(fn=None, recursive: bool = True):
+    if recursive:
+        ctx = patch_dynamo_config(dont_skip_tracing=True)
+        if fn:
+            return ctx(fn)
+        return ctx
+    else:
+        raise NotImplementedError(
+            "non-recursive dont_skip_tracing is not supported yet"
+        )

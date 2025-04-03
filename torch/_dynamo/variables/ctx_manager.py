@@ -41,8 +41,10 @@ from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
@@ -113,13 +115,18 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
             args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
+        assert isinstance(
+            args[0], (UserMethodVariable, UserFunctionVariable, SkipFunctionVariable)
+        )
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
 
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
+
+        if isinstance(args[0], SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(args[0], self)
 
     def supports_graph_breaks(self):
         return True
@@ -1348,6 +1355,42 @@ class EventVariable(VariableTracker):
         prefix = "_event"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
         codegen.append_output(codegen.create_load_global(name, add=True))
+
+
+class DynamoConfigPatchVariable(ContextWrappingVariable):
+    """represents torch._dynamo.patch_dynamo_config"""
+
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
+
+    def __init__(self, target_values, **kwargs) -> None:
+        target_values = tuple(target_values.items())
+        super().__init__(target_values=(target_values,), initial_values=None, **kwargs)
+        self.initial_values = {}
+        for key, _ in target_values:
+            self.initial_values[key] = torch._dynamo.config.__getattr__(key)
+        self.initial_values = (tuple(self.initial_values.items()),)
+        install_guard(self._guards_singleton)
+
+    def enter(self, tx):
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def _call_func(self, tx: "InstructionTranslator", values):
+        assert len(values) == 1
+        value = values[0]
+        # manually patch dynamo config
+        for key, val in value:
+            torch._dynamo.config.__setattr__(key, val)
+
+    def module_name(self):
+        return "torch._dynamo"
+
+    def fn_name(self):
+        return "patch_dynamo_config"
 
 
 class WithExitFunctionVariable(VariableTracker):

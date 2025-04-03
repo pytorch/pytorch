@@ -198,3 +198,12 @@ def get_nonrecursive_disable_wrapper(fn: Callable[..., Any]) -> Callable[..., An
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper
+
+
+def _dynamo_config_patch_proxy_dunder_call(self, func):
+    @functools.wraps(func)
+    def inner(*args, **kwargs):
+        with self:
+            return func(*args, **kwargs)
+
+    return inner
