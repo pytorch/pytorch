@@ -555,7 +555,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   class DesyncDebugger {
    public:
     // Initialize and enable DesyncDebugger
-    void init(int rank, int size, c10::intrusive_ptr<Store> store);
+    void init(
+        int rank,
+        int size,
+        int globalRank,
+        int pgId,
+        c10::intrusive_ptr<Store> store);
 
     // Run desync debug. This function is called by watchdog at time of timeout.
     void run();
@@ -574,6 +579,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // From ProcessGroupNCCL
     int rank_;
     int size_;
+    int globalRank_;
+    int pgId_;
 
     // Reference to the store so that we can log start/end event.
     c10::intrusive_ptr<Store> store_;
