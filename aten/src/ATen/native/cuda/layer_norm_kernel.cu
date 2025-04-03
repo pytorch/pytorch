@@ -1505,100 +1505,100 @@ void LayerNormBackwardKernelImpl(
 template <typename scalar_t, typename acc_t>
 __global__
 void rmsnorm_cuda_kernel(
-	const scalar_t* __restrict__ input,
-	scalar_t* __restrict__ output,
-	scalar_t* __restrict__ x_norm,
-	scalar_t* __restrict__ inverse_rms,
-	const acc_t* __restrict__ weight,
-	int64_t N,   // size of the normalized dimension
-	int64_t M,   // number of samples
-	double eps) {
-	// Each block processes multiple samples via a grid-stride loop.
-	for (int sample = blockIdx.x; sample < M; sample += gridDim.x) {
-		// Get pointers for the current sample.
-		const scalar_t* input_row = input + sample * N;
-		scalar_t* output_row = output + sample * N;
-		scalar_t* x_norm_row = x_norm + sample * N;
+  const scalar_t* __restrict__ input,
+  scalar_t* __restrict__ output,
+  scalar_t* __restrict__ x_norm,
+  scalar_t* __restrict__ inverse_rms,
+  const acc_t* __restrict__ weight,
+  int64_t N,   // size of the normalized dimension
+  int64_t M,   // number of samples
+  double eps) {
+  // Each block processes multiple samples via a grid-stride loop.
+  for (int sample = blockIdx.x; sample < M; sample += gridDim.x) {
+    // Get pointers for the current sample.
+    const scalar_t* input_row = input + sample * N;
+    scalar_t* output_row = output + sample * N;
+    scalar_t* x_norm_row = x_norm + sample * N;
 
-		// Shared memory buffer for reduction.
-		alignas(sizeof(double)) extern __shared__ char s_data1[];
-		acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data1);
+    // Shared memory buffer for reduction.
+    alignas(sizeof(double)) extern __shared__ char s_data1[];
+    acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data1);
 
-		// Each thread computes a partial sum-of-squares for this sample.
-		acc_t sum = 0;
-		for (int j = threadIdx.x; j < N; j += blockDim.x) {
-			acc_t val = static_cast<acc_t>(input_row[j]);
-			sum += val * val;
-		}
-		shared_buffer[threadIdx.x] = sum;
-		__syncthreads();
+    // Each thread computes a partial sum-of-squares for this sample.
+    acc_t sum = 0;
+    for (int j = threadIdx.x; j < N; j += blockDim.x) {
+      acc_t val = static_cast<acc_t>(input_row[j]);
+      sum += val * val;
+    }
+    shared_buffer[threadIdx.x] = sum;
+    __syncthreads();
 
-		// Reduction in shared memory.
-		for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-			if (threadIdx.x < stride) {
-				shared_buffer[threadIdx.x] += shared_buffer[threadIdx.x + stride];
-			}
-			__syncthreads();
-		}
-		acc_t total_sum = shared_buffer[0];
+    // Reduction in shared memory.
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride) {
+        shared_buffer[threadIdx.x] += shared_buffer[threadIdx.x + stride];
+      }
+      __syncthreads();
+    }
+    acc_t total_sum = shared_buffer[0];
 
-		// Compute inverse RMS for this sample.
-		acc_t inv_rms_val = 1.0 / std::sqrt(total_sum / static_cast<acc_t>(N) + static_cast<acc_t>(eps));
-		if (threadIdx.x == 0)
-		inverse_rms[sample] = inv_rms_val;
-		__syncthreads();
+    // Compute inverse RMS for this sample.
+    acc_t inv_rms_val = 1.0 / std::sqrt(total_sum / static_cast<acc_t>(N) + static_cast<acc_t>(eps));
+    if (threadIdx.x == 0)
+    inverse_rms[sample] = inv_rms_val;
+    __syncthreads();
 
-		// Compute the normalized value and apply the weight.
-		for (int j = threadIdx.x; j < N; j += blockDim.x) {
-			acc_t val = static_cast<acc_t>(input_row[j]);
-			acc_t norm_val = val * inv_rms_val;
-			x_norm_row[j] = static_cast<scalar_t>(norm_val);
-			output_row[j] = static_cast<scalar_t>(norm_val * static_cast<acc_t>(weight[j]));
-		}
-		__syncthreads();
-	}
+    // Compute the normalized value and apply the weight.
+    for (int j = threadIdx.x; j < N; j += blockDim.x) {
+      acc_t val = static_cast<acc_t>(input_row[j]);
+      acc_t norm_val = val * inv_rms_val;
+      x_norm_row[j] = static_cast<scalar_t>(norm_val);
+      output_row[j] = static_cast<scalar_t>(norm_val * static_cast<acc_t>(weight[j]));
+    }
+    __syncthreads();
+  }
 }
 
 void rmsnorm_cuda_forward(
-	const at::Tensor& input,
-	at::Tensor& output,
-	at::Tensor& x_norm,
-	at::Tensor& inverse_rms,
-	const at::Tensor& weight,
-	const int64_t normalized_shape_size,
-	const double eps) {
-	int64_t N = normalized_shape_size;
-	int64_t M = input.numel() / N;
+  const at::Tensor& input,
+  at::Tensor& output,
+  at::Tensor& x_norm,
+  at::Tensor& inverse_rms,
+  const at::Tensor& weight,
+  const int64_t normalized_shape_size,
+  const double eps) {
+  int64_t N = normalized_shape_size;
+  int64_t M = input.numel() / N;
 
-	auto input_contiguous = input.expect_contiguous();
-	auto weight_contiguous = weight.expect_contiguous();
+  auto input_contiguous = input.expect_contiguous();
+  auto weight_contiguous = weight.expect_contiguous();
 
-	AT_DISPATCH_FLOATING_TYPES_AND2(
-		at::ScalarType::Half,
-		at::ScalarType::BFloat16,
-		input.scalar_type(),
-		"rmsnorm_cuda_kernel",
-		[&]() {
-			using acc_t = acc_type<scalar_t, true>;
-			auto* input_ptr = input_contiguous->data_ptr<scalar_t>();
-			auto* output_ptr = output.data_ptr<scalar_t>();
-			auto* x_norm_ptr = x_norm.data_ptr<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    input.scalar_type(),
+    "rmsnorm_cuda_kernel",
+    [&]() {
+      using acc_t = acc_type<scalar_t, true>;
+      auto* input_ptr = input_contiguous->data_ptr<scalar_t>();
+      auto* output_ptr = output.data_ptr<scalar_t>();
+      auto* x_norm_ptr = x_norm.data_ptr<scalar_t>();
 
-			auto* inverse_rms_ptr = inverse_rms.data_ptr<scalar_t>();
+      auto* inverse_rms_ptr = inverse_rms.data_ptr<scalar_t>();
 
-			auto* weight_ptr = weight_contiguous->data_ptr<acc_t>();
-			int threadsPerBlock = 256;
-			// TODO: Get these from the CUDA API.
-			int max_allowed_blocks = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
-			int blocksPerGrid = std::min<int>(M, max_allowed_blocks); // e.g., max_allowed_blocks could be 1024
-			size_t sharedMemSize = threadsPerBlock * sizeof(acc_t);
+      auto* weight_ptr = weight_contiguous->data_ptr<acc_t>();
+      int threadsPerBlock = 256;
+      // TODO: Get these from the CUDA API.
+      int max_allowed_blocks = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+      int blocksPerGrid = std::min<int>(M, max_allowed_blocks); // e.g., max_allowed_blocks could be 1024
+      size_t sharedMemSize = threadsPerBlock * sizeof(acc_t);
 
-			rmsnorm_cuda_kernel<scalar_t, acc_t><<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
-				input_ptr, output_ptr, x_norm_ptr, inverse_rms_ptr, weight_ptr, N, M, eps);
+      rmsnorm_cuda_kernel<scalar_t, acc_t><<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
+        input_ptr, output_ptr, x_norm_ptr, inverse_rms_ptr, weight_ptr, N, M, eps);
 
-				C10_CUDA_KERNEL_LAUNCH_CHECK();
-		}
-	);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  );
 }
 
 } // namespace
@@ -1647,52 +1647,52 @@ void rmsnorm_backward_input_kernel(
     int64_t N,
     int64_t M,
     const acc_t* __restrict__ weight) {
-	// Shared memory for reduction (to compute dot = sum_j(x_norm * g))
-	alignas(sizeof(double)) extern __shared__ char s_data1[];
-	acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data1);
+  // Shared memory for reduction (to compute dot = sum_j(x_norm * g))
+  alignas(sizeof(double)) extern __shared__ char s_data1[];
+  acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data1);
 
-	// Process multiple samples if necessary using a grid-stride loop.
-	for (int sample = blockIdx.x; sample < M; sample += gridDim.x) {
-		const scalar_t* grad_row  = grad + sample * N;
-		const scalar_t* xnorm_row = x_norm + sample * N;
-		scalar_t* grad_in_row     = grad_input + sample * N;
-		acc_t sum_val = 0;
+  // Process multiple samples if necessary using a grid-stride loop.
+  for (int sample = blockIdx.x; sample < M; sample += gridDim.x) {
+    const scalar_t* grad_row  = grad + sample * N;
+    const scalar_t* xnorm_row = x_norm + sample * N;
+    scalar_t* grad_in_row     = grad_input + sample * N;
+    acc_t sum_val = 0;
 
-		// Each thread computes a partial dot product: sum_j(x_norm[j]*g[j])
-		for (int j = threadIdx.x; j < N; j += blockDim.x) {
-			// Multiply grad by weight if provided.
-			acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
-			sum_val += static_cast<acc_t>(xnorm_row[j]) * static_cast<acc_t>(g_val);
-		}
-		shared_buffer[threadIdx.x] = sum_val;
-		__syncthreads();
+    // Each thread computes a partial dot product: sum_j(x_norm[j]*g[j])
+    for (int j = threadIdx.x; j < N; j += blockDim.x) {
+      // Multiply grad by weight if provided.
+      acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
+      sum_val += static_cast<acc_t>(xnorm_row[j]) * static_cast<acc_t>(g_val);
+    }
+    shared_buffer[threadIdx.x] = sum_val;
+    __syncthreads();
 
-		// Reduce within the block to compute the full dot product.
-		for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-			if (threadIdx.x < stride)
-			shared_buffer[threadIdx.x] += shared_buffer[threadIdx.x + stride];
-			__syncthreads();
-		}
+    // Reduce within the block to compute the full dot product.
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride)
+      shared_buffer[threadIdx.x] += shared_buffer[threadIdx.x + stride];
+      __syncthreads();
+    }
 
-		// The full dot product over the normalized dimension.
-		acc_t dot = shared_buffer[0];
-		__syncthreads();
+    // The full dot product over the normalized dimension.
+    acc_t dot = shared_buffer[0];
+    __syncthreads();
 
-		// Read inverse_rms for this sample.
-		acc_t inv_rms_val = static_cast<acc_t>(inverse_rms[sample]);
+    // Read inverse_rms for this sample.
+    acc_t inv_rms_val = static_cast<acc_t>(inverse_rms[sample]);
 
-		// Now compute grad_input[j] = inverse_rms * (g[j] - x_norm[j]*(dot/N))
-		for (int j = threadIdx.x; j < N; j += blockDim.x) {
-			acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
-			acc_t grad_val = inv_rms_val * ( static_cast<acc_t>(g_val) - static_cast<acc_t>(xnorm_row[j]) * (dot / static_cast<acc_t>(N)) );
-			grad_in_row[j] = static_cast<scalar_t>(grad_val);
-			// grad_in_row[j] = static_cast<scalar_t>(grad_row[j]);
-			// printf("N=%lld M=%lld sample=%d j=%d grad_row[%d]=%f grad_val=%f grad_row=%p\n", N, M, sample, j, j, grad_row[1], grad_val, grad_row + 1);
-			// printf("grad_row=%p grad_row[%d]=%f\n", grad_row, j, grad_row[j]);
-			// printf("gg=%f j=%d\n", grad_row[j], j);
-		}
-		__syncthreads();
-	}
+    // Now compute grad_input[j] = inverse_rms * (g[j] - x_norm[j]*(dot/N))
+    for (int j = threadIdx.x; j < N; j += blockDim.x) {
+      acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
+      acc_t grad_val = inv_rms_val * ( static_cast<acc_t>(g_val) - static_cast<acc_t>(xnorm_row[j]) * (dot / static_cast<acc_t>(N)) );
+      grad_in_row[j] = static_cast<scalar_t>(grad_val);
+      // grad_in_row[j] = static_cast<scalar_t>(grad_row[j]);
+      // printf("N=%lld M=%lld sample=%d j=%d grad_row[%d]=%f grad_val=%f grad_row=%p\n", N, M, sample, j, j, grad_row[1], grad_val, grad_row + 1);
+      // printf("grad_row=%p grad_row[%d]=%f\n", grad_row, j, grad_row[j]);
+      // printf("gg=%f j=%d\n", grad_row[j], j);
+    }
+    __syncthreads();
+  }
 }
 
 // Kernel for computing grad_weight using a grid-stride loop.
@@ -1705,45 +1705,45 @@ void rmsnorm_backward_weight_kernel(
     acc_t* __restrict__ grad_weight,    // [N]
     int64_t N,
     int64_t M) {
-	alignas(sizeof(double)) extern __shared__ char s_data2[];
-	acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data2);
+  alignas(sizeof(double)) extern __shared__ char s_data2[];
+  acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data2);
 
-	// Use a grid-stride loop to iterate over j (the normalized dimension)
-	for (int64_t j = blockIdx.x * blockDim.x + threadIdx.x; j < N; j += gridDim.x * blockDim.x) {
-		acc_t sum_val = 0;
+  // Use a grid-stride loop to iterate over j (the normalized dimension)
+  for (int64_t j = blockIdx.x * blockDim.x + threadIdx.x; j < N; j += gridDim.x * blockDim.x) {
+    acc_t sum_val = 0;
 
-		constexpr int UNROLL_FACTOR = 8;
-		scalar_t grad_regs[UNROLL_FACTOR];
-		scalar_t x_norm_regs[UNROLL_FACTOR];
-		for (int64_t sample = threadIdx.y * UNROLL_FACTOR; sample < M; sample += blockDim.y * UNROLL_FACTOR) {
-			#pragma unroll
-			for (int64_t k = 0; k < UNROLL_FACTOR && sample + k < M; ++k) {
-				grad_regs[k] = grad[(sample + k) * N + j];
-				x_norm_regs[k] = x_norm[(sample + k) * N + j];
-			}
-			#pragma unroll
-			for (int64_t k = 0; k < UNROLL_FACTOR && sample + k < M; ++k) {
-				sum_val += static_cast<acc_t>(grad_regs[k]) *
-				static_cast<acc_t>(x_norm_regs[k]);
-			}
-		}
+    constexpr int UNROLL_FACTOR = 8;
+    scalar_t grad_regs[UNROLL_FACTOR];
+    scalar_t x_norm_regs[UNROLL_FACTOR];
+    for (int64_t sample = threadIdx.y * UNROLL_FACTOR; sample < M; sample += blockDim.y * UNROLL_FACTOR) {
+      #pragma unroll
+      for (int64_t k = 0; k < UNROLL_FACTOR && sample + k < M; ++k) {
+        grad_regs[k] = grad[(sample + k) * N + j];
+        x_norm_regs[k] = x_norm[(sample + k) * N + j];
+      }
+      #pragma unroll
+      for (int64_t k = 0; k < UNROLL_FACTOR && sample + k < M; ++k) {
+        sum_val += static_cast<acc_t>(grad_regs[k]) *
+        static_cast<acc_t>(x_norm_regs[k]);
+      }
+    }
 
-		// Now reduce across the threads in the block.
-		shared_buffer[threadIdx.y * blockDim.x + threadIdx.x] = sum_val;
-		__syncthreads();
+    // Now reduce across the threads in the block.
+    shared_buffer[threadIdx.y * blockDim.x + threadIdx.x] = sum_val;
+    __syncthreads();
 
-		for (int stride = blockDim.y / 2; stride > 0; stride >>= 1) {
-			if (threadIdx.y < stride) {
-				shared_buffer[threadIdx.y * blockDim.x + threadIdx.x] +=
-				shared_buffer[(threadIdx.y + stride) * blockDim.x + threadIdx.x];
-			}
-			__syncthreads();
-		}
+    for (int stride = blockDim.y / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.y < stride) {
+        shared_buffer[threadIdx.y * blockDim.x + threadIdx.x] +=
+        shared_buffer[(threadIdx.y + stride) * blockDim.x + threadIdx.x];
+      }
+      __syncthreads();
+    }
 
-		if (threadIdx.y == 0) {
-			grad_weight[j] = shared_buffer[threadIdx.x];
-		}
-	}
+    if (threadIdx.y == 0) {
+      grad_weight[j] = shared_buffer[threadIdx.x];
+    }
+  }
 }
 
 // Host function for the backward pass.
@@ -1751,79 +1751,79 @@ void rmsnorm_backward_weight_kernel(
 // grad_input_mask[1] indicates whether to compute grad with respect to weight.
 std::tuple<at::Tensor, at::Tensor>
 rms_norm_backward_cuda(
-	at::Tensor const& grad,
-	at::Tensor const & input,
-	std::optional<at::Tensor> const & weight_opt,
-	std::optional<double> eps,  // Not used in backward here (already folded into inverse_rms)
-	at::Tensor const & output,
-	at::Tensor const & x_norm,
-	at::Tensor const & inverse_rms,
-	std::array<bool, 2ul> grad_input_mask) {
-		c10::MaybeOwned<Tensor> weight_maybe_owned =
-		at::borrow_from_optional_tensor(weight_opt);
-		const Tensor& weight = *weight_maybe_owned;
+  at::Tensor const& grad,
+  at::Tensor const & input,
+  std::optional<at::Tensor> const & weight_opt,
+  std::optional<double> eps,  // Not used in backward here (already folded into inverse_rms)
+  at::Tensor const & output,
+  at::Tensor const & x_norm,
+  at::Tensor const & inverse_rms,
+  std::array<bool, 2ul> grad_input_mask) {
+    c10::MaybeOwned<Tensor> weight_maybe_owned =
+    at::borrow_from_optional_tensor(weight_opt);
+    const Tensor& weight = *weight_maybe_owned;
 
-		auto grad_contiguous = grad.expect_contiguous();
-		auto input_contiguous = input.expect_contiguous();
-		auto weight_contiguous = weight.expect_contiguous();
-		auto output_contiguous = output.expect_contiguous();
-		auto x_norm_contiguous = x_norm.expect_contiguous();
-		auto inverse_rms_contiguous = inverse_rms.expect_contiguous();
+    auto grad_contiguous = grad.expect_contiguous();
+    auto input_contiguous = input.expect_contiguous();
+    auto weight_contiguous = weight.expect_contiguous();
+    auto output_contiguous = output.expect_contiguous();
+    auto x_norm_contiguous = x_norm.expect_contiguous();
+    auto inverse_rms_contiguous = inverse_rms.expect_contiguous();
 
-		// Allocate outputs conditionally.
-		auto grad_input = grad_input_mask[0] ? at::empty_like(input) : at::Tensor();
-		auto grad_weight = (grad_input_mask[1] && weight_opt.has_value()) ? at::empty_like(weight_opt.value()) : at::Tensor();
+    // Allocate outputs conditionally.
+    auto grad_input = grad_input_mask[0] ? at::empty_like(input) : at::Tensor();
+    auto grad_weight = (grad_input_mask[1] && weight_opt.has_value()) ? at::empty_like(weight_opt.value()) : at::Tensor();
 
-		const int64_t M = input.size(0);  // number of samples
-		const int64_t N = input.size(1);  // normalized dimension
+    const int64_t M = input.size(0);  // number of samples
+    const int64_t N = input.size(1);  // normalized dimension
 
-		// Launch configuration for the grad_input kernel.
-		if (grad_input_mask[0]) {
-			int threadsPerBlock = 256;
-			// Limit the grid size if M is huge; the kernel uses a grid-stride loop.
-			int blocksPerGrid = std::min<int>(M, 1024);
-			size_t sharedMemSize = threadsPerBlock * sizeof(float); // Here we assume acc_t is float.
+    // Launch configuration for the grad_input kernel.
+    if (grad_input_mask[0]) {
+      int threadsPerBlock = 256;
+      // Limit the grid size if M is huge; the kernel uses a grid-stride loop.
+      int blocksPerGrid = std::min<int>(M, 1024);
+      size_t sharedMemSize = threadsPerBlock * sizeof(float); // Here we assume acc_t is float.
 
-			AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_input", ([&] {
-				using acc_t = at::acc_type<scalar_t, true>;
-				rmsnorm_backward_input_kernel<scalar_t, acc_t>
-				<<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
-					grad_contiguous->data_ptr<scalar_t>(),
-					x_norm_contiguous->data_ptr<scalar_t>(),
-					inverse_rms_contiguous->data_ptr<scalar_t>(),
-					grad_input.data_ptr<scalar_t>(),
-					N,
-					M,
-					weight_opt.has_value() ? weight_contiguous->data_ptr<acc_t>() : nullptr
-				);
-				C10_CUDA_KERNEL_LAUNCH_CHECK();
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_input", ([&] {
+        using acc_t = at::acc_type<scalar_t, true>;
+        rmsnorm_backward_input_kernel<scalar_t, acc_t>
+        <<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
+          grad_contiguous->data_ptr<scalar_t>(),
+          x_norm_contiguous->data_ptr<scalar_t>(),
+          inverse_rms_contiguous->data_ptr<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(),
+          N,
+          M,
+          weight_opt.has_value() ? weight_contiguous->data_ptr<acc_t>() : nullptr
+        );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-			}));
-		}
+      }));
+    }
 
-		// Launch configuration for the grad_weight kernel.
-		if (grad_input_mask[1] && weight_opt.has_value()) {
-			AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_weight", ([&] {
-				using acc_t = at::acc_type<scalar_t, true>;
-				dim3 threadsPerBlock(32, 32);
-				dim3 blocksPerGrid;
-				size_t sharedMemSize = threadsPerBlock.x * threadsPerBlock.y * sizeof(acc_t);
-				blocksPerGrid.x = std::min<int>(((N + threadsPerBlock.x - 1) / threadsPerBlock.x), 1024);
+    // Launch configuration for the grad_weight kernel.
+    if (grad_input_mask[1] && weight_opt.has_value()) {
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_weight", ([&] {
+        using acc_t = at::acc_type<scalar_t, true>;
+        dim3 threadsPerBlock(32, 32);
+        dim3 blocksPerGrid;
+        size_t sharedMemSize = threadsPerBlock.x * threadsPerBlock.y * sizeof(acc_t);
+        blocksPerGrid.x = std::min<int>(((N + threadsPerBlock.x - 1) / threadsPerBlock.x), 1024);
 
-				rmsnorm_backward_weight_kernel<scalar_t, acc_t>
-				<<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
-					grad_contiguous->data_ptr<scalar_t>(),
-					x_norm_contiguous->data_ptr<scalar_t>(),
-					grad_weight.data_ptr<acc_t>(),
-					N,
-					M
-				);
-				C10_CUDA_KERNEL_LAUNCH_CHECK();
-			}));
-		}
+        rmsnorm_backward_weight_kernel<scalar_t, acc_t>
+        <<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
+          grad_contiguous->data_ptr<scalar_t>(),
+          x_norm_contiguous->data_ptr<scalar_t>(),
+          grad_weight.data_ptr<acc_t>(),
+          N,
+          M
+        );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }));
+    }
 
-		return std::make_tuple(grad_input, grad_weight);
-	}
+    return std::make_tuple(grad_input, grad_weight);
+  }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
