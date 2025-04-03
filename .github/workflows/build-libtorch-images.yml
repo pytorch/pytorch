@@ -39,48 +39,30 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  build-docker-cuda:
+  build:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}
+    name: ${{ matrix.name }}:${{ matrix.tag }}
     strategy:
+      fail-fast: false
       matrix:
-        cuda_version: ["12.8", "12.6", "12.4", "11.8"]
+        include: [
+          { name: "libtorch-cxx11-builder", tag: "cuda12.8",  runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "cuda12.6",  runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "cuda12.4",  runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "cuda11.8",  runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "rocm6.2.4", runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "rocm6.3",   runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "rocm6.4",   runner: "linux.9xlarge.ephemeral" },
+          { name: "libtorch-cxx11-builder", tag: "cpu",       runner: "linux.9xlarge.ephemeral" },
+        ]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
-          docker-image-name: libtorch-cxx11-builder
-          custom-tag-prefix: cuda${{matrix.cuda_version}}
-          docker-build-dir: libtorch
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  build-docker-rocm:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    strategy:
-      matrix:
-        rocm_version: ["6.2.4", "6.3", "6.4"]
-    steps:
-      - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
-        with:
-          docker-image-name: libtorch-cxx11-builder
-          custom-tag-prefix: rocm${{matrix.rocm_version}}
-          docker-build-dir: libtorch
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  build-docker-cpu:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    steps:
-      - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
-        with:
-          docker-image-name: libtorch-cxx11-builder
-          custom-tag-prefix: cpu
+          docker-image-name: ${{ matrix.name }}
+          custom-tag-prefix: ${{ matrix.tag }}
           docker-build-dir: libtorch
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}
