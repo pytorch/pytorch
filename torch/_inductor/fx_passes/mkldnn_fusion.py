@@ -1035,13 +1035,13 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if meta_value is None or (meta_value.dim() != 4 and meta_value.dim() != 5):
                 return False
-        if (
+        if (not is_xpu) and (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-        if (
+        if (not is_xpu) and (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
@@ -1124,13 +1124,13 @@ if torch._C._has_mkldnn:
             ):
                 return False
 
-        if (
+        if (input_meta_value.device.type == "cpu") and (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-        if (
+        if (input_meta_value.device.type == "cpu") and (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
