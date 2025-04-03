@@ -637,6 +637,7 @@ class _TorchDynamoContext:
                         "Detected that you are using FX to torch.jit.trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
+
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
