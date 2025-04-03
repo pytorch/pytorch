@@ -234,7 +234,7 @@ GEMM_TEMPLATE = r"""
     {%- if is_woq_int4 %}
         {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
         {%- set tile_qparam = kernel.slice_nd(
-            qscale_and_zeros, [("k_start / group_size", "k_end / group_size"), ("n_start", "n_start + n_size"), ()]) %}
+            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("n_start", "n_start + n_size"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
         {%- set tile_qparam = None %}
@@ -1122,7 +1122,11 @@ class CppGemmTemplate(CppTemplate):
             k = new_size[-2]
             if not isinstance(W, ir.TensorBox):
                 W = ir.TensorBox(W)
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            # WOQ INT4 weights are reordered in microkernel
+            if (
+                micro_gemm.get_b_layout() != LayoutType.NORMAL
+                and not micro_gemm.is_woq_int4()
+            ):
                 permute_dims = list(range(len(new_size) + 1))
                 permute_dims[-1], permute_dims[-2] = permute_dims[-2], permute_dims[-1]
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
@@ -1139,7 +1143,11 @@ class CppGemmTemplate(CppTemplate):
         else:
             k = new_size[-2]
             # Apply VNNI packing to the weight tensor
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            # WOQ INT4 weights are reordered in microkernel
+            if (
+                micro_gemm.get_b_layout() != LayoutType.NORMAL
+                and not micro_gemm.is_woq_int4()
+            ):
                 # TODO: Move VNNI weight packing for non-constant tensors into the template,
                 # to improve cache locality and avoid full-tensor copy.
                 layout_str = (
