@@ -1151,7 +1151,9 @@ class GraphLowering(torch.fx.Interpreter):
 
                 # use contiguous unless the (custom) op asks something else
                 # explicitly
-                if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                if torch._C.Tag.needs_exact_strides in target.tags:
+                    decided_constraint = constrain_to_fake_tensors  # type: ignore[assignment]
+                elif torch._C.Tag.needs_fixed_stride_order in target.tags:
                     decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
                 elif torch._C.Tag.flexible_layout in target.tags:
                     decided_constraint = None  # type: ignore[assignment]
@@ -1192,7 +1194,34 @@ class GraphLowering(torch.fx.Interpreter):
             layout_constraints = maybe_layout_constraints(target)
             if layout_constraints:
                 old_args, old_kwargs = args, kwargs
-                args, kwargs = layout_constraints(n, *args, **kwargs)
+                if layout_constraints is constrain_to_fake_tensors:
+                    # only constrain_to_fake_tensor if this exists.
+                    # otherwise, no constraints at all: the implication is
+                    # that this operator was inserted by a custom pass
+                    # so we'll give them the freedom.
+                    if "eager_input_vals" in n.meta:
+                        fake_args, fake_kwargs = n.meta["eager_input_vals"]
+
+                        # (fake_args, fake_kwargs) might not align with (args, kwargs).
+                        # we need to normalize them based on the schema
+                        assert isinstance(target, torch._ops.OpOverload)
+
+                        def normalize(args: Any, kwargs: Any) -> tuple[Any, Any]:
+                            result = torch.fx.operator_schemas.normalize_function(
+                                target, args, kwargs
+                            )
+                            assert result is not None
+                            return result[0], result[1]
+
+                        fake_args, fake_kwargs = normalize(fake_args, fake_kwargs)
+                        args, kwargs = normalize(args, kwargs)
+                        old_args, old_kwargs = normalize(old_args, old_kwargs)
+
+                        args, kwargs = constrain_to_fake_tensors(
+                            args, kwargs, fake_args, fake_kwargs
+                        )
+                else:
+                    args, kwargs = layout_constraints(n, *args, **kwargs)
 
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 
@@ -1506,9 +1535,9 @@ class GraphLowering(torch.fx.Interpreter):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
-                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
-                        inp_args = arg_kwarg_vals[0]
-                        inp_kwargs = arg_kwarg_vals[1]
+                    if eager_input_vals := n.meta.get("eager_input_vals"):
+                        inp_args = eager_input_vals[0]
+                        inp_kwargs = eager_input_vals[1]
                         args, kwargs = constrain_to_fake_tensors(
                             args, kwargs, inp_args, inp_kwargs
                         )

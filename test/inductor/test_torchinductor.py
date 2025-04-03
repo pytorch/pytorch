@@ -1368,6 +1368,8 @@ class CommonTemplate:
             return c + d
 
         for dtype in [torch.complex32, torch.complex64, torch.complex128]:
+            if not self.is_dtype_supported(dtype):
+                continue
             x = torch.tensor(
                 [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
                 dtype=dtype,
@@ -3780,6 +3782,9 @@ class CommonTemplate:
         }
     )
     def test_linear_dynamic_maxautotune(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         @torch.compile(dynamic=True)
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4271,34 +4276,35 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    def test_low_memory_max_pool(self, dilation: int):
+    @parametrize("dim", (2, 3))
+    def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
         def fn(x):
-            kernel_size = [3, 3]
-            stride = [2, 2]
-            padding = [1, 1]
+            kernel_size = [3, 3] if dim == 2 else [3, 3, 2]
+            stride = [2] * dim
+            padding = [1] * dim
             ceil_mode = False
 
-            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+            vals, offsets = prims._low_memory_max_pool_with_offsets(
                 x,
                 kernel_size,
                 stride,
                 padding,
-                [dilation] * 2,
+                [dilation] * dim,
                 ceil_mode,
             )
-            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+            indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
-                kernel_size[1],
-                x.size(-1),
+                kernel_size,
+                x.shape[-dim:],
                 stride,
                 padding,
-                dilation=[dilation] * 2,
+                dilation=[dilation] * dim,
             )
             return vals, indices, offsets
 
-        self.common(fn, (torch.randn(1, 3, 10, 10),))
+        self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     @xfail_if_mps
     def test_to_dtype(self):
@@ -6564,6 +6570,7 @@ class CommonTemplate:
             ),
         )
 
+    @skip_if_halide  # log2 not implemented for halide
     def test_log2(self):
         def fn(x):
             return torch.log2(x), torch.log2(x + 1) - 2
@@ -6582,6 +6589,7 @@ class CommonTemplate:
             (torch.randn([8, 8]) + 10,),
         )
 
+    @skip_if_halide  # log2 not implemented for halide
     def test_log_fp64(self):
         def fn(x):
             return torch.log(x), torch.log2(x)
@@ -10334,6 +10342,15 @@ class CommonTemplate:
             fn,
             [x],
         )
+
+    @skip_if_halide  # log2 not yet implemented
+    @skip_if_triton_cpu  # log2 implemented only in Dec 2024
+    def test_pow_by_natural_log2_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        self.common(fn, [torch.randn(5)])
 
     def test_setitem_with_int_parameter(self):
         x = torch.zeros(7, device=self.device)
