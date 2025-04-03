@@ -493,11 +493,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
         ):
             if node.target == torch.ops._c10d_functional.wait_tensor.default:
-                # This is a wait node, it's producer is some collective node. When
-                # called, it blocks the current thread until that collective is done.
-                # We should not be moving the collective down to the wait node:
-                #   1. If we aren't in SPMD mode, this move can cause hangs/collective mismatches
-                #   2. Even if we are in SPMD mode, this move gives less compute for comms to overlap with
+                # This is a wait node, and `other_node`` is some collective node.
+                # Eager semantics allow waits to be issued in a different order than
+                # the collectives. Reordering this wait node might reorder collectives
+                # which cause hangs. Once we have SPMD mode, we can safely reorder them.
+                # However, increasing the locality between a collective and its wait node
+                # is generally worse for performance.
                 return
 
             # move node's producers right before it

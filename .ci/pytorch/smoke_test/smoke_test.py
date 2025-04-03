@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Optional
 
 import torch
 import torch._dynamo
@@ -195,6 +196,36 @@ def test_cuda_gds_errors_captured() -> None:
         )
 
 
+def find_pypi_package_version(package: str) -> Optional[str]:
+    from importlib import metadata
+
+    dists = metadata.distributions()
+    for dist in dists:
+        if dist.metadata["Name"].startswith(package):
+            return dist.version
+    return None
+
+
+def cudnn_to_version_str(cudnn_version: int) -> str:
+    patch = int(cudnn_version % 10)
+    minor = int((cudnn_version / 100) % 100)
+    major = int((cudnn_version / 10000) % 10000)
+    return f"{major}.{minor}.{patch}"
+
+
+def compare_pypi_to_torch_versions(
+    package: str, pypi_version: str, torch_version: str
+) -> None:
+    if pypi_version is None:
+        raise RuntimeError(f"Can't find {package} in PyPI for Torch: {torch_version}")
+    if pypi_version.startswith(torch_version):
+        print(f"Found matching {package}. Torch: {torch_version} PyPI {pypi_version}")
+    else:
+        raise RuntimeError(
+            f"Wrong {package} version. Torch: {torch_version} PyPI: {pypi_version}"
+        )
+
+
 def smoke_test_cuda(
     package: str, runtime_error_check: str, torch_compile_check: str
 ) -> None:
@@ -226,20 +257,27 @@ def smoke_test_cuda(
             raise RuntimeError(
                 f"Wrong CUDA version. Loaded: {torch.version.cuda} Expected: {gpu_arch_ver}"
             )
-        print(f"torch cuda: {torch.version.cuda}")
-        # todo add cudnn version validation
-        print(f"torch cudnn: {torch.backends.cudnn.version()}")
-        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
 
+        print(f"torch cuda: {torch.version.cuda}")
         torch.cuda.init()
         print("CUDA initialized successfully")
         print(f"Number of CUDA devices: {torch.cuda.device_count()}")
         for i in range(torch.cuda.device_count()):
             print(f"Device {i}: {torch.cuda.get_device_name(i)}")
 
-        # nccl is availbale only on Linux
+        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
+        torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
+        print(f"Torch cuDNN version: {torch_cudnn_version}")
+
+        # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
         if sys.platform in ["linux", "linux2"]:
-            print(f"torch nccl version: {torch.cuda.nccl.version()}")
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
+            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+            compare_pypi_to_torch_versions(
+                "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
+            )
 
         if runtime_error_check == "enabled":
             test_cuda_runtime_errors_captured()

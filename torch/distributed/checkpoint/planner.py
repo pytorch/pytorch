@@ -232,6 +232,9 @@ class SavePlanner(abc.ABC):
     # Global checkpoint plan as computed by `create_global_plan` API.
     # Cached on the coordinator rank.
     _cached_global_plan: dict[str, list[SavePlan]] = {}
+    # Metadata for the global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_metadata: dict[str, Metadata] = {}
 
     @abc.abstractmethod
     def set_up_planner(

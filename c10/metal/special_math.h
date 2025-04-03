@@ -1523,5 +1523,198 @@ inline float scaled_modified_bessel_k1_forward(T x) {
   return (0.5 * (b - p) / ::metal::precise::sqrt(x));
 }
 
+template <typename T>
+float chebyshev_polynomial_t_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 1.0) {
+    if (x > 0.0 || n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if ((n > 6) && (::metal::precise::fabs(x) < 1.0)) {
+    return ::metal::precise::cos(n * ::metal::precise::acos(x));
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x;
+  }
+
+  float p = 1.0;
+  float q = x;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (x + x) * q - p;
+    p = q;
+    q = r;
+  }
+  return r;
+}
+
+template <typename T>
+float chebyshev_polynomial_u_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 1.0) {
+    if (x > 0.0 || n % 2 == 0) {
+      return n + 1;
+    }
+
+    return -(n + 1);
+  }
+
+  if ((n > 8) && (::metal::fabs(x) < 1.0)) {
+    const auto acos_x = ::metal::precise::acos(x);
+    if (::metal::precise::sin(acos_x) != 0.0) {
+      return ::metal::precise::sin((n + 1) * acos_x) /
+          ::metal::precise::sin(acos_x);
+    }
+
+    return (n + 1) * ::metal::precise::cos((n + 1) * acos_x) / x;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  auto q = 2.0 * x;
+  if (n == 1) {
+    return q;
+  }
+
+  auto p = 1.0;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = 2 * x * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+}
+
+template <typename T>
+float chebyshev_polynomial_v_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 1.0) {
+    if (x > 0.0) {
+      return 1.0;
+    }
+
+    if (n % 2 == 0) {
+      return n + n + 1;
+    }
+
+    return -(n + n + 1);
+  }
+
+  if ((n > 8) && (::metal::fabs(x) < 1.0)) {
+    const auto acos_x = ::metal::precise::acos(x);
+    if (::metal::precise::sin(.5 * acos_x) != 1.0) {
+      return ::metal::precise::cos((n + 0.5) * acos_x) /
+          ::metal::precise::cos(.5 * acos_x);
+    }
+
+    if (n % 2 == 0) {
+      return n + n + 1;
+    }
+
+    return -(n + n + 1);
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  auto q = 2.0 * x - 1.0;
+  if (n == 1) {
+    return q;
+  }
+
+  auto p = 1.0;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = 2 * x * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template <typename T>
+float chebyshev_polynomial_w_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 1.0) {
+    if (x > 0.0) {
+      return n + n + 1;
+    }
+
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if ((n > 8) && (::metal::fabs(x) < 1.0)) {
+    const auto acos_x = ::metal::precise::acos(x);
+    if (::metal::precise::cos(.5 * acos_x) != 1.0) {
+      return ::metal::precise::sin((n + 0.5) * acos_x) /
+          ::metal::precise::sin(.5 * acos_x);
+    }
+
+    if (x > 0.0) {
+      return n + n + 1;
+    }
+
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  auto q = 2.0 * x + 1.0;
+  if (n == 1) {
+    return q;
+  }
+
+  auto p = 1.0;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = 2.0 * x * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // chebyshev_polynomial_w_forward(T x, int64_t n)
+
 } // namespace metal
 } // namespace c10
