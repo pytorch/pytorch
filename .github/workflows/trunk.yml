@@ -168,7 +168,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: win-arm64-vs2022-cpu-py3-test
+    name: win-arm64-vs2022-cpu-py3
     uses: ./.github/workflows/_win-arm64-build.yml
     needs: get-label-type
     with:
@@ -179,7 +179,7 @@ jobs:
     secrets: inherit
 
   win-arm64-vs2022-cpu-py3-test:
-    name: win-arm64-vs2022-cpu-py3-test
+    name: win-arm64-vs2022-cpu-py3
     uses: ./.github/workflows/_win-arm64-test.yml
     needs: win-arm64-vs2022-cpu-py3-build
     with:
