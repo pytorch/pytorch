@@ -884,8 +884,42 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+void initialize_torch_libraries();
+#endif
+
 namespace detail {
 
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+extern std::vector<TorchLibraryInit*> torch_library_initializers;
+class TorchLibraryInit final {
+    private:
+      using InitFn = void(Library&);
+      Library::Kind kind;
+      InitFn* init_function;
+      const char* ns;
+      std::optional<c10::DispatchKey> key;
+      const char* file;
+      uint32_t line;
+      std::unique_ptr<Library> lib = nullptr;
+
+    public:
+      TorchLibraryInit(
+            Library::Kind kind,
+            InitFn* fn,
+            const char* ns,
+            std::optional<c10::DispatchKey> k,
+            const char* file,
+            uint32_t line) : kind(kind), init_function(fn), ns(ns), key(k), file(file), line(line) {
+              torch_library_initializers.push_back(this);
+            }
+
+      void initialize() {
+        lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
+        init_function(*lib);
+      }
+};
+#else
 class TorchLibraryInit final {
  private:
   using InitFn = void(Library&);
@@ -903,6 +937,7 @@ class TorchLibraryInit final {
     fn(lib_);
   }
 };
+#endif
 
 } // namespace detail
 
