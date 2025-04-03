@@ -11,7 +11,6 @@ class TestUnsqueezeInplace(torch._dynamo.test_case.TestCase):
     """
 
     def test_unsqueeze_inplace(self):
-
         inputs: dict[str, torch.Tensor] = {"v0_0": torch.rand([3], device="cpu")}
 
         class Model(torch.nn.Module):
