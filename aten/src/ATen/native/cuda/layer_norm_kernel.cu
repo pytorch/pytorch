@@ -1589,7 +1589,6 @@ void rmsnorm_cuda_forward(
 
       auto* weight_ptr = weight_contiguous->data_ptr<acc_t>();
       int threadsPerBlock = 256;
-      // TODO: Get these from the CUDA API.
       int max_allowed_blocks = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
       int blocksPerGrid = std::min<int>(M, max_allowed_blocks); // e.g., max_allowed_blocks could be 1024
       size_t sharedMemSize = threadsPerBlock * sizeof(acc_t);

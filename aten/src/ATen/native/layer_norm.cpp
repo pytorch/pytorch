@@ -266,29 +266,6 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
-std::tuple<Tensor, Tensor> math_native_rms_norm(
-    const Tensor& input,
-    const std::optional<Tensor>& weight,
-    IntArrayRef normalized_shape,
-    double eps) {
-  // Compute the mean of the squared input over the normalized dimensions.
-  // We keep the reduced dimensions for proper broadcasting.
-  Tensor mean_sq = mean(input.pow(2), normalized_shape, /*keepdim=*/true);
-  
-  // Compute the reciprocal of the square root of (mean_sq + eps).
-  Tensor rstd = rsqrt(mean_sq.add(eps));
-  
-  // Normalize the input by multiplying by rstd.
-  Tensor output = input.mul(rstd);
-  
-  // If weight is provided, apply it elementwise.
-  if (weight.has_value()) {
-    output = output.mul(weight.value());
-  }
-  
-  return std::make_tuple(output, rstd);
-}
-
 Tensor rms_norm_symint(
     const Tensor& input,
     c10::SymIntArrayRef normalized_shape,
