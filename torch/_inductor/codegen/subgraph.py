@@ -81,8 +81,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             # Reset output strides with nested compilation
             context.output_strides = []
 
-        # benchmark_gm(*self.example_inputs) modifies self.example_inputs
-        return benchmarker.benchmark_gpu(lambda: benchmark_gm([*self.example_inputs]))
+        out.copy_(benchmark_gm([*args])[0])
+
+        return benchmarker.benchmark_gpu(lambda: benchmark_gm([*args]))
 
     def hash_key(self):
         return "-".join(
