@@ -1155,7 +1155,7 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                "mlp_dim": [5, 16, 17],
+                "mlp_dim": [3, 5, 16, 17],
                 "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),

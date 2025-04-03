@@ -559,22 +559,26 @@ class GraphModule(torch.nn.Module):
 
         @mark_compile_region
         def gn(x):
-            return mod(x)
+            return torch.cos(x), mod(x)
 
         def fn(x):
-            return gn(x)
+            out = gn(x)
+            return out[0] + out[1]
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         # requires_grad is False deliberately to force None the joint_graph
         # outputs
         x = torch.randn(8, 8, requires_grad=False)
+        x_clone = x.detach().clone().requires_grad_(False)
 
-        ref = mod(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        ref = fn(x)
+        res = opt_fn(x_clone)
 
         ref.sum().backward()
         res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
