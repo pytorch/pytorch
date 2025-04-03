@@ -62,22 +62,3 @@ esac
         "${TOPDIR}/.ci/docker/"
 
 )
-
-GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
-GIT_BRANCH_NAME=${GITHUB_REF##*/}
-GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
-DOCKER_IMAGE_BRANCH_TAG=${DOCKER_IMAGE}-${GIT_BRANCH_NAME}
-DOCKER_IMAGE_SHA_TAG=${DOCKER_IMAGE}-${GIT_COMMIT_SHA}
-
-if [[ "${WITH_PUSH}" == true ]]; then
-  (
-    set -x
-    ${DOCKER} push "${DOCKER_IMAGE}"
-    if [[ -n ${GITHUB_REF} ]]; then
-        ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
-        ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
-        ${DOCKER} push "${DOCKER_IMAGE_BRANCH_TAG}"
-        ${DOCKER} push "${DOCKER_IMAGE_SHA_TAG}"
-    fi
-  )
-fi
