@@ -73,11 +73,15 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
 #undef LOAD_SYMBOL
 
 // NOLINTBEGIN(performance-avoid-endl)
-#define TRY_LOAD_SYMBOL(var, name_str)                               \
-  try {                                                              \
-    var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str)); \
-  } catch (const at::DynamicLibraryError& e) {                       \
-    std::cerr << "Could not dlsym " << name_str << std::endl;        \
+#define TRY_LOAD_SYMBOL(var, name_str)                                               \
+  try {                                                                              \
+    var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));                 \
+  } catch (const at::DynamicLibraryError& e) {                                       \
+    std::cerr                                                                        \
+        << "[WARNING] Could not dlsym " << name_str                                  \
+        << ". This is okay if you don't need functionality from " << name_str        \
+        << ". Otherwise consider rebuilding your model with the latest AOTInductor." \
+        << std::endl;                                                                \
   }
   // NOLINTEND(performance-avoid-endl)
 
@@ -94,6 +98,9 @@ consider rebuild your model with the latest AOTInductor.");
   TRY_LOAD_SYMBOL(
       free_inactive_constant_buffer_func_,
       "AOTInductorModelContainerFreeInactiveConstantBuffer")
+  TRY_LOAD_SYMBOL(
+      extract_constants_map_func_,
+      "AOTInductorModelContainerExtractConstantsMap");
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -194,6 +201,21 @@ std::unordered_map<std::string, int32_t> AOTIModelContainerRunner::
     AOTI_RUNTIME_ERROR_CODE_CHECK(
         get_constant_dtype_func_(container_handle_, i, &dtype));
     result.emplace(name, dtype);
+  }
+  return result;
+}
+
+const std::unordered_map<std::string, at::Tensor> AOTIModelContainerRunner::
+    extract_constants_map(bool use_inactive) const {
+  TensorConstantMap extracted_map;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(extract_constants_map_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&extracted_map,
+      use_inactive));
+
+  std::unordered_map<std::string, at::Tensor> result;
+  for (const auto& pair : extracted_map) {
+    result.emplace(pair.first, *(pair.second));
   }
   return result;
 }
