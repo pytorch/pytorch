@@ -1061,8 +1061,7 @@ static CacheNode* _compiled_autograd_impl(
       TORCH_INTERNAL_ASSERT(input_metadata.size() == outputs.size());
 
       // Lazily bind the `validate_outputs` function to Python.
-      static c10::once_flag flag;
-      c10::call_once(flag, [&]() {
+      static bool flag [[maybe_unused]] = [&]() {
         auto schema = std::vector<at::TypePtr>{IValuePacker<
             std::vector<std::optional<InputMetadata>>>::packed_type()};
         bind_function(
@@ -1072,7 +1071,8 @@ static CacheNode* _compiled_autograd_impl(
             schema,
             /*is_custom_function=*/false,
             /*is_traceable=*/true);
-      });
+        return true;
+      }();
 
       // Don't emit validate_outputs nodes that follow a CompiledBackward node.
       // These nodes would otherwise prevent reordering of accumulate_grad
