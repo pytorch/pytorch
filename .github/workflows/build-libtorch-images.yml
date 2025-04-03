@@ -46,9 +46,6 @@ jobs:
     strategy:
       matrix:
         cuda_version: ["12.8", "12.6", "12.4", "11.8"]
-    env:
-      GPU_ARCH_TYPE: cuda
-      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -65,9 +62,6 @@ jobs:
     strategy:
       matrix:
         rocm_version: ["6.2.4", "6.3", "6.4"]
-    env:
-      GPU_ARCH_TYPE: rocm
-      GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main

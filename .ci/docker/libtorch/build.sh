@@ -7,7 +7,7 @@ image="$1"
 shift
 
 if [ -z "${image}" ]; then
-  echo "Usage: $0 IMAGE"
+  echo "Usage: $0 IMAGE:ARCHTAG"
   exit 1
 fi
 
@@ -15,27 +15,36 @@ DOCKER_IMAGE="pytorch/${image}"
 
 TOPDIR=$(git rev-parse --show-toplevel)
 
-GPU_ARCH_TYPE=${GPU_ARCH_TYPE:-cpu}
-GPU_ARCH_VERSION=${GPU_ARCH_VERSION:-}
-
 WITH_PUSH=${WITH_PUSH:-}
 
 DOCKER=${DOCKER:-docker}
 
-case ${GPU_ARCH_TYPE} in
+# Go from imagename:tag to tag
+DOCKER_TAG_PREFIX=$(echo "${image}" | awk -F':' '{print $2}')
+
+GPU_ARCH_VERSION=""
+if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
+    # extract cuda version from image name.  e.g. manylinux2_28-builder:cuda12.8 returns 12.8
+    GPU_ARCH_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'cuda' '{print $2}')
+elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
+    # extract rocm version from image name.  e.g. manylinux2_28-builder:rocm6.2.4 returns 6.2.4
+    GPU_ARCH_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
+fi
+
+case ${DOCKER_TAG_PREFIX} in
     cpu)
         BASE_TARGET=cpu
         DOCKER_TAG=cpu
         GPU_IMAGE=ubuntu:20.04
         DOCKER_GPU_BUILD_ARG=""
         ;;
-    cuda)
+    cuda*)
         BASE_TARGET=cuda${GPU_ARCH_VERSION}
         DOCKER_TAG=cuda${GPU_ARCH_VERSION}
         GPU_IMAGE=ubuntu:20.04
         DOCKER_GPU_BUILD_ARG=""
         ;;
-    rocm)
+    rocm*)
         BASE_TARGET=rocm
         DOCKER_TAG=rocm${GPU_ARCH_VERSION}
         GPU_IMAGE=rocm/dev-ubuntu-22.04:${GPU_ARCH_VERSION}-complete
@@ -43,7 +52,7 @@ case ${GPU_ARCH_TYPE} in
         DOCKER_GPU_BUILD_ARG="--build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg ROCM_VERSION=${GPU_ARCH_VERSION}"
         ;;
     *)
-        echo "ERROR: Unrecognized GPU_ARCH_TYPE: ${GPU_ARCH_TYPE}"
+        echo "ERROR: Unrecognized DOCKER_TAG_PREFIX: ${DOCKER_TAG_PREFIX}"
         exit 1
         ;;
 esac
