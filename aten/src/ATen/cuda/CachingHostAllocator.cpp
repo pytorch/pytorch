@@ -99,7 +99,7 @@ struct CUDACachingHostAllocatorImpl
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
-    TORCH_INTERNAL_ASSERT(use_host_register.count(*ptr) == 0);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
     use_host_register[*ptr] = use_register;
 
     auto end = std::chrono::system_clock::now();
@@ -118,7 +118,7 @@ struct CUDACachingHostAllocatorImpl
     // However, allocations using cudaHostRegister should use corresonding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
-    TORCH_INTERNAL_ASSERT(use_host_register.count(ptr) == 1);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
     if (use_host_register[ptr]) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
