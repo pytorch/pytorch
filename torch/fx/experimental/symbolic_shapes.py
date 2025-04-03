@@ -4543,10 +4543,7 @@ class ShapeEnv:
                 return sympy.S.Zero
             else:
                 return sympy.S.One
-        elif (
-            not duck
-            or val not in self.val_to_var
-        ):
+        elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
