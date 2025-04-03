@@ -64,7 +64,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import VariableTracker, typestr
+from .base import typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -1161,13 +1161,14 @@ If the above doesn't work, please subtmit an issue to GitHub.
             # Guard against inplace view op on input tensor (not supported)
             if args and isinstance(args[0], variables.TensorVariable):
                 tensor_var = args[0]
-                # Check if input tensor and inplace_view op specifcally 
+                # Check if input tensor and inplace_view op specifcally
                 if tensor_var.source is not None and hasattr(torch.ops.aten, name):
                     fn = getattr(torch.ops.aten, name)
                     if (
                         hasattr(fn, "overloads")
                         and hasattr(fn, fn.overloads()[0])
-                        and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+                        and torch.Tag.inplace_view
+                        in getattr(fn, fn.overloads()[0]).tags
                     ):
                         unimplemented_v2(
                             gb_type="Inplace op on input tensor",
