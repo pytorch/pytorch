@@ -1303,6 +1303,9 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 def sym_and(
     x: Union[bool, SymBool], *others: Union[bool, SymBool]
 ) -> Union[bool, SymBool]:
+    """
+    and, but for symbolic expressions, without bool casting.
+    """
     assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
@@ -1332,6 +1335,9 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 def sym_or(
     x: Union[bool, SymBool], *others: Union[bool, SymBool]
 ) -> Union[bool, SymBool]:
+    """
+    or, but for symbolic expressions, without bool casting.
+    """
     assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
