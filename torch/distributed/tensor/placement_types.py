@@ -109,37 +109,39 @@ class Shard(Placement):
         return shard_list, pad_sizes
 
     @staticmethod
-    def _local_shard_size_on_dim(
-        size_on_dim: int,
+    def _local_shard_size_and_offset(
+        curr_local_size: int,
         num_chunks: int,
         rank: int,
-        return_offset: bool = False,
     ) -> tuple[int, int]:
         """
-        returns the local shard size and offset on a given tensor dim
+        Given the size of the current local tensor (which may already be sharded on some dimensions),
+        computes the new local shard size and offset given the desired number of chunks
+        (generally equal to the size of the current sharding dim).
 
-        # TODO(whc)
-         - `size_on_dim` arg has a pretty confusing name, would 'global_dim_size' be better?
-         - `local_shard_size_on_dim` could be renamed to `local_shard_size`?
-         - why do we have 'return_offset` bool? if we always return a tuple anyway, why not always return the real offset?
+        # TODO(whc) is offset computed relative to the global tensor shape or relative to the original 'local'
+        # shape before the newest sharding?
+
+        Returns (new local shard size, offset)
+
         """
         # Compute the chunk size inline with ``torch.chunk``
-        if size_on_dim % num_chunks == 0:
-            full_chunk_size = size_on_dim // num_chunks
-            return full_chunk_size, full_chunk_size * rank if return_offset else -1
+        if curr_local_size % num_chunks == 0:
+            full_chunk_size = curr_local_size // num_chunks
+            return full_chunk_size, full_chunk_size * rank
 
         # uneven sharding case
-        full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+        full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
         shard_starting_idx = full_chunk_size * rank
 
-        if size_on_dim < shard_starting_idx:
-            return 0, size_on_dim if return_offset else -1
+        if curr_local_size < shard_starting_idx:
+            return 0, curr_local_size
         else:
             local_shard_size = (
-                min(size_on_dim, shard_starting_idx + full_chunk_size)
+                min(curr_local_size, shard_starting_idx + full_chunk_size)
                 - shard_starting_idx
             )
-            return local_shard_size, shard_starting_idx if return_offset else -1
+            return local_shard_size, shard_starting_idx
 
     def _shard_tensor(
         self,
@@ -329,7 +331,7 @@ class Shard(Placement):
             new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
 
         if new_dim_padding:
-            local_shard_size_on_new_dim = self._local_shard_size_on_dim(
+            local_shard_size_on_new_dim = self._local_shard_size_and_offset(
                 new_dim_logical_size, num_chunks, my_coordinate[mesh_dim]
             )[0]
             new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
