@@ -1560,6 +1560,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             counters["inductor"]["select_algorithm_autotune"], autotune_count
         )
 
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
