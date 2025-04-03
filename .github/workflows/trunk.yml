@@ -181,7 +181,9 @@ jobs:
   win-arm64-vs2022-cpu-py3-test:
     name: win-arm64-vs2022-cpu-py3
     uses: ./.github/workflows/_win-arm64-test.yml
-    needs: win-arm64-vs2022-cpu-py3-build
+    needs:
+      - win-arm64-vs2022-cpu-py3-build
+      - target-determination
     with:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
