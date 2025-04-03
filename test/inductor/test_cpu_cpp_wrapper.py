@@ -359,7 +359,9 @@ if RUN_CPU:
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
         BaseTest(
-            "test_woq_int4", "cpu", test_mkldnn_pattern_matcher.TestQuantizedPatternMatcher()
+            "test_woq_int4",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestQuantizedPatternMatcher(),
         ),
     ]:
         make_test_case(
