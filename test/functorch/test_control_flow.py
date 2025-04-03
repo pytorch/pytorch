@@ -463,7 +463,9 @@ class TestControlFlow(TestCase):
         result_flatten = pytree.tree_leaves(result)
         result_exp_flatten = pytree.tree_leaves(result_exp)
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
-        expected_grads = torch.autograd.grad(result_exp_flatten, params_flatten, grad_exp_init)
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, params_flatten, grad_exp_init
+        )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, params_flatten, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
@@ -1869,7 +1871,7 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result_same, expected_result)
-        
+
         if autograd:
             self.check_autograd(result_same, expected_result, (init, inp))
 
@@ -1887,7 +1889,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_diff, expected_result)
         self.assertEqual(result_diff[1], result_same[1][1])
-        
+
         if autograd:
             self.check_autograd(result_diff, expected_result, (init, inp))
 
@@ -1974,7 +1976,7 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             self.check_autograd(result, expected_result, (init, inp))
 
@@ -2956,7 +2958,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
         h1 = torch.randn(3, 7, device=device, requires_grad=autograd)
         h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
-        
+
         result = scan_fct(
             get_scan_combine_fn("fct_c1_no_grad", True),
             (h1, h2),
@@ -3275,7 +3277,7 @@ class GraphModule(torch.nn.Module):
             "Expected init and carry to have same metadata.*",
         ):
             f(add_wrong_dtype, init, x)
-            
+
     @skipIfNoDynamoSupport
     @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph(self):
