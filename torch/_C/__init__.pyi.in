@@ -1357,6 +1357,7 @@ def _get_blas_preferred_backend() -> _BlasBackend: ...
 def _set_blas_preferred_backend(arg: _BlasBackend): ...
 
 class _BlasBackend:
+    Default: _BlasBackend
     Cublas: _BlasBackend
     Cublaslt: _BlasBackend
     Ck: _BlasBackend
@@ -2675,6 +2676,7 @@ class _StaticCudaLauncher:
         cubin_file: str,
         func_name: str,
         shared_mem_bytes: _int,
+        device: _int,
     ) -> tuple[_int, _int, _int]: ...
     @staticmethod
     def _launch_kernel(
