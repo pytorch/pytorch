@@ -1172,10 +1172,10 @@ If the above doesn't work, please subtmit an issue to GitHub.
                     ):
                         unimplemented_v2(
                             gb_type="Inplace op on input tensor",
-                            context=typestr(self.value),
+                            context="",
                             explanation=f"Attempted to trace an inplace view op on input tensor {typestr(self.value)}.",
                             hints=[
-                                *graph_break_hints.USER_ERROR,
+                                *graph_break_hints.SUPPORTABLE,
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
