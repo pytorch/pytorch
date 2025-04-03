@@ -502,6 +502,7 @@ from .random import (
     initial_seed,
     manual_seed,
     manual_seed_all,
+    rng_supported_mesh,
     seed,
     seed_all,
     set_rng_state,
