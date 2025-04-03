@@ -1408,6 +1408,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "reorderable_logging_functions",
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
+            "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
         }
 
@@ -4371,7 +4372,9 @@ def does_not_override_dict_iter_methods(user_cls):
 # compiled bytecode
 # They will be skipped which is the desired result
 def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.size(i)
 
@@ -4379,7 +4382,9 @@ def call_size(x, i):
 
 
 def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.stride(i)
 
@@ -4387,7 +4392,9 @@ def call_stride(x, i):
 
 
 def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x):
         return x.storage_offset()
 
