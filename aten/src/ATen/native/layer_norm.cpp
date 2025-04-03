@@ -12,10 +12,13 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/div.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
@@ -23,6 +26,8 @@
 #include <ATen/ops/pow.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
