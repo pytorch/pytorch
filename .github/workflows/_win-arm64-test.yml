@@ -42,7 +42,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    if: github.repository_owner == 'pytorch'
     strategy:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
