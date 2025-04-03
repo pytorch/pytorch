@@ -38,8 +38,6 @@ jobs:
       fail-fast: false
       matrix:
         cuda_version: ["11.8", "12.4", "12.6", "cpu"]
-    env:
-      CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main

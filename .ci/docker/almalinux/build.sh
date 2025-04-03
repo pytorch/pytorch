@@ -7,7 +7,7 @@ image="$1"
 shift
 
 if [ -z "${image}" ]; then
-  echo "Usage: $0 IMAGE"
+  echo "Usage: $0 IMAGE:ARCHTAG"
   exit 1
 fi
 
@@ -17,9 +17,16 @@ DOCKER_IMAGE_NAME="pytorch/${image}"
 export DOCKER_BUILDKIT=1
 TOPDIR=$(git rev-parse --show-toplevel)
 
-CUDA_VERSION=${CUDA_VERSION:-12.1}
+# Go from imagename:tag to tag
+DOCKER_TAG_PREFIX=$(echo "${image}" | awk -F':' '{print $2}')
 
-case ${CUDA_VERSION} in
+CUDA_VERSION=""
+if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
+    # extract cuda version from image name and tag.  e.g. manylinux2_28-builder:cuda12.8 returns 12.8
+    CUDA_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'cuda' '{print $2}')
+fi
+
+case ${DOCKER_TAG_PREFIX} in
   cpu)
     BASE_TARGET=base
     DOCKER_TAG=cpu
@@ -28,9 +35,13 @@ case ${CUDA_VERSION} in
     BASE_TARGET=all_cuda
     DOCKER_TAG=latest
     ;;
-  *)
+  cuda*)
     BASE_TARGET=cuda${CUDA_VERSION}
     DOCKER_TAG=cuda${CUDA_VERSION}
+    ;;
+  *)
+    echo "ERROR: Unknown docker tag ${DOCKER_TAG_PREFIX}"
+    exit 1
     ;;
 esac
 
