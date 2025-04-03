@@ -206,9 +206,3 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: C:\${{ github.run_id }}\build-results
-
-      - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped'
-        uses: ./.github/actions/upload-sccache-stats
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
