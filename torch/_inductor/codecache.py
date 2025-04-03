@@ -1311,17 +1311,22 @@ class FxGraphCache:
             cache_info["cache_state"] = "hit"
             if remote_cache:
                 # Count remote cache hit stats
-                CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count"
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "inductor_fx_remote_cache_hit_count",
                 )
-                CompileEventLogger.add_to_set_toplevel(
-                    "inductor_fx_remote_cache_hit_keys", key
+                CompileEventLogger.try_(
+                    CompileEventLogger.add_to_set_toplevel,
+                    "inductor_fx_remote_cache_hit_keys",
+                    key,
                 )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                CompileEventLogger.increment_toplevel(
-                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "distributed_ephemeral_timeout_us",
+                    time_saved_ns // 1000,
                 )
                 if (
                     ephemeral_increase
@@ -1331,11 +1336,14 @@ class FxGraphCache:
         else:
             if remote_cache:
                 # Count remote cache miss stats
-                CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count"
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "inductor_fx_remote_cache_miss_count",
                 )
-                CompileEventLogger.add_to_set_toplevel(
-                    "inductor_fx_remote_cache_miss_keys", key
+                CompileEventLogger.try_(
+                    CompileEventLogger.add_to_set_toplevel,
+                    "inductor_fx_remote_cache_miss_keys",
+                    key,
                 )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
