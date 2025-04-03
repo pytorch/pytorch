@@ -101,7 +101,7 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
     c10::DeviceType src_device_type = src_device.type();
     c10::DeviceType dst_device_type = dst_device.type();
     TORCH_CHECK(
-      (src_device == dst_device)
+      (src_device_type == dst_device_type)
       || (src_device_type == c10::kCPU && dst_device_type == c10::kMPS)
       || (src_device_type == c10::kMPS && dst_device_type == c10::kCPU),
       "Lazy cloning is only supported in the following cases: ",
