@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -30,6 +31,7 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
+from torch.monitor import _WaitCounter
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -1459,6 +1461,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -2215,16 +2224,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                    ):
+                        log_waitcounter=True,
+                        waitcounter_name_override="entire_backward_compile",
+                    ), _WaitCounter(
+                        "pytorch.wait_counter.dynamo_compile"
+                    ).guard():
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
-                            # CompiledFunction.metadata
-                            # CompiledFunction.maybe_subclass_metadata
-                            # bw_module
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
                                 fw_metadata,

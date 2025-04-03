@@ -2,7 +2,7 @@ ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG IMAGE_NAME
 
-FROM ${IMAGE_NAME}
+FROM ${IMAGE_NAME} as base
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
@@ -90,14 +90,20 @@ RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
 ARG TRITON
+
+FROM base as triton-builder
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
+RUN bash ./install_triton.sh
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
 
 ARG HALIDE
 # Build and install halide
@@ -151,6 +157,16 @@ ARG CUDA_VERSION
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash install_cusparselt.sh
 RUN rm install_cusparselt.sh
+
+# Install NCCL
+ARG CUDA_VERSION
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash install_nccl.sh
+RUN rm install_nccl.sh /ci_commit_pins/nccl-cu*
+ENV USE_SYSTEM_NCCL=1
+ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 # Install CUDSS
 ARG CUDA_VERSION
