@@ -265,8 +265,6 @@ static bool getDisableAddmmCudaLt() {
 
 #ifdef USE_ROCM
 static bool isSupportedHipLtROCmArch(int index) {
-    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
-    std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
@@ -276,13 +274,7 @@ static bool isSupportedHipLtROCmArch(int index) {
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs, index);
 }
 #endif
 
@@ -939,9 +931,7 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
 }
 
 static bool _scaled_mm_allowed_device() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
 #ifdef USE_ROCM
-    std::string device_arch = dprops->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx942",
 #if ROCM_VERSION >= 60300
@@ -951,30 +941,16 @@ static bool _scaled_mm_allowed_device() {
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
+    auto dprops = at::cuda::getCurrentDeviceProperties();
     return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
 #endif
 }
 
 #ifdef USE_ROCM
 static bool _scaled_mm_is_fnuz() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx942"};
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
 
