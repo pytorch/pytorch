@@ -60,6 +60,8 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping, Sequence
 
+    from torch.fx import GraphModule
+
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -81,6 +83,28 @@ log = logging.getLogger(__name__)
 def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
+
+
+@dataclasses.dataclass
+class WrapperGraphModule:
+    """
+    Output of FX wrapper codegen. Exposes the same methods as a ModuleType, but these
+    map back to a GraphModule instead of Python source.
+    """
+
+    gm: GraphModule
+    compiled_fn: Callable[..., Any]
+
+    @property
+    def __file__(self) -> str:
+        return ""  # TODO return the output code path
+
+    def call(self, args: list[Any]) -> Any:
+        return self.compiled_fn(*args)
+
+    @property
+    def value(self) -> str:
+        return self.gm.code
 
 
 class WorkspaceZeroMode(enum.Enum):

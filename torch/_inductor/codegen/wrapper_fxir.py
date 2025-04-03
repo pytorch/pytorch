@@ -5,7 +5,7 @@ import random
 import textwrap
 import types
 from collections import Counter
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 
@@ -15,6 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._library.triton import wrap_triton
+from torch.fx import GraphModule
 
 
 aten = torch.ops.aten
@@ -26,7 +27,7 @@ from torch._inductor.virtualized import V
 
 from .. import config, ir
 from ..utils import convert_to_symint, LineContext
-from .common import WorkspaceArg, WorkspaceZeroMode
+from .common import WorkspaceArg, WorkspaceZeroMode, WrapperGraphModule
 from .wrapper import (
     AllocateLine,
     BufferLike,
@@ -68,7 +69,7 @@ Extra wrapper IR nodes for FX codegen.
 
 @dataclasses.dataclass
 class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
+    buffers: list[BufferLike]
 
 
 class TritonKernel:
@@ -89,7 +90,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def __init__(self):
         super().__init__()
         graph = torch.fx.Graph()
-        self.gm = torch.fx.GraphModule({}, graph)  # Wrapper FX IR.
+        self.gm = GraphModule({}, graph)  # Wrapper FX IR.
         self.buffer_to_node: dict[
             Optional[str], torch.fx.Node
         ] = {}  # Symbol table for codegen.
@@ -112,6 +113,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         return WrapperFxCodegen()
+
+    def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
+        """
+        Converts the graph module into a runnable function. The default implementation
+        is simply an interpreter calling kernels in eager mode. Derived backends can
+        override this to do further compilation.
+        """
+        return gm.forward
 
     def _import_kernel(self, code: str) -> types.ModuleType:
         """
@@ -228,7 +237,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         ]
         self.writeline(OutputLine(output_refs))
 
-    def _generate(self, is_inference):
+    def _generate(self, is_inference) -> tuple[WrapperGraphModule, None]:
         self._codegen_outputs_wrapper_ir()
 
         # We disable planning during training because it presently increases peak memory consumption.
@@ -282,6 +291,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             conversion_func(line)
 
         self.gm.recompile()
+        compiled_fn = self.compile_graph(self.gm)
+
+        return WrapperGraphModule(self.gm, compiled_fn), None
 
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
@@ -534,7 +546,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
-        kwargs = kernel.kwargs
+        kwargs = kernel.kwargs.copy()
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]

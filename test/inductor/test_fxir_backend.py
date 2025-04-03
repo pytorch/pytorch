@@ -41,16 +41,12 @@ class FxirTestCase(InductorTestCase):
         def generate(self, *args, **kwargs):
             nonlocal gms
             gms.append(self.gm)
-            self._generate(*args, **kwargs)
+            return self._generate(*args, **kwargs)
 
         with unittest.mock.patch.object(
             torch._inductor.codegen.wrapper_fxir.WrapperFxCodegen, "generate", generate
         ):
-            try:
-                opt(*args)
-            except torch._inductor.exc.InductorError:
-                # Expect this exception, since the FX backend doesn't support Python codegen.
-                pass
+            opt(*args)
 
         return gms
 

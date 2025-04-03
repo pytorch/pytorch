@@ -29,6 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -54,6 +55,7 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     init_backend_registration,
     WorkspaceArg,
+    WrapperGraphModule,
 )
 from .exc import (
     CppWrapperCodegenError,
@@ -111,10 +113,12 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._higher_order_ops.effects import _EffectType
-    from torch.fx import GraphModule
     from torch.fx.graph import Graph
+
     from .codegen.wrapper import PythonWrapperCodegen
     from .scheduler import BaseSchedulerNode
+
+    CompiledModule = Union[ModuleType, WrapperGraphModule]
 
 from torch._inductor.codecache import output_code_log
 
@@ -2162,7 +2166,7 @@ class GraphLowering(torch.fx.Interpreter):
     # No-op to be patched for unit tests
     save_output_code: Optional[Callable[[str], None]] = None
 
-    def compile_to_module(self) -> ModuleType:
+    def compile_to_module(self) -> CompiledModule:
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
@@ -2171,14 +2175,30 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             return self._compile_to_module()
 
-    def _compile_to_module(self) -> ModuleType:
-        from .codecache import PyCodeCache
-
+    def _compile_to_module(self) -> CompiledModule:
         # Currently, if we're here, we don't have to worry about the kernel code, which
         # is only available in AOTInductor mode.
         wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
+
+        if isinstance(wrapper_code, ValueWithLineMap):
+            mod = self._compile_to_module_lines(wrapper_code)
+        elif isinstance(wrapper_code, WrapperGraphModule):
+            mod = wrapper_code
+            # TODO log output code to a file. Refactor existing logger which calls mod.value.
+        else:
+            raise NotImplementedError(
+                f"Unrecognized wrapper code type: {type(wrapper_code)}"
+            )
+
+        return mod
+
+    def _compile_to_module_lines(
+        self, wrapper_code: ValueWithLineMap
+    ) -> CompiledModule:
+        from .codecache import PyCodeCache
+
         if config.triton.autotune_at_compile_time:
             tuning_code = (
                 '"""\n'
