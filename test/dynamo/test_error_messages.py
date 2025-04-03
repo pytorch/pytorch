@@ -835,6 +835,7 @@ User code traceback:
 """,
         )
 
+    @unittest.skipIf(IS_FBCODE, "assert gets patched in internal pytest")
     @make_logging_test(graph_breaks=True)
     def test_assert_failure_in_generic_ctx_mgr(self, records):
         def fn(x):
