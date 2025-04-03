@@ -323,7 +323,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used = OrderedSet[tuple]()
+        used: OrderedSet[tuple[int, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -332,7 +332,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key = (conf.block_m, conf.block_n, conf.block_k, conf.num_stages, num_warps)
+            key: tuple[int, ...] = (conf.block_m, conf.block_n, conf.block_k, conf.num_stages, num_warps)
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
@@ -351,7 +351,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     "num_warps": num_warps,
                 }
                 if group_m is not None:
-                    kwargs["group_m"] = group_m
+                    kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
     def _scale_mm_configs(
@@ -402,12 +402,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         scaled_configs = []
         for c in configs:
-            c.block_m = max(min(int(c.block_m * scale), m), min_block_size)
-            c.block_n = max(min(int(c.block_n * scale), n), min_block_size)
-            c.block_k = max(min(int(c.block_k * scale), k), min_block_size_k)
+            scaled_config = dataclasses.replace(
+                c,
+                block_m=max(min(int(c.block_m * scale), m), min_block_size),
+                block_n=max(min(int(c.block_n * scale), n), min_block_size),
+                block_k=max(min(int(c.block_k * scale), k), min_block_size_k),
+            )
 
-            if not exclude(c.block_m, c.block_n, c.block_k):
-                scaled_configs.append(c)
+            if not exclude(scaled_config.block_m, scaled_config.block_n, scaled_config.block_k):
+                scaled_configs.append(scaled_config)
 
         return scaled_configs
 
@@ -582,7 +585,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used = OrderedSet[tuple]()
+        used: OrderedSet[tuple[int, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -590,55 +593,56 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             # Each warp computes a 16x16 tile = 256 elements
             conf.num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
-            for matrix_instr_nonkdim in [0, 16]:
-                if matrix_instr_nonkdim != 0 and (
-                    conf.block_m % matrix_instr_nonkdim != 0
-                    or conf.block_n % matrix_instr_nonkdim != 0
-                ):
-                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                    continue
+            # Defaults for AMD triton backend kern args if not set
+            matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
+            waves_per_eu = getattr(conf, "waves_per_eu", 0)
+            kpack = getattr(conf, "kpack", 2)
+            
+            if matrix_instr_nonkdim != 0 and (
+                conf.block_m % matrix_instr_nonkdim != 0
+                or conf.block_n % matrix_instr_nonkdim != 0
+            ):
+                #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                continue
 
-                # Defaults for AMD triton backend kern args if not set
-                waves_per_eu = getattr(conf, "waves_per_eu", 0)
-                kpack = getattr(conf, "kpack", 2)
 
-                # Construct key for finding duplicate configs
-                key = (
-                    conf.block_m,
-                    conf.block_n,
-                    conf.block_k,
-                    conf.num_stages,
-                    conf.num_warps,
-                    waves_per_eu,
-                    matrix_instr_nonkdim,
-                    kpack,
-                )
+            # Construct key for finding duplicate configs
+            key: tuple[int, ...]  = (
+                conf.block_m,
+                conf.block_n,
+                conf.block_k,
+                conf.num_stages,
+                conf.num_warps,
+                waves_per_eu,
+                matrix_instr_nonkdim,
+                kpack,
+            )
 
-                # Check if gemm specific arg exists - add to key if does
-                group_m = getattr(conf, "group_m", None)
+            # Check if gemm specific arg exists - add to key if does
+            group_m = getattr(conf, "group_m", None)
+            if group_m is not None:
+                key += (group_m,)
+
+            if waves_per_eu != 0:
+                waves_per_eu = int(8 // conf.num_warps)
+
+            if key not in used and (
+                max_mm_configs is None or len(used) < max_mm_configs
+            ):
+                used.add(key)
+                kwargs = {
+                    "BLOCK_M": conf.block_m,
+                    "BLOCK_N": conf.block_n,
+                    "BLOCK_K": conf.block_k,
+                    "num_stages": conf.num_stages,
+                    "num_warps": conf.num_warps,
+                    "matrix_instr_nonkdim": matrix_instr_nonkdim,
+                    "waves_per_eu": waves_per_eu,
+                    "kpack": kpack,
+                }
                 if group_m is not None:
-                    key += (group_m,)
-
-                if waves_per_eu != 0:
-                    waves_per_eu = int(8 // conf.num_warps)
-
-                if key not in used and (
-                    max_mm_configs is None or len(used) < max_mm_configs
-                ):
-                    used.add(key)
-                    kwargs = {
-                        "BLOCK_M": conf.block_m,
-                        "BLOCK_N": conf.block_n,
-                        "BLOCK_K": conf.block_k,
-                        "num_stages": conf.num_stages,
-                        "num_warps": conf.num_warps,
-                        "matrix_instr_nonkdim": matrix_instr_nonkdim,
-                        "waves_per_eu": waves_per_eu,
-                        "kpack": kpack,
-                    }
-                    if group_m is not None:
-                        kwargs["GROUP_M"] = group_m
-                    yield self.triton_config(**kwargs)
+                    kwargs["GROUP_M"] = group_m
+                yield self.triton_config(**kwargs)
 
     def get_extra_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         filtered_configs = self._filter_configs(
