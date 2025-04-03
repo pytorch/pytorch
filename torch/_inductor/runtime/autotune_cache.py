@@ -121,7 +121,21 @@ class AutotuneCache:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        cache_filename = f"{dirname}/{cache_key}.best_config"
+        from ..codecache import torch_key
+
+        """
+        [Note: torch_key in autotune cache key]
+        Include torch_key() in the cache key so that different versions
+        of torch result in cache invalidation. This is important in case
+        of changes to the best_config format or other code changes that
+        are not backward compatible w.r.t. the cache.
+        """
+        hasher = hashlib.sha256()
+        hasher.update(cache_key.encode("utf-8"))
+        hasher.update(torch_key())
+        updated_cache_key = hasher.hexdigest()
+
+        cache_filename = f"{dirname}/{updated_cache_key}.best_config"
         local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
@@ -139,10 +153,13 @@ class AutotuneCache:
             return
         assert isinstance(backend_hash, str)
 
+        from ..codecache import torch_key
+
         is_fbcode = bool(inductor_meta.get("is_fbcode", False))
 
         salt = "autotune-best-config-v2"
-        key = backend_hash + self.configs_hash + salt
+        # re: torch_key - see [Note: torch_key in autotune cache key]
+        key = torch_key().hex() + backend_hash + self.configs_hash + salt
         key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
         remote_cache = create_cache(
