@@ -1622,21 +1622,6 @@ std::tuple<Tensor, Tensor, Tensor> rms_norm_cuda(
   return std::make_tuple(output, x_norm, inverse_rms);
 }
 
-template <typename scalar_t>
-__global__
-void
-print_kernel(
-  const scalar_t* data,
-  int64_t N,
-  int64_t M
-) {
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < M * N; i += blockDim.x * gridDim.x) {
-    printf("pk: grad[%d]=%e\n", i, data[i]);
-    int grad_int = static_cast<int>(data[i]);
-    printf("pk: grad_int[%d]=%d\n", i, grad_int);
-  }
-}
-
 template <typename scalar_t, typename acc_t>
 __global__
 void rmsnorm_backward_input_kernel(
