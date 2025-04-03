@@ -195,11 +195,15 @@ struct DumpPipe {
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
         "Error removing existing named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     TORCH_CHECK(
         mkfifo(filename.c_str(), 0666) != -1,
         "Error creating named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
     LOG(INFO) << "Pipe file " << filename
               << " has been opened, write to it to trigger NCCL Debug Dump.";
