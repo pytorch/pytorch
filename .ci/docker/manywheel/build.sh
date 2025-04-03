@@ -139,22 +139,3 @@ fi
         -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
         "${TOPDIR}/.ci/docker/"
 )
-
-GITHUB_REF=${GITHUB_REF:-"dev")}
-GIT_BRANCH_NAME=${GITHUB_REF##*/}
-GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
-DOCKER_IMAGE_BRANCH_TAG=${DOCKER_IMAGE}-${GIT_BRANCH_NAME}
-DOCKER_IMAGE_SHA_TAG=${DOCKER_IMAGE}-${GIT_COMMIT_SHA}
-
-if [[ "${WITH_PUSH}" == true ]]; then
-    (
-        set -x
-        docker push "${DOCKER_IMAGE}"
-        if [[ -n ${GITHUB_REF} ]]; then
-            docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
-            docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
-            docker push "${DOCKER_IMAGE_BRANCH_TAG}"
-            docker push "${DOCKER_IMAGE_SHA_TAG}"
-        fi
-    )
-fi
