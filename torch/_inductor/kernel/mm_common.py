@@ -89,6 +89,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
 
     return options_dict
 
+
 def persistent_mm_options(mat1, mat2):
     return dict(
         A_ROW_MAJOR=not mat1.layout.is_transposed(),
