@@ -3806,7 +3806,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         count=0
     
         while guard_size_oblivious(accum % length != 0) or (count==0 and (end+1)<len(a_.shape)):
-            if accum % length != 0 :
+            if accum % length == 0 :
                 count = count+1
             end = end + 1
             accum = accum * a_.shape[end]
