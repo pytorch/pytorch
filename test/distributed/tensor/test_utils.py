@@ -3,13 +3,13 @@
 import itertools
 
 import torch
-from torch.distributed._tensor import distribute_tensor, DTensor
-from torch.distributed._tensor._utils import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._utils import (
     _explicit_order_placements,
     compute_local_shape_and_global_offset,
 )
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -69,8 +69,8 @@ class LocalTest(TestCase):
             {
                 "mesh_shape": [2, 3, 4],
                 "placements": [
-                    _StridedShard(0, split_factor=6),
-                    _StridedShard(0, split_factor=3),
+                    _StridedShard(0, split_factor=12),
+                    _StridedShard(0, split_factor=4),
                     Shard(0),
                 ],
                 "exception_type": NotImplementedError,
