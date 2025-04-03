@@ -1058,7 +1058,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {
-    desyncDebugger_.init(rank, size, store_);
+    desyncDebugger_.init(rank, size, globalRank(), getUid(), store_);
   }
 }
 
@@ -1943,9 +1943,13 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
 void ProcessGroupNCCL::DesyncDebugger::init(
     int rank,
     int size,
+    int globalRank,
+    int pgId,
     c10::intrusive_ptr<Store> store) {
   rank_ = rank;
   size_ = size;
+  globalRank_ = globalRank;
+  pgId_ = pgId;
   store_ = std::move(store);
   enabled_ = true;
   traceKeyStart_ = getTraceStartKey("NCCL", rank);
@@ -1957,20 +1961,37 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
   auto logPrefix = c10::str("Rank ", rank_);
+  ::c10d::C10dLoggingData log;
+  log.integers["pg_id"] = pgId_;
+  log.integers["rank"] = rank_;
+  log.integers["global_rank"] = globalRank_;
+  log.integers["world_size"] = size_;
+  // Use this to differentiate between flight recorder and desync debug report.
+  log.strings["flight_recorder_version"] = "-1";
+
   try {
     std::string desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+    log.strings["status"] = "SUCCESS";
     LOG(ERROR) << logPrefix << desyncMsg;
   } catch (const std::exception& e) {
+    log.strings["status"] = "EXCEPTION";
+    log.strings["exception_msg"] = e.what();
     enabled_ = false;
     LOG(ERROR) << logPrefix
                << " Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                << " Please file an issue. Error: " << e.what();
   } catch (...) {
     enabled_ = false;
+    log.strings["status"] = "EXCEPTION";
+    log.strings["exception_msg"] = "Unknown exception";
     LOG(ERROR)
         << logPrefix
         << " Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
         << " Please file an issue.";
+  }
+  auto logger = c10d::C10dLogger::getLogger();
+  if (logger) {
+    logger->log(log);
   }
 }
 
