@@ -139,6 +139,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
   c10::DeviceType device_type = storage.device_type();
 
   if (device_opt.has_value()) {
+    TORCH_INTERNAL_ASSERT(allocator_opt.has_value());
     allocator = allocator_opt.value();
 
     DeviceGuard device_guard(device_opt.value());
@@ -186,19 +187,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       device_type);
 }
 
-static c10::DataPtr clone_between_devices(
-    const void* data,
-    std::size_t n,
-    Device src_device,
-    Allocator* src_allocator,
-    Device dst_device,
-    Allocator* dst_allocator) {
-  DeviceType src_type = src_device.type();
-  DeviceType dst_type = dst_device.type();
-  check_clone_between_devices(src_type, dst_type);
-  return dst_allocator->clone(data, n, /*sync=*/true);
-}
-
 C10_API void materialize_cow_storage(StorageImpl& storage) {
   TORCH_INTERNAL_ASSERT(
       !c10::ParallelGuard::is_enabled(),
@@ -231,18 +219,16 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
       new_data_ptr =
           storage.allocator()->clone(data_ptr.get(), storage.nbytes());
     } else {
-      new_data_ptr = clone_between_devices(
-          // NOTE: For MPS-to-CPU, `data_ptr.get()` gives an address in CPU
-          // space even though `src_device` is MPS. Likewise, for CPU-to-MPS,
-          // `data_ptr.get()` gives an address in MPS space even though the
-          // `src_device` is CPU. So both the src and dest pointers will always
-          // be in the address space of the dest device.
-          data_ptr.get(),
-          storage.nbytes(),
-          src_device,
-          ctx->original_allocator(),
-          dst_device,
-          storage.allocator());
+      check_clone_between_devices(src_device.type(), dst_device.type());
+      Allocator* dst_allocator = storage.allocator();
+
+      // NOTE: For MPS-to-CPU, `data_ptr.get()` gives an address in CPU space
+      // even though `src_device` is MPS. Likewise, for CPU-to-MPS,
+      // `data_ptr.get()` gives an address in MPS space even though the
+      // `src_device` is CPU. So both the data_ptr and new_data_ptr will always
+      // be in the address space of the dest device.
+      new_data_ptr =
+          dst_allocator->clone(data_ptr.get(), storage.nbytes(), /*sync=*/true);
     }
   }
 

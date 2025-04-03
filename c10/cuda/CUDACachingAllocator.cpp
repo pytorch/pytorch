@@ -3934,11 +3934,9 @@ class NativeCachingAllocator : public CUDAAllocator {
       const void* src,
       std::size_t count,
       bool sync = false) const final {
+    TORCH_INTERNAL_ASSERT(!sync, "sync is not yet supported");
     C10_CUDA_CHECK(
         cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
-    if (sync) {
-      c10::cuda::device_synchronize();
-    }
   }
 };
 

@@ -367,11 +367,9 @@ void CUDAPluggableAllocator::copy_data(
     const void* src,
     std::size_t count,
     bool sync) const {
+  TORCH_INTERNAL_ASSERT(!sync, "sync is not yet supported");
   C10_CUDA_CHECK(
       cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
-  if (sync) {
-    c10::cuda::device_synchronize();
-  }
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
