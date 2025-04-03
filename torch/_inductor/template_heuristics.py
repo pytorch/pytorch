@@ -329,7 +329,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         for conf in configs:
             # Each warp computes a 16x16 tile = 256 elements
-            num_warps = min(num_warps, conf.block_m * conf.block_n // 256)
+            num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
             key = (conf.block_m, conf.block_n, conf.block_k, conf.num_stages, num_warps)
