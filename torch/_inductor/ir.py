@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import functools
@@ -34,12 +36,10 @@ import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch import Tensor
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -57,7 +57,6 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
-    SympyBoolean,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -72,7 +71,6 @@ from .codegen.common import (
     index_prevent_reordering,
     Kernel,
 )
-from .codegen.wrapper import PythonWrapperCodegen
 from .dependencies import (
     Dep,
     extract_free_symbols,
@@ -80,7 +78,6 @@ from .dependencies import (
     extract_read_writes,
     var_builder,
 )
-from .graph import GraphLowering
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
@@ -94,7 +91,6 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
-    IndentedBuffer,
     ir_dataclass,
     is_dynamic,
     is_gpu,
@@ -108,9 +104,15 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    from torch import Tensor
+    from torch._library.fake_class_registry import FakeScriptObject
+    from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
     from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.wrapper import PythonWrapperCodegen
+    from .graph import GraphLowering
+    from .utils import IndentedBuffer
 
 else:
     CUDATemplate: TypeAlias = object
@@ -201,8 +203,8 @@ class GraphPartitionSignature:
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
     # we cannot get name from Expr.
-    input_nodes: dict[str, Union["IRNode", sympy.Expr, "TorchBindObject"]]
-    output_nodes: list["IRNode"]
+    input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
+    output_nodes: list[IRNode]
 
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
@@ -339,11 +341,11 @@ def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(x: "IRNode", guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
-    x: Optional["IRNode"], guard_shape: bool = True
+    x: Optional[IRNode], guard_shape: bool = True
 ) -> Optional[torch.Tensor]:
     if x is None:
         return None
@@ -381,7 +383,7 @@ def may_convert_to_optional(
 
 
 def get_device_type(
-    x: Union["IRNode", "OutputSpec", torch.device, None, str],
+    x: Union[IRNode, OutputSpec, torch.device, None, str],
 ) -> Optional[str]:
     if isinstance(x, str) or x is None:
         return x
@@ -392,7 +394,7 @@ def get_device_type(
     assert_never(f"get_device_type({x}: {type(x).__name__})")
 
 
-def is_triton(x: Union["IRNode", torch.device, None, str]) -> bool:
+def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
     device = get_device_type(x)
     # Special case cpu and cuda as using the method below
     # to determine if the scheduler is a triton scheduler subclass
@@ -412,11 +414,11 @@ def is_triton(x: Union["IRNode", torch.device, None, str]) -> bool:
     return issubclass(device_scheduling, TritonScheduling)
 
 
-def is_cpu(x: Union["IRNode", torch.device, None, str]) -> bool:
+def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union["Buffer", "TensorBox"], alignment: int) -> bool:
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
     if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
         return False
 
@@ -456,9 +458,9 @@ def significant_strides_equal(
 
 
 def try_match_insignificant_strides(
-    tensor: "IRNode",
+    tensor: IRNode,
     strides: Sequence[Union[int, torch.SymInt]],
-) -> "IRNode":
+) -> IRNode:
     """
     Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
     dimensions - size 0 or 1 - will be updated.
@@ -533,7 +535,7 @@ class IRNode:
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return self.origin_node
 
-    def get_defining_op(self) -> Optional["Operation"]:
+    def get_defining_op(self) -> Optional[Operation]:
         return None
 
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
@@ -563,19 +565,19 @@ class IRNode:
         except NotImplementedError:
             return None
 
-    def get_layout(self) -> "Layout":
+    def get_layout(self) -> Layout:
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
-    def maybe_get_layout(self) -> Optional["Layout"]:
+    def maybe_get_layout(self) -> Optional[Layout]:
         try:
             return self.get_layout()
         except NotImplementedError:
             return None
 
-    def get_output_spec(self) -> "OutputSpec":
+    def get_output_spec(self) -> OutputSpec:
         return self.get_layout()
 
-    def maybe_get_output_spec(self) -> Optional["OutputSpec"]:
+    def maybe_get_output_spec(self) -> Optional[OutputSpec]:
         try:
             return self.get_output_spec()
         except NotImplementedError:
@@ -669,7 +671,7 @@ class IRNode:
     def realize_hint(self) -> None:
         pass
 
-    def unwrap_view(self) -> "IRNode":
+    def unwrap_view(self) -> IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout(self) -> None:
@@ -720,7 +722,7 @@ class IRNode:
     def is_no_op(self) -> bool:
         return False
 
-    def constant_to_device(self, device: torch.device) -> "IRNode":
+    def constant_to_device(self, device: torch.device) -> IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def get_mutation_names(self) -> Sequence[str]:
@@ -776,7 +778,7 @@ class Operation:
     def get_reads(self) -> OrderedSet[Dep]:
         return self.get_read_writes().reads
 
-    def get_outputs(self) -> list["Buffer"]:
+    def get_outputs(self) -> list[Buffer]:
         raise NotImplementedError
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -863,7 +865,7 @@ class Loops(IRNode):
     @classmethod
     def create(
         cls, *args: Any, **kwargs: Any
-    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         r = cls(*args, **kwargs)
@@ -1387,7 +1389,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1697,7 +1699,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1760,7 +1762,7 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: Optional[IRNode] = None,
-    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1806,7 +1808,7 @@ class Reduction(Loops):
         new_reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint,
-    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1926,7 +1928,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         num_output: int,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         """
         Create the reduction disregarding splitting.
         """
@@ -1962,7 +1964,7 @@ class WelfordReduction(MultiOutputReduction):
         reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         assert reduction_type in ("welford_reduce", "welford_combine")
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
@@ -1991,7 +1993,7 @@ class WelfordReduction(MultiOutputReduction):
 
             def copy(
                 loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
-            ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
+            ) -> Union[TensorBox, ShapeAsConstantBuffer]:
                 def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                     reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
@@ -2090,7 +2092,7 @@ class WelfordReduction(MultiOutputReduction):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -2259,7 +2261,7 @@ class Scan(Loops):
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
         **kwargs: Any,
-    ) -> Sequence[Optional[Union["TensorBox", "ShapeAsConstantBuffer"]]]:
+    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2460,7 +2462,7 @@ class Sort(Loops):
         descending: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
-    ) -> Sequence[Optional[Union["TensorBox", "ShapeAsConstantBuffer"]]]:
+    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
 
@@ -2555,7 +2557,7 @@ def as_storage_and_layout(
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
     exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
-) -> tuple["StorageBox", "Layout"]:
+) -> tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2650,7 +2652,7 @@ class BaseView(IRNode):
     def dtype(self) -> torch.dtype:
         return self.data.get_dtype()
 
-    def get_layout(self) -> "Layout":
+    def get_layout(self) -> Layout:
         return self.data.get_layout()
 
     def get_device(self) -> Optional[torch.device]:
@@ -3132,7 +3134,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: "Layout"
+    layout: Layout
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -3182,7 +3184,7 @@ class ReinterpretView(BaseView):
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.layout.make_indexer()
 
-    def get_layout(self) -> "Layout":
+    def get_layout(self) -> Layout:
         return self.layout
 
     def freeze_layout(self) -> None:
@@ -3604,7 +3606,7 @@ class Layout(OutputSpec):
     def should_pad_strides(self) -> bool:
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
 
-    def as_fixed(self) -> "FixedLayout":
+    def as_fixed(self) -> FixedLayout:
         if isinstance(self, FixedLayout):
             return self
 
@@ -3803,7 +3805,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, "TensorBox"]) -> None:
+    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -3915,7 +3917,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def get_buffer(self) -> Buffer:
         def unwrap_views(target: Any) -> Any:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -4716,7 +4718,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> Union["TensorBox", ShapeAsConstantBuffer]:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         raise NotImplementedError
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
@@ -4938,7 +4940,7 @@ class ConcatKernel(NopKernel):
     """
 
     @classmethod
-    def create(cls, inputs: Sequence[IRNode], dim: int) -> "StorageBox":
+    def create(cls, inputs: Sequence[IRNode], dim: int) -> StorageBox:
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
         new_size = list(inputs[0].get_size())
@@ -5134,7 +5136,7 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
-    mutation_outputs: list["MutationOutput"] = dataclasses.field(default_factory=list)
+    mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
 
     def __init__(
         self,
@@ -5276,7 +5278,7 @@ class ExternKernel(InputsKernel):
             return self.python_kernel_name
 
     @staticmethod
-    def copy_input(x: IRNode) -> Union["TensorBox", ShapeAsConstantBuffer]:
+    def copy_input(x: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
         pw = Pointwise.create(
             device=x.get_device(),
             dtype=x.get_dtype(),
@@ -6085,7 +6087,7 @@ class TMADescriptor(ExternKernel):
 
     # as TMA descriptors are immutable,
     # we can dedup them by the input args
-    _CACHE: dict[Any, "TMADescriptor"] = {}
+    _CACHE: dict[Any, TMADescriptor] = {}
 
     @classmethod
     def create(
@@ -6094,7 +6096,7 @@ class TMADescriptor(ExternKernel):
         dims: list[Union[int, torch.SymInt]],
         block_dims: list[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
-    ) -> "TMADescriptor":
+    ) -> TMADescriptor:
         key = (id(tensor), dims, block_dims, element_size)
         if key not in cls._CACHE:
             cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
@@ -6429,7 +6431,7 @@ class InplaceCopyFallback(ExternKernel):
     @classmethod
     def create(
         cls, dst: IRNode, src: IRNode, non_blocking: bool = False
-    ) -> "InplaceCopyFallback":
+    ) -> InplaceCopyFallback:
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
@@ -7143,9 +7145,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(
-        cls, kernel: _OpOverloads, *args: Any, **kwargs: Any
-    ) -> "FallbackKernel":
+    def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
@@ -7483,7 +7483,7 @@ class MutableBox(IRNode):
 
 class TensorBox(MutableBox):
     @staticmethod
-    def create(data: IRNode) -> Union["TensorBox", ShapeAsConstantBuffer]:
+    def create(data: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
         if isinstance(data, ShapeAsConstantBuffer):
             return data
         return TensorBox(StorageBox(data))
@@ -8263,7 +8263,7 @@ class _CollectiveKernel(FallbackKernel):
         inputs: Union[TensorBox, list[TensorBox]],
         *args: Any,
         **kwargs: Any,
-    ) -> Union[list[MultiOutput], "_CollectiveKernel"]:
+    ) -> Union[list[MultiOutput], _CollectiveKernel]:
         with V.graph.fake_mode:
             (
                 example_output,
