@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Optional
 
@@ -148,9 +149,9 @@ triton_scaled_grouped_mm_template = TritonTemplate(
 
 
 def grouped_mm_args(
-    mat1,
-    mat2,
-    offs,
+    mat1: TensorBox,
+    mat2: TensorBox,
+    offs: Optional[TensorBox],
     layout=None,
     out_dtype=None,
 ):
@@ -162,8 +163,6 @@ def grouped_mm_args(
 
     assert m1dim == 2 or m1dim == 3
     assert m2dim == 2 or m2dim == 3
-
-    scale_multiplier = 1 if m1dim == 3 or m2dim == 3 else offs.get_size()
 
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -202,8 +201,21 @@ aten__scaled_grouped_mm = ExternKernelChoice(
 )
 
 
-def can_use_triton_kernel(offs, bias, m1_size, m2_size):
-    return offs is not None and bias is None and has_triton_tma_device() and len(m1_size) == 2 and len(m2_size) == 3
+def can_use_triton_kernel(
+    offs: Optional[TensorBox],
+    bias: Optional[TensorBox],
+    m1_size: list[int],
+    m2_size: list[int],
+) -> bool:
+    return (
+        offs is not None
+        and bias is None
+        and has_triton_tma_device()
+        and len(m1_size) == 2
+        and len(m2_size) == 3
+        and m1_size[-1] >= 32
+        and m2_size[-2] >= 32
+    )
 
 
 @register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
@@ -223,7 +235,7 @@ def tuned_scaled_grouped_mm(
         mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
     )
 
-    counters["aten_mm_info"][f"aten._scaled_grouped_mm.default"] += 1
+    counters["aten_mm_info"]["aten._scaled_grouped_mm.default"] += 1
     log.info(
         "Tuned aten._scaled_grouped_mm.default: mat1_shape=%s, mat2_shape=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
         m1_size,
@@ -239,7 +251,7 @@ def tuned_scaled_grouped_mm(
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
     # workaround for Inductor not supporting optional tensor input arguments
-    input_nodes: list[Any, ...] = [mat_a, mat_b, scale_a, scale_b]
+    input_nodes: list[Any] = [mat_a, mat_b, scale_a, scale_b]
     if offs is not None:
         input_nodes.append(realize_inputs(offs))
     if bias is not None:

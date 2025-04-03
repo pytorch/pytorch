@@ -1322,7 +1322,7 @@ class TestFP8MatmulCuda(TestCase):
         f = torch._scaled_grouped_mm
         f = torch.compile(f) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                                       out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
         offs_cpu = offs.cpu()
         alist, ascalelist, outlist = [], [], []
@@ -1354,7 +1354,7 @@ class TestFP8MatmulCuda(TestCase):
         f = torch._scaled_grouped_mm
         f = torch.compile(f) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), scale_a, scale_b,
-                                       out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
         self.grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
@@ -1379,7 +1379,7 @@ class TestFP8MatmulCuda(TestCase):
         f = torch._scaled_grouped_mm
         f = torch.compile(f) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                                       out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
         blist, bscalelist, outlist = [], [], []
         start = 0
