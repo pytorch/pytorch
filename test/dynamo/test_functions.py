@@ -3824,6 +3824,7 @@ class GraphModule(torch.nn.Module):
     def test_unsqueeze_inplace(self):
         def fn(x):
             return torch.Tensor.unsqueeze_(x, dim=1) + 1
+
         def self_fn(x):
             return x.unsqueeze_(dim=1) + 1
 
