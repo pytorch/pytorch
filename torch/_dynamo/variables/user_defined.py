@@ -402,8 +402,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             assert len(args) == 1
             assert len(kwargs) == 0
-            return variables.ConstDictVariable(
-                {}, edict, mutation_type=ValueMutationNew()
+            return UserDefinedDictVariable(
+                edict(), dict_ct={}, mutation_type=ValueMutationNew()
             )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__

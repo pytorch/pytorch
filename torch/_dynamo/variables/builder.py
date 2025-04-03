@@ -658,7 +658,7 @@ class VariableBuilder:
             return result
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) or (edict and istype(value, edict)):
+        ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
@@ -1315,7 +1315,7 @@ class VariableBuilder:
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
-            def build_key_value(i, k, v):
+            def build_key_value(i, k, v) -> tuple[VariableTracker, VariableTracker]:
                 source_key = ConstDictKeySource(self.get_source(), i)
                 key = LazyVariableTracker.create(k, source_key)
 
@@ -1333,13 +1333,16 @@ class VariableBuilder:
                 for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
+            if isinstance(value, collections.OrderedDict):
+                user_cls = collections.OrderedDict
+            elif edict and isinstance(value, edict):
+                user_cls = edict
+            else:
+                user_cls = dict
+
             dict_vt = ConstDictVariable(
                 result,
-                user_cls=(
-                    collections.OrderedDict
-                    if isinstance(value, collections.OrderedDict)
-                    else dict
-                ),
+                user_cls=user_cls,
                 mutation_type=ValueMutationExisting(),
                 source=self.source,
             )
