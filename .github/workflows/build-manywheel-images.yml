@@ -47,9 +47,6 @@ jobs:
     strategy:
       matrix:
         cuda_version: ["12.8", "12.6", "12.4", "11.8"]
-    env:
-      GPU_ARCH_TYPE: cuda-manylinux_2_28
-      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -66,9 +63,6 @@ jobs:
     strategy:
       matrix:
         cuda_version: ["12.8"]
-    env:
-      GPU_ARCH_TYPE: cuda-aarch64
-      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -85,9 +79,6 @@ jobs:
     strategy:
       matrix:
         rocm_version: ["6.2.4", "6.3", "6.4"]
-    env:
-      GPU_ARCH_TYPE: rocm-manylinux_2_28
-      GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -101,8 +92,6 @@ jobs:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    env:
-      GPU_ARCH_TYPE: cpu-manylinux_2_28
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -116,8 +105,6 @@ jobs:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
-    env:
-      GPU_ARCH_TYPE: cpu-aarch64
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -131,8 +118,6 @@ jobs:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
-    env:
-      GPU_ARCH_TYPE: cpu-aarch64-2_28
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -146,8 +131,6 @@ jobs:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    env:
-      GPU_ARCH_TYPE: cpu-cxx11-abi
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
@@ -161,8 +144,6 @@ jobs:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    env:
-      GPU_ARCH_TYPE: xpu
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
