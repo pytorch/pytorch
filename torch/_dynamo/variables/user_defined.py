@@ -270,7 +270,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             or self.value.__module__ == "torch"
         ):
             if source:
-                # NOTE: Takes this path
                 return VariableTracker.build(tx, obj, source)
 
         if (

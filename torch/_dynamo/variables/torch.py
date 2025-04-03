@@ -1157,11 +1157,11 @@ If the above doesn't work, please subtmit an issue to GitHub.
             )
 
         if self.is_tensor_method():
-            log.warning(f"Calling tensor_method here, {self.value}")
             name = self.value.__name__
-            # Guard against inplace op on input tensor
+            # Guard against inplace view op on input tensor (not supported)
             if args and isinstance(args[0], variables.TensorVariable):
                 tensor_var = args[0]
+                # Check if input tensor and inplace_view op specifcally 
                 if tensor_var.source is not None and hasattr(torch.ops.aten, name):
                     fn = getattr(torch.ops.aten, name)
                     if (
