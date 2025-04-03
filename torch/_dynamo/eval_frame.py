@@ -637,7 +637,6 @@ class _TorchDynamoContext:
                         "Detected that you are using FX to torch.jit.trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
-
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
@@ -672,9 +671,16 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
-                    torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                        saved_dynamic_layer_stack_depth
-                    )
+                    try:
+                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                            saved_dynamic_layer_stack_depth
+                        )
+                    except RuntimeError as e:
+                        if (
+                            torch._C._functorch.get_dynamic_layer_stack_depth()
+                            != saved_dynamic_layer_stack_depth
+                        ):
+                            raise e
 
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:

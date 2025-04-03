@@ -31,6 +31,24 @@ class InPlaceCompilationTests(TestCase):
         model(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_vmap_compile_not_throw_dyanamic_layer_error(self):
+        def buggy_vmap_fn(input_tensor, index_tensor, src_tensor):
+            return torch.func.vmap(
+                lambda t: torch.scatter_add(t, 0, index_tensor, src_tensor)
+            )(input_tensor)
+
+        # only out-of-bounds error is thrown, no error from recorvering DynamicLayerStack to
+        # to the desired depth.
+        with self.assertRaisesRegex(
+            RuntimeError, "index 1 is out of bounds for dimension.*"
+        ):
+            torch._dynamo.reset()
+            input_tensor = torch.randn(3)
+            index_tensor = torch.tensor([0, 1, 2])
+            src_tensor = torch.tensor([1.0, 2.0, 3.0])  # This will create a real tensor
+            opt_fn = torch.compile(buggy_vmap_fn, backend="eager", fullgraph=True)
+            opt_fn(input_tensor, index_tensor, src_tensor)
+
     def test_overwrite_call_impl(self):
         torch._dynamo.reset()
         model = ToyModel()
