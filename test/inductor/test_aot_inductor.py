@@ -70,6 +70,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
+        sub_kernel_autotuned,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -3517,6 +3518,28 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    def test_runtime_checks_large(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, *inputs):
+                result = inputs[0]
+                for i in range(1, len(inputs)):
+                    result = result + inputs[i]
+                return result
+
+        inputs = []
+        for i in range(1000):
+            inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
+        inputs = tuple(inputs)
+        model = Model()
+        with torch.no_grad():
+            AOTIRunnerUtil.compile(
+                model,
+                inputs,
+            )
+
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4660,6 +4683,42 @@ class AOTInductorTestsTemplate:
         # generated code should NOT contain an alignment check for that input.
         self.code_check_count(
             model, example_inputs, "aoti_torch_clone_preserve_strides", 0
+        )
+
+    def test_autotuning_args_reuse(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                x_out = torch.empty_strided(
+                    (x.size()[0], x.size()[1]), (x.size()[1], 1), device=GPU_TYPE
+                )
+                x_out = torch.permute(x_out, [0, 1])
+                add_kernel_autotuned[(4,)](x, x, x_out, 16)
+
+                y_out = torch.empty_strided(
+                    (y.size()[0], y.size()[1]), (y.size()[1], 1), device=GPU_TYPE
+                )
+                y_out = torch.permute(y_out, [0, 1])
+                add_kernel_autotuned[(64,)](y, y, y_out, 64)
+
+                sub_kernel_autotuned[(4,)](x, x, x_out, 16)
+
+                return x_out, y_out
+
+        example_inputs = (
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(8, 8, device=GPU_TYPE),
+        )
+        dim0_x = Dim("dim0_x", min=1, max=2048)
+        dim0_y = Dim("dim0_y", min=1, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
+        self.check_model(
+            Model(),
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+            options={"max_autotune": True},
         )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
