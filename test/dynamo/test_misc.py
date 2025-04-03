@@ -594,6 +594,22 @@ class MiscTests(torch._inductor.test_case.TestCase):
         ref = f(x)
         self.assertEqual(res, ref)
 
+    def test_newly_constructed_tensor_attr_mutation(self):
+        def f(x):
+            y = x + 10
+            y.grad = x
+            y.foo = 42
+            return y
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.ones(5)
+
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res.grad, ref.grad)
+        self.assertEqual(res.foo, ref.foo)
+
     def test_closure_recompiles(self):
         cnt = CompileCounter()
 
@@ -8667,7 +8683,7 @@ def ___make_guard_fn():
 
     def test_tracing_pytree(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     flat_xs, spec = module.tree_flatten(xs)
@@ -8683,7 +8699,7 @@ def ___make_guard_fn():
 
     def test_tracing_nested_pytree(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     flat_xs, spec = module.tree_flatten(xs)
@@ -8702,7 +8718,7 @@ def ___make_guard_fn():
 
     def test_tracing_nested_pytree_tuples(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     flat_xs, spec = module.tree_flatten(xs)
@@ -8721,7 +8737,7 @@ def ___make_guard_fn():
 
     def test_tracing_nested_pytree_dicts(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     flat_xs, spec = module.tree_flatten(xs)
@@ -8760,7 +8776,7 @@ def ___make_guard_fn():
 
     def test_tracing_nested_pytree_mixed_all(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     flat_xs, spec = module.tree_flatten(xs)
@@ -8814,7 +8830,7 @@ def ___make_guard_fn():
         from torch.utils.checkpoint import checkpoint
 
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     nested_xs = [[xs]]
@@ -8834,7 +8850,7 @@ def ___make_guard_fn():
 
     def test_tracing_tree_map_only(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(xs):
                     def mapper(x):
@@ -10203,7 +10219,7 @@ def ___make_guard_fn():
 
     def test_pytree_tree_leaves(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x):
                     tree = {
@@ -10233,7 +10249,7 @@ def ___make_guard_fn():
 
     def test_pytree_tree_flatten_unflatten(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x, y):
                     tree = {
@@ -10280,7 +10296,7 @@ def ___make_guard_fn():
 
     def test_pytree_tree_map(self):
         for name, module in pytree_modules.items():
-            with self.subTest(f"pytree implement: {name}"):
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x, y):
                     tree1 = {
