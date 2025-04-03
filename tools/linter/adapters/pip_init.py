@@ -67,6 +67,7 @@ if __name__ == "__main__":
     # However, `pip install --user` interacts poorly with virtualenvs (see:
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
+    # TODO: delete or update this
     in_conda = os.environ.get("CONDA_PREFIX") is not None
     in_virtualenv = os.environ.get("VIRTUAL_ENV") is not None
     if not in_conda and not in_virtualenv:
