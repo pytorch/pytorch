@@ -298,5 +298,9 @@ class LazyLinear(LazyModuleMixin, Linear):
             )
             self.in_features = input.shape[-1]
 
+    def _lazy_load_pre_materialize_hook(self):
+        if self.in_features == 0 and isinstance(self.weight, Tensor):
+            self.in_features = self.weight.shape[-1]
+
 
 # TODO: PartialLinear - maybe in sparse?
