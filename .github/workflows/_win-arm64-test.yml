@@ -12,10 +12,6 @@ on:
         type: string
         description: What CUDA version to build with, "cpu" for none.
         default: "cpu"
-      test-matrix:
-        required: true
-        type: string
-        description: JSON description of what test configs to run.
       sync-tag:
         required: false
         type: string
@@ -29,15 +25,25 @@ on:
         default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      runner:
+        required: false
+        type: string
+        default: windows-11-arm64
+        description: |
+          Label of the runner this job should run on.
+          
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-
+  PYTHON_VERSION: "3.12"
+  PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+  
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}

@@ -176,22 +176,16 @@ jobs:
       cuda-version: cpu
       sync-tag: win-arm64-cpu-build
       runner: "windows-11-arm64"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "windows-11-arm64" },
-        ]}
     secrets: inherit
 
   win-arm64-vs2022-cpu-py3-test:
     name: win-arm64-vs2022-cpu-py3
     uses: ./.github/workflows/_win-arm64-test.yml
-    needs:
-      - win-arm64-vs2022-cpu-py3-build
-      - target-determination
+    needs: win-arm64-vs2022-cpu-py3-build
     with:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-arm64-vs2022-cpu-py3-build.outputs.test-matrix }}
+      runner: "windows-11-arm64"
     secrets: inherit
 
 
