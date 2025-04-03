@@ -367,7 +367,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   void enableCollectivesTiming() override;
 
-  const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {
+  const std::shared_ptr<::gloo::rendezvous::Store>& _getStore() const {
     return store_;
   }
 
@@ -393,7 +393,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   }
 
  protected:
-  std::unique_ptr<::gloo::rendezvous::Store> store_;
+  std::shared_ptr<::gloo::rendezvous::Store> store_;
   const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
