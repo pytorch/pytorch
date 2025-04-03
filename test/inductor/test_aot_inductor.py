@@ -3518,6 +3518,28 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    def test_runtime_checks_large(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, *inputs):
+                result = inputs[0]
+                for i in range(1, len(inputs)):
+                    result = result + inputs[i]
+                return result
+
+        inputs = []
+        for i in range(1000):
+            inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
+        inputs = tuple(inputs)
+        model = Model()
+        with torch.no_grad():
+            AOTIRunnerUtil.compile(
+                model,
+                inputs,
+            )
+
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
