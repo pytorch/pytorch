@@ -269,18 +269,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
-            if source is not None and hasattr(torch.ops.aten, name):
-                fn = getattr(torch.ops.aten, name)
-                if (
-                    hasattr(fn, "overloads")
-                    and hasattr(fn, fn.overloads()[0])
-                    and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
-                ):
-                    # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                    return variables.misc.DelayGraphBreakVariable(
-                        source=AttrSource(self.source, name)
-                    )
-            elif source:
+            if source:
                 # NOTE: Takes this path
                 return VariableTracker.build(tx, obj, source)
 

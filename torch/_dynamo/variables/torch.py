@@ -64,7 +64,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import VariableTracker
+from .base import VariableTracker, typestr
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -1157,6 +1157,27 @@ If the above doesn't work, please subtmit an issue to GitHub.
             )
 
         if self.is_tensor_method():
+            log.warning(f"Calling tensor_method here, {self.value}")
+            name = self.value.__name__
+            # Guard against inplace op on input tensor
+            if args and isinstance(args[0], variables.TensorVariable):
+                tensor_var = args[0]
+                if tensor_var.source is not None and hasattr(torch.ops.aten, name):
+                    fn = getattr(torch.ops.aten, name)
+                    if (
+                        hasattr(fn, "overloads")
+                        and hasattr(fn, fn.overloads()[0])
+                        and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+                    ):
+                        unimplemented_v2(
+                            gb_type="Inplace op on input tensor",
+                            context=typestr(self.value),
+                            explanation=f"Attempted to trace an inplace view op on input tensor {typestr(self.value)}.",
+                            hints=[
+                                *graph_break_hints.USER_ERROR,
+                                "Ensure you do not modify input tensor in place.",
+                            ],
+                        )
             return self.call_tensor_method(tx, args, kwargs)
 
         special_handler = self._get_handlers().get(self.value)
