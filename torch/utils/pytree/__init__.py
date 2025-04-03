@@ -51,6 +51,12 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -95,7 +101,7 @@ if cxx is not None:
 else:
     del cxx
 
-    class CxxModule(_ModuleType):
+    class LazyCxxModule(_ModuleType):
         def __getattr__(self, name: str) -> _Any:
             if name == "__name__":
                 return f"{__name__}.cxx"
@@ -126,13 +132,19 @@ else:
     #     import torch.utils.pytree.cxx
     #     from torch.utils.pytree.cxx import tree_map
     #
-    _sys.modules[f"{__name__}.cxx"] = CxxModule(f"{__name__}.cxx")
+    _sys.modules[f"{__name__}.cxx"] = LazyCxxModule(f"{__name__}.cxx")
 
-    del CxxModule
+    del LazyCxxModule
 
 
 if not PYTORCH_USE_CXX_PYTREE:
     from torch.utils._pytree import (
+        is_namedtuple as is_namedtuple,
+        is_namedtuple_class as is_namedtuple_class,
+        is_namedtuple_instance as is_namedtuple_instance,
+        is_structseq as is_structseq,
+        is_structseq_class as is_structseq_class,
+        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
@@ -152,6 +164,12 @@ if not PYTORCH_USE_CXX_PYTREE:
     )
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
+        is_namedtuple as is_namedtuple,
+        is_namedtuple_class as is_namedtuple_class,
+        is_namedtuple_instance as is_namedtuple_instance,
+        is_structseq as is_structseq,
+        is_structseq_class as is_structseq_class,
+        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
