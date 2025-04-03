@@ -26,7 +26,7 @@ struct ModeImpl {
       scalar_t *iter_begin,
       scalar_t *iter_end) {
     at::cuda::ThrustAllocator thrust_allocator;
-    auto stream = at::cuda::getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 
     const auto n_element = iter_end - iter_begin;
@@ -96,7 +96,7 @@ struct ModeImpl<bool> {
       const bool *first,
       const bool *last) {
     at::cuda::ThrustAllocator thrust_allocator;
-    auto stream = at::cuda::getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 
     // For bool, we can skip finding the unique elements since there
