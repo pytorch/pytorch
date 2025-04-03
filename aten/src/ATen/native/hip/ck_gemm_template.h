@@ -382,7 +382,7 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
 
  if(!gemm.IsSupportedArgument(argument))
  {
-        printf("error shape = %d %d %d TRANSA=%d TRANSB=%d \n",
+        printf("error shape = %ld %ld %ld TRANSA=%d TRANSB=%d \n",
                         n, m, k,TRANSA, TRANSB);
 
         throw std::runtime_error(

@@ -1342,15 +1342,13 @@ class InstructionTranslatorBase(
                 raise
             except RuntimeError as e:
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
+                    readable_graph = torch.fx.GraphModule(
+                        self.output.nn_modules, self.output.graph
+                    ).print_readable(
+                        print_output=False, include_stride=True, include_device=True
                     )
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
+                    raise
 
                 raise
             except Exception as e:
@@ -2763,9 +2761,11 @@ class InstructionTranslatorBase(
         if val.exc_type is StopIteration:  # type: ignore[attr-defined]
             new_val = variables.BuiltinVariable(RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
-                [],
+                [ConstantVariable("generator raised StopIteration")],
                 {},
             )
+            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
@@ -2823,6 +2823,17 @@ class InstructionTranslatorBase(
 
     def LOAD_ASSERTION_ERROR(self, inst):
         self.load_builtin_from_argval("AssertionError")
+
+    def LOAD_BUILD_CLASS(self, inst):
+        unimplemented_v2(
+            gb_type="LOAD_BUILD_CLASS bytecode not supported",
+            context="",
+            explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
+            hints=[
+                "Move the class definition out of the compiled region.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
@@ -3773,10 +3784,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
+            msg = inspect.getattr_static(
+                func.get_function(), "_torchdynamo_disable_msg", None
+            )
             unimplemented_v2(
                 gb_type="Skip inlining `torch.compiler.disable()`d function",
                 context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],
