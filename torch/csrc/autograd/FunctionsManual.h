@@ -1064,6 +1064,10 @@ Tensor _to_copy_backward(
     const Tensor& grad,
     const c10::TensorOptions& self_options);
 
+Tensor _lazy_clone_backward(
+    const Tensor& grad,
+    const c10::TensorOptions& self_options);
+
 std::tuple<Tensor, Tensor> index_reduce_backward(
     const Tensor& grad,
     const Tensor& self,

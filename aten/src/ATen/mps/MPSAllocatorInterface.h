@@ -15,6 +15,7 @@ namespace at::mps {
 class IMPSAllocator : public c10::Allocator {
  public:
   // see the comments in MPSAllocator.h for the description of these methods.
+  virtual DataPtr registerCPUBackedPtr(void* cpu_ptr, const size_t nbytes) = 0;
   virtual void emptyCache() const = 0;
   virtual void freeInactiveBuffers() const = 0;
   virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
@@ -26,6 +27,7 @@ class IMPSAllocator : public c10::Allocator {
   virtual bool isSharedStorageSupported() const = 0;
   virtual c10::DataPtr allocScalarBufferWithValue(void* value, size_t size)
       const = 0;
+  virtual bool isSharedAllocatorUsage() const = 0;
   virtual std::string formatSize(size_t size) const = 0;
   virtual void setLowWatermarkRatio(double ratio) const = 0;
   virtual void setHighWatermarkRatio(double ratio) const = 0;
@@ -38,6 +40,7 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
+  virtual std::pair<void*, uint32_t> unsafeGetSharedBufferPtr(void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 };
@@ -61,7 +64,7 @@ TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
-IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
+IMPSAllocator* getIMPSAllocator(bool sharedAllocator = true);
 
 bool isMPSPinnedPtr(const void* data);
 
