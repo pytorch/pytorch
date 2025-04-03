@@ -102,7 +102,6 @@ jobs:
         uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Set Test step time
@@ -113,11 +112,11 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
-      - name: Download PyTorch Build Artifacts
-        uses: seemethere/download-artifact-s3@v4
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4.1.7  
         with:
-          name: ${{ inputs.build-environment }}
-          path: C:\${{ github.run_id }}\build-results
+            name: ${{ inputs.build-environment }}
+            path: C:\${{ github.run_id }}\build-results
 
       - name: Test
         id: test
