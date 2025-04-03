@@ -1427,7 +1427,8 @@ graph():
     %wait_tensor : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce_2,), kwargs = {})
     %wait_tensor_1 : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce_1,), kwargs = {})
     %wait_tensor_2 : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce,), kwargs = {})
-    return (wait_tensor, wait_tensor_1, wait_tensor_2)""",
+    return (wait_tensor, wait_tensor_1, wait_tensor_2)
+""",  # noqa: B950
             )
 
         torch._inductor.config.post_grad_custom_post_pass = assert_pass
