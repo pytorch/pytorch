@@ -36,6 +36,14 @@ make sure that there is a test for it.
 """
 
 
+class GenericCtxMgr:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+
 class GraphBreakMessagesTest(LoggingTestCase):
     def test_dynamic_shape_operator(self):
         def fn():
@@ -308,38 +316,6 @@ from user code:
             post_munge=post_munge,
         )
 
-    def test_disable(self):
-        @torch.compiler.disable
-        def inner():
-            return 1
-
-        def fn():
-            return inner()
-
-        def post_munge(s):
-            return re.sub(
-                r"<function GraphBreakMessagesTest\.test_disable\.<locals>\.inner at 0x[0-9A-Fa-f]+>",
-                "<function inner>",
-                s,
-            )
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function inner>` since it was wrapped with `torch.compiler.disable`
-  Hint: Remove the `torch.compiler.disable` call
-
-  Developer debug context: <function inner>
-
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return inner()""",
-            post_munge=post_munge,
-        )
-
     def test_dynamo_graph_break_fn(self):
         def fn():
             torch._dynamo.graph_break()
@@ -601,19 +577,12 @@ from user code:
         )
 
     def test_generic_ctx_mgr_graph_break(self):
-        class CtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
-
         def fn():
-            with CtxMgr():
-                with CtxMgr():
+            with GenericCtxMgr():
+                with GenericCtxMgr():
                     pass
-                with CtxMgr():
-                    with CtxMgr():
+                with GenericCtxMgr():
+                    with GenericCtxMgr():
                         pass
                     torch._dynamo.graph_break()
 
@@ -628,7 +597,7 @@ Graph break under GenericContextWrappingVariable
   Hint: Move the offending context manager(s) to outside the compiled region.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
 
-  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr), GenericContextWrappingVariable(GenericCtxMgr)]
 
 
 from user code:
@@ -864,6 +833,43 @@ User code traceback:
   File "test_error_messages.py", line N, in fn
     if x.sum() > 0:
 """,
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_assert_failure_in_generic_ctx_mgr(self, records):
+        def fn(x):
+            with GenericCtxMgr():
+                assert x is None
+
+        with self.assertRaises(AssertionError):
+            torch.compile(fn, backend="eager")(torch.randn(3))
+
+        # only 1 graph break message
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: skip: from user code at:
+  File "test_error_messages.py", line N, in fn
+    assert x is None
+""",
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].exc_info[1], suppress_suffix=True, skip=0),
+            """\
+Data-dependent assertion failed (cannot compile partial graph)
+  Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Remove the assert statement.
+  Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
+
+  Developer debug context: value: ConstantVariable(bool: False)
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    assert x is None""",
         )
 
     def test_no_internal_compiler_stacktrace(self):
@@ -1113,6 +1119,81 @@ User code traceback:
   File "test_error_messages.py", line N, in f3
     torch._dynamo.graph_break()  # correct
 """,
+        )
+
+    def test_disable_message(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def outer(fn, x):
+            return fn(x)
+
+        @torch.compiler.disable
+        def f(x):
+            return x + 1
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(f, torch.randn(3)),
+            """\
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
+        )
+
+        @torch.compiler.disable(reason="test message")
+        def g(x):
+            return x + 2
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(g, torch.randn(3)),
+            """\
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
+        )
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 3
+
+        mod = Mod()
+        mod.compile()
+        mod = torch.compiler.disable(mod, reason="test message 2")
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: outer(mod, torch.randn(3)),
+            """\
+Unsupported function call (delayed)
+  Explanation: Dynamo determined that a graph break should occur when calling `L['fn']`. Reason: Optimized `nn.Module` is wrapped with `torch.compiler.disable` (reason: test message 2)
+
+
+  Developer debug context: source: LocalSource(local_name='fn', is_input=True, dynamism=None, is_derefed_cell_contents=False)
+
+
+from user code:
+   File "test_error_messages.py", line N, in outer
+    return fn(x)""",
+            post_munge=post_munge,
         )
 
 
