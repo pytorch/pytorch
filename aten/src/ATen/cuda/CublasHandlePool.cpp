@@ -123,7 +123,7 @@ size_t parseChosenWorkspaceSize() {
     // for extra convenience
     val = getenv("ROCBLAS_WORKSPACE_CONFIG");
   }
-  /* 32MiB default, 128MiB for MI300 */
+  /* 32MiB default, 128MiB for gfx94x/gfx95x */
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
   const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
