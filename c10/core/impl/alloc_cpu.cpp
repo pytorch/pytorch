@@ -19,11 +19,13 @@
 #endif
 
 // TODO: rename flags to C10
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     false,
     "If set, do memory zerofilling when allocating on CPU")
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_junk_fill,
     false,
