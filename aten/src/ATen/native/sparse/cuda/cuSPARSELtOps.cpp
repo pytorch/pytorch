@@ -21,7 +21,7 @@ thread_local bool handle_initialized = false;
 
 #ifdef USE_ROCM
 // Single global flag for platform-wide hipSparseLt support
-std::once_flag g_hipSparseLtSupportInitFlag;
+c10::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
 
 // Set of supported architectures
