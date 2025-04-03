@@ -6999,13 +6999,11 @@ def forward(self, x):
         ep.module()(torch.tensor([4, 7, 5]))
         ep.module()(torch.tensor([6, 5, 5]))
         with self.assertRaisesRegex(
-            RuntimeError,
-            r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
+            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
         ):
             ep.module()(torch.tensor([3, 6, 5]))
         with self.assertRaisesRegex(
-            RuntimeError,
-            r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
         ):
             ep.module()(torch.tensor([6, 6, 6]))
 
