@@ -191,7 +191,7 @@ jobs:
     with:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.win-arm64-vs2022-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
 
