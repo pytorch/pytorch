@@ -10,6 +10,7 @@
 #include <atomic>
 #include <optional>
 
+#include <atomic>
 #include <stack>
 #include <unordered_set>
 #include <vector>
