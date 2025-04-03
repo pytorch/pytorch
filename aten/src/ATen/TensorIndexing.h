@@ -433,7 +433,7 @@ inline Tensor handleDimInMultiDimIndexing(
     const Tensor& original_tensor,
     const TensorIndex& index,
     int64_t* dim_ptr,
-    int64_t* specified_dims_ptr,
+    const int64_t* specified_dims_ptr,
     int64_t real_dim,
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,

@@ -93,7 +93,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   return result;
 }
 
-static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
+static std::vector<int64_t> to_aten_shape(int ndim, const npy_intp* values) {
   // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
   for (const auto i : c10::irange(ndim)) {
