@@ -243,7 +243,7 @@ def videohandler(extension, data):
     except ImportError as e:
         raise ModuleNotFoundError(
             "Package `torchvision` is required to be installed for default video file loader."
-            "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
+            "Please use `pip install torchvision`"
             "to install the package"
         ) from e
 
@@ -266,7 +266,7 @@ def audiohandler(extension, data):
     except ImportError as e:
         raise ModuleNotFoundError(
             "Package `torchaudio` is required to be installed for default audio file loader."
-            "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
+            "Please use `pip install torchaudio`"
             "to install the package"
         ) from e
 
@@ -287,7 +287,7 @@ class MatHandler:
         except ImportError as e:
             raise ModuleNotFoundError(
                 "Package `scipy` is required to be installed for mat file."
-                "Please use `pip install scipy` or `conda install scipy`"
+                "Please use `pip install scipy`"
                 "to install the package"
             ) from e
         self.sio = sio
