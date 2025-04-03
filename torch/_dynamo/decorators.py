@@ -755,9 +755,9 @@ class DynamoConfigPatchProxy:
 
 
 def patch_dynamo_config(
-    arg1: Optional[Union[str, dict[str, Any], tuple[str, Any]]] = None,
+    arg1: Optional[Union[str, dict[str, Any], tuple[tuple[str, Any], ...]]] = None,
     arg2: Any = None,
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> DynamoConfigPatchProxy:
     """
     A restricted form of torch._dynamo.config.patch that can be traced by Dynamo to
@@ -765,7 +765,7 @@ def patch_dynamo_config(
 
     Can be used as a decorator or a context manager.
 
-    DO NOT MODIFY the returned context manager/decorated function/decorator wrapper.
+    User code SHOULD NOT MODIFY the return value of this function.
     """
     if isinstance(arg1, tuple):
         arg1 = dict(arg1)
