@@ -81,6 +81,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
       const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+      // convenience for ROCm users, allow alternative HIP token
+      if (!env) {
+        env = getenv("PYTORCH_HIP_ALLOC_CONF");
+      }
+#endif
       inst->parseArgs(env);
       return inst;
     })();
