@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import contextlib
 import dataclasses
 import functools
@@ -104,7 +102,6 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
-    from torch import Tensor
     from torch._library.fake_class_registry import FakeScriptObject
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
@@ -203,8 +200,8 @@ class GraphPartitionSignature:
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
     # we cannot get name from Expr.
-    input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
-    output_nodes: list[IRNode]
+    input_nodes: dict[str, Union["IRNode", sympy.Expr, "TorchBindObject"]]
+    output_nodes: list["IRNode"]
 
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
@@ -341,11 +338,11 @@ def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(x: "IRNode", guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
-    x: Optional[IRNode], guard_shape: bool = True
+    x: Optional["IRNode"], guard_shape: bool = True
 ) -> Optional[torch.Tensor]:
     if x is None:
         return None
@@ -383,7 +380,7 @@ def may_convert_to_optional(
 
 
 def get_device_type(
-    x: Union[IRNode, OutputSpec, torch.device, None, str],
+    x: Union["IRNode", "OutputSpec", torch.device, None, str],
 ) -> Optional[str]:
     if isinstance(x, str) or x is None:
         return x
@@ -394,7 +391,7 @@ def get_device_type(
     assert_never(f"get_device_type({x}: {type(x).__name__})")
 
 
-def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
+def is_triton(x: Union["IRNode", torch.device, None, str]) -> bool:
     device = get_device_type(x)
     # Special case cpu and cuda as using the method below
     # to determine if the scheduler is a triton scheduler subclass
@@ -414,11 +411,11 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
     return issubclass(device_scheduling, TritonScheduling)
 
 
-def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
+def is_cpu(x: Union["IRNode", torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
+def is_aligned_realized_tensor(x: Union["Buffer", "TensorBox"], alignment: int) -> bool:
     if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
         return False
 
@@ -458,9 +455,9 @@ def significant_strides_equal(
 
 
 def try_match_insignificant_strides(
-    tensor: IRNode,
+    tensor: "IRNode",
     strides: Sequence[Union[int, torch.SymInt]],
-) -> IRNode:
+) -> "IRNode":
     """
     Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
     dimensions - size 0 or 1 - will be updated.
@@ -535,7 +532,7 @@ class IRNode:
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return self.origin_node
 
-    def get_defining_op(self) -> Optional[Operation]:
+    def get_defining_op(self) -> Optional["Operation"]:
         return None
 
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
@@ -565,19 +562,19 @@ class IRNode:
         except NotImplementedError:
             return None
 
-    def get_layout(self) -> Layout:
+    def get_layout(self) -> "Layout":
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
-    def maybe_get_layout(self) -> Optional[Layout]:
+    def maybe_get_layout(self) -> Optional["Layout"]:
         try:
             return self.get_layout()
         except NotImplementedError:
             return None
 
-    def get_output_spec(self) -> OutputSpec:
+    def get_output_spec(self) -> "OutputSpec":
         return self.get_layout()
 
-    def maybe_get_output_spec(self) -> Optional[OutputSpec]:
+    def maybe_get_output_spec(self) -> Optional["OutputSpec"]:
         try:
             return self.get_output_spec()
         except NotImplementedError:
@@ -624,7 +621,7 @@ class IRNode:
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
 
     def get_device(self) -> Optional[torch.device]:
@@ -671,7 +668,7 @@ class IRNode:
     def realize_hint(self) -> None:
         pass
 
-    def unwrap_view(self) -> IRNode:
+    def unwrap_view(self) -> "IRNode":
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout(self) -> None:
@@ -722,7 +719,7 @@ class IRNode:
     def is_no_op(self) -> bool:
         return False
 
-    def constant_to_device(self, device: torch.device) -> IRNode:
+    def constant_to_device(self, device: torch.device) -> "IRNode":
         raise NotImplementedError(type(self).__name__)
 
     def get_mutation_names(self) -> Sequence[str]:
@@ -778,7 +775,7 @@ class Operation:
     def get_reads(self) -> OrderedSet[Dep]:
         return self.get_read_writes().reads
 
-    def get_outputs(self) -> list[Buffer]:
+    def get_outputs(self) -> list["Buffer"]:
         raise NotImplementedError
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -865,7 +862,7 @@ class Loops(IRNode):
     @classmethod
     def create(
         cls, *args: Any, **kwargs: Any
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         r = cls(*args, **kwargs)
@@ -1389,7 +1386,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1699,7 +1696,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1762,7 +1759,7 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: Optional[IRNode] = None,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1808,7 +1805,7 @@ class Reduction(Loops):
         new_reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1928,7 +1925,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         num_output: int,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
+    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
         """
         Create the reduction disregarding splitting.
         """
@@ -1964,12 +1961,12 @@ class WelfordReduction(MultiOutputReduction):
         reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
+    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
         assert reduction_type in ("welford_reduce", "welford_combine")
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(val: int) -> Union[TensorBox, ShapeAsConstantBuffer]:
+        def const(val: int) -> Union[TensorBox, "ShapeAsConstantBuffer"]:
             def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                 return ops.constant(
                     val,
@@ -1993,7 +1990,7 @@ class WelfordReduction(MultiOutputReduction):
 
             def copy(
                 loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
-            ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+            ) -> Union["TensorBox", "ShapeAsConstantBuffer"]:
                 def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                     reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
@@ -2092,7 +2089,7 @@ class WelfordReduction(MultiOutputReduction):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
+    ) -> Sequence[Union["TensorBox", "ShapeAsConstantBuffer"]]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -2261,7 +2258,7 @@ class Scan(Loops):
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
         **kwargs: Any,
-    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
+    ) -> Sequence[Optional[Union["TensorBox", "ShapeAsConstantBuffer"]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2462,7 +2459,7 @@ class Sort(Loops):
         descending: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
-    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
+    ) -> Sequence[Optional[Union["TensorBox", "ShapeAsConstantBuffer"]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
 
@@ -2557,7 +2554,7 @@ def as_storage_and_layout(
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
     exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
-) -> tuple[StorageBox, Layout]:
+) -> tuple["StorageBox", "Layout"]:
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2652,7 +2649,7 @@ class BaseView(IRNode):
     def dtype(self) -> torch.dtype:
         return self.data.get_dtype()
 
-    def get_layout(self) -> Layout:
+    def get_layout(self) -> "Layout":
         return self.data.get_layout()
 
     def get_device(self) -> Optional[torch.device]:
@@ -3134,7 +3131,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: Layout
+    layout: "Layout"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -3184,7 +3181,7 @@ class ReinterpretView(BaseView):
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.layout.make_indexer()
 
-    def get_layout(self) -> Layout:
+    def get_layout(self) -> "Layout":
         return self.layout
 
     def freeze_layout(self) -> None:
@@ -3199,7 +3196,7 @@ class ReinterpretView(BaseView):
             | get_free_symbols(self.layout.offset, unbacked_only)
         )
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
@@ -3606,7 +3603,7 @@ class Layout(OutputSpec):
     def should_pad_strides(self) -> bool:
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
 
-    def as_fixed(self) -> FixedLayout:
+    def as_fixed(self) -> "FixedLayout":
         if isinstance(self, FixedLayout):
             return self
 
@@ -3805,7 +3802,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
+    def __init__(self, view: Union[BaseView, "TensorBox"]) -> None:
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -3917,7 +3914,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> Buffer:
+    def get_buffer(self) -> "Buffer":
         def unwrap_views(target: Any) -> Any:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -4076,7 +4073,7 @@ class Buffer(IRNode):
 
         return loader
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return self.get_name()
 
     def decide_layout(self) -> None:
@@ -4172,7 +4169,7 @@ class NoneAsConstantBuffer(IRNode):
     ) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return V.graph.wrapper_code.none_str
 
     def get_output_spec(self) -> OutputSpec:
@@ -4191,7 +4188,7 @@ class ShapeAsConstantBuffer(IRNode):
     ) -> OrderedSet[sympy.Symbol]:
         return get_free_symbols(self.expr, unbacked_only)
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
@@ -4705,7 +4702,7 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
 
-    def benchmark(self, *args: Any, out: Tensor) -> float:
+    def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
         return benchmarker.benchmark(algo, args, {"out": out})
 
@@ -4718,7 +4715,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> Union["TensorBox", ShapeAsConstantBuffer]:
         raise NotImplementedError
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
@@ -4940,7 +4937,7 @@ class ConcatKernel(NopKernel):
     """
 
     @classmethod
-    def create(cls, inputs: Sequence[IRNode], dim: int) -> StorageBox:
+    def create(cls, inputs: Sequence[IRNode], dim: int) -> "StorageBox":
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
         new_size = list(inputs[0].get_size())
@@ -5136,7 +5133,7 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
-    mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
+    mutation_outputs: list["MutationOutput"] = dataclasses.field(default_factory=list)
 
     def __init__(
         self,
@@ -5214,12 +5211,12 @@ class ExternKernel(InputsKernel):
             self.apply_constraint()
             self.freeze_layout()
 
-    def codegen_comment(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen_comment(self, wrapper: "PythonWrapperCodegen") -> None:
         origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         raise NotImplementedError
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
@@ -5278,7 +5275,7 @@ class ExternKernel(InputsKernel):
             return self.python_kernel_name
 
     @staticmethod
-    def copy_input(x: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def copy_input(x: IRNode) -> Union["TensorBox", ShapeAsConstantBuffer]:
         pw = Pointwise.create(
             device=x.get_device(),
             dtype=x.get_dtype(),
@@ -5848,7 +5845,7 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
-    def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen_size_asserts(self, wrapper: "PythonWrapperCodegen") -> None:
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
@@ -5931,7 +5928,7 @@ class ExternKernel(InputsKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         kernel_name = self.get_kernel_name()
@@ -6006,7 +6003,7 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
@@ -6087,7 +6084,7 @@ class TMADescriptor(ExternKernel):
 
     # as TMA descriptors are immutable,
     # we can dedup them by the input args
-    _CACHE: dict[Any, TMADescriptor] = {}
+    _CACHE: dict[Any, "TMADescriptor"] = {}
 
     @classmethod
     def create(
@@ -6096,7 +6093,7 @@ class TMADescriptor(ExternKernel):
         dims: list[Union[int, torch.SymInt]],
         block_dims: list[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
-    ) -> TMADescriptor:
+    ) -> "TMADescriptor":
         key = (id(tensor), dims, block_dims, element_size)
         if key not in cls._CACHE:
             cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
@@ -6148,7 +6145,7 @@ class TMADescriptor(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.generate_tma_descriptor(self)
 
 
@@ -6184,7 +6181,7 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel = kernel.fn
         return kernel, configs, restore_value_args, reset_to_zero_args
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         (
@@ -6352,7 +6349,7 @@ class InplaceBernoulliFallback(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         assert all(isinstance(t, IRNode) for t in self.inputs)
         (x,) = (cast(IRNode, t).codegen_reference() for t in self.inputs)
 
@@ -6397,7 +6394,7 @@ class InplaceCopyFallback(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         (dst, src, non_blocking) = self.codegen_args()
         wrapper.codegen_device_copy(src, dst, non_blocking)
 
@@ -6431,7 +6428,7 @@ class InplaceCopyFallback(ExternKernel):
     @classmethod
     def create(
         cls, dst: IRNode, src: IRNode, non_blocking: bool = False
-    ) -> InplaceCopyFallback:
+    ) -> "InplaceCopyFallback":
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
@@ -6447,7 +6444,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         argrefs = [
             *(t.codegen_reference() for t in self.inputs_as_nodes),
             *map(repr, self.constant_args),
@@ -6519,7 +6516,7 @@ class ScatterFallback(ExternKernel):
     It also handle the case `src` being a scalar properly.
     """
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         reduce = self.kwargs["reduce"]
         if V.graph.cpp_wrapper:
             # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
@@ -6592,7 +6589,7 @@ class IndexPutFallback(ExternKernel):
     This needs to be a custom class to handle mutation and indices properly
     """
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         (x, values, *valid_indices) = (
             t.codegen_reference() for t in self.inputs_as_nodes
         )
@@ -6670,7 +6667,7 @@ class DeviceCopy(ExternKernelOut):
             constant_args,
         )
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         args = self.codegen_args()
         assert len(args) == 2
         if self.output_view:
@@ -6705,7 +6702,7 @@ class DynamicScalar(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.sym])
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.codegen_dynamic_scalar(self)
 
 
@@ -6720,7 +6717,7 @@ class AssertScalar(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def __init__(self, scalar: SympyBoolean, msg: str) -> None:
+    def __init__(self, scalar: "SympyBoolean", msg: str) -> None:
         super().__init__(
             # Buffer(name, layotu)
             None,
@@ -6739,7 +6736,7 @@ class AssertScalar(ExternKernel):
     ) -> OrderedSet[sympy.Symbol]:
         return get_free_symbols(self.scalar, unbacked_only)
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         if not config.scalar_asserts:
             return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
@@ -6881,7 +6878,7 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen_unbacked_symbol_defs(self, wrapper: "PythonWrapperCodegen") -> None:
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
         )
@@ -6921,7 +6918,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     @staticmethod
     def find_device(
-        tensor_args: Optional[Sequence[Tensor]], example_output: Sequence[Any]
+        tensor_args: Optional[Sequence[torch.Tensor]], example_output: Sequence[Any]
     ) -> Any:
         non_torch_bind_tensor_args = (
             [t for t in tensor_args if not isinstance(t, TorchBindObject)]
@@ -7060,7 +7057,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         return [*args, *ordered_kwargs]
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         kernel = self.op_overload
         assert kernel is not None
         if kernel.namespace == "aten":
@@ -7145,7 +7142,9 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
+    def create(
+        cls, kernel: _OpOverloads, *args: Any, **kwargs: Any
+    ) -> "FallbackKernel":
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
@@ -7293,7 +7292,7 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(
@@ -7440,7 +7439,7 @@ class MutableBox(IRNode):
     def get_defining_op(self) -> Optional[Operation]:
         return self.data.get_defining_op()
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return self.data.codegen_reference(writer)
 
     @property
@@ -7483,7 +7482,7 @@ class MutableBox(IRNode):
 
 class TensorBox(MutableBox):
     @staticmethod
-    def create(data: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def create(data: IRNode) -> Union["TensorBox", ShapeAsConstantBuffer]:
         if isinstance(data, ShapeAsConstantBuffer):
             return data
         return TensorBox(StorageBox(data))
@@ -7583,7 +7582,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
-    graph: Optional[GraphLowering] = None
+    graph: Optional["GraphLowering"] = None
 
 
 def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
@@ -7691,7 +7690,7 @@ class InvokeSubgraph(ExternKernel):
         invoke_subgraph.outputs = outputs_  # type: ignore[assignment]
         return outputs_  # type: ignore[return-value]
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.codegen_invoke_subgraph(self)
 
 
@@ -7823,7 +7822,7 @@ class Conditional(ExternKernel):
         conditional.outputs = outputs  # type: ignore[assignment]
         return outputs
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.codegen_conditional(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
@@ -8064,7 +8063,7 @@ class WhileLoop(ExternKernel):
                 V.graph.never_reuse_buffers.add(out.get_name())
         return all_outputs
 
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.codegen_while_loop(self)
 
 
@@ -8122,15 +8121,15 @@ class NonTensorObj(IRNode):
 @ir_dataclass
 class TorchBindObject(NonTensorObj):
     name: str
-    value: Union[FakeScriptObject, torch.ScriptObject]
+    value: Union["FakeScriptObject", torch.ScriptObject]
 
     def get_name(self) -> str:
         return self.name
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return self.name
 
-    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
+    def get_value(self) -> Union["FakeScriptObject", torch.ScriptObject]:
         return self.value
 
     def get_real_obj(self) -> torch.ScriptObject:
@@ -8161,7 +8160,7 @@ class GeneratorState(NonTensorObj):
     def get_name(self) -> str:
         return self.name
 
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+    def codegen_reference(self, writer: Optional["IndentedBuffer"] = None) -> str:
         return self.name
 
 
@@ -8263,7 +8262,7 @@ class _CollectiveKernel(FallbackKernel):
         inputs: Union[TensorBox, list[TensorBox]],
         *args: Any,
         **kwargs: Any,
-    ) -> Union[list[MultiOutput], _CollectiveKernel]:
+    ) -> Union[list[MultiOutput], "_CollectiveKernel"]:
         with V.graph.fake_mode:
             (
                 example_output,
