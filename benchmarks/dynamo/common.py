@@ -1726,6 +1726,7 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.Adam(
                     params, lr=0.01, capturable=True, foreach=True
                 )
+                self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
         else:
             self.optimizer = None
 
