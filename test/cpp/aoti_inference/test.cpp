@@ -230,6 +230,16 @@ void test_aoti_constants_update(
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  for (auto& pair : missing_map) {
+    delete pair.second;
+  }
+  for (auto& pair : rand_map) {
+    delete pair.second;
+  }
+  for (auto& pair : real_map) {
+    delete pair.second;
+  }
 }
 
 void test_aoti_extract_constants_map(const std::string& device) {
@@ -395,6 +405,13 @@ void test_aoti_double_buffering(
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  for (auto& pair : rand_map) {
+    delete pair.second;
+  }
+  for (auto& pair : real_map) {
+    delete pair.second;
+  }
 }
 
 #if defined(USE_CUDA) || defined(USE_ROCM)
@@ -435,6 +452,10 @@ void test_aoti_double_buffering_with_tensor_constants() {
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  for (auto& pair : real_map) {
+    delete pair.second;
+  }
 }
 
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
@@ -610,11 +631,19 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
+
   ASSERT_EQ(
       initMemory + DATASIZE - (torchReserved2 - initTorchReserved),
       updateMemory1);
   ASSERT_EQ(FOLDEDDATASIZE, torchActive1 - torchActive2);
   ASSERT_EQ(0, torchActive2 - initTorchActive);
+
+  for (auto& pair : rand_map) {
+    delete pair.second;
+  }
+  for (auto& pair : real_map) {
+    delete pair.second;
+  }
 }
 
 class ThreadPool {
