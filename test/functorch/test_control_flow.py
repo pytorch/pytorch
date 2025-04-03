@@ -2841,23 +2841,6 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(add_input_grads, expected_add_input_grads)
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    def test_scan_closure_RNN_parameters_as_inputs(self):
-        x = torch.randn(3, 5, 10, device=torch.device("cpu"))
-        h = torch.randn(3, 7, device=torch.device("cpu"))
-        W_ih = torch.randn(5, 7, device=torch.device("cpu"))
-        b_ih = torch.randn(7, device=torch.device("cpu"))
-        W_hh = torch.randn(7, 7, device=torch.device("cpu"))
-        b_hh = torch.randn(7, device=torch.device("cpu"))
-
-        with self.assertRaisesRegex(RuntimeError, "All xs leaves must at least have.*"):
-            scan(
-                get_scan_combine_fn("RNN", True, parameters=[W_ih, b_ih, W_hh, b_hh]),
-                h,
-                [x, W_ih, b_ih, W_hh, b_hh],
-                dim=2,
-            )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])

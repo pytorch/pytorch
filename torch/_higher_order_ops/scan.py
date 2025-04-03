@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Iterable
+from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
-import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
@@ -90,7 +89,7 @@ def first_slice_copy_with_grad(li):
     return slc
 
 
-def split_into_chunks(iterable: Iterable[Any], chunk_sizes: list[int]) -> list[Any]:
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
     it = iter(iterable)
     assert sum(chunk_sizes) == len(
         iterable
@@ -471,7 +470,8 @@ class ScanAutogradOp(torch.autograd.Function):
     i.e., bwd_xs = [*g_ys, *bw_carries, *fw_xs], with bw_carries = concat([fw_init, fw_carries[:-1]]).
 
     For ease of understanding the procedure of the gradient calculation is as follows:
-    One starts from the last step with the init being the upstream gradient of initial_g_additional_inputs (all zeros) and g_last_carry.
+    One starts from the last step with the init being the upstream gradient of initial_g_additional_inputs (all zeros)
+    and g_last_carry.
     Then, in the first scan step, we compute the gradients g_c_T, g_xs_T and g_addititional_inputs_T with
     g_c_(T-1), g_xs_T and g_addititional_inputs_T = bw_fn(c_(T-1), xs_T, additional_inputs, g_last_carry, g_ys_T)
     We then accumulate g_addititional_inputs_T with the g_addititional_inputs_T and thus use as the init for the next step
@@ -628,16 +628,9 @@ class ScanAutogradOp(torch.autograd.Function):
         def combine_fn_bw_grad_accumulation(*args):
             # Separate off gradient accumulation for additional arguments from the arguments used for ``ctx._combine_fn_bw``
             # The content of ``combine_fn_bw_args`` is [*carries_g, *outs_g, *init, *xs, *additional_inputs]
-            carried_g_additional_input, combine_fn_bw_args = split_into_chunks(
-                args,
-                [
-                    num_additional_inputs,
-                    num_leaves_init
-                    + num_leaves_ys
-                    + num_leaves_init
-                    + num_leaves_xs
-                    + num_additional_inputs,
-                ],
+            carried_g_additional_input, combine_fn_bw_args = (
+                args[:num_additional_inputs],
+                args[num_additional_inputs:],
             )
 
             g_c_t, g_xs_t, g_additional_inputs_t = split_into_chunks(
