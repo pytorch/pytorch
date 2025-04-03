@@ -57,7 +57,7 @@ static void initHipSparseLtSupport() {
 
 static bool isHipSparseLtSupported(int idx) {
     // Initialize support check only once
-    std::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
+    c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
 
     // Return cached result (platform-wide)
     return g_hipSparseLtSupported;
