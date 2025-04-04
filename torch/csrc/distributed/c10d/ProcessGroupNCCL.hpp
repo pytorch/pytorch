@@ -1169,9 +1169,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
 
-  // promise to coordinate flight recorder dump.
-  std::promise<void> promiseFlightRecorderDump_;
-
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.
   int coordCheckIntervalMilSec_;

@@ -941,7 +941,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
-  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 300);
+  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -1815,8 +1815,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     if (logger) {
       logger->log(debugLog);
     }
-    // Indicate to watchdog thread that we have finished dumping.
-    promiseFlightRecorderDump_.set_value();
   }
 
   // GIL deadlock check.
@@ -2146,20 +2144,13 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
   }
-  // Give time for dumping before throwing exception
-  auto start = std::chrono::steady_clock::now();
-  auto status = promiseFlightRecorderDump_.get_future().wait_for(
+  // Give time for dumping before throwing exception for all ranks.
+  // It is hard to presume or control what the pattern of watchdog might look
+  // like, so it is better to let all ranks universally sleep for a short period
+  // of time, in this case, 60 seconds, which is also the maximum time we leave
+  // for FR dump.
+  std::this_thread::sleep_for(
       std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-  if (status == std::future_status::timeout) {
-    LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                 << waitTimeoutDumpInMilSec_ << "ms"
-                 << " flight recorder dumps to finish.";
-  } else if (status == std::future_status::ready) {
-    auto end = std::chrono::steady_clock::now();
-    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms"
-              << " giving time for flight recorder dumps to finish.";
-  }
 }
 
 void ProcessGroupNCCL::checkAndSetRemoteError() {
