@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
-    IS_WINDOWS,
     retry_shell,
     set_cwd,
     shell,
@@ -172,19 +171,10 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_shard/checkpoint/test_checkpoint"
-    "distributed/_shard/checkpoint/test_file_system_checkpoint"
-    "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharded_tensor/ops/test_embedding",
-    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
-    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
-    "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/tensor/test_attention",
 ]
 
 S390X_BLOCKLIST = [
@@ -1377,11 +1367,7 @@ def parse_args():
         default=IS_CI
         and (
             TEST_WITH_CROSSREF
-            or TEST_WITH_ASAN
-            or (TEST_CONFIG == "distributed" and TEST_CUDA)
-            or (IS_WINDOWS and not TEST_CUDA)
-            or TEST_CONFIG == "nogpu_AVX512"
-            or TEST_CONFIG == "nogpu_NO_AVX2"
+            or TEST_CONFIG == "distributed"
             or TEST_CONFIG == "default"
         )
         and get_pr_number() is not None
