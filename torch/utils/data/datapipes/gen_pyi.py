@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import os
-import pathlib
-from collections import defaultdict
-from pathlib import Path
-from typing import Any, Union
-from typing_extensions import deprecated
+from collections import defaultdict as _defaultdict
+from pathlib import Path as _Path
+from typing import Any as _Any, Union as _Union
+from typing_extensions import deprecated as _deprecated
 
 
 try:
@@ -15,7 +14,7 @@ try:
 except ImportError:
     import sys
 
-    REPO_ROOT = Path(__file__).absolute().parents[4]
+    REPO_ROOT = _Path(__file__).absolute().parents[4]
     sys.path.insert(0, str(REPO_ROOT))
 
     from torchgen.api.python import (
@@ -27,7 +26,7 @@ except ImportError:
         del sys.path[0]
 
 
-@deprecated(
+@_deprecated(
     "`torch.utils.data.datapipes.gen_pyi.materialize_lines` is deprecated and will be removed in the future.",
     category=FutureWarning,
 )
@@ -41,7 +40,7 @@ def materialize_lines(lines: list[str], indentation: int) -> str:
     return output
 
 
-@deprecated(
+@_deprecated(
     "`torch.utils.data.datapipes.gen_pyi.gen_from_template` is deprecated and will be removed in the future.",
     category=FutureWarning,
 )
@@ -49,7 +48,7 @@ def gen_from_template(
     dir: str,
     template_name: str,
     output_name: str,
-    replacements: list[tuple[str, Any, int]],
+    replacements: list[tuple[str, _Any, int]],
 ):
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
@@ -108,7 +107,7 @@ def parse_datapipe_file(
 ) -> tuple[dict[str, list[str]], dict[str, str], set[str], dict[str, list[str]]]:
     """Given a path to file, parses the file and returns a dictionary of method names to function signatures."""
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
-    doc_string_dict = defaultdict(list)
+    doc_string_dict = _defaultdict(list)
     with open(file_path, encoding="utf-8") as f:
         open_paren_count = 0
         method_name, class_name, signature = "", "", ""
@@ -223,7 +222,7 @@ def process_signature(line: str) -> list[str]:
 
 
 def get_method_definitions(
-    file_path: Union[str, list[str]],
+    file_path: _Union[str, list[str]],
     files_to_exclude: set[str],
     deprecated_files: set[str],
     default_output_type: str,
@@ -238,7 +237,7 @@ def get_method_definitions(
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
     """
     if root == "":
-        root = str(pathlib.Path(__file__).parent.resolve())
+        root = str(_Path(__file__).parent.resolve())
     file_path = [file_path] if isinstance(file_path, str) else file_path
     file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(
@@ -318,7 +317,7 @@ def main() -> None:
         mapDP_method_to_special_output_type,
     )
 
-    path = Path(__file__).absolute().parent
+    path = _Path(__file__).absolute().parent
     fm = _FileManager(install_dir=path, template_dir=path, dry_run=False)
     fm.write_with_template(
         "datapipe.pyi",
