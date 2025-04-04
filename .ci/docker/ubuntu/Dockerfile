@@ -131,7 +131,6 @@ RUN bash ./install_triton.sh
 # Install ccache/sccache (do this last, so we get priority in PATH)
 FROM base as sccache
 COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
 RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
 RUN rm install_cache.sh
 
