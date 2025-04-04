@@ -534,7 +534,8 @@ class MetalKernel(SIMDKernel):
         reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         acc_buf_size = min(reduction_dim.numel, self.max_threadgroup_size)
         if reduction_type == "any":
-            acc = self._new_idxvar(dtype, default_value="false")
+            acc = self._new_idxvar(dtype)
+            self.indexing_code.writeline(f"{acc} = false;")
             self.indexing_code.writeline(
                 "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
             )
