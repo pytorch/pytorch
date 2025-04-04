@@ -1568,17 +1568,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         def create_new_tensor_handle() -> tuple[str, list[str]]:
-            # TODO (benjaminglass1): uncomment this and remove the call to
-            # create_reinterpret_view after the AOTI forwards compatibility window has
-            # passed.
-            #
-            # tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            # tmp_call_strs = [
-            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
-            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            # ]
-            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
-            return create_reinterpret_call(), []
+            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
