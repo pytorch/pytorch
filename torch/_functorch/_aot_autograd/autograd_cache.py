@@ -373,6 +373,8 @@ class FXGraphCacheLoadable:
         # so we can call it only after we're sure both forward and backward have
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
+        # Clear CompiledTritonKernels before loading from FXGraphCache
+        torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
         remote_cache = None
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():

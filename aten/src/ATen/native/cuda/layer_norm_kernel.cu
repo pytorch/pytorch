@@ -657,6 +657,7 @@ bool aligned_grid
 >
 __global__
 void
+__launch_bounds__(block_dim_x * block_dim_y)
  GammaBetaBackwardCUDAKernelTemplate(
     int64_t M,
     int64_t N,
