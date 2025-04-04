@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
 )
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -86,7 +87,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 def _maybe_compile_and_run_fn(fn, *args):
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_dynamo_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
@@ -293,6 +294,10 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+            )
         return gm
 
 
@@ -479,6 +484,24 @@ def _maybe_fake_prop_ignore_unbacked(fn, args):
                     fake_mode.shape_env.ignore_fresh_unbacked_symbols()
                 )
         return fn(*args)
+
+
+def redirect_to_mode(hop: OperatorBase, mode):
+    """Utility for redispatching HOP to underlying mode
+
+    Args:
+        hop: The HOP to redispatch
+        mode: The mode to redispatch to
+
+    Returns:
+        A decorated function that implements the HOP for the given mode
+    """
+
+    @hop.py_impl(mode)
+    def impl(mode, *args, **kwargs):
+        return mode.__torch_dispatch__(hop, [], args, kwargs)
+
+    return impl
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
@@ -777,10 +800,7 @@ def register_fake(hop, fn=None):
     def register(func):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # Redirect the hop to the fake tensor mode implementation.
-        @hop.py_impl(FakeTensorMode)
-        def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(hop, [], args, kwargs)
+        redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
         return func

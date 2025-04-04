@@ -866,8 +866,16 @@ class FakeTensor(Tensor):
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
+        # list of ops which can have args(tensor/tensorList) in mixed device
+        mixed_device_fns = ordered_set(
+            aten._foreach_copy.default,
+        )
+
+        def check_cpu_device(device: torch.device) -> bool:
+            return device.type == "cpu"
+
         def cpu_zero_dim(t: Tensor) -> bool:
-            return t.device.type == "cpu" and t.dim() == 0
+            return check_cpu_device(t.device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
@@ -896,6 +904,14 @@ class FakeTensor(Tensor):
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
+
+            # if still device mismatches we will check ops which can work
+            # on different devices for ex. _foreach_copy, and one of the
+            # device must be cpu in this case we will return from here without
+            # throwing an error
+            if func in mixed_device_fns:
+                if any(map(check_cpu_device, (common_device, t.device))):
+                    return
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
@@ -1499,14 +1515,15 @@ class FakeTensorMode(TorchDispatchMode):
                 for node in subgraph_mod.graph.nodes:
                     if node.op == "call_function":
                         op = node.target
-                        # Dynamo graphs can have operator.add type of operations. For these operations, it is safe to cache.
-                        if (
-                            callable(op)
-                            and getattr(op, "__module__", None)
-                            in {"_operator", "operator"}
-                            and not op.__name__.startswith("i")
-                        ):
-                            continue
+
+                        # AOTDispatcher first pass does not run make_fx on
+                        # dynamo graphs. As a result, it can have non OpOverload
+                        # ops.
+                        if not isinstance(op, torch._ops.OpOverload):
+                            raise _BypassDispatchCache(
+                                f"{func.name()} hop with a non OpOverload input"
+                            )
+
                         try:
                             self._validate_cache_key(op, [], {})
                         except _BypassDispatchCache as e:

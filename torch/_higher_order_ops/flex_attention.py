@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
+    redirect_to_mode,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -479,18 +480,9 @@ def flex_attention_fake_tensor_mode(
         return out, logsumexp
 
 
-@flex_attention.py_impl(_CachingTorchDispatchMode)
-def _flex_caching(
-    mode: _CachingTorchDispatchMode, *args: Any, **kwargs: Any
-) -> tuple[torch.Tensor, torch.Tensor]:
-    return mode.__torch_dispatch__(flex_attention, (), args, kwargs)
-
-
-@flex_attention.py_impl(_CachedTorchDispatchMode)
-def _flex_cached(
-    mode: _CachedTorchDispatchMode, *args: Any, **kwargs: Any
-) -> tuple[torch.Tensor, torch.Tensor]:
-    return mode.__torch_dispatch__(flex_attention, (), args, kwargs)
+# Registers dispatches for SAC
+redirect_to_mode(flex_attention, _CachingTorchDispatchMode)
+redirect_to_mode(flex_attention, _CachedTorchDispatchMode)
 
 
 # ---------------------------- Autograd Implementation ----------------------------
