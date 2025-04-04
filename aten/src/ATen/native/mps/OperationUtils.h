@@ -123,7 +123,7 @@ class ConstMTLBufferTensor {
 
   // WARNING: Do not write to the buffer returned by this function.
   id<MTLBuffer> mtl_buffer_unsafe() const {
-    return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage.data());
+    return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage().data());
   }
 
   const TensorBase& tensor() const {
