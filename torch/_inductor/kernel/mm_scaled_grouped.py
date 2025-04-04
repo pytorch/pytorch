@@ -3,6 +3,7 @@ import logging
 from typing import Any, Optional
 
 import torch
+import triton
 from torch._dynamo.utils import counters
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton_tma_device
@@ -17,11 +18,140 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import get_num_sms, get_tma_workspace_arg, use_aten_gemm_kernels
-from .mm_common import _is_static_problem, check_supported_striding, persistent_mm_grid
+from .mm_common import _is_static_problem, check_supported_striding, persistent_grouped_mm_grid
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+
+
+_NV_CONFIGS = [
+    triton.Config(
+        {
+            "BLOCK_M": block_size_m,
+            "BLOCK_N": block_size_n,
+            "BLOCK_K": block_size_k,
+            "NUM_CONSUMER_GROUPS": 1,
+        },
+        num_stages=num_stages,
+        num_warps=num_warps,
+    )
+    for block_size_m in [64]
+    for block_size_n in [64]
+    for block_size_k in [64]
+    for num_stages in [3]
+    for num_warps in [8]
+]
+
+_AMD_CONFIGS = [
+    triton.Config(
+        {
+            "BLOCK_M": block_size_m,
+            "BLOCK_N": block_size_n,
+            "BLOCK_K": block_size_k,
+            "waves_per_eu": waves_per_cu,
+            "matrix_instr_nonkdim": matrix_instr_nonkdim,
+            "NUM_CONSUMER_GROUPS": 1,
+        },
+        num_stages=num_stages,
+        num_warps=num_warps,
+    )
+    for block_size_m in [32, 64, 128]
+    for block_size_n in [32, 64, 128, 256]
+    for block_size_k in [128, 256]
+    for num_stages in [1, 2]
+    for num_warps, waves_per_cu in [(4, 1), (8, 2), (16, 4)]
+    for matrix_instr_nonkdim in [16]
+]
+
+def scaled_grouped_mm_configs():
+    return _AMD_CONFIGS if torch.version.hip else _NV_CONFIGS
+
+
+def early_config_prune(configs, named_args):
+    from triton.runtime import driver
+
+    device = torch.cuda.current_device()
+    dtsize = 1
+
+    pruned_configs = []
+    for config in configs:
+        kw = config.kwargs
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, num_consumer_groups = (
+            kw["BLOCK_M"],
+            kw["BLOCK_N"],
+            kw["BLOCK_K"],
+            config.num_stages,
+            config.num_warps,
+            getattr(config, "num_consumer_groups", 0),
+        )
+        G, M, N, K = (
+            named_args["G"],
+            named_args["M_BUCKET"],
+            named_args["N"],
+            named_args["K"],
+        )
+
+        # 1. make sure we have enough smem
+        max_shared_memory = driver.active.utils.get_device_properties(device)[
+            "max_shared_mem"
+        ]
+        if torch.version.hip:
+            required_shared_memory = BLOCK_N * BLOCK_K * num_stages * dtsize
+        else:
+            required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
+        if required_shared_memory > max_shared_memory:
+            continue
+
+        use_warp_specialization = num_consumer_groups >= 1
+
+        M_PER_GROUP = M // G
+        MIN_M_TILES = 32 if torch.version.hip else 64
+        # 2. make sure we don't load M tiles that are too big
+        if (
+            not use_warp_specialization
+            and BLOCK_M > MIN_M_TILES
+            and BLOCK_M > (M_PER_GROUP * 2)
+        ):
+            continue
+        # 3. make sure we don't load N tiles that are too small
+        if BLOCK_M < 128 and BLOCK_M < (M_PER_GROUP // 2):
+            continue
+
+        num_sm = driver.active.utils.get_device_properties(device)[
+            "multiprocessor_count"
+        ]
+        N_TILES = N // BLOCK_N
+        MIN_N_TILES = 32 if torch.version.hip else 64
+        # 4. make sure we don't load N tiles that are too big
+        if (
+            not use_warp_specialization
+            and BLOCK_N > MIN_N_TILES
+            and M * N_TILES < num_sm
+        ):
+            continue
+        # 5. make sure we don't load N tiles that are too small
+        if BLOCK_N < 128 and M * N_TILES > 2 * num_sm:
+            continue
+
+        # 6. make sure K can be evenly divided
+        if K % BLOCK_K != 0:
+            continue
+
+        # 7. make sure we can partition for ws
+        if use_warp_specialization:
+            if num_warps != 4:
+                continue
+
+            # "tritongpu-warp-spec-data-partition"
+            m_slice = BLOCK_M // num_consumer_groups
+            n_slice = BLOCK_N // num_consumer_groups
+            if m_slice < 64 and n_slice < 256:
+                continue
+
+        pruned_configs.append(config)
+
+    return pruned_configs
 
 
 # Copied from fbgemm grouped_gemm.py
@@ -141,9 +271,10 @@ triton_scaled_grouped_mm_source = r"""
             iterated_tiles += num_tiles
 """
 
+
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
-    grid=persistent_mm_grid,
+    grid=persistent_grouped_mm_grid,
     source=triton_scaled_grouped_mm_source,
 )
 
@@ -270,27 +401,22 @@ def tuned_scaled_grouped_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    scaled_grouped_mm_configs = V.choices.get_scaled_grouped_mm_configs(device_type)
-
     if is_nonzero and can_use_triton_kernel(offs, bias, m1_size, m2_size):
         m, k1 = m1_size
         g, k2, n = m2_size
         k = V.graph.sizevars.guard_equals(k1, k2)
-        for config in scaled_grouped_mm_configs(m, n, k):
-            kwargs = {
-                "G": g,
-                "M": m,
-                "M_BUCKET": next_power_of_2(m),
-                "N": n,
-                "K": k,
-                "NUM_SMS": get_num_sms(),
-                "USE_TMA_LOAD": True,
-                "USE_TMA_STORE": False,
-                "USE_FAST_ACCUM": use_fast_accum,
-                "num_stages": config.num_stages,
-                "num_warps": config.num_warps,
-                **config.kwargs,
-            }
+        kwargs = {
+            "G": g,
+            "M": m,
+            "M_BUCKET": next_power_of_2(m),
+            "N": n,
+            "K": k,
+            "NUM_SMS": get_num_sms(),
+            "USE_TMA_LOAD": True,
+            "USE_TMA_STORE": False,
+            "USE_FAST_ACCUM": use_fast_accum,
+        }
+        for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
@@ -299,7 +425,10 @@ def tuned_scaled_grouped_mm(
                     num_tma_descriptors=2,
                     device=mat_a.get_device(),
                 ),
+                num_stages=config.num_stages,
+                num_warps=config.num_warps,
                 **kwargs,
+                **config.kwargs,
             )
 
     return autotune_select_algorithm("scaled_grouped_mm", choices, input_nodes, layout)

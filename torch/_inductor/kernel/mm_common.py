@@ -55,6 +55,11 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     )
 
 
+@SymbolicGridFn
+def persistent_grouped_mm_grid(m, n, meta):
+    return (meta["NUM_SMS"], 1, 1)
+
+
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
