@@ -1299,6 +1299,19 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return result
 
 
+# When a or b is evaluated, a is evaluated eagerly first then b. This causes
+# a data dependent error for an expression “if u0==1 or True”. or over guarding for
+# “if s0==1 or True”.
+
+# On the other hand, when we use operator.or_, then dynamo will generate
+# a sympy expression Sympy.Or(u0==1, True) without evaluating the args first.
+
+# When the whole expression is passed to evaluation in that case, we do not throw a
+# data dependent error or guard because we can statically know the result is True
+# before unpacking the symbols.
+sym_or = operator.or_
+
+
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
