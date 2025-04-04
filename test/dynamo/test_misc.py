@@ -10211,8 +10211,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {44, 93}
   > Right: {}
 ==> val_to_var: values don't match.
-  >  Left: {0: 0, 1: 1, 2: s44, 3: s93}
-  > Right: {0: 0, 1: 1}
+  >  Left: {2: s44, 3: s93}
+  > Right: {}
 ==> var_to_range: values don't match.
   >  Left: {s44: VR[2, int_oo], s93: VR[2, int_oo]}
   > Right: {}
