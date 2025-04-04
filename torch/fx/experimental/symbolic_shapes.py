@@ -1278,7 +1278,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 
 
 # When a or b is evaluated, a is evaluated eagerly first then b. This causes
-# a data dependent error for an expression “if u0==1 or True”. or overguarding for
+# a data dependent error for an expression “if u0==1 or True”. or over guarding for
 # “if s0==1 or True”.
 
 # On the other hand, when we use operator.or_, then dynamo will generate
