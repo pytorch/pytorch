@@ -170,7 +170,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         return
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool, rank: Optional[int] = None, no_rank_coordination: bool = False) -> None:
         self._fail_rank("fail_set_up_storage_writer")
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -203,7 +203,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         return
 
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool, rank: Optional[int] = None, no_rank_coordination: bool = False) -> None:
         self._fail_rank("fail_set_up_storage_reader")
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
@@ -218,7 +218,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_read_data")
         return self._fail_rank_async("fail_read_data_async")
 
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, rank: Optional[int] = None) -> Metadata:
         self._fail_rank("fail_read_metadata")
         return self.metadata
 
