@@ -2,6 +2,9 @@ import torch
 
 from torch._inductor.experimental.padded_tensor import PaddedTensor
 from torch._inductor.test_case import run_tests, TestCase
+from transformer_model import *
+
+from torch.utils import _pytree as pytree
 
 
 class PaddedTensorFunctionalTests(TestCase):
@@ -123,6 +126,52 @@ class NNOpTests(TestCase):
             self.assertEqual(y_p.shape, (16, 16, 9))
             self.assertEqual(y_p.original_tensor.shape, (i, i, 9))
             self.assertEqual(y, y_p.unpad())
+
+
+class ModelTests(TestCase):
+    def setUp(self):
+        super().setUp()
+
+    def test_transformer(self):
+        with torch.device("cuda"):
+            bsz = 8
+
+            # Set up transformer
+            args = ModelArgs.from_name("mini")
+            transformer = Transformer(args)
+            transformer.setup_caches(bsz, 16)
+
+            transformer = torch.compile(transformer, mode="reduce-overhead")
+
+            for seqlen in range(3, 15):
+                print("seqlen = ", seqlen)
+                # Set error_on_recompile to True after 3rd iteration.
+                # TODO: We don't need this if we mark padded dimensions as dynamic.
+                if seqlen == 5:
+                    torch._dynamo.config.error_on_recompile = True
+
+                # Run unpadded
+                inputs = (
+                    torch.randint(0, 3, (bsz, seqlen)),
+                    torch.arange(0, seqlen, dtype=torch.int32),
+                )
+
+                out = transformer(*inputs)
+                out = out.clone()
+
+                # Run padded
+                inputs_p = [
+                    PaddedTensor.from_tensor(inputs[0], multipliers={0: 1, 1: 32}),
+                    PaddedTensor.from_tensor(
+                        inputs[1], multipliers={0: 32}, neutral_element=-1
+                    ),
+                ]
+
+                out_p = transformer(*inputs_p)
+                out_p = out_p.clone()
+
+                # Check
+                self.assertEqual(out, out_p.unpad())
 
 
 if __name__ == "__main__":

@@ -176,7 +176,8 @@ class PaddedTensor(torch.Tensor):
         assert spec == out_shapes_spec
 
         out_flat = [
-            PaddedTensor(o, multipliers, s) for o, s in zip(out_flat, out_shapes_flat)
+            PaddedTensor(o, multipliers, s) if o is not None and s is not None else o
+            for o, s in zip(out_flat, out_shapes_flat)
         ]
 
         out = pytree.tree_unflatten(out_flat, spec)
@@ -195,7 +196,9 @@ class PaddedTensor(torch.Tensor):
             "split_with_sizes",
             "flatten",
             "scaled_dot_product_attention",
+            "grad",
         ]
+
         if func.__name__ in shape_decomp_ops:
             out = cls.execute_padded(func, types, args, kwargs)
         else:
