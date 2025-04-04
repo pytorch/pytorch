@@ -70,7 +70,6 @@ mkdir /tmp/cppdocs-sync
 mv _config.yml README.md /tmp/cppdocs-sync/
 rm -rf ./*
 
-
 # Copy over all the newly generated HTML
 cp -r "${pt_checkout}"/docs/cpp/build/html/* .
 
