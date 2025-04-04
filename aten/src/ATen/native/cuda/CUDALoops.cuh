@@ -229,9 +229,13 @@ static inline void launch_vectorized_kernel(
   // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
   // that causes some numerical mismatches with uint8 on sm80 and sm90.
   // TODO: Revisit this after CUDA 12.8 update.
+#if (defined(_WIN32) || defined(_WIN64))
+  vec_size = std::min<uint16_t>(vec_size, 4);
+#else
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
+#endif
 #endif
   switch (vec_size) {
 #ifdef USE_ROCM
@@ -241,11 +245,13 @@ static inline void launch_vectorized_kernel(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
 #endif
+#if !(defined(_WIN32) || defined(_WIN64))
     case 8:
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
+#endif
     case 4:
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
