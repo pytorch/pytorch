@@ -1423,7 +1423,11 @@ class AOTInductorModelCache:
 
             # For AOTI, we only measure the memory compression ratio at the run time
             # instead of the compile time, so explicitly reset memory stats here.
-            torch.cuda.reset_peak_memory_stats()
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                empty_gpu_cache(current_device)
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
             cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
         return cls.cache[key]
