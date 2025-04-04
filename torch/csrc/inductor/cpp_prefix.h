@@ -5,17 +5,14 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
-#include <limits>
 #include <map>
 #include <memory>
-#include <optional>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
-// Because AOTInductor generated code will copy-paste this cpp_prefix.h for
-// the CPU backend, we have to make sure the used headers are implemented
-// in a header-only way, i.e. all the function and class definitions are
-// in .h files instead of .cpp files, to avoid ABI backward-compatiblity
-// breakage.
+// Because AOTInductor generated code directly includes this for the CPU
+// backend, we have to make sure the used headers are implemented in a
+// header-only way, i.e. all the function and class definitions are in .h files
+// instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
@@ -23,7 +20,9 @@
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/generic_math.h>
@@ -39,6 +38,9 @@
 #endif
 
 #if INDUCTOR_USE_VECTOR_TYPES()
+#include <limits>
+#include <optional>
+
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #else
@@ -51,6 +53,8 @@ typedef at::BFloat16 bfloat16;
 
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
+typedef at::Float8_e4m3fnuz float8_e4m3fnuz;
+typedef at::Float8_e5m2fnuz float8_e5m2fnuz;
 
 template <typename T>
 struct Welford {
@@ -353,15 +357,11 @@ inline at::vec::VectorizedN<scalar_t, N> div_floor_floating_vec(
 
 template <typename T, int NV, int NI>
 struct IndexValueVec {
-  at::vec::VectorizedN<T, NV> value;
-  at::vec::VectorizedN<int64_t, NI> index;
+  at::vec::VectorizedN<T, NV> value{};
+  at::vec::VectorizedN<int64_t, NI> index{0};
 
-  IndexValueVec(const T _value) {
-    value = at::vec::VectorizedN<T, NV>(_value);
-    index = at::vec::VectorizedN<int64_t, NI>(0);
-  };
-
-  IndexValueVec(){};
+  IndexValueVec(const T _value) : value{_value} {}
+  IndexValueVec() = default;
 };
 
 template <
@@ -507,8 +507,8 @@ template <typename T, int NV, int NI>
 inline IndexValue<T> argmin_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
-  __at_align__ int64_t tmpidx[len];
+  __at_align__ std::array<T, len> tmpval;
+  __at_align__ std::array<int64_t, len> tmpidx;
   vec.value.store(tmpval);
   vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
@@ -522,8 +522,8 @@ template <typename T, int NV, int NI>
 inline IndexValue<T> argmax_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
-  __at_align__ int64_t tmpidx[len];
+  __at_align__ std::array<T, len> tmpval;
+  __at_align__ std::array<int64_t, len> tmpidx;
   vec.value.store(tmpval);
   vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
@@ -554,7 +554,7 @@ inline at::vec::Vectorized<scalar_t> vec_shuffle_down(
     at::vec::Vectorized<scalar_t> x,
     size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
-  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
   x.store(array);
   for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
     array[i] = array[i + n];
@@ -627,7 +627,7 @@ Welford<scalar_t> welford_vec_reduce_all(
     acc = welford_combine(acc, shuffled, use_index);
   }
 
-  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
   acc.mean.store(array);
   result.mean = array[0];
 
