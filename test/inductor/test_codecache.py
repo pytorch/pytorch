@@ -1330,10 +1330,12 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_vllm(self):
+    @parametrize("dynamic", (False, True))
+    def test_standalone_compile(self, dynamic: bool):
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
-        torch._dynamo.mark_dynamic(x, 0)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
 
         def f(x):
             with torch.no_grad():
@@ -1366,18 +1368,13 @@ class TestFxGraphCache(TestCase):
             gm, args, kwargs = capture(f)(x)
             assert not kwargs
 
-            # Problem 1: args is a SymInt, which needs a shape_env.
-            # How do we pass that to inductor_compile?
             compiled_artifact = torch._inductor.standalone_compile(gm, args)
-            print("inductor compile")
             compiled_artifact.save("compiled_artifact.bin")
-            print("saved artifact")
 
         with fresh_inductor_cache():
             loaded = torch._inductor.compile_fx.CompiledArtifact.load(
                 "compiled_artifact.bin", args
             )
-            print("loaded artifact")
             compiled_out = loaded(*args)
             self.assertEqual(eager_out, compiled_out)
 

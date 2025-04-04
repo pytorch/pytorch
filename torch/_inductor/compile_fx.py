@@ -2385,7 +2385,10 @@ class CompiledArtifact:
 
     def save(self, filename: str) -> None:
         with dynamo_timed("CompiledArtifact.save"):
-            assert self._artifacts is not None
+            if self._artifacts is None:
+                raise Exception(
+                    "CompiledArtifact.save failed to save since there's no artifact to save"
+                )
             artifact_bytes, cache_info = self._artifacts
             assert len(cache_info.aot_autograd_artifacts) == 1
             key = cache_info.aot_autograd_artifacts[0]
@@ -2423,20 +2426,15 @@ class CompiledArtifact:
 
             assert entry is not None
 
-            # TODO(rzou): We shouldn't need the configs?
-            # What are they used for?
-            # Can these be a part of the serialized thing?
-            aot_config = (
-                torch._dynamo.variables.higher_order_ops.get_dummy_aot_autograd_config()
-            )
             fx_config = _CompileFxKwargs(
                 cudagraphs=BoxedBool(False),
                 boxed_forward_device_index=BoxedDeviceIndex(0),
             )
 
-            compiled_fn = entry.wrap_post_compile(
-                list(example_args), aot_config, fx_config
-            )
+            with config.patch(unsafe_skip_cache_dynamic_shape_guards=True):
+                compiled_fn = entry.wrap_post_compile(
+                    list(example_args), entry.sanitized_aot_config, fx_config
+                )
             return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
@@ -2457,10 +2455,16 @@ def standalone_compile(
         FakeTensorMode(shape_env=shape_env)
     )
 
-    compiled_fn = compile_fx(gm, example_inputs, **kwargs)
-    assert callable(compiled_fn)
+    from torch.compiler._cache import CacheArtifactManager
 
-    artifacts = torch.compiler.save_cache_artifacts()
-    assert artifacts is not None
+    with CacheArtifactManager.with_fresh_cache():
+        compiled_fn = compile_fx(gm, example_inputs, **kwargs)
+        assert callable(compiled_fn)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        if artifacts is None:
+            log.warning(
+                "standalone_compile artifact generation failed, cannot save. Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
+            )
 
     return CompiledArtifact(compiled_fn, artifacts)

@@ -368,7 +368,7 @@ def standalone_compile(
     options: Optional[dict[str, Any]] = None,
 ) -> CompiledArtifact:
     """
-    TODO: precompilation using caching
+    Alpha level API for inductor level precompilation
     """
     from torch._inductor.compile_fx import standalone_compile
 
