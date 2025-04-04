@@ -747,9 +747,7 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 range_tree_entry.set_name(name)
 
-            strided_index = sympy_dot(
-                input_node.get_stride(), index_symbols
-            )
+            strided_index = sympy_dot(input_node.get_stride(), index_symbols)
             strided_index = self.rename_indexing(strided_index)
             self.body.writeline("xindex = " + texpr(strided_index))
 

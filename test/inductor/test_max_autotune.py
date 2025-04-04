@@ -1380,15 +1380,14 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
-
     @parametrize("prologue", (False, True))
     def test_conv1x1_cast(self, prologue):
-
-        with torch._inductor.config.patch(prologue_fusion = prologue):
+        with torch._inductor.config.patch(prologue_fusion=prologue):
             conv1x1 = (
                 torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
                 .to(memory_format=torch.channels_last)
-                .to(GPU_TYPE).to(dtype=torch.float16)
+                .to(GPU_TYPE)
+                .to(dtype=torch.float16)
             )
             input_tensor = (
                 torch.randn(4, 3, 32, 32)
@@ -1398,7 +1397,13 @@ class TestPrologueFusion(TestCase):
 
             def foo(mod, input):
                 return torch.nn.functional.conv2d(
-                    input, mod.weight.to(input.dtype), None, mod.stride, mod.padding, mod.dilation, mod.groups
+                    input,
+                    mod.weight.to(input.dtype),
+                    None,
+                    mod.stride,
+                    mod.padding,
+                    mod.dilation,
+                    mod.groups,
                 )
 
             with torch.no_grad():
@@ -1408,9 +1413,10 @@ class TestPrologueFusion(TestCase):
 
                 FileCheck().check_not("extern_kernels.convolution").run(code[0])
                 if prologue:
-                    self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+                    self.check_code(
+                        code[0], num_kernels=1, num_allocs=1, num_deallocs=2
+                    )
                 self.assertEqual(out_eager, out, atol=1e-2, rtol=0)
-
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
