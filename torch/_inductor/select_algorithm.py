@@ -372,12 +372,11 @@ class TritonTemplateKernel(TritonKernel):
         # The generated code is not depednet on the input nodes. However, some of the variables
         # returned by generate_and_load that are computed during the template expansion are dependent
         # we call input depenndent preserved_state. Namely,
-        # 1) kernel.args.input_buffers.keys()
+        # 1) kernel.args
         # 2) kernel.prologue_supported_inputs
-        # 3) kernel.args.sizevars.keys()
-        # During template expansions we record all function calls that effect those and replay them
-        # on a cache hit to regenerate them.
-        # We store (callable, args, kwargs) for each such event.
+        # those are indentified by input_dependent_preserved_state. 
+        # During template expansions we record all function calls that effect change input_dependent_preserved_state
+        # and replay them on a cache hit to regenerate them.
         self.input_dependent_tracked_events: list[
             tuple[Callable, list[Any], dict[str, Any]]
         ]= []
