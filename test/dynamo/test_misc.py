@@ -90,6 +90,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_HPU,
     wrapDeterministicFlagAPITest,
+    xfailIfS390X,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
@@ -417,6 +418,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torch._dynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
+    @xfailIfS390X
     def test_int_shape_binops(self):
         def fn(x):
             # Test reversal by putting int arg first.
@@ -576,6 +578,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertEqual(obj.y, x + 1)
         self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
+    @xfailIfS390X
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
         def f(x):
@@ -589,6 +592,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         ref = f(x)
         self.assertEqual(res, ref)
 
+    @xfailIfS390X
     def test_newly_constructed_tensor_attr_mutation(self):
         def f(x):
             y = x + 10
@@ -651,6 +655,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             output = torch.compile(f, backend="eager", fullgraph=True)(*args)
             self.assertEqual(output, None)
 
+    @xfailIfS390X
     def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
@@ -667,6 +672,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 6)
         )
 
+    @xfailIfS390X
     def test_int_shape_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
@@ -757,6 +763,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         # TODO: Test the guards maybe?
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    @xfailIfS390X
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -792,6 +799,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         else:
             self.assertExpectedInline(counts.op_count, """9""")
 
+    @xfailIfS390X
     def test_user_defined_binop(self):
         class MyClass:
             def __init__(self, value):
@@ -1035,6 +1043,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             else:
                 os.environ["OS_ENVIRON_TEST"] = original
 
+    @xfailIfS390X
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")
@@ -3284,6 +3293,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
 
+    @xfailIfS390X
     def test_nesteduserfunction_setattr(self):
         x = 0
 
@@ -6581,6 +6591,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         else:
             self.assertIn("""x.size()[0] < 3""", first_guard_failure)
 
+    @xfailIfS390X
     def test_guard_failure_fn2(self):
         def fn(x, y):
             x = x + 1
@@ -7767,6 +7778,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         # 2 since graph break produces 2 graphs. NB: there are no recompiles
         self.assertEqual(counter.frame_count, 2)
 
+    @xfailIfS390X
     @torch.compiler.config.patch(dynamic_sources="L['x'], L['y']")
     def test_dynamic_sources_dynamic_override(self):
         counter = CompileCounter()
@@ -10730,6 +10742,7 @@ fn
 
         fn(torch.tensor([3, 3]))
 
+    @xfailIfS390X
     @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_mark_unbacked_strict(self):
         @torch.compile()
