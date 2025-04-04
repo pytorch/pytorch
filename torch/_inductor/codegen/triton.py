@@ -605,7 +605,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
         )
 
-    _print_PowByNatural = _print_FloatPow
+    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        if expr.args[0].is_Integer:
+            return f"libdevice.pow({float(expr.args[0])}, {self._print(expr.args[1])})"
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
@@ -677,6 +682,10 @@ class TritonPrinter(PythonPrinter):
     def _print_OpaqueUnaryFn_atan(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"libdevice.log2(({self._print(expr.args[0])}).to(tl.float32))"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -2543,17 +2552,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in ("argmax", "argmin"):
+                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=V.kernel.get_index_dtype_as_torch_dtype(),
+                        dtype=accumulator_dtype,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
