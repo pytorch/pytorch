@@ -7100,7 +7100,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.outputs if self.outputs else self.mutation_outputs,
             )
 
-        def is_number(t: torch.JitType) -> bool:
+        def is_number(t: Any) -> bool:
             return isinstance(t, torch.NumberType) or (
                 isinstance(t, torch.OptionalType)
                 and isinstance(t.getElementType(), torch.NumberType)
