@@ -1740,9 +1740,9 @@ class Tensor(torch._C.TensorBase):
                     if is_cuda and stream == 2:
                         raise BufferError("per-thread default stream is not supported.")
 
-                    assert is_cuda or (
-                        is_rocm and stream not in (1, 2)
-                    ), f"unsupported stream {stream} for ROCm."
+                    assert is_cuda or (is_rocm and stream not in (1, 2)), (
+                        f"unsupported stream {stream} for ROCm."
+                    )
 
                     stream = torch.cuda.ExternalStream(stream)
 
