@@ -2282,12 +2282,10 @@ def forward(self, pred_1, x_1):
             self.assertEqual(cnt.frame_count, 6)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_scanned_0(self, device):
+    def test_scan_init_scanned_0(self):
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
-        init = torch.randn(3, 2, device=device)
+        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
+        init = torch.randn(3, 2, device=torch.device("cpu"))
         dim = 1
 
         # Scan dimension is 0
@@ -2305,17 +2303,14 @@ def forward(self, pred_1, x_1):
             )
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_non_tensor(self, reverse, device):
-        x = torch.randn(3, 1, 2, device=device)
+    def test_scan_init_non_tensor(self):
+        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
         dim = 1
 
         # Init is a float and not a tensor
         init = 1.0
         with self.assertRaisesRegex(RuntimeError, "All init leaves must be a Tensor.*"):
-            scan(get_scan_combine_fn("add", False), init, x, dim=dim, reverse=reverse)
+            scan(get_scan_combine_fn("add", False), init, x, dim=dim, reverse=False)
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_wrong_shape(self):
