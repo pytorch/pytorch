@@ -23,6 +23,7 @@
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/native_rms_norm_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
