@@ -6,22 +6,52 @@
 namespace c10 {
 namespace metal {
 
-constant constexpr unsigned simdgroup_size = 32;
+constant constexpr ushort simdgroup_size = 32;
 
 template <typename T>
+inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
+  return ::metal::simd_sum(val);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
+  return ::metal::simd_product(val);
+}
+
+// Metal does not support SIMD reductions over 64-bit types
+// Simulate it using simd_shuffle_down over uint2 type
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val += as_type<long>(::metal::simd_shuffle_down(as_type<uint2>(val), i));
+  }
+  return val;
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val *= as_type<long>(::metal::simd_shuffle_down(as_type<uint2>(val), i));
+  }
+  return val;
+}
+
+// Below algorithms are  written with hardcoded assumption that simdgroup is 32
+// and threadgroup_max is 1024, i.e. reduction can be done in two stages max
+template <typename T>
 opmath_t<T> threadgroup_sum(
-    threadgroup T* data,
+    threadgroup opmath_t<T>* data,
     T val,
     unsigned idx,
     unsigned size) {
-  auto rc = ::metal::simd_sum(val);
+  auto rc = simd_sum(static_cast<opmath_t<T>>(val));
   if (idx % simdgroup_size == 0) {
     data[idx / simdgroup_size] = rc;
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
     if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = ::metal::simd_sum(data[idx]);
+      auto rc1 = simd_sum(data[idx]);
       if (idx == 0) {
         data[0] = rc1;
       }
@@ -33,18 +63,18 @@ opmath_t<T> threadgroup_sum(
 
 template <typename T>
 opmath_t<T> threadgroup_prod(
-    threadgroup T* data,
+    threadgroup opmath_t<T>* data,
     T val,
     unsigned idx,
     unsigned size) {
-  auto rc = ::metal::simd_product(val);
+  auto rc = simd_prod(static_cast<opmath_t<T>>(val));
   if (idx % simdgroup_size == 0) {
     data[idx / simdgroup_size] = rc;
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
     if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = ::metal::simd_product(data[idx]);
+      auto rc1 = simd_prod(data[idx]);
       if (idx == 0) {
         data[0] = rc1;
       }
