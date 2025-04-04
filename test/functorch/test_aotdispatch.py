@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import ContextDecorator, nullcontext
+from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
@@ -6602,6 +6602,232 @@ metadata incorrectly.
 
             self.assertEqual(1, len(ctx.tangent_strides))
             self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_saved_tensors_hooks(self):
+        def _test_pack_hooks(fn, inp_fn, hooks):
+            torch._dynamo.reset()
+            with ExitStack() as stack:
+                for hook in hooks:
+                    pack, unpack = hook
+                    stack.enter_context(
+                        torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+                    )
+                ref_x = inp_fn()
+                x = ref_x.detach().clone().requires_grad_()
+
+                ref_y = fn(ref_x)
+                ref_y.sum().backward()
+
+                y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+                y.sum().backward()
+                self.assertEqual(ref_y, y, atol=1e-2, rtol=1e-2)
+                self.assertEqual(ref_x.grad, x.grad, atol=1e-2, rtol=1e-2)
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.d1 = x.size(1)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                d1 = ctx.d1
+                return gx + saved_x * d1
+
+        def fn(x):
+            x = x.relu()
+            x = x + 1
+            x = 2 * x
+            x = AF.apply(x)
+            return x
+
+        def simple_fn(x):
+            x = x + 1
+            x = SAF.apply(x)
+            return x
+
+        device = torch.device("cuda:0")
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        def pack_dev_sym_cpu(x):
+            return (x.device, x.size(0), 10 * x.cpu())
+
+        def unpack_dev_sym_cpu(packed):
+            device, dim0, tensor = packed
+            ret = tensor.to(device=device) * dim0
+            return ret
+
+        def pack_tensor(x):
+            return x.cpu()
+
+        def unpack_tensor(packed):
+            t_cpu = packed
+            return t_cpu.to(device=device)
+
+        def pack_bf16(x):
+            return x.to(dtype=torch.bfloat16)
+
+        def unpack_bf16(x):
+            return x.to(dtype=torch.float)
+
+        def pack_mul2(x):
+            return x * 2
+
+        def unpack_mul2(x):
+            return x / 2
+
+        def pack_float8(x):
+            return (x.dtype, x.to(torch.float8_e4m3fn))
+
+        def unpack_float8(packed):
+            dtype, tensor = packed
+            return tensor.to(dtype)
+
+        def amax_to_scale(
+            amax: torch.Tensor,
+            float8_dtype: torch.dtype,
+            round_scales_to_power_of_2: bool = False,
+        ):
+            amax = amax.to(torch.float64)
+            res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=1e-12)
+            res = res.to(torch.float32)
+            return res
+
+        def pack_fp8_with_scale(x):
+            amax = torch.max(torch.abs(x))
+            scale = amax_to_scale(amax, torch.float8_e4m3fn)
+            x_scaled = x.to(torch.float32) * scale
+            x_fp8 = x_scaled.to(torch.float8_e4m3fn)
+            return x.dtype, scale, x_fp8
+
+        def unpack_fp8_with_scale(x):
+            dtype, scale, x_fp8 = x
+            y = x_fp8.to(dtype) / scale
+            return y
+
+        def pack_wrapper_sc(x):
+            return WrapperSubclass(x)
+
+        def unpack_wrapper_sc(x):
+            return x.a
+
+        def pack_wrapper_two_tensor(x):
+            return TwoTensor(x, x)
+
+        def unpack_wrapper_two_tensor(x):
+            return x.a + x.b
+
+        for test_fn in [simple_fn, fn]:
+            _test_pack_hooks(test_fn, inp_fn, [(pack_bf16, unpack_bf16)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2)])
+            _test_pack_hooks(
+                test_fn, inp_fn, [(pack_mul2, unpack_mul2), (pack_bf16, unpack_bf16)]
+            )
+            _test_pack_hooks(test_fn, inp_fn, [(pack_float8, unpack_float8)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_tensor, unpack_tensor)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_dev_sym_cpu, unpack_dev_sym_cpu)])
+            _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+            _test_pack_hooks(
+                test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+            )
+            _test_pack_hooks(
+                test_fn, inp_fn, [(pack_fp8_with_scale, unpack_fp8_with_scale)]
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_recomp_saved_tensors_hooks(self):
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.d1 = x.size(1)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                d1 = ctx.d1
+                return gx + saved_x * d1
+
+        def fn(x):
+            x = x.relu()
+            x = x + 1
+            x = 2 * x
+            x = AF.apply(x)
+            return x
+
+        def simple_fn(x):
+            x = x + 1
+            x = SAF.apply(x)
+            return x
+
+        device = torch.device("cuda:0")
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        def pack_bf16(x):
+            return x.to(dtype=torch.bfloat16)
+
+        def unpack_bf16(x):
+            return x.to(dtype=torch.float)
+
+        def pack_mul2(x):
+            return x * 2
+
+        def unpack_mul2(x):
+            return x / 2
+
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        x = inp_fn()
+        y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        y.sum().backward()
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_bf16, unpack_bf16):
+            x = inp_fn()
+            y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+            y.sum().backward()
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_mul2, unpack_mul2):
+            x = inp_fn()
+            y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+            y.sum().backward()
+        self.assertEqual(cnt.frame_count, 3)
 
 
 # entries in here don't work and need to be fixed.
