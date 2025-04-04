@@ -24,9 +24,12 @@ namespace c10::impl::cow {
 // If `device_opt` is given, the output will be copied to the specified device
 // when materialization occurs.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
+    StorageImpl& storage);
+
+C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
-    optional<Device> device_opt = nullopt,
-    optional<Allocator*> allocator_opt = nullopt);
+    Device device,
+    Allocator& allocator);
 
 // Check if a storage has a simple DataPtr with no abnormal context
 C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
