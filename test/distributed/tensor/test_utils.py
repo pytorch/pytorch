@@ -27,24 +27,33 @@ class LocalTest(TestCase):
         # mesh_shape: ShapeType, placements: Sequence[Placement]
         test_cases = [
             {
-                "mesh_shape": [2, 2],
-                "placements": [Replicate()],
-                "ordered": [(0, Replicate())],
+                "mesh_shape": [2, 4],
+                "placements": [Replicate(), Replicate()],
+                "ordered": [(0, Replicate()), (1, Replicate())],
             },
             {
-                "mesh_shape": [2, 2],
-                "placements": [Shard(0)],
-                "ordered": [(0, Shard(0))],
+                "mesh_shape": [3, 2],
+                "placements": [Shard(0), Replicate()],
+                "ordered": [(0, Shard(0)), (1, Replicate())],
             },
             {
-                "mesh_shape": [2, 2],
-                "placements": [_StridedShard(0, split_factor=2), Shard(0)],
+                "mesh_shape": [2, 4],
+                "placements": [_StridedShard(0, split_factor=4), Shard(0)],
                 "ordered": [(1, Shard(0)), (0, Shard(0))],
             },
             {
                 "mesh_shape": [2, 3, 4],
                 "placements": [Shard(0), _StridedShard(0, split_factor=4), Shard(0)],
                 "ordered": [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))],
+            },
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [
+                    _StridedShard(0, split_factor=12),
+                    _StridedShard(0, split_factor=4),
+                    Shard(0),
+                ],
+                "ordered": [(2, Shard(0)), (1, Shard(0)), (0, Shard(0))],
             },
         ]
         for test_case in test_cases:
@@ -69,22 +78,20 @@ class LocalTest(TestCase):
             {
                 "mesh_shape": [2, 3, 4],
                 "placements": [
-                    _StridedShard(0, split_factor=12),
-                    _StridedShard(0, split_factor=4),
-                    Shard(0),
-                ],
-                "exception_type": NotImplementedError,
-                "exception_text": "NYI",
-            },
-            {
-                "mesh_shape": [2, 3, 4],
-                "placements": [
                     _StridedShard(0, split_factor=3),
                     Shard(0),
                     Shard(0),
                 ],
                 "exception_type": NotImplementedError,
                 "exception_text": r"Strided sharding does not allow Shard\(\) to appear after the strided part has ended",
+            },
+            {
+                "mesh_shape": [2, 3],
+                "placements": [
+                    Shard(0),
+                ],
+                "exception_type": RuntimeError,
+                "exception_text": "Expected one placement per mesh dim",
             },
         ]
         for test_case in error_cases:
