@@ -3330,8 +3330,6 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
-        if specialize_zero_one:
-            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -4541,7 +4539,10 @@ class ShapeEnv:
         sloc = self._get_sloc()
 
         if val in (0, 1) and specialize_zero_one:
-            r = self.val_to_var[val]
+            if val == 0:
+                return sympy.S.Zero
+            else:
+                return sympy.S.One
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
