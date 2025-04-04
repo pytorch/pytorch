@@ -6,26 +6,6 @@ from typing import Any as _Any, Union as _Union
 from typing_extensions import deprecated as _deprecated
 
 
-try:
-    from torchgen.api.python import (
-        format_function_signature as _format_function_signature,
-    )
-    from torchgen.utils import FileManager as _FileManager
-except ImportError:
-    import sys
-
-    REPO_ROOT = _Path(__file__).absolute().parents[4]
-    sys.path.insert(0, str(REPO_ROOT))
-
-    from torchgen.api.python import (
-        format_function_signature as _format_function_signature,
-    )
-    from torchgen.utils import FileManager as _FileManager
-
-    if len(sys.path) > 0 and sys.path[0] == str(REPO_ROOT):
-        del sys.path[0]
-
-
 @_deprecated(
     "`torch.utils.data.datapipes.gen_pyi.materialize_lines` is deprecated and will be removed in the future.",
     category=FutureWarning,
@@ -236,6 +216,8 @@ def get_method_definitions(
     # 2. Parse method name and signature
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
     """
+    from torchgen.api.python import format_function_signature
+
     if root == "":
         root = str(_Path(__file__).parent.resolve())
     file_path = [file_path] if isinstance(file_path, str) else file_path
@@ -266,7 +248,7 @@ def get_method_definitions(
             doc_string = " ..."
         else:
             doc_string = "\n" + doc_string
-        definition = _format_function_signature(method_name, arguments, output_type)
+        definition = format_function_signature(method_name, arguments, output_type)
         method_definitions.append(
             f"# Functional form of '{class_name}'\n"
             + definition[:-3].rstrip()  # remove "..."
@@ -317,8 +299,10 @@ def main() -> None:
         mapDP_method_to_special_output_type,
     )
 
+    from torchgen.utils import FileManager
+
     path = _Path(__file__).absolute().parent
-    fm = _FileManager(install_dir=path, template_dir=path, dry_run=False)
+    fm = FileManager(install_dir=path, template_dir=path, dry_run=False)
     fm.write_with_template(
         "datapipe.pyi",
         "datapipe.pyi.in",
