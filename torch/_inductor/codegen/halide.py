@@ -33,7 +33,7 @@ from ..utils import (
     sympy_index_symbol,
     sympy_subs,
 )
-from ..virtualized import _ops as ops, OpsHandler, V
+from ..virtualized import _ops as ops, V
 from .common import (
     BackendFeature,
     CSEVariable,
@@ -96,6 +96,8 @@ class HalidePrinter(PythonPrinter):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
 
+    _print_FloorToInt = _print_floor
+
     def _print_Trunc(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.trunc({self._print(expr.args[0])})")
@@ -140,39 +142,42 @@ class HalidePrinter(PythonPrinter):
 
     def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cos(({self._print(expr.args[0])})"
+        return f"hl.cos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cosh(({self._print(expr.args[0])})"
+        return f"hl.cosh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.acos(({self._print(expr.args[0])})"
+        return f"hl.acos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sin(({self._print(expr.args[0])})"
+        return f"hl.sin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sinh(({self._print(expr.args[0])})"
+        return f"hl.sinh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.asin(({self._print(expr.args[0])})"
+        return f"hl.asin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tan(({self._print(expr.args[0])})"
+        return f"hl.tan({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tanh(({self._print(expr.args[0])})"
+        return f"hl.tanh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.atan(({self._print(expr.args[0])})"
+        return f"hl.atan({self._print(expr.args[0])})"
+
+    def _print_OpaqueUnaryFn_log2(self, expr):
+        raise NotImplementedError("log2")
 
     def _print_FloorDiv(self, expr):
         if expr.is_integer:
@@ -198,7 +203,7 @@ class HalidePrinter(PythonPrinter):
         val, n = expr.args
         val = self._print(val)
         n = int(n)
-        return f"hl.f32({10.**(-n)!r})*hl.round(({val})*hl.f32({10.**n!r}))"
+        return f"hl.f32({10.0 ** (-n)!r})*hl.round(({val})*hl.f32({10.0**n!r}))"
 
 
 texpr = HalidePrinter().doprint
@@ -454,6 +459,10 @@ class HalideOverrides(OpOverrides):
         return f"hl.log({x})"  # hl.fast_log fails accuracy
 
     @staticmethod
+    def log2(x):
+        raise NotImplementedError("log2")
+
+    @staticmethod
     def isinf(x):
         # workaround https://github.com/halide/Halide/issues/8309
         return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
@@ -561,12 +570,6 @@ class HalideOverrides(OpOverrides):
 
 
 HalideOverrides._initialize_pointwise_overrides("halide")
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_HalideOverrides(HalideOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HalideCSEVariable(CSEVariable):
@@ -862,11 +865,11 @@ class HalideKernel(SIMDKernel):
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
-                    self.index_replacements[
-                        node.symbol()
-                    ] = V.graph.sizevars.simplify_with_ranges(
-                        ModularIndexing(full_index, node.divisor, node.length),
-                        self.halide_vars,  # type: ignore[arg-type]
+                    self.index_replacements[node.symbol()] = (
+                        V.graph.sizevars.simplify_with_ranges(
+                            ModularIndexing(full_index, node.divisor, node.length),
+                            self.halide_vars,  # type: ignore[arg-type]
+                        )
                     )
 
         # codegen the variable definitions
@@ -1189,9 +1192,9 @@ class HalideKernel(SIMDKernel):
 
         if isinstance(value, tuple):
             assert reduction_type == "welford_combine"
-            self.cse.reduction_cache[
-                cache_key
-            ] = result_tuple = self.welford_combine_impl(*value)
+            self.cse.reduction_cache[cache_key] = result_tuple = (
+                self.welford_combine_impl(*value)
+            )
             return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
@@ -1310,9 +1313,9 @@ class HalideKernel(SIMDKernel):
         scan = f"{scan_dom}.x"
         self.body.writeline(f"{scan_dom} = hl.RDom([hl.Range(1, {length})])")
 
-        assert (
-            len(self.reduction_renames) == 1
-        ), "multi-dimensional scan not implemented"
+        assert len(self.reduction_renames) == 1, (
+            "multi-dimensional scan not implemented"
+        )
         (scan_var,) = [*self.reduction_renames]  # type: ignore[misc]
         scan_renames_cur = {scan_var: sympy_index_symbol(scan)}
         scan_renames_pri = {scan_var: sympy_index_symbol(scan) - 1}
@@ -1492,7 +1495,7 @@ class HalideKernel(SIMDKernel):
             argtypes,
             target="-".join(target),
             scheduler=schduler,
-            scheduler_flags=scheduler_flags,
+            scheduler_flags=scheduler_flags,  # type: ignore[arg-type]
             cuda_device=cuda_device,
         )
 
@@ -1639,7 +1642,7 @@ class HalideKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            gpu=False,  # grid/stream is handled internally in halide
+            device=current_device,
             triton=False,
         )
 

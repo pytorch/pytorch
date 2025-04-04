@@ -160,8 +160,6 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 } // namespace torch::autograd::python
 
-PyObject* THPEngineClass = nullptr;
-
 static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
@@ -181,7 +179,7 @@ static Edge parseGradientEdge(PyObject* obj, int64_t index) {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
-PyObject* THPEngine_run_backward(
+static PyObject* THPEngine_run_backward(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
@@ -194,15 +192,15 @@ PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
-  constexpr const char* accepted_kwargs[] = {// NOLINT
-                                             "tensors",
-                                             "grad_tensors",
-                                             "keep_graph",
-                                             "create_graph",
-                                             "inputs",
-                                             "allow_unreachable",
-                                             "accumulate_grad",
-                                             nullptr};
+  constexpr const char* accepted_kwargs[] = {
+      "tensors",
+      "grad_tensors",
+      "keep_graph",
+      "create_graph",
+      "inputs",
+      "allow_unreachable",
+      "accumulate_grad",
+      nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
@@ -396,7 +394,7 @@ PyObject* THPEngine_run_backward(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
+static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject* obj) {
@@ -431,7 +429,9 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_is_checkpoint_valid(PyObject* self, PyObject* noargs) {
+static PyObject* THPEngine_is_checkpoint_valid(
+    PyObject* self,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   if (engine.is_checkpoint_valid()) {
@@ -442,7 +442,10 @@ PyObject* THPEngine_is_checkpoint_valid(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+static PyObject* THPEngine_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
   return type->tp_alloc(type, 0);
 }
 
@@ -459,7 +462,7 @@ static struct PyMethodDef THPEngine_methods[] = {
      nullptr},
     {nullptr}};
 
-PyTypeObject THPEngineType = {
+static PyTypeObject THPEngineType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */

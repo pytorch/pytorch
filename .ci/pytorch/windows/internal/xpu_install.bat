@@ -47,9 +47,9 @@ set XPU_EXTRA_INSTALLED=0
 set XPU_EXTRA_UNINSTALL=0
 
 if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2025.0] (
-    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/efc86abd-cb77-452e-a03f-a741895b8ece/intel-deep-learning-essentials-2025.0.0.336_offline.exe
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/9d6d6c17-ca2d-4735-9331-99447e4a1280/intel-deep-learning-essentials-2025.0.1.28_offline.exe
     set XPU_BUNDLE_PRODUCT_NAME=intel.oneapi.win.deep-learning-essentials.product
-    set XPU_BUNDLE_VERSION=2025.0.0+335
+    set XPU_BUNDLE_VERSION=2025.0.1+20
     set XPU_BUNDLE_INSTALLED=0
     set XPU_BUNDLE_UNINSTALL=0
     set XPU_EXTRA_URL=NULL

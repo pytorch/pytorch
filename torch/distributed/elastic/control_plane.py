@@ -40,8 +40,9 @@ def worker_main() -> Generator[None, None, None]:
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     with ExitStack() as stack:
