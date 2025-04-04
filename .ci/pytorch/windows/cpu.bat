@@ -19,6 +19,8 @@ REM Check for optional components
 echo Disabling CUDA
 set USE_CUDA=0
 
+set USE_STATIC_MKL=1
+
 call internal\check_opts.bat
 IF ERRORLEVEL 1 goto :eof
 
