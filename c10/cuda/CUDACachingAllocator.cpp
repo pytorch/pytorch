@@ -1946,14 +1946,17 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     std::vector<Block*> all_blocks;
-    MempoolId_t active_mempool_id = {0, 0};
+    MempoolId_t mempool_id = {0, 0};
 
     auto active_mempool = MemPoolContext::getActiveMemPool();
     if (active_mempool) {
-      active_mempool_id = active_mempool->id();
+      mempool_id = active_mempool->id();
+    }
+
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
       // If there is an active mempool, we find the corresponding PrivatePool
       // in graph_pools and only return the blocks from it.
-      auto pool = graph_pools.find(active_mempool_id);
+      auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
         all_blocks = get_private_pool_head_blocks(pool->second.get());
       }
@@ -1983,7 +1986,7 @@ class DeviceCachingAllocator {
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
       MempoolId_t id = head_block->pool->owner_MempoolId();
-      if (active_mempool && id == active_mempool_id) {
+      if ((mempool_id.first == 0 && mempool_id.second == 0) || id == mempool_id) {
         segment_info.owner_private_pool_id = id;
       }
 
