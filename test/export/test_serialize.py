@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
@@ -539,8 +540,12 @@ def forward(self, x):
         ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
 
         serialized = ExportedProgramSerializer().serialize(ep)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+        self.assertEqual(
+            serialized.exported_program.range_constraints["s77"].min_val, 2
+        )
+        self.assertEqual(
+            serialized.exported_program.range_constraints["s77"].max_val, 3
+        )
 
     def test_kwargs_default(self) -> None:
         """
@@ -913,6 +918,32 @@ class TestDeserialize(TestCase):
 
         inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
         self.check_graph(Mod(), inp, use_pre_dispatch=False)
+
+    def test_none_input(self):
+        """
+        Testing a backwards-compatibility breakage where old models do not have
+        an input spec with the node name.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + z
+
+        ep = torch.export.export(M(), (torch.ones(3, 3), None, torch.ones(3, 3)))
+
+        serialized_program = ExportedProgramSerializer(None, 2).serialize(ep)
+        serialized_program.exported_program.graph_module.signature.input_specs[
+            1
+        ] = schema.InputSpec.create(
+            user_input=schema.UserInputSpec(arg=schema.Argument.create(as_none=True))
+        )
+        ep = ExportedProgramDeserializer(None).deserialize(
+            serialized_program.exported_program, {}, {}, {}
+        )
+        ep.graph_module.recompile()
+        unflattened = torch.export.unflatten(ep)
+        inp = (torch.rand(3, 3), None, torch.rand(3, 3))
+        self.assertEqual(unflattened(*inp), M()(*inp))
 
     def test_multi_return(self) -> None:
         """
