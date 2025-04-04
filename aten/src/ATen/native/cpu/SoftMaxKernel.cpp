@@ -37,6 +37,8 @@ inline void _vec_log_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  using acc_t = at::opmath_type<scalar_t>;
+  using AccVec = vec::Vectorized<vec::vec_scalar_t<acc_t>>;
   // Coincidentally, at::internal::GRAIN_SIZE is 32768, which is equal to the
   // size of L1D cache on many processors. Some processors have 48 KB L1D cache
   // nowadays, so maybe in the future, we can leverage the knowledge of a
@@ -54,8 +56,8 @@ inline void _vec_log_softmax_lastdim(
   parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
-    auto tmp_sum_scalar = std::make_unique<scalar_t[]>(CHUNK_SIZE);
-    auto max_input_arr = std::make_unique<scalar_t[]>(CHUNK_SIZE);
+    auto tmp_sum_scalar = std::make_unique<acc_t[]>(CHUNK_SIZE);
+    auto max_input_arr = std::make_unique<acc_t[]>(CHUNK_SIZE);
     for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
       int64_t loop_end = CHUNK_SIZE;
       if (ii + CHUNK_SIZE > end)
@@ -71,17 +73,17 @@ inline void _vec_log_softmax_lastdim(
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
         const scalar_t* input_data = input_data_base + i * dim_size;
-        scalar_t max_input = max_input_arr[j];
+        acc_t max_input = max_input_arr[j];
         tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
-            [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-            [](Vec x, Vec y) { return x + y; },
+            [max_input](AccVec x) { return (x - AccVec(max_input)).exp(); },
+            [](AccVec x, AccVec y) { return x + y; },
             input_data,
             dim_size);
       }
       // See [Note AVX-SSE transitions] for why this should call the
       // vectorized version (aside from perf improvements).
       vec::map(
-          [](Vec x) { return x.log(); },
+          [](AccVec x) { return x.log(); },
           tmp_sum_scalar.get(),
           tmp_sum_scalar.get(),
           loop_end);
@@ -89,8 +91,8 @@ inline void _vec_log_softmax_lastdim(
         int64_t i = ii + j;
         const scalar_t* input_data = input_data_base + i * dim_size;
         scalar_t* output_data = output_data_base + i * dim_size;
-        scalar_t tmp_sum = tmp_sum_scalar[j];
-        scalar_t max_input = max_input_arr[j];
+        acc_t tmp_sum = tmp_sum_scalar[j];
+        acc_t max_input = max_input_arr[j];
 
         // It's necessary to keep the order of the operations below.
         // In some cases that input is large digits and the difference
@@ -98,8 +100,8 @@ inline void _vec_log_softmax_lastdim(
         // there would be a numerical problem. See an example in
         // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
         vec::map(
-            [tmp_sum, max_input](Vec x) {
-              return x - Vec(max_input) - Vec(tmp_sum);
+            [tmp_sum, max_input](AccVec x) {
+              return x - AccVec(max_input) - AccVec(tmp_sum);
             },
             output_data,
             input_data,
