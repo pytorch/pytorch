@@ -17,6 +17,7 @@ from torch._utils import _dummy_type
 from torch.types import Device
 
 from . import (
+    _device_t,
     _get_amdsmi_device_index,
     _get_device_index,
     _get_nvml_device_index,
@@ -222,7 +223,7 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
-def memory_stats(device: Union[Device, int] = None) -> dict[str, Any]:
+def memory_stats(device: _device_t = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
