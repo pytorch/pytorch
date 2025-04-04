@@ -158,10 +158,19 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.rand((10, 10)),))
 
+    def test_rms_norm_nograd(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150629
+        def fn(x, w):
+            with torch.no_grad():
+                return torch.nn.functional.rms_norm(x, x.shape, w)
+
+        self.common(fn, (torch.rand(10), torch.ones(10)))
+
 
 # Copy tests
 for test_name in [
     "test_min_max_reduction",
+    "test_add_complex4",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -195,17 +204,19 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_large_broadcast_reduction",
     "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
-    "test_low_memory_max_pool_dilation_1",
-    "test_low_memory_max_pool_dilation_2",
+    "test_low_memory_max_pool_dilation_1_dim_2",
+    "test_low_memory_max_pool_dilation_2_dim_2",
     "test_max_min",
     "test_max_pool2d2",
     "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
+    "test_neg_max_uint8",
     "test_pow2",
     "test_prod",
     "test_randint_int64_mod",
