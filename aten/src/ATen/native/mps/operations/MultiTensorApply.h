@@ -7,28 +7,14 @@ static_assert(sizeof(bool) == 1);
 
 namespace at::native::mps {
 
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/Amp_metallib.h>
-// workaround to not include lib twice
-#define lib _ignored_lib_name_for_fused
-#include <ATen/native/mps/FusedOptimizerOps_metallib.h>
-#undef lib
-#endif
-
-inline std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
-  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
-}
-
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kmaxThreadGroups = 32;
 static constexpr int64_t kmaxTensors = 32;
 
-struct MetadataArguments { // the size of this struct must be less than 4 bytes
-  uint numels[kmaxTensors];
-  uint threadgroup_to_tensor[kmaxThreadGroups];
-  uint threadgroup_to_chunk[kmaxThreadGroups];
+struct MetadataArguments { // the size of this struct must be less than 4 kilobytes
+  uint64_t numels[kmaxTensors];
+  uint64_t threadgroup_to_tensor[kmaxThreadGroups];
+  uint64_t threadgroup_to_chunk[kmaxThreadGroups];
 };
 
 struct FusedAdamEncodingFunctor {
@@ -130,7 +116,7 @@ struct FusedSgdEncodingFunctor<false> {
   }
 };
 
-std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname);
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname);
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_name,
                                                    std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -166,7 +152,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
@@ -267,6 +253,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   });
 }
 
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getAmpCPLState(const std::string& fname);
 template <int depth, typename... ArgTypes>
 void multi_tensor_apply(const std::string& kernel_name,
                         std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -283,7 +270,7 @@ void multi_tensor_apply(const std::string& kernel_name,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [pipeline, function] = getCPLState(kernel_name);
+      auto [pipeline, function] = getAmpCPLState(kernel_name);
       [computeEncoder setComputePipelineState:pipeline];
 
       id<MTLArgumentEncoder> argumentEncoder = [function newArgumentEncoderWithBufferIndex:0];

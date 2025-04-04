@@ -1,10 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
-// For MTLLanguageVersion_3_1
 #include <ATen/native/ForeachUtils.h>
-#include <ATen/native/mps/MPSGraphSequoiaOps.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/MultiTensorApply.h>
 
@@ -17,12 +14,19 @@
 #endif
 
 namespace at::native {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Amp_metallib.h>
+#endif
 namespace mps {
-namespace {
 
 static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scaled_grad,
                                                               at::Tensor& found_inf,
                                                               const at::Tensor& inv_scale) {
+  if (scaled_grad.numel() == 0) {
+    return;
+  }
   float inv_scale_val = inv_scale.item<float>();
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -31,23 +35,16 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
 
   const uint32_t threadsPerThreadgroup = 256;
   uint32_t numel = static_cast<uint32_t>(scaled_grad.numel());
-  uint32_t numThreadgroups = (numel + threadsPerThreadgroup - 1) / threadsPerThreadgroup;
   MTLSize threadGroupSize = MTLSizeMake(threadsPerThreadgroup, 1, 1);
-  MTLSize gridSize = MTLSizeMake(numThreadgroups * threadsPerThreadgroup, 1, 1);
+  MTLSize gridSize = MTLSizeMake(numel, 1, 1);
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     auto computeEncoder = stream->commandEncoder();
     TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
-    if (scaled_grad.numel() == 0) {
-      return;
-    }
-
-    id<MTLBuffer> data_buffer = getMTLBufferStorage(scaled_grad);
-    id<MTLBuffer> found_inf_buffer = getMTLBufferStorage(found_inf);
 
     [computeEncoder setComputePipelineState:ampPipelineState];
-    mtl_setArgs(computeEncoder, data_buffer, found_inf_buffer, inv_scale_val, numel);
-    [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+    mtl_setArgs(computeEncoder, scaled_grad, found_inf, inv_scale_val);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
   });
 }
 
@@ -82,10 +79,13 @@ static void _amp_update_scale_mps_impl(Tensor& self,
                 scaleGrowthFactorVal,
                 scaleBackoffFactorVal,
                 growthIntervalVal);
-    [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
   });
 }
-} // namespace
+
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getAmpCPLState(const std::string& fname) {
+  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
+}
 } // namespace mps
 
 void _amp_foreach_non_finite_check_and_unscale_mps_(at::TensorList self,

@@ -1,9 +1,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#define kmaxThreadGroups 32
-#define kmaxTensors 32
-#define kChunkSize 65536
+constant constexpr unsigned kmaxThreadGroups = 32;
+constant constexpr unsigned kmaxTensors = 32;
+constant constexpr unsigned kChunkSize = 65536;
 
 template <typename T>
 struct AmpNonFiniteCheckAndUnscaleArgs {
@@ -11,9 +11,9 @@ struct AmpNonFiniteCheckAndUnscaleArgs {
 };
 
 struct MetadataArguments {
-  uint numels[kmaxTensors];
-  uint threadgroup_to_tensor[kmaxThreadGroups];
-  uint threadgroup_to_chunk[kmaxThreadGroups];
+  ulong numels[kmaxTensors];
+  ulong threadgroup_to_tensor[kmaxThreadGroups];
+  ulong threadgroup_to_chunk[kmaxThreadGroups];
 };
 
 template <typename T>
@@ -22,12 +22,12 @@ kernel void ampNonFiniteCheckAndUnscale(
     constant MetadataArguments& metadata [[buffer(1)]],
     device float* foundInf [[buffer(2)]],
     constant T& invScale [[buffer(3)]],
-    uint3 local_tid [[thread_position_in_threadgroup]],
-    uint3 tgSize [[threads_per_threadgroup]],
-    uint3 group_id [[threadgroup_position_in_grid]]) {
-  uint threadGroupSize = tgSize.x;
-  uint tensor_index = metadata.threadgroup_to_tensor[group_id.x];
-  uint chunk = metadata.threadgroup_to_chunk[group_id.x];
+    uint local_tid [[thread_position_in_threadgroup]],
+    uint tgSize [[threads_per_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]]) {
+  uint threadGroupSize = tgSize;
+  uint tensor_index = metadata.threadgroup_to_tensor[group_id];
+  uint chunk = metadata.threadgroup_to_chunk[group_id];
   uint numel = metadata.numels[tensor_index];
 
   uint offset = chunk * kChunkSize;
@@ -36,7 +36,7 @@ kernel void ampNonFiniteCheckAndUnscale(
 
   device T* data = pointerArgs.data[tensor_index];
 
-  for (uint i = local_tid.x; i < chunk_size; i += threadGroupSize) {
+  for (uint i = local_tid; i < chunk_size; i += threadGroupSize) {
     uint index = offset + i;
     T val = data[index];
     if (!isfinite(val)) {
@@ -52,11 +52,7 @@ kernel void ampNonFiniteCheckAndUnscaleSingle(
     device T* data [[buffer(0)]],
     device float* foundInf [[buffer(1)]],
     constant T& invScale [[buffer(2)]],
-    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= numel)
-    return;
-
   T val = data[tid];
   if (!isfinite(val)) {
     device atomic_float* flag = (device atomic_float*)foundInf;
@@ -100,9 +96,9 @@ kernel void ampUpdateScale(
       constant MetadataArguments & metadata [[buffer(1)]],                  \
       device float* foundInf [[buffer(2)]],                                 \
       constant DTYPE& invScale [[buffer(3)]],                               \
-      uint3 local_tid [[thread_position_in_threadgroup]],                   \
-      uint3 tgSize [[threads_per_threadgroup]],                             \
-      uint3 group_id [[threadgroup_position_in_grid]])
+      uint local_tid [[thread_position_in_threadgroup]],                    \
+      uint tgSize [[threads_per_threadgroup]],                              \
+      uint group_id [[threadgroup_position_in_grid]])
 
 #define INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE_SINGLE(DTYPE)            \
   template                                                                   \
@@ -111,7 +107,6 @@ kernel void ampUpdateScale(
           device DTYPE * data [[buffer(0)]],                                 \
           device float* foundInf [[buffer(1)]],                              \
           constant DTYPE& invScale [[buffer(2)]],                            \
-          constant uint& numel [[buffer(3)]],                                \
           uint tid [[thread_position_in_grid]])
 
 #define INSTANTIATE_AMP_UPDATE_SCALE(DTYPE)                    \
