@@ -1,0 +1,35 @@
+name: Binary Builds
+
+on:
+  pull_request:
+  # TODO: Uncomment this when we finish developing the workflow
+  # push:
+  #   branches:
+  #     - main
+  #     - nightly
+  #     - release/*
+  #   tags:
+  #     - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  #     - 'ciflow/binaries/*'
+  workflow_dispatch:
+
+# TODO: Could we autogenerate this?
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+  linux-cpu:
+    needs: get-label-type
+    uses: ./.github/workflows/_linux-binary.yml
+    with:
+      package_type: wheel
+      accelerator_type: cpu
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}

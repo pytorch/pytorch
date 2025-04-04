@@ -26,12 +26,20 @@ if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
 
+if [[ -n "${ACCELERATOR_VERSION:-}" ]]; then
+    CUDA_VERSION="${ACCELERATOR_VERSION}"
+    echo "Using CUDA $CUDA_VERSION as determined by ACCELERATOR_VERSION"
+fi
+
+# ===========================================================================
+# TODO: This is a legacy variable that we eventually want to get rid of in
+#       favor of ACCELERATOR_VERSION
 # Determine CUDA version and architectures to build for
 #
 # NOTE: We should first check `DESIRED_CUDA` when determining `CUDA_VERSION`,
 # because in some cases a single Docker image can have multiple CUDA versions
 # on it, and `nvcc --version` might not show the CUDA version we want.
-if [[ -n "$DESIRED_CUDA" ]]; then
+if [[ -n "$DESIRED_CUDA" && -z "${CUDA_VERSION:-}" ]]; then
     # If the DESIRED_CUDA already matches the format that we expect
     if [[ ${DESIRED_CUDA} =~ ^[0-9]+\.[0-9]+$ ]]; then
         CUDA_VERSION=${DESIRED_CUDA}
@@ -48,6 +56,7 @@ else
     CUDA_VERSION=$(nvcc --version|grep release|cut -f5 -d" "|cut -f1 -d",")
     echo "CUDA $CUDA_VERSION Detected"
 fi
+# ===========================================================================
 
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
