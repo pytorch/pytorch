@@ -1,0 +1,22 @@
+name: ppc64le
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-manylinux-2_28-py3-cpu-ppc64le-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-manylinux-2_28-py3-cpu-ppc64le-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-ppc64le-binary-manywheel
+      docker-image-name: pytorch/manylinuxppc64le-builder:cpu-ppc64le-main
+      runner: linux.ppc64le
+    secrets: inherit
