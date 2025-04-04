@@ -145,4 +145,22 @@ using rmsnorm_fn = Tensor (*)(
     std::optional<double> /* eps */);
 DECLARE_DISPATCH(rmsnorm_fn, RMSNormKernel)
 
+std::tuple<Tensor, Tensor, Tensor> rms_norm_cpu(
+    at::Tensor const& input,
+    c10::ArrayRef<long> normalized_shape,
+    std::optional<at::Tensor> const& weight_opt,
+    std::optional<double> eps_opt);
+
+std::tuple<Tensor, Tensor>
+rms_norm_backward_cpu(
+    const Tensor &grad,                      // Gradient with respect to the output y
+    const Tensor &input,                     // Original input x
+    const std::optional<Tensor> &weight,       // Optional weight (scaling factor)
+    const std::optional<double> eps,         // Optional epsilon (not used here as inverse_rms is provided)
+    const Tensor &output,                    // Output from the forward pass (unused in this backward computation)
+    const Tensor &x_norm,                    // Normalized input (x multiplied by inverse_rms)
+    const Tensor &inverse_rms,               // Inverse RMS factor: 1 / sqrt(mean(x^2) + eps)
+    std::array<bool, 2ul> grad_input_mask    // Mask: [compute_grad_input, compute_grad_weight]
+);
+
 } // namespace at::native
