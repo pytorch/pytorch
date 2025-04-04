@@ -42,6 +42,7 @@ RELEASE = os.environ.get("RELEASE", False)
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
+
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
@@ -73,7 +74,7 @@ extensions = [
 ]
 
 ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://pytorch.org/docs/stable/_static/img/pytorch-logo-dark.svg"
+ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
