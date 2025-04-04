@@ -111,6 +111,10 @@ class LocalSource(Source):
     # Whether this local is an input to the root frame.
     is_input: bool = False
 
+    # Whether we know this input is dynamic (based on example_inputs)
+    # For non tensors, we simply look at the first index of the tuple
+    dynamism: Optional[frozenset[str]] = None
+
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
     # or `co_freevars`.
@@ -464,9 +468,9 @@ class DefaultsSource(ChainedSource):
     _name: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        assert (
-            self.base
-        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        assert self.base, (
+            "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        )
         if self.is_kw:
             assert isinstance(self.idx_key, str)
             object.__setattr__(self, "field", "__kwdefaults__")
@@ -836,6 +840,12 @@ def is_from_local_source(source: Source, *, only_allow_input=False):
     if only_allow_input and not source.is_input:
         return False
     return True
+
+
+def is_from_source(source: Source, target: Source):
+    if isinstance(source, ChainedSource):
+        return is_from_source(source.base, target)
+    return source == target
 
 
 def is_from_unspecialized_param_buffer_source(source: Source):

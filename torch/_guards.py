@@ -230,6 +230,7 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
+    size_oblivious: bool
 
 
 @dataclass_slots
@@ -630,8 +631,12 @@ class GuardsSet:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -1016,6 +1021,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

@@ -1444,11 +1444,11 @@ class DistributedDataParallel(Module, Joinable):
         """`TorchDynamo` requires DDP's status and module for cooperative optimization."""
         return cls._active_ddp_module
 
-    @torch._disable_dynamo(recursive=True)
     # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
     # for the 'module_to_run' underneath
     # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
+    @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self
         try:
@@ -2226,7 +2226,6 @@ class DistributedDataParallel(Module, Joinable):
         if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
             cuda_supported = (
                 torch.version.cuda is not None
-                and int(torch.version.cuda.split(".")[0]) >= 11
             ) or torch.version.hip is not None
             nccl_supported = (
                 dist.is_available()

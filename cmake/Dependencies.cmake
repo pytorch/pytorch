@@ -279,7 +279,7 @@ if(NOT AT_MKL_ENABLED)
   set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
   if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
     message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
-  elif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
+  elseif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
     message(FATAL_ERROR "pocketfft headers not found in ${POCKETFFT_INCLUDE_DIR}")
   endif()
 
@@ -784,7 +784,14 @@ if(USE_NUMA)
 endif()
 
 if(USE_ITT)
-  find_package(ITT)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+      message(WARNING "ITT is only cmake-2.8 compatible")
+      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+      find_package(ITT)
+      unset(CMAKE_POLICY_VERSION_MINIMUM)
+    else()
+      find_package(ITT)
+    endif()
   if(ITT_FOUND)
     include_directories(SYSTEM ${ITT_INCLUDE_DIR})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${ITT_LIBRARIES})
@@ -809,9 +816,18 @@ if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
 
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
   set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  add_subdirectory(
-    "${FP16_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+    message(WARNING "FP16 is only cmake-2.8 compatible")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(
+      "${FP16_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+  else()
+    add_subdirectory(
+      "${FP16_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+  endif()
 elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   add_library(fp16 STATIC "/usr/include/fp16.h")
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
@@ -1047,9 +1063,6 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    if(HIP_NEW_TYPE_ENUMS)
-      list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
-    endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
     endif()
@@ -1081,12 +1094,10 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
-    if(UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
-    endif(UNIX)
 
+    # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
@@ -1155,7 +1166,14 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+      message(WARNING "Archived TensorPipe forces CMake compatibility mode")
+      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+      unset(CMAKE_POLICY_VERSION_MINIMUM)
+    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)

@@ -2324,9 +2324,7 @@ class TestFX(JitTestCase):
 
         copied_graph = copy.deepcopy(g)
 
-        val_map = {}
-        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
-            val_map[orig_node] = new_node
+        val_map = dict(zip(g.nodes, copied_graph.nodes))
 
         for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
             orig_users = set(orig_node.users.keys())
@@ -3039,7 +3037,7 @@ class TestFX(JitTestCase):
         from torch.fx.immutable_collections import immutable_list
 
         x = immutable_list([3, 4])
-        with self.assertRaisesRegex(NotImplementedError, "new_args"):
+        with self.assertRaisesRegex(TypeError, "new_args"):
             x[0] = 4
 
     def test_partial_trace(self):
