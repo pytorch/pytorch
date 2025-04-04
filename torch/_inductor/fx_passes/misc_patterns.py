@@ -53,6 +53,7 @@ def _misc_patterns_init(input_device: Optional[torch.device] = None):
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
         fwd_only,
         [post_grad_patterns, joint_graph_patterns],
+        skip_duplicates=True,
     )
 
     def randperm_index_pattern(x, slice_shape):
