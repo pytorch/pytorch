@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import sympy
@@ -10,7 +11,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, Layout
+from ..ir import _IntLike, ChoiceCaller, Layout, TensorBox
 from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
 
 
@@ -52,6 +53,11 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
         1,
         1,
     )
+
+
+@SymbolicGridFn
+def persistent_grouped_mm_grid(m, n, meta):
+    return (meta["NUM_SMS"], 1, 1)
 
 
 def acc_type(dtype):
@@ -253,3 +259,26 @@ def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
         numel *= dim
     nonzero = numel > 0
     return static_shape, nonzero
+
+
+def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
+    def is_row_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-1] == 1
+
+    def is_col_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-2] == 1
+
+    def has_zero_dim(size: Sequence[_IntLike]) -> bool:
+        return bool(size[0] == 0 or size[1] == 0)
+
+    # Check mat_a (self) stride requirements
+    torch._check(
+        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+    )
+
+    # Check mat_b stride requirements
+    torch._check(
+        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+    )
