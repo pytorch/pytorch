@@ -1484,7 +1484,7 @@ class TestLinalg(TestCase):
                 expect_index_0_check,
             )
 
-        # dim is int.
+        # dim is int
         test(-1, 1, True)
 
         # dim is None
@@ -1496,7 +1496,7 @@ class TestLinalg(TestCase):
         # shape[d] == 0
         test(-1, [0], False, True)
 
-        # u0+1 == 0 is False we do not see a runtime assert in the generated graph.
+        # u0 + 1 == 0 is False we do not see a runtime assert in the generated graph.
         test(-1, [1], False, False)
 
         test(-1, [0, 1], False, True)
