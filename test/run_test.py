@@ -185,7 +185,6 @@ S390X_BLOCKLIST = [
     "inductor/test_cpu_select_algorithm",
     "inductor/test_aot_inductor_arrayref",
     "lazy/test_meta_kernel",
-    "profiler/test_profiler",
     "test_jit",
     "test_nn",
     # these tests run long and fail in addition to that
