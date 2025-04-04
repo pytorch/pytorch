@@ -449,6 +449,10 @@ class MetalOverrides(OpOverrides):
     def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
         return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
 
+    @staticmethod
+    def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -492,6 +496,16 @@ class MetalKernel(SIMDKernel):
             self.compute.writeline(DeferredLine(name, line))
         else:
             self.stores.writeline(DeferredLine(name, line))
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        var = self.args.output(name)
+        index = self.prepare_indexing(index)
+        dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
+        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+        # Only one thread in the reduction group needs to store the results
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
+        line = f"if ({reduction_dim.name} == 0) {line}"
+        self.stores.writeline(DeferredLine(name, line))
 
     def _new_accvar(
         self,
