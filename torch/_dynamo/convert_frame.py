@@ -260,7 +260,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
-            prev_dont_skip_tracing = config.dont_skip_tracing
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -289,7 +288,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
                 )
-                config.dont_skip_tracing = prev_dont_skip_tracing
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn

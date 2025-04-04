@@ -1377,6 +1377,7 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         self.initial_values = (tuple(self.initial_values.items()),)
 
     def enter(self, tx):
+        self.set_cleanup_hook(tx)
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
