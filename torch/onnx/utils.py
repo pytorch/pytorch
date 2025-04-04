@@ -1393,7 +1393,7 @@ def _export(
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
-    # torch.onnx.export does not support opset versions >ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
+    # torch.onnx.export does not support opset versions >= 18
     if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
         # We do not want to fail because we should still allow users to create
         # custom symbolic functions for opset>ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
