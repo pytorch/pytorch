@@ -348,6 +348,10 @@ class ProcessGroup:
         tensors: list[Tensor],
         opts: AllreduceOptions = ...,
     ) -> Work: ...
+    def as_work(
+        self,
+        tensor: Tensor
+    ) -> Work: ...
     @overload
     def allreduce(
         self,

@@ -1230,6 +1230,24 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 0
         assert counter.op_count == 0
         assert same(outputs, correct_outputs)
+    
+    @parametrize("ingraph_wait", [True, False])
+    def test_dynamo_async_op(self, ingraph_wait):
+        @torch.compile(fullgraph=True)
+        def fn(param):
+            handle = dist.all_reduce(p.grad, op=dist.ReduceOp.SUM, async_op=True)
+            if ingraph_wait:
+                handle.wait()
+            return handle
+
+        p = torch.ones(10, 10, requires_grad=True).cuda()
+        p.grad = torch.ones(10, 10).cuda()
+
+        print(p.grad)
+        handle = fn(p)
+        # assert isinstance(handle, AsyncCollectiveTensor)
+        if not ingraph_wait:
+            handle.wait()
 
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
