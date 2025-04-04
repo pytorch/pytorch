@@ -20,6 +20,7 @@
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif
+#include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
@@ -89,13 +90,6 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
-enum ConstantType : uint8_t {
-  Unknown = 0,
-  Parameter = 1,
-  Buffer = 2,
-  TensorConstant = 3,
-  FoldedConstant = 4,
-};
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
