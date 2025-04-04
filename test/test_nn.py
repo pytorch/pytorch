@@ -1812,7 +1812,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     def test_weight_norm(self):
-        for dtype in [torch.float, torch.bfloat16]:
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
             input = torch.randn(3, 4, dtype=dtype)
             m = nn.Linear(4, 5).to(dtype=dtype)
             expected_output = m(input)
