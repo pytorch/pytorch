@@ -23,6 +23,7 @@
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_cholesky_native.h>
+#include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
@@ -262,14 +263,14 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
   }
 }
 
-void linalg_solve_out_mps_impl(const Tensor& A,
-                               const Tensor& B,
-                               bool left,
-                               bool check_errors,
-                               const Tensor& result,
-                               const Tensor& LU,
-                               const Tensor& pivots,
-                               const Tensor& info) {
+static void linalg_solve_out_mps_impl(const Tensor& A,
+                                      const Tensor& B,
+                                      bool left,
+                                      bool check_errors,
+                                      const Tensor& result,
+                                      const Tensor& LU,
+                                      const Tensor& pivots,
+                                      const Tensor& info) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
@@ -294,7 +295,7 @@ void linalg_solve_out_mps_impl(const Tensor& A,
 
   uint64_t numPivots = std::min(aRows, aCols);
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
-  info_.fill(0); // will be set to 1 during kernel if something fails
+  info.fill_(0); // will be set to 1 during kernel if something fails
   resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
@@ -318,8 +319,8 @@ void linalg_solve_out_mps_impl(const Tensor& A,
     pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
+  resize_output(LU, A_t.sizes());
   Tensor LU_ = LU;
-  resize_output(LU_, A_t.sizes());
   if (!LU_.is_same(A_t)) {
     A_t = LU_.copy_(A_t);
   } else {
@@ -435,6 +436,32 @@ void linalg_solve_out_mps_impl(const Tensor& A,
     // If this was a right solve, transpose the result back
     result.copy_(result_t.transpose(-2, -1).contiguous());
   }
+}
+
+static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
+  using namespace mps;
+  TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
+  TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
+  using CachedGraph = MPSUnaryCachedGraph;
+
+  MPSStream* stream = getCurrentMPSStream();
+  info.zero_();
+
+  if (A.numel() == 0) {
+    return;
+  }
+
+  if (!result.is_contiguous()) {
+    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+  }
+  auto A_sizes = A.sizes();
+  int ndim = A.dim();
+
+  Tensor LU = empty_like(A);
+  Tensor identity = zeros_like(A);
+  Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
+  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -1427,5 +1454,9 @@ TORCH_IMPL_FUNC(lu_unpack_out_mps)
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
+}
+
+TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
+  mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
 } // namespace at::native
