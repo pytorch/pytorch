@@ -2,7 +2,6 @@
 # and https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_primitives.py
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
-import operator
 from abc import ABCMeta
 from typing import Any, Optional, Union
 
@@ -15,7 +14,6 @@ from torch.ao.quantization.observer import (
     TorchAODType,
     ZeroPointDomain,
 )
-from torch.fx import Node
 
 
 ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
@@ -731,51 +729,6 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
             self.zero_point_domain,
         )
 
-    def convert(self, model: torch.fx.GraphModule, observer_node: Node):
-        print("calling convert")
-        from torch.ao.quantization.fx.utils import create_getattr_from_value
-
-        scale, zero_point = self.calculate_qparams()
-        with model.graph.inserting_before(observer_node):
-            assert self.block_size is not None, "Expecting block_size to be populated"
-            assert (
-                self.original_dtype is not None
-            ), "Expecting original_dtype to be populated"
-            scale_node = create_getattr_from_value(model, model.graph, "_scale", scale)
-            zero_point_node = create_getattr_from_value(
-                model, model.graph, "_zero_point", zero_point
-            )
-            q_node = model.graph.call_function(
-                torch.ops.pt2e_quant.quantize_affine,
-                (
-                    observer_node.args[0],
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {},
-            )
-            dq_node = model.graph.call_function(
-                torch.ops.pt2e_quant.dequantize_affine,
-                (
-                    q_node,
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {"output_dtype": self.original_dtype},
-            )
-            observer_node.replace_all_uses_with(dq_node)
-            model.graph.erase_node(observer_node)
-
 
 class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
     def __init__(
@@ -869,75 +822,45 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
             self.zero_point_domain,
         )
 
-    def convert(self, model: torch.fx.GraphModule, observer_node: Node):
-        print("calling convert")
-        from torch.ao.quantization.fx.utils import create_getattr_from_value
 
-        with model.graph.inserting_before(observer_node):
-            assert self.block_size is not None, "Expecting block_size to be populated"
-            assert (
-                self.original_dtype is not None
-            ), "Expecting original_dtype to be populated"
-            if hasattr(self, "is_dynamic") and self.is_dynamic:
-                print("is dynamic")
-                choose_qparams_affine = model.graph.call_function(
-                    torch.ops.pt2e_quant.choose_qparams_affine,
-                    (
-                        observer_node.args[0],
-                        self.mapping_type.name,
-                        self.block_size,
-                        self.target_dtype,
-                        self.quant_min,
-                        self.quant_max,
-                        self.eps,
-                        self.scale_dtype,
-                        self.zero_point_dtype,
-                        self.preserve_zero,
-                        self.zero_point_domain.name,
-                    ),
-                )
-                scale_node = model.graph.call_function(
-                    operator.getitem, (choose_qparams_affine, 0)
-                )
-                zero_point_node = model.graph.call_function(
-                    operator.getitem, (choose_qparams_affine, 1)
-                )
-            else:
-                scale, zero_point = self.calculate_qparams()
-                scale_node = create_getattr_from_value(
-                    model, model.graph, "_scale", scale
-                )
-                zero_point_node = create_getattr_from_value(
-                    model, model.graph, "_zero_point", zero_point
-                )
+class AffineQuantizedPlaceholderObserver(AffineQuantizedObserverBase):
+    def __init__(
+        self,
+        mapping_type: MappingType,
+        target_dtype: torch.dtype,
+        granularity: Granularity,
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        eps: Optional[float] = None,
+        is_dynamic=False,
+        scale_dtype: Optional[torch.dtype] = None,
+        zero_point_dtype: Optional[torch.dtype] = None,
+        preserve_zero: bool = True,
+        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        # there could be some extra args that's ignored
+        **kwargs,
+    ):
+        self.is_dynamic = is_dynamic
 
-            q_node = model.graph.call_function(
-                torch.ops.pt2e_quant.quantize_affine,
-                (
-                    observer_node.args[0],
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {},
-            )
-            dq_node = model.graph.call_function(
-                torch.ops.pt2e_quant.dequantize_affine,
-                (
-                    q_node,
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {"output_dtype": self.original_dtype},
-            )
-            observer_node.replace_all_uses_with(dq_node)
-            model.graph.erase_node(observer_node)
+        super().__init__(
+            mapping_type=mapping_type,
+            target_dtype=target_dtype,
+            granularity=granularity,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            eps=eps,
+            scale_dtype=scale_dtype,
+            zero_point_dtype=zero_point_dtype,
+            preserve_zero=preserve_zero,
+            zero_point_domain=zero_point_domain,
+        )
+
+    def forward(self, input):
+        self.block_size = get_block_size(input.shape, self.granularity)
+        self.original_dtype = input.dtype
+        return input
+
+    def calculate_qparams(self):
+        raise Exception(  # noqa: TRY002
+            "calculate_qparams should not be called for PlaceholderObserver"
+        )
