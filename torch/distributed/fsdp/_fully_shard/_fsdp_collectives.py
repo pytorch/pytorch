@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from contextlib import contextmanager, ExitStack
 from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
@@ -17,11 +18,11 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-MEM_POOL = None
+MEM_POOL: Optional[torch.cuda.MemPool] = None
 
 
 @contextmanager
-def maybe_mem_pool():
+def maybe_mem_pool() -> Generator[None]:
     with ExitStack() as stack:
         if MEM_POOL is not None:
             stack.enter_context(torch.cuda.use_mem_pool(MEM_POOL))
@@ -425,7 +426,9 @@ def foreach_reduce(
     all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
         with maybe_mem_pool():
-            reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
+            reduce_output = reduce_scatter_input.new_empty(
+                (reduce_scatter_output_numel,)
+            )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if reduce_scatter_reduce_op is None:
             if predivide_factor is None:
