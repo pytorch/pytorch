@@ -232,7 +232,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[Union[SymInt, int], int]
+    tup: tuple[Union[SymInt, int], int],
 ) -> tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
@@ -1296,7 +1296,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
 ) -> Union[bool, int, float]:
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -1926,7 +1926,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2162,7 +2162,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool]
+    symbool: Union[bool, torch.SymBool],
 ) -> Union[int, torch.SymInt]:
     if isinstance(symbool, bool):
         return 1 if symbool else 0
@@ -3330,8 +3330,6 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
-        if specialize_zero_one:
-            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -4541,7 +4539,10 @@ class ShapeEnv:
         sloc = self._get_sloc()
 
         if val in (0, 1) and specialize_zero_one:
-            r = self.val_to_var[val]
+            if val == 0:
+                return sympy.S.Zero
+            else:
+                return sympy.S.One
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
