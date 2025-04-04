@@ -53,7 +53,7 @@ jobs:
 
           set +x
 
-          python3 .ci/release/generate_build_matrix.py \
+          python3 .cd/release/generate_build_matrix.py \
             --package-type "${PACKAGE_TYPE}" \
             --os "${OS}" \
             --accelerator-type "${ACCELERATOR_TYPE}" \
