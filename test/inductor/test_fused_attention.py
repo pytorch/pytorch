@@ -2,6 +2,7 @@
 import functools
 import itertools
 import math
+import unittest
 
 import torch
 import torch._inductor.config
