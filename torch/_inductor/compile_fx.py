@@ -124,6 +124,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
+    from torch.compiler._cache import CacheInfo
 
     from .ir import ExternKernelNode
 
@@ -2362,3 +2363,109 @@ def _aoti_flatten_inputs(
         }
     )
     return flat_example_inputs, options
+
+
+_ENCODING_VERSION: int = 1
+
+
+class CompiledArtifact:
+    _compiled_fn: Callable[..., Any]
+    _artifacts: Optional[tuple[bytes, CacheInfo]]
+
+    def __init__(
+        self,
+        compiled_fn: Callable[..., Any],
+        artifacts: Optional[tuple[bytes, CacheInfo]],
+    ):
+        self._compiled_fn = compiled_fn
+        self._artifacts = artifacts
+
+    def __call__(self, *args: Any) -> Any:
+        return self._compiled_fn(*args)[0]
+
+    def save(self, filename: str) -> None:
+        with dynamo_timed("CompiledArtifact.save"):
+            if self._artifacts is None:
+                raise RuntimeError(
+                    "CompiledArtifact.save failed to save since there's no artifact to save"
+                )
+            artifact_bytes, cache_info = self._artifacts
+            assert len(cache_info.aot_autograd_artifacts) == 1
+            key = cache_info.aot_autograd_artifacts[0]
+
+            from torch.utils._appending_byte_serializer import BytesWriter
+
+            writer = BytesWriter(0)
+            writer.write_uint64(_ENCODING_VERSION)
+            writer.write_str(key)
+            writer.write_bytes(artifact_bytes)
+            with open(filename, "wb") as file:
+                file.write(writer.to_bytes())
+
+    @staticmethod
+    def load(filename: str, *example_args: Any) -> CompiledArtifact:
+        with dynamo_timed("CompiledArtifact.load"):
+            with open(filename, "rb") as file:
+                artifacts = file.read()
+            from torch.utils._appending_byte_serializer import BytesReader
+
+            reader = BytesReader(artifacts)
+            assert reader.read_uint64() == _ENCODING_VERSION
+            key = reader.read_str()
+            artifact_bytes = reader.read_bytes()
+            assert reader.is_finished()
+
+            torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            with torch._functorch.config.patch(strict_autograd_cache=True):
+                from torch._functorch._aot_autograd.autograd_cache import (
+                    AOTAutogradCache,
+                )
+
+                entry = AOTAutogradCache._lookup(key, local=True, remote=False)
+
+            assert entry is not None
+
+            fx_config = _CompileFxKwargs(
+                cudagraphs=BoxedBool(False),
+                boxed_forward_device_index=BoxedDeviceIndex(0),
+            )
+
+            with config.patch(unsafe_skip_cache_dynamic_shape_guards=True):
+                compiled_fn = entry.wrap_post_compile(
+                    list(example_args), entry.sanitized_aot_config, fx_config
+                )
+            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+
+
+def standalone_compile(
+    gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
+) -> CompiledArtifact:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    shape_env = ShapeEnv()
+    for e in example_inputs:
+        if isinstance(e, torch.SymInt):
+            shape_env = e.node.shape_env
+            break
+
+    from torch._subclasses import FakeTensorMode
+
+    torch._guards._TLS.tracing_context = torch._guards.TracingContext(
+        FakeTensorMode(shape_env=shape_env)
+    )
+
+    from torch.compiler._cache import CacheArtifactManager
+
+    with CacheArtifactManager.with_fresh_cache():
+        compiled_fn = compile_fx(gm, example_inputs, **kwargs)
+        assert callable(compiled_fn)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        if artifacts is None:
+            log.warning(
+                "standalone_compile artifact generation failed, cannot save. "
+                "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
+            )
+
+    return CompiledArtifact(compiled_fn, artifacts)

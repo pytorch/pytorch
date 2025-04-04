@@ -1021,16 +1021,20 @@ class FxGraphCache:
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(
-                shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
-            )
-            log.debug(
-                "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
-                key,
-                candidate.guards_expr,
-                hints,
-                hit,
-            )
+            if config.unsafe_skip_cache_dynamic_shape_guards:
+                hit = True
+            else:
+                hit = bool(
+                    shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
+                )
+                log.debug(
+                    "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
+                    key,
+                    candidate.guards_expr,
+                    hints,
+                    hit,
+                )
+
             if hit:
                 graph = candidate
                 break
@@ -1078,7 +1082,7 @@ class FxGraphCache:
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
-        if graph.guards_expr:
+        if not config.unsafe_skip_cache_dynamic_shape_guards and graph.guards_expr:
             check = bool(
                 shape_env.evaluate_guards_expression(graph.guards_expr, symints)
             )
