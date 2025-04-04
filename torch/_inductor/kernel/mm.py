@@ -205,9 +205,6 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
-    define_args=["A", "B"],
-    # Write now those are all loaded inputs in the template above.
-    prologue_supported_arg_names=["A", "B"],
 )
 
 persistent_tma_mm_template = TritonTemplate(
