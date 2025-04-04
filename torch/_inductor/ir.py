@@ -5999,17 +5999,18 @@ class TMADescriptor(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_tma_descriptor(self)
 
+
 class SubgraphBuffer(ExternKernel):
-    def __init__(
-        self, layout, input_nodes, gm, example_inputs
-    ):
+    def __init__(self, layout, input_nodes, gm, example_inputs):
         super().__init__(None, layout, input_nodes)
         self.gm = gm
         self.example_inputs = example_inputs
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        self.subgraph = V.graph.make_subgraph(self.gm, self.example_inputs, "mm_decompose_k")
+        self.subgraph = V.graph.make_subgraph(
+            self.gm, self.example_inputs, "mm_decompose_k"
+        )
 
     def codegen(self, wrapper) -> None:
         import torch._inductor.config as inductor_config
@@ -6028,8 +6029,12 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        wrapper.codegen_subgraph(CodegenGraph(self.subgraph), [*[buffer.get_name() for buffer in self.inputs]], [self.name])
-            
+        wrapper.codegen_subgraph(
+            CodegenGraph(self.subgraph),
+            [*[buffer.get_name() for buffer in self.inputs]],
+            [self.name],
+        )
+
 
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_metadata(self):  # type: ignore[no-untyped-def]
