@@ -1490,13 +1490,13 @@ class TestLinalg(TestCase):
         # dim is None
         test(-1, None, True)
 
-        # len(dim) ==0
+        # len(dim) == 0
         test(-1, [], True)
 
         # shape[d] == 0
         test(-1, [0], False, True)
 
-        # u0+1==0 is False so we do not see a runtime assert
+        # u0+1 == 0 is False we do not see a runtime assert in the generated graph.
         test(-1, [1], False, False)
 
         test(-1, [0, 1], False, True)

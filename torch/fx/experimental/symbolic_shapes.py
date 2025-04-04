@@ -1277,9 +1277,16 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     return x
 
 
-# a or b is eager, meaning that (a==1 or True) will specialize a.
-# but operator.or_(a==1, True) generates sympy expression and avoid
-# the specialization.
+# When a or b is evaluated, a is evaluated eagerly first then b. This causes
+# a data dependent error for an expression “if u0==1 or True”. or overguarding for
+# “if s0==1 or True”.
+
+# On the other hand, when we use operator.or_, then dynamo will generate
+# a sympy expression Sympy.Or(u0==1, True) without evaluating the args first.
+
+# When the whole expression is passed to evaluation in that case, we do not throw a
+# data dependent error or guard because we can statically know the result is True 
+# before unpacking the symbols.
 sym_or = operator.or_
 
 
