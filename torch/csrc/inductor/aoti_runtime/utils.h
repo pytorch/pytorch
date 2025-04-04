@@ -140,9 +140,10 @@ class MaybeOwningAtenTensorHandle {
   MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
   // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
-  MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) = delete;
-  MaybeOwningAtenTensorHandle& operator=(const MaybeOwningAtenTensorHandle& other) =
+  MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =
       delete;
+  MaybeOwningAtenTensorHandle& operator=(
+      const MaybeOwningAtenTensorHandle& other) = delete;
 
   // Move constructor and move assignment operator
   MaybeOwningAtenTensorHandle(MaybeOwningAtenTensorHandle&& other) = default;
