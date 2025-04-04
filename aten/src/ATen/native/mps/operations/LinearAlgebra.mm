@@ -262,32 +262,27 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
   }
 }
 
-void linalg_solve_out_mps_impl(const TensorBase& A,
-                               const TensorBase& B,
+void linalg_solve_out_mps_impl(const Tensor& A,
+                               const Tensor& B,
                                bool left,
                                bool check_errors,
-                               const TensorBase& result,
-                               const TensorBase& LU,
-                               const TensorBase& pivots,
-                               const TensorBase& info) {
+                               const Tensor& result,
+                               const Tensor& LU,
+                               const Tensor& pivots,
+                               const Tensor& info) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
               "linalg.lu_factor(): MPS doesn't support complex types.");
-  Tensor A_t = Tensor(A);
-  Tensor B_t = Tensor(B);
-  Tensor info_ = Tensor(info);
-  Tensor pivots_t = Tensor(pivots);
-  Tensor LU_ = Tensor(LU);
-  Tensor result_ = Tensor(result);
+  Tensor A_t, B_t;
   // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
   // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
   if (left) {
-    A_t = A_t.contiguous();
-    B_t = B_t.contiguous();
+    A_t = A.contiguous();
+    B_t = B.contiguous();
   } else {
-    A_t = A_t.transpose(-2, -1).contiguous();
-    B_t = B_t.transpose(-2, -1).contiguous();
+    A_t = A.transpose(-2, -1).contiguous();
+    B_t = B.transpose(-2, -1).contiguous();
   }
 
   uint64_t aRows = A_t.size(-2);
@@ -299,10 +294,10 @@ void linalg_solve_out_mps_impl(const TensorBase& A,
 
   uint64_t numPivots = std::min(aRows, aCols);
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
-  info_.fill_(0); // will be set to 1 during kernel if something fails
-  resize_output(info_, pivot_sizes);
+  info_.fill(0); // will be set to 1 during kernel if something fails
+  resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
-  resize_output(pivots_t, pivot_sizes);
+  resize_output(pivots, pivot_sizes);
 
   if (A_t.numel() == 0) {
     return;
@@ -323,6 +318,7 @@ void linalg_solve_out_mps_impl(const TensorBase& A,
     pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
+  Tensor LU_ = LU;
   resize_output(LU_, A_t.sizes());
   if (!LU_.is_same(A_t)) {
     A_t = LU_.copy_(A_t);
@@ -421,7 +417,7 @@ void linalg_solve_out_mps_impl(const TensorBase& A,
 
   auto stacked_status = A.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
   std::vector<int64_t> info_sizes(A.sizes().begin(), A.sizes().end() - 2);
-  info_.copy_(stacked_status.view(info_sizes));
+  info.copy_(stacked_status.view(info_sizes));
 
   if (check_errors) {
     for (const auto i : c10::irange(status_tensors.size())) {
@@ -437,7 +433,7 @@ void linalg_solve_out_mps_impl(const TensorBase& A,
   }
   if (!left) {
     // If this was a right solve, transpose the result back
-    result_.copy_(result_t.transpose(-2, -1).contiguous());
+    result.copy_(result_t.transpose(-2, -1).contiguous());
   }
 }
 
