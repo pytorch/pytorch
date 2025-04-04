@@ -143,7 +143,7 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
-          python3 -mpip install $(echo *.whl)
+          python -mpip install $(echo *.whl)
           popd
 
           .ci/pytorch/win-arm64-test.sh
