@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
 
 
 # Wraps a tensor, exposing only DLPack methods:
@@ -414,8 +414,31 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCUDA
     def test_needs_copy_error(self, device):
-        with self.assertRaisesRegex(RuntimeError, "cannot move tensor from .*"):
+        with self.assertRaisesRegex(ValueError, "cannot move tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    def test_unsupported_device_error(self, device):
+        inp = make_tensor((5,), dtype=torch.float32, device=device)
+        dl_device_type = DLDeviceType.kDLHexagon
+
+        with self.assertRaisesRegex(
+            BufferError, f"Unsupported device_type: {int(dl_device_type)}"
+        ):
+            inp.__dlpack__(max_version=(1, 0), dl_device=(dl_device_type, 0))
+
+    @skipMeta
+    @onlyCPU
+    def test_dlpack_unsupported_dtype_error(self, device):
+        inp = make_tensor((5,), dtype=torch.float32, device=device).to(
+            torch.float8_e4m3fn
+        )
+
+        with self.assertRaisesRegex(
+            BufferError, ".* types are not supported by dlpack"
+        ):
+            from_dlpack(inp)
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
