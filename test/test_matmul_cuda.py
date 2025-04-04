@@ -1276,9 +1276,6 @@ class TestFP8MatmulCuda(TestCase):
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         scale_a = torch.arange(m * n_groups, device=device, dtype=torch.float32) / 4
         scale_b = torch.arange(n * n_groups, device=device, dtype=torch.float32) / 4
-        for name in ["a", "b", "scale_a", "scale_b"]:
-            print(name, locals()[name].shape)
-            print(locals()[name])
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         f = torch._scaled_grouped_mm
         f = torch.compile(f) if use_torch_compile else f
@@ -1293,12 +1290,6 @@ class TestFP8MatmulCuda(TestCase):
             ascalelist.append(scale_a[i * m : (i + 1) * m])
             bscalelist.append(scale_b[i * n : (i + 1) * n])
             start = offs_cpu[i]
-        print(a)
-        print("alist:", alist)
-        asplit = [x.squeeze(1) for x in a.view(m, n_groups, k).split(1, dim=1)]
-        print("asplit:", asplit)
-        for x, y in zip(alist, asplit):
-            torch.testing.assert_close(x.float(), y.float())
         self.grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
