@@ -5,6 +5,7 @@
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 #include <string_view>
+#include "c10/util/intrusive_ptr.h"
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
@@ -303,6 +304,7 @@ void register_work(
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+  std::cout << "wait_tensor found works.size()=" << works.size() << std::endl;
   for (const auto& work : works) {
     work->wait();
   }
@@ -325,6 +327,17 @@ void set_allow_inflight_collective_as_graph_input(bool value) {
 bool allow_inflight_collective_as_graph_input() {
   return RankLocal<WorkRegistry>::get()
       .allow_inflight_collective_as_graph_input();
+}
+
+c10::intrusive_ptr<c10d::Work> as_work_impl(at::Tensor& tensor) {
+  auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+  std::cout << "FOUND works.size()=" << works.size() << std::endl;
+  TORCH_CHECK(works.size() == 1, ".as_work(tensor) is only supported when there's a single ongoing collective for the tensor.");
+  return works[0];
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::as_work(at::Tensor& tensor) {
+  return as_work_impl(tensor);
 }
 
 } // namespace c10d
