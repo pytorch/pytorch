@@ -61,7 +61,7 @@ class StorageWriter(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool, rank: Optional[int] = None, no_rank_coordination: bool = False) -> None:
         """
         Initialize this instance.
 
@@ -200,7 +200,7 @@ class StorageReader(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, rank: Optional[int] = None) -> Metadata:
         """
         Read the checkpoint metadata.
 
@@ -210,7 +210,7 @@ class StorageReader(abc.ABC):
         """
 
     @abc.abstractmethod
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool, rank: Optional[int] = None, no_rank_coordination: bool = False) -> None:
         """
         Initialize this instance.
 
@@ -218,6 +218,9 @@ class StorageReader(abc.ABC):
             metadata (Metadata): The metadata schema to use.
             is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
+            rank: The current local rank.
+            no_rank_coordination: Whether the rank coordination is skipped.
+                This results into every rank writing its local data and metadata to the storage.
         """
 
     @abc.abstractmethod

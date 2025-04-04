@@ -200,7 +200,7 @@ class _HuggingFaceStorageReader(FsspecReader):
         fut.set_result(None)
         return fut
 
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, rank: Optional[int] = None) -> Metadata:
         path = self.fs.concat_path(self.path, _metadata_fn)
         with self.fs.create_stream(path, "r") as metadata_file:
             metadata = json.load(metadata_file)

@@ -64,7 +64,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.checkpoint_id = checkpoint_id
         self.coordinator_rank = coordinator_rank
 
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, rank: Optional[int] = None) -> Metadata:
         """Extends the default StorageReader to support building the metadata file"""
         # Metadata is built in planner.set_up_planner, since we are not actually reading metadata from
         # the disk
@@ -121,7 +121,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool, rank: Optional[int] = None, no_rank_coordination: bool = False) -> None:
         """Implementation of the StorageReader method"""
         self.is_coordinator = is_coordinator
         if self.is_coordinator:

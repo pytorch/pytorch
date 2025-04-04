@@ -3,13 +3,14 @@
 import os
 import warnings
 from typing import Any, cast, Optional, Union
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.distributed_c10d import _get_default_group
+from typing_extensions import deprecated
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
@@ -213,12 +214,24 @@ def _load_state_dict(
         ckpt_kwargs["checkpoint_id"] = ckpt_id
         ckpt_kwargs["process_group"] = distW.group
 
+    no_rank_coordination = False
+    try:
+        metadata = storage_reader.read_metadata(rank=None)
+    except:
+        try:
+            metadata = storage_reader.read_metadata(rank=distW.rank)
+            no_rank_coordination = True
+        except:
+            raise RuntimeError(f"No checkpoint metadata found for checkpoint_id={ckpt_id}")
+
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        metadata = storage_reader.read_metadata()
+        nonlocal no_rank_coordination
+        nonlocal metadata
+
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
-        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
+        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator, distW.rank, no_rank_coordination)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)
@@ -231,7 +244,12 @@ def _load_state_dict(
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
+    if no_rank_coordination:
+        local_plan: LoadPlan = local_step()
+        global_plan: LoadPlan = global_step([local_plan])
+        central_plan: LoadPlan = global_plan[0]
+    else:
+        central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
@@ -242,8 +260,11 @@ def _load_state_dict(
         all_reads.wait()
         return None
 
-    _ = distW.all_gather("read", read_data)
-
+    if no_rank_coordination:
+        read_data()
+        dist.barrier(process_group or _get_default_group())
+    else:
+        _ = distW.all_gather("read", read_data)
 
 def _load_state_dict_from_keys(
     keys: Optional[Union[set[str], str]] = None,
