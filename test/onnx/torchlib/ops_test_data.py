@@ -78,6 +78,7 @@ class TorchLibOpInfo:
     compare_shape_only_for_output: tuple[int, ...] = ()
     # Whether the function is designed for complex inputs
     complex: bool = False
+    opset_introduced: int = 18
     # The acceptable tolerance of the inference result difference between PyTorch and ORT.
     # Format: {dtype: (rtol, atol)}.
     # For example: {torch.float16: (1e-3, 1e-3)}
@@ -448,6 +449,7 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
     TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
     TorchLibOpInfo("nn.functional.gelu", nn_ops.aten_gelu),
+    TorchLibOpInfo("nn.functional.gelu", nn_ops.aten_gelu_opset20, opset_introduced=20),
 )
 
 

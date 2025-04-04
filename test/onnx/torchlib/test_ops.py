@@ -67,6 +67,9 @@ TESTED_DTYPES = (
 COMPLEX_TYPES = (torch.complex64,)
 
 
+TESTED_OPSET_VERSIONS = [18, 19, 20]
+
+
 def dtypes_except(*dtypes: torch.dtype) -> Sequence[torch.dtype]:
     """Returns all dtypes except the ones specified."""
     return tuple(dtype for dtype in TESTED_DTYPES if dtype not in dtypes)
@@ -125,6 +128,7 @@ def run_test_output_match(
         str,
         ops_test_data.TorchLibOpInfo,
     ],
+    opset_version: int = 18,
 ):
     """Base test method for testing each opset, used by instantiate_device_type_tests.
 
@@ -220,7 +224,9 @@ def run_test_output_match(
 
                 test_name = test_suite.id()
                 function_output, model_proto = function_executor(
-                    test_name, reference_torch_outputs
+                    test_name,
+                    reference_torch_outputs,
+                    opset_version=opset_version,
                 )(onnx_function, input_onnx, kwargs_onnx)
                 # Finally we re-flatten everything
                 # TODO: add pytree structure comparison.
@@ -310,14 +316,52 @@ class TestOutputConsistencyFullGraph(common_utils.TestCase):
         self, device: str, dtype: torch.dtype, op: opinfo_core.OpInfo
     ):
         # Base test method for testing each op by running the full ONNX graph.
-        run_test_output_match(
-            self,
-            device,
-            dtype,
-            op,
-            ops_test_common.graph_executor,
-            ops_test_data.TORCHLIB_OPINFO_MAPPING,
-        )
+        opset_introduced = ops_test_data.TORCHLIB_OPINFO_MAPPING[
+            op.name
+        ].opset_introduced
+        if opset_introduced == 18:
+            run_test_output_match(
+                self,
+                device,
+                dtype,
+                op,
+                ops_test_common.graph_executor,
+                ops_test_data.TORCHLIB_OPINFO_MAPPING,
+            )
+
+    @ops_test_common.add_decorate_info(
+        ops_test_data.OPS_DB,
+        "TestOutputConsistencyFullGraph",
+        "test_output_match_opinfo_opset_",
+        skip_or_xfails=ops_test_data.EXPECTED_SKIPS_OR_FAILS,
+    )
+    @common_device_type.ops(  # type: ignore[misc]
+        [
+            info
+            for info in ops_test_data.OPS_DB
+            if info.name in ops_test_data.TESTED_OPS
+        ],
+        allowed_dtypes=TESTED_DTYPES,
+    )
+    def test_output_match_opinfo_all_opsets_(
+        self, device: str, dtype: torch.dtype, op: opinfo_core.OpInfo
+    ):
+        # Base test method for testing each op by running the full ONNX graph.
+        for opset_version in TESTED_OPSET_VERSIONS:
+            with self.subTest(msg=opset_version, opset_version=opset_version):
+                opset_introduced = ops_test_data.TORCHLIB_OPINFO_MAPPING[
+                    op.name
+                ].opset_introduced
+                if opset_introduced <= opset_version:
+                    run_test_output_match(
+                        self,
+                        device,
+                        dtype,
+                        op,
+                        ops_test_common.graph_executor,
+                        ops_test_data.TORCHLIB_OPINFO_MAPPING,
+                        opset_version=opset_version,
+                    )
 
     @ops_test_common.add_decorate_info(
         ops_test_data.OPS_DB,

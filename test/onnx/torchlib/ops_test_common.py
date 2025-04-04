@@ -24,7 +24,7 @@ import onnxruntime.capi.onnxruntime_pybind11_state
 import onnxscript
 import onnxscript.evaluator
 import pytest
-from onnxscript import ir
+from onnxscript import ir, version_converter
 
 import torch
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
@@ -51,6 +51,13 @@ FLOAT_TYPES = (
     torch.float32,
     torch.float64,
 )
+
+
+OPSET_VERSION_MAPPING = {
+    18: onnxscript.opset18,
+    19: onnxscript.opset19,
+    20: onnxscript.opset20,
+}
 
 TEST_OPSET_VERSION = 18
 IS_MACOS = sys.platform.startswith("darwin")
@@ -487,6 +494,7 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
 def graph_executor(
     test_name: str,
     outputs: Sequence[Any],
+    opset_version: int = TEST_OPSET_VERSION,
 ) -> Callable[[Callable[..., Any], tuple[Any], dict[str, Any]], None]:
     """Eagerly executes a function."""
 
@@ -500,10 +508,10 @@ def graph_executor(
             (),
             (),
             nodes=(),
-            opset_imports={"": 18, "pkg.torch.onnx": 1},
+            opset_imports={"": opset_version, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        opset = onnxscript.opset18
+        opset = OPSET_VERSION_MAPPING[opset_version]
         tracer = _building.OpRecorder(opset, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
@@ -593,6 +601,7 @@ def graph_executor(
         _ir_passes.add_torchlib_common_imports(onnx_model)
         _ir_passes.add_opset_imports(onnx_model)
         # Make sure the model is valid
+        version_converter.convert_version(onnx_model, target_version=opset_version)
         model_proto = ir.to_proto(onnx_model)
         try:
             onnx.checker.check_model(model_proto, full_check=True)

@@ -285,14 +285,10 @@ class ONNXRegistry:
             # Filter decompositions to only include those with opset_introduced <= opset_version
             decomps = [d for d in decomps if d.opset_introduced <= self.opset_version]
 
-            # Sort decompositions by opset_introduced in descending order
-            decomps_sorted = sorted(
-                decomps, key=lambda x: x.opset_introduced, reverse=True
-            )
-
             # Keep only the decomposition with the highest opset_introduced
-            if decomps_sorted:
-                cleaned_functions[target_or_name] = [decomps_sorted[0]]
+            if decomps:
+                max_opset_decomp = max(decomps, key=lambda x: x.opset_introduced)
+                cleaned_functions[target_or_name] = [max_opset_decomp]
 
         self.functions = cleaned_functions
 
