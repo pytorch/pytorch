@@ -781,7 +781,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
 
