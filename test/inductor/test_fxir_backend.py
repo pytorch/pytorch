@@ -242,6 +242,17 @@ class FxirTestCase(InductorTestCase):
         output_node = gm.graph.find_nodes(op="output")[0]
         self.assertEqual(len(output_node.args[0]), 2)
 
+    def test_duplicate_input(self):
+        """
+        Test duplicated inputs. This will collapse into a single input in the GM.
+        """
+
+        args = [torch.randn(4, device=self.device)] * 2
+        gm = self._compile_and_check(torch.add, args, expected_num_triton_kernels=1)
+
+        num_placeholders = len(gm.graph.find_nodes(op="placeholder"))
+        self.assertEqual(num_placeholders, 1)
+
     def test_custom_compiler(self):
         """
         Test a derived backend with a custom compiler.
