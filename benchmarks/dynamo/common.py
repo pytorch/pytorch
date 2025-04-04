@@ -1421,6 +1421,9 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
 
+            # For AOTI, we only measure the memory compression ratio at the run time
+            # instead of the compile time, so explicitly reset memory stats here.
+            torch.cuda.reset_peak_memory_stats()
             cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
         return cls.cache[key]
@@ -3735,10 +3738,6 @@ def run(runner, args, original_dir=None):
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
             runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
-
-            # For AOTI, we only measure the memory compression ratio at the run time
-            # instead of the compile time, so use a warmup run to trigger AOTI compilation.
-            args.use_warm_peak_memory = True
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
