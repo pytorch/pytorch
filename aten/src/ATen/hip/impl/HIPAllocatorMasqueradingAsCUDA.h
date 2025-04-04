@@ -23,8 +23,8 @@ public:
   DeleterFnPtr raw_deleter() const override {
     return allocator_->raw_deleter();
   }
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-    allocator_->copy_data(dest, src, count);
+  void copy_data(void* dest, const void* src, std::size_t count, bool sync=false) const final {
+    allocator_->copy_data(dest, src, count, sync);
   }
 };
 

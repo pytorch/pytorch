@@ -60,9 +60,9 @@ struct OpenRegAllocator final : at::Allocator {
     return &ReportAndDelete;
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
+  void copy_data(void* dest, const void* src, std::size_t count, bool sync=false) const final {
     py::gil_scoped_acquire acquire;
-    get_method("copy_data")(reinterpret_cast<openreg_ptr_t>(dest), reinterpret_cast<openreg_ptr_t>(src), count);
+    get_method("copy_data")(reinterpret_cast<openreg_ptr_t>(dest), reinterpret_cast<openreg_ptr_t>(src), count, sync);
   }
 };
 

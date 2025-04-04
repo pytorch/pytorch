@@ -365,7 +365,9 @@ std::string CUDAPluggableAllocator::name() {
 void CUDAPluggableAllocator::copy_data(
     void* dest,
     const void* src,
-    std::size_t count) const {
+    std::size_t count,
+    bool sync) const {
+  TORCH_INTERNAL_ASSERT(!sync, "sync is not yet supported");
   C10_CUDA_CHECK(
       cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }

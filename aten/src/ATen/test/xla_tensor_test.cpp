@@ -24,7 +24,7 @@ struct XLAAllocator final : public at::Allocator {
   at::DeleterFnPtr raw_deleter() const override {
     return &XLAFree;
   }
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
+  void copy_data(void* dest, const void* src, std::size_t count, bool sync=false) const final {
     default_copy_data(dest, src, count);
   }
 };
