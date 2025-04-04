@@ -1413,7 +1413,7 @@ inline void {{kernel_name}}_kernel(
     int64_t ldb,
     int64_t ldc,
     int64_t q_group_size,
-    const bfloat16* {{restrict_keyword}} ScaleAndZeros,
+    const at:BFloat16* {{restrict_keyword}} ScaleAndZeros,
     int64_t lds, // leading dimension of ScaleAndZeros
     int64_t k_start) {
   constexpr int BLOCK_K = {{block_k}};
@@ -1551,7 +1551,7 @@ inline void {{kernel_name}}_kernel(
     def get_kernel_extra_args_declare(self) -> str:
         return (
             "const int64_t q_group_size,\n"
-            "    const bfloat16* __restrict__ ScaleAndZeros,\n"
+            "    const at:BFloat16* __restrict__ ScaleAndZeros,\n"
             "    const int64_t lds,\n"
             "    int64_t k_start,"
         )
