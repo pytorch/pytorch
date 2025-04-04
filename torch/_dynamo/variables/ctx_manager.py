@@ -1234,9 +1234,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert (
-            value.device.type == device.type
-        ), "stream value is not equal to the passed device"
+        assert value.device.type == device.type, (
+            "stream value is not equal to the passed device"
+        )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -1368,8 +1368,6 @@ class EventVariable(VariableTracker):
 class DynamoConfigPatchVariable(ContextWrappingVariable):
     """represents torch._dynamo.patch_dynamo_config"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
-
     def __init__(self, target_values, **kwargs) -> None:
         target_values = tuple(target_values.items())
         super().__init__(target_values=(target_values,), initial_values=None, **kwargs)
@@ -1377,7 +1375,6 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         for key, _ in target_values:
             self.initial_values[key] = torch._dynamo.config.__getattr__(key)
         self.initial_values = (tuple(self.initial_values.items()),)
-        install_guard(self._guards_singleton)
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)

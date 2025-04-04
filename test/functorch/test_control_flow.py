@@ -6903,6 +6903,7 @@ class GraphModule(torch.nn.Module):
 
         t, = fx_pytree.tree_flatten_spec(([t], {}), self._in_spec)
         sum_1: "f32[]" = torch.ops.aten.sum.default(t)
+        _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(sum_1, dtype = torch.float32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
         to: "i64[]" = torch.ops.aten.to.dtype(sum_1, torch.int64);  sum_1 = None
         item: "Sym(u0)" = torch.ops.aten.item.default(to);  to = None
         sin: "f32[2, 3]" = torch.ops.aten.sin.default(t)
