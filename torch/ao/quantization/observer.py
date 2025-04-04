@@ -1853,7 +1853,13 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """
 
     def convert(self, model: torch.fx.GraphModule, observer_node: Node):
-        print("calling convert")
+        """
+        Converts the ovserver node in the graph into its quantized representation
+
+        Args:
+            model: graph module to conver the observer node in
+            observer_node: the observer node to convert
+        """
         from torch.ao.quantization.fx.utils import create_getattr_from_value
 
         with model.graph.inserting_before(observer_node):
@@ -1862,7 +1868,6 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                 self.original_dtype is not None
             ), "Expecting original_dtype to be populated"
             if hasattr(self, "is_dynamic") and self.is_dynamic:
-                print("is dynamic")
                 choose_qparams_affine = model.graph.call_function(
                     torch.ops.pt2e_quant.choose_qparams_affine,
                     (
