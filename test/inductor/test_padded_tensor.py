@@ -134,14 +134,17 @@ class ModelTests(TestCase):
 
     def test_transformer(self):
         with torch.device("cuda"):
-            bsz = 8
+            bsz, seqlen_max = 2, 32
+            seqlen_multiple = 16
 
             # Set up transformer
             args = ModelArgs.from_name("mini")
             transformer = Transformer(args)
-            transformer.setup_caches(bsz, 16)
+            transformer.setup_caches(bsz, seqlen_max)
 
-            transformer = torch.compile(transformer, mode="reduce-overhead")
+            transformer = torch.compile(
+                transformer, fullgraph=True, mode="reduce-overhead"
+            )
 
             for seqlen in range(3, 15):
                 print("seqlen = ", seqlen)
@@ -161,9 +164,11 @@ class ModelTests(TestCase):
 
                 # Run padded
                 inputs_p = [
-                    PaddedTensor.from_tensor(inputs[0], multipliers={0: 1, 1: 32}),
                     PaddedTensor.from_tensor(
-                        inputs[1], multipliers={0: 32}, neutral_element=-1
+                        inputs[0], multipliers={0: 1, 1: seqlen_multiple}
+                    ),
+                    PaddedTensor.from_tensor(
+                        inputs[1], multipliers={0: seqlen_multiple}, neutral_element=-1
                     ),
                 ]
 
