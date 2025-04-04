@@ -93,7 +93,7 @@ jobs:
           set -eux
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}      
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set Test step time
         id: test-timeout
@@ -131,11 +131,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          SHARD_NUMBER: ${{ matrix.shard }}
-          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          TEST_CONFIG: ${{ matrix.config }}
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
-          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           python -mpip install $(echo *.whl)
