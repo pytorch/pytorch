@@ -139,7 +139,4 @@ if [ -n "$ROCM_VERSION" ]; then
     echo "Cannot find ROCm compiler."
     exit 1
   fi
-else
-  # For multi stage builds, since COPY can't be done conditionally
-  mkdir -p /opt/rocm
 fi

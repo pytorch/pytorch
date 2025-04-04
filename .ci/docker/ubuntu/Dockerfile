@@ -141,7 +141,6 @@ RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/trito
 RUN rm -rf /opt/triton
 
 COPY --from=sccache /opt/cache /opt/cache
-COPY --from=sccache /opt/rocm /opt/rocm
 ENV PATH /opt/cache/bin:$PATH
 
 RUN chown -R jenkins:jenkins /opt/conda

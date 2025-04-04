@@ -100,10 +100,26 @@ COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN bash ./install_triton.sh
 
+# Install ccache/sccache (do this last, so we get priority in PATH)
+FROM base as sccache
+COPY ./common/install_cache.sh install_cache.sh
+ENV PATH /opt/cache/bin:$PATH
+RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
+RUN rm install_cache.sh
+
 FROM base as final
 COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; fi
 RUN rm -rf /opt/triton
+
+COPY --from=sccache /opt/cache /opt/cache
+ENV PATH /opt/cache/bin:$PATH
+
+RUN chown -R jenkins:jenkins /opt/conda
+
+# Install ccache/sccache (do this last, so we get priority in PATH)
+COPY ./common/install_cache.sh install_cache.sh
+ENV PATH /opt/cache/bin:$PATH
 
 ARG HALIDE
 # Build and install halide
@@ -113,9 +129,6 @@ COPY ci_commit_pins/halide.txt halide.txt
 RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
 
-# Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
 # See https://github.com/pytorch/pytorch/issues/82174
 # TODO(sdym@fb.com):
 # check if this is needed after full off Xenial migration
