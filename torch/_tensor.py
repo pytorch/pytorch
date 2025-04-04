@@ -1716,23 +1716,37 @@ class Tensor(torch._C.TensorBase):
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
             raise TypeError("stream must be ``int`` or ``none``")
-        elif stream is not None and stream != -1:
+        elif stream != -1:
             if self.device.type == "cuda":
                 # NB: This logic handles the special case values for default
                 # streams and must be kept in sync with from_dlpack in
                 # torch/utils/dlpack.py
-                if stream == 1 and torch.version.hip is None:
-                    stream = torch.cuda.default_stream()
-                elif stream == 0 and torch.version.hip is not None:
+                is_rocm = torch.version.hip is not None
+                is_cuda = not is_rocm
+
+                if (
+                    stream is None
+                    or (is_rocm and stream == 0)
+                    or (is_cuda and stream == 1)
+                ):
                     stream = torch.cuda.default_stream()
                 else:
+                    if is_cuda and stream == 2:
+                        raise BufferError("per-thread default stream is not supported.")
+
+                    assert is_cuda or (is_rocm and stream not in (1, 2)), (
+                        f"unsupported stream {stream} for ROCm."
+                    )
+
                     stream = torch.cuda.ExternalStream(stream)
+
                 # Only synchronize on different streams
-                sync_stream = torch.cuda.current_stream()
-                if stream != sync_stream:
+                current_stream = torch.cuda.current_stream()
+                if stream != current_stream:
                     event = torch.cuda.Event()
-                    event.record(sync_stream)
+                    event.record(current_stream)
                     stream.wait_event(event)
+
         if self.device.type == "xla":
             import torch_xla
             import torch_xla.utils.dlpack as xla_dlpack
