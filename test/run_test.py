@@ -185,7 +185,6 @@ S390X_BLOCKLIST = [
     "inductor/test_aot_inductor_arrayref",
     "lazy/test_meta_kernel",
     "profiler/test_profiler",
-    "test_cpp_extensions_open_device_registration",
     "test_jit",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
