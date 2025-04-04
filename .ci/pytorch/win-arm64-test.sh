@@ -21,7 +21,7 @@ run_tests() {
             echo Running test: %%t
             python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
         )
-    ) 
+    )
 }
 
 run_tests
