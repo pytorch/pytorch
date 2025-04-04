@@ -579,8 +579,11 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
-static void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+namespace {
+
+template <class T>
+void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -590,8 +593,8 @@ static void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
+  DLManagedTensor* dlMTensor = (DLManagedTensor*)PyCapsule_GetPointer(
+      data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
@@ -599,12 +602,58 @@ static void DLPack_Capsule_Destructor(PyObject* data) {
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+template <class T>
+PyObject* THPModule_toDLPackImpl(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
+  static torch::PythonArgParser parser(
+      {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None)"});
+  torch::ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    auto data = r.tensor(0);
+    auto dl_device = r.intlist(1);
+    auto copy = r.toBoolOptional(2);
+
+    // Parse the int list into a tuple.
+    std::optional<DLDevice> optional_dl_device;
+
+    if (!dl_device.empty()) {
+      TORCH_CHECK(
+          dl_device.size() == 2,
+          "dl_device must be either None or a tuple of ints");
+      optional_dl_device = DLDevice{
+          static_cast<DLDeviceType>(dl_device[0]),
+          static_cast<int32_t>(dl_device[1])};
+    }
+
+    auto tensor = at::DLPackTraits<T>::toDLPack(
+        at::maybeCopyTensor(data, optional_dl_device, copy));
+    return PyCapsule_New(
+        tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+  }
+
+  return nullptr;
   END_HANDLE_TH_ERRORS
+}
+
+} // namespace
+
+static PyObject* THPModule_toDLPack(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(self, args, kwargs);
+}
+
+static PyObject* THPModule_toDLPackVersioned(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(self, args, kwargs);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -612,6 +661,22 @@ static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   auto tensor = torch::utils::tensor_fromDLPack(data);
   return THPVariable_Wrap(tensor);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_torchDeviceToDLDevice(
+    PyObject* _unused,
+    PyObject* data) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPDevice_Check(data),
+      "torchDeviceToDLDevice: expected torch.device argument.");
+  auto device = reinterpret_cast<THPDevice*>(data)->device;
+  auto dl_device = at::torchDeviceToDLDevice(device);
+  auto tuple = PyTuple_New(2);
+  PyTuple_SetItem(tuple, 0, THPUtils_packInt64(dl_device.device_type));
+  PyTuple_SetItem(tuple, 1, THPUtils_packInt64(dl_device.device_id));
+  return tuple;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1659,8 +1724,19 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_are_vmap_fallback_warnings_enabled,
      METH_NOARGS,
      nullptr},
-    {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
+    {"_to_dlpack",
+     castPyCFunctionWithKeywords(THPModule_toDLPack),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_to_dlpack_versioned",
+     castPyCFunctionWithKeywords(THPModule_toDLPackVersioned),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_torchDeviceToDLDevice",
+     THPModule_torchDeviceToDLDevice,
+     METH_O,
+     nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,

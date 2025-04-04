@@ -5,13 +5,20 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    skipCUDAIfNotRocm,
     skipCUDAIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import IS_JETSON, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -236,6 +243,31 @@ class TestTorchDlPack(TestCase):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
 
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            BufferError, "per-thread default stream is not supported"
+        ):
+            torch.from_dlpack(x.__dlpack__(stream=2))
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(BufferError, r"unsupported stream \d for ROCm"):
+                torch.from_dlpack(x.__dlpack__(stream=stream))
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
+
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
     def test_dlpack_export_requires_grad(self):
@@ -280,6 +312,110 @@ class TestTorchDlPack(TestCase):
         # by element.
         new_tensor = torch.tensor(wrap)
         self.assertEqual(tensor, new_tensor)
+
+    @skipMeta
+    @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
+    @onlyNativeDeviceTypes
+    def test_max_version(self, device):
+        def test(device, **kwargs):
+            inp = make_tensor((5,), dtype=torch.float32, device=device)
+            out = torch.from_dlpack(inp.__dlpack__(**kwargs))
+            self.assertEqual(inp, out)
+
+        # Use the DLPack 0.X version implementation, since max_version=None.
+        test(device)
+        # Use the DLPack 0.X version implementation.
+        test(device, max_version=(0, 8))
+        # Current highest DLPack version implemented.
+        test(device, max_version=(1, 0))
+        # Newer DLPack version.
+        # Consumer should still be able to process a smaller version capsule.
+        test(device, max_version=(2, 0))
+
+    @skipMeta
+    @onlyCPU
+    @dtypes(
+        # Note: NumPy DLPack bool support only landed in 1.25.
+        *all_types_and_complex_and(
+            torch.half,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
+        import numpy as np
+
+        t = make_tensor((5,), dtype=dtype, device=device)
+
+        if hasattr(np, "from_dlpack"):
+            # DLPack support only available from NumPy 1.22 onwards.
+            # Here, we test having another framework (NumPy) calling our
+            # Tensor.__dlpack__ implementation.
+            arr = np.from_dlpack(t)
+            self.assertEqual(t, arr)
+
+        # We can't use the array created above as input to from_dlpack.
+        # That's because DLPack imported NumPy arrays are read-only.
+        # Thus, we need to convert it to NumPy by using the numpy() method.
+        t_arr = t.numpy()
+
+        # Transform the NumPy array back using DLPack.
+        res = from_dlpack(t_arr)
+
+        self.assertEqual(t, res.cpu())
+        # If device is CPU (same as our original tensor), then they
+        # should alias each other.
+        self.assertEqual(t.data_ptr(), res.data_ptr())
+
+    def _test_from_dlpack(self, device, out_device=None, copy=None):
+        if isinstance(device, str):
+            device = torch.device(device)
+
+        inp = make_tensor((5,), dtype=torch.float32, device=device)
+        out = torch.from_dlpack(inp, device=out_device, copy=copy)
+
+        if out_device is None:
+            out_device = device
+        if isinstance(out_device, str):
+            out_device = torch.device(out_device)
+
+        self.assertEqual(inp, out)
+        self.assertEqual(out.device, out_device)
+
+        # They should be moved (i.e. not copied) only if:
+        #   (a) we are forcing move, i.e. copy=False
+        #   (b) the output device is the same as the input one AND copy is None
+        if copy is False or (copy is None and device == out_device):
+            self.assertEqual(inp.data_ptr(), out.data_ptr())
+        else:
+            # Otherwise, inp should be copied.
+            self.assertNotEqual(inp.data_ptr(), out.data_ptr())
+
+    @skipMeta
+    @onlyCUDA
+    def test_copy(self, device):
+        # Force-copy same device tensor.
+        self._test_from_dlpack(device, copy=True)
+        self._test_from_dlpack(device, out_device=device, copy=True)
+        # Output should be in a different device, i.e. should have been copied.
+        self._test_from_dlpack(device, out_device="cpu")
+        self._test_from_dlpack(device, out_device="cpu", copy=True)
+
+    @skipMeta
+    @onlyCUDA
+    def test_no_copy(self, device):
+        # No copy, since tensor lives in the same device.
+        self._test_from_dlpack(device)
+        self._test_from_dlpack(device, copy=False)
+        self._test_from_dlpack(device, out_device=device)
+        self._test_from_dlpack(device, out_device=device, copy=False)
+
+    @skipMeta
+    @onlyCUDA
+    def test_needs_copy_error(self, device):
+        with self.assertRaisesRegex(RuntimeError, "cannot move tensor from .*"):
+            self._test_from_dlpack(device, out_device="cpu", copy=False)
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
