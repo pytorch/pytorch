@@ -2,7 +2,7 @@
 # ruff: noqa: F841
 import copy
 import unittest
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.ao.quantization.observer import (
@@ -101,10 +101,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export_for_training(
-            m,
-            example_inputs,
-        ).module()
+        m = export_for_training(m, example_inputs, strict=True).module()
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate
@@ -253,7 +250,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 MinMaxObserver
             )
 
-            extra_args: Dict[str, Any] = {"eps": 2**-12}
+            extra_args: dict[str, Any] = {"eps": 2**-12}
             weight_quantization_spec = QuantizationSpec(
                 dtype=torch.uint8,
                 quant_min=0,

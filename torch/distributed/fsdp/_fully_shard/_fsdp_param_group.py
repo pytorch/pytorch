@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Callable, cast, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -31,7 +31,7 @@ from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
-_ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
+_ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
 
 """
@@ -77,7 +77,7 @@ class FSDPCommContext:
         self.all_gather_state: Optional[AllGatherState] = None
         self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
-        self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
+        self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
@@ -95,17 +95,17 @@ class FSDPCommContext:
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
-    event: torch.Event  # all-gather copy-out
+    event: Optional[torch.Event]  # all-gather copy-out
 
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event  # reduce-scatter event
+    event: Optional[torch.Event]  # reduce-scatter event
 
 
 class AllReduceState(NamedTuple):
     all_reduce_input: torch.Tensor
-    event: torch.Event  # all-reduce event
+    event: Optional[torch.Event]  # all-reduce event
 
 
 class FSDPParamGroup:
@@ -116,7 +116,7 @@ class FSDPParamGroup:
 
     def __init__(
         self,
-        params: List[nn.Parameter],
+        params: list[nn.Parameter],
         modules: tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
@@ -158,11 +158,16 @@ class FSDPParamGroup:
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
+        # Optional stream to run the user-defined all-reduce hook in
+        # Saved here and not in the comm. context because we allow the user to
+        # specify it, possibly at construction time before lazy init
+        self._all_reduce_hook_stream: Optional[torch.cuda.Stream] = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
-        self._post_forward_indices: List[int] = []
+        self._post_forward_indices: list[int] = []
         # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
         # Whether to all-reduce gradients for HSDP; only used if
@@ -305,11 +310,11 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
-    def _wait_all_gather_streams_on_event(self, event: torch.Event):
+    def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]):
         # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
             self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream"):
+        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
@@ -325,8 +330,8 @@ class FSDPParamGroup:
         self._to_sharded()
 
     def pre_forward(
-        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
@@ -372,6 +377,8 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
+        # This method should be idempotent and safe to call even when this
+        # FSDP parameter group was not used in backward (should be a no-op)
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
@@ -387,9 +394,11 @@ class FSDPParamGroup:
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: List[FSDPParam] = []
-            unsharded_grads: List[torch.Tensor] = []
+            fsdp_params_with_grad: list[FSDPParam] = []
+            unsharded_grads: list[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
+                if not hasattr(fsdp_param, "_unsharded_param"):
+                    continue
                 # May have an accumulated gradient of the reduce dtype if the
                 # previous backward did not reduce-scatter
                 if fsdp_param.unsharded_accumulated_grad is not None:
@@ -405,11 +414,26 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            if self.comm_ctx.reduce_scatter_state is not None:
+            if (
+                self.comm_ctx.reduce_scatter_state is not None
+                and self.comm_ctx.reduce_scatter_state.event is not None
+            ):
                 self.device_handle.current_stream().wait_event(
                     self.comm_ctx.reduce_scatter_state.event
                 )
-                self.comm_ctx.reduce_scatter_state = None
+            self.comm_ctx.reduce_scatter_state = None
+            all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
+            all_reduce_stream: torch.cuda.Stream
+            if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
+                # this means the native HSDP is not enabled,
+                # but user may want to have a custom HSDP setup
+                assert self._all_reduce_hook is not None, (
+                    "all reduce hook stream is specified but hook itself is missing."
+                )
+                all_reduce_stream = self._all_reduce_hook_stream
+            else:
+                all_reduce_stream = self.comm_ctx.all_reduce_stream
+
             self._wait_for_post_backward()
             (
                 reduce_scatter_input,
@@ -428,15 +452,17 @@ class FSDPParamGroup:
                 self.device,
                 self.reduce_scatter_reduce_op,
                 self._all_reduce_process_group if self._is_hsdp else None,
-                self.comm_ctx.all_reduce_stream,
+                all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
+                self._all_reduce_hook,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
             )
             if all_reduce_input is not None:
-                assert all_reduce_event is not None
+                if self.device.type != "cpu":
+                    assert all_reduce_event is not None
                 self._all_reduce_state = AllReduceState(
                     all_reduce_input, all_reduce_event
                 )
@@ -462,9 +488,12 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if self._all_reduce_state is not None:
+        if (
+            self._all_reduce_state is not None
+            and self._all_reduce_state.event is not None
+        ):
             self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-            self._all_reduce_state = None
+        self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -491,9 +520,10 @@ class FSDPParamGroup:
         else:
             raise ValueError(f"Unknown pass type: {pass_type}")
         target_fqn = target_fsdp_param_group._module_fqn
-        with record_function(
-            f"FSDP::{pass_type}_prefetch for {target_fqn}"
-        ), target_fsdp_param_group.use_training_state(training_state):
+        with (
+            record_function(f"FSDP::{pass_type}_prefetch for {target_fqn}"),
+            target_fsdp_param_group.use_training_state(training_state),
+        ):
             async_op = target_fsdp_param_group.unshard_async_op
             target_fsdp_param_group.unshard(async_op)
 
@@ -539,8 +569,8 @@ class FSDPParamGroup:
 
     # Hook Registration #
     def _register_post_backward_hook(
-        self, args: tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
         if (not torch._dynamo.config.skip_fsdp_hooks) or compiled_autograd_enabled():
@@ -550,8 +580,8 @@ class FSDPParamGroup:
         args_list, args_spec = tree_flatten(args)
         kwargs_list, kwargs_spec = tree_flatten(kwargs)
         args_kwargs_list = list(args_list) + list(kwargs_list)
-        inp_tensor_indices: List[int] = []
-        inp_tensors: List[torch.Tensor] = []
+        inp_tensor_indices: list[int] = []
+        inp_tensors: list[torch.Tensor] = []
         for i, obj in enumerate(args_kwargs_list):
             if torch.is_tensor(obj) and obj.requires_grad:
                 inp_tensor_indices.append(i)
@@ -570,12 +600,12 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert (
-            num_pre_save_hooks == num_pre_load_hooks
-        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        assert num_pre_save_hooks == num_pre_load_hooks, (
+            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        )
         if num_pre_save_hooks > 0:
             return  # already registered
-        modules_with_fsdp_params: Set[nn.Module] = {
+        modules_with_fsdp_params: set[nn.Module] = {
             fsdp_param._module_info.module for fsdp_param in self.fsdp_params
         }
 
@@ -583,12 +613,12 @@ class FSDPParamGroup:
             self._to_sharded()
 
         for module in modules_with_fsdp_params:
-            self._module_to_pre_save_state_dict_hook_handle[
-                module
-            ] = module.register_state_dict_pre_hook(to_sharded_hook)
-            self._module_to_pre_load_state_dict_hook_handle[
-                module
-            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
+            self._module_to_pre_save_state_dict_hook_handle[module] = (
+                module.register_state_dict_pre_hook(to_sharded_hook)
+            )
+            self._module_to_pre_load_state_dict_hook_handle[module] = (
+                module._register_load_state_dict_pre_hook(to_sharded_hook)
+            )
 
     # Properties #
     @property
@@ -666,8 +696,8 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], modules: tuple[nn.Module, ...]
-) -> List[ParamModuleInfo]:
+    params: list[nn.Parameter], modules: tuple[nn.Module, ...]
+) -> list[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight
     Shared module: mlp.lin1 = mlp.lin2
@@ -675,7 +705,7 @@ def _get_param_module_infos(
     find shared modules' parameters and shared parameters within a module.
     """
     params_set = set(params)
-    param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
+    param_to_module_info: dict[nn.Parameter, ParamModuleInfo] = {}
     for module in modules:
         for _, submodule in module.named_modules(remove_duplicate=False):
             for param_name, param in _named_parameters_with_duplicates(

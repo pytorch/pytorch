@@ -3,7 +3,7 @@
 import os
 
 import psutil
-import pytorch_openreg
+import pytorch_openreg  # noqa: F401
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -28,7 +28,7 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(pytorch_openreg.NUM_DEVICES):
+        for i in range(torch.accelerator.device_count()):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_factory(self):
@@ -77,6 +77,17 @@ class TestOpenReg(TestCase):
         self.assertTrue(pinned_a.is_pinned())
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
+
+    def test_rewrapped_storage(self):
+        pinned_a = torch.randn(10).pin_memory()
+        rewrapped_a = torch.tensor((), dtype=torch.float32).set_(
+            pinned_a.untyped_storage()[2:],
+            size=(5,),
+            stride=(1,),
+            storage_offset=0,
+        )
+        self.assertTrue(rewrapped_a.is_pinned())
+        self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
 
     def test_stream_synchronize(self):
         stream = torch.Stream(device="openreg:1")

@@ -47,9 +47,9 @@ set XPU_EXTRA_INSTALLED=0
 set XPU_EXTRA_UNINSTALL=0
 
 if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2025.0] (
-    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/efc86abd-cb77-452e-a03f-a741895b8ece/intel-deep-learning-essentials-2025.0.0.336_offline.exe
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/9d6d6c17-ca2d-4735-9331-99447e4a1280/intel-deep-learning-essentials-2025.0.1.28_offline.exe
     set XPU_BUNDLE_PRODUCT_NAME=intel.oneapi.win.deep-learning-essentials.product
-    set XPU_BUNDLE_VERSION=2025.0.0+335
+    set XPU_BUNDLE_VERSION=2025.0.1+20
     set XPU_BUNDLE_INSTALLED=0
     set XPU_BUNDLE_UNINSTALL=0
     set XPU_EXTRA_URL=NULL
@@ -104,14 +104,6 @@ goto xpu_install_end
 
 :xpu_bundle_install
 
-:: Install Level Zero SDK
-set XPU_EXTRA_LZ_URL=https://github.com/oneapi-src/level-zero/releases/download/v1.14.0/level-zero-sdk_1.14.0.zip
-curl -k -L %XPU_EXTRA_LZ_URL% --output "%SRC_DIR%\temp_build\level_zero_sdk.zip"
-echo "Installing level zero SDK..."
-7z x "%SRC_DIR%\temp_build\level_zero_sdk.zip" -o"%SRC_DIR%\temp_build\level_zero"
-set "INCLUDE=%SRC_DIR%\temp_build\level_zero\include;%INCLUDE%"
-
-:: Install Bundle
 curl -o xpu_bundle.exe --retry 3 --retry-all-errors -k %XPU_BUNDLE_URL%
 echo "XPU Bundle installing..."
 start /wait "Intel Pytorch Bundle Installer" "xpu_bundle.exe" --action=install --eula=accept --silent --log-dir install_bundle
@@ -128,3 +120,14 @@ if errorlevel 1 exit /b 1
 del xpu_extra.exe
 
 :xpu_install_end
+
+if not "%XPU_ENABLE_KINETO%"=="1" goto install_end
+:: Install Level Zero SDK
+set XPU_EXTRA_LZ_URL=https://github.com/oneapi-src/level-zero/releases/download/v1.14.0/level-zero-sdk_1.14.0.zip
+curl -k -L %XPU_EXTRA_LZ_URL% --output "%SRC_DIR%\temp_build\level_zero_sdk.zip"
+echo "Installing level zero SDK..."
+7z x "%SRC_DIR%\temp_build\level_zero_sdk.zip" -o"%SRC_DIR%\temp_build\level_zero"
+set "INCLUDE=%SRC_DIR%\temp_build\level_zero\include;%INCLUDE%"
+del "%SRC_DIR%\temp_build\level_zero_sdk.zip"
+
+:install_end

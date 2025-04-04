@@ -35,7 +35,7 @@ struct TORCH_API Bound {
   bool operator>(const Bound& other) const;
   bool operator>=(const Bound& other) const;
 
-  void swap() {
+  void swap() noexcept {
     std::swap(start, end);
     swapped = !swapped;
   }

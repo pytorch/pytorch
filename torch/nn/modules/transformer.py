@@ -63,10 +63,7 @@ class Transformer(Module):
         transformer layers.
 
     User is able to modify the attributes as needed. The architecture
-    is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
-    Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
-    Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-    Processing Systems, pages 6000-6010.
+    is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -87,7 +84,7 @@ class Transformer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
         >>> src = torch.rand((10, 32, 512))
         >>> tgt = torch.rand((20, 32, 512))
@@ -325,7 +322,7 @@ class TransformerEncoder(Module):
             (and convert back on output). This will improve the overall performance of
             TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
 
-    Examples::
+    Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
         >>> src = torch.rand(10, 32, 512)
@@ -543,7 +540,7 @@ class TransformerDecoder(Module):
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
 
-    Examples::
+    Examples:
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
         >>> memory = torch.rand(10, 32, 512)
@@ -635,11 +632,8 @@ class TransformerEncoderLayer(Module):
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
-    This standard encoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
-    in a different way during application.
+    This standard encoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    Users may modify or implement in a different way during application.
 
     TransformerEncoderLayer can handle either traditional torch.tensor inputs,
     or Nested Tensor inputs.  Derived classes are expected to similarly accept
@@ -669,7 +663,7 @@ class TransformerEncoderLayer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> src = torch.rand(10, 32, 512)
         >>> out = encoder_layer(src)
@@ -956,11 +950,8 @@ class TransformerDecoderLayer(Module):
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
-    This standard decoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
-    in a different way during application.
+    This standard decoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    Users may modify or implement in a different way during application.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -978,7 +969,7 @@ class TransformerDecoderLayer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)

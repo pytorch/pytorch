@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -38,7 +38,7 @@ def _get_quantized_conv_bn_example_inputs_kwargs(
     has_bias: bool,
     bias_is_quantized: bool,
     is_cuda: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Optional example inputs for quantized and folded conv-bn patterns
     used in convert, expressed as kwargs.
@@ -357,7 +357,7 @@ def _is_dequantize(n: Node) -> bool:
     ]
 
 
-def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Node]]:
+def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Node]]:
     """
     Helper function to extract the nodes in the conv-bn fusion pattern after
     subgraph rewriting, in the form of a map:
@@ -374,7 +374,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Nod
         "conv_bias_q", "conv_bias_dq"
     """
 
-    def _get_nodes(nodes: List[Node]) -> tuple[Node, Node, Optional[Node]]:
+    def _get_nodes(nodes: list[Node]) -> tuple[Node, Node, Optional[Node]]:
         """
         Return a 3-tuple of (conv_node, bn_node, getitem_node).
         This asserts that the match contains exactly one of each node.
@@ -470,13 +470,13 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Nod
     return mapping
 
 
-def _filter_nodes_map(nodes_map: Dict[Node, Node]) -> Dict[Node, Node]:
+def _filter_nodes_map(nodes_map: dict[Node, Node]) -> dict[Node, Node]:
     """
     Return a filtered `nodes_map` returned from the subgraph rewriter.
     The filtered `nodes_map` will contain only nodes that are actually
     matched in the pattern, excluding None or placeholder nodes.
     """
-    new_nodes_map: Dict[Node, Node] = {}
+    new_nodes_map: dict[Node, Node] = {}
     for pattern_node, graph_node in nodes_map.items():
         # bias can be None
         if graph_node is None:
@@ -548,7 +548,7 @@ def _update_conv_input_qspec_map_after_replacement(
 
 def _update_special_qspecs_after_replacement(
     node: Node,
-    original_to_replacement_node: Dict[Node, Node],
+    original_to_replacement_node: dict[Node, Node],
 ):
     """
     Update the `SharedQuantizationSpec`s and `DerivedQuantizationSpec`s

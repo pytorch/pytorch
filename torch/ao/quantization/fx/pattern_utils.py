@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from collections import OrderedDict
-from typing import Any, Dict
+from typing import Any
 
 from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
 from torch.ao.quantization.observer import ObserverBase
@@ -18,7 +18,7 @@ __all__ = [
 QuantizeHandler = Any
 
 # pattern for conv bn fusion
-_DEFAULT_FUSION_PATTERNS: Dict[Pattern, QuantizeHandler] = OrderedDict()
+_DEFAULT_FUSION_PATTERNS: dict[Pattern, QuantizeHandler] = OrderedDict()
 
 
 def _register_fusion_pattern(pattern):
@@ -29,17 +29,17 @@ def _register_fusion_pattern(pattern):
     return insert
 
 
-def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
+def get_default_fusion_patterns() -> dict[Pattern, QuantizeHandler]:
     return copy.copy(_DEFAULT_FUSION_PATTERNS)
 
 
-_DEFAULT_QUANTIZATION_PATTERNS: Dict[Pattern, QuantizeHandler] = OrderedDict()
+_DEFAULT_QUANTIZATION_PATTERNS: dict[Pattern, QuantizeHandler] = OrderedDict()
 
 # Mapping from pattern to activation_post_process(observer/fake_quant) constructor for output activation
 # e.g. pattern: torch.sigmoid,
 #      output_activation_post_process: default_fixed_qparams_range_0to1_fake_quant
-_DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP: Dict[Pattern, QuantizeHandler] = {}
-_DEFAULT_OUTPUT_OBSERVER_MAP: Dict[Pattern, QuantizeHandler] = {}
+_DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP: dict[Pattern, QuantizeHandler] = {}
+_DEFAULT_OUTPUT_OBSERVER_MAP: dict[Pattern, QuantizeHandler] = {}
 
 
 # Register pattern for both static quantization and qat
@@ -57,7 +57,7 @@ def _register_quant_pattern(pattern, fixed_qparams_observer=None):
 
 
 # Get patterns for both static quantization and qat
-def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
+def get_default_quant_patterns() -> dict[Pattern, QuantizeHandler]:
     return copy.copy(_DEFAULT_QUANTIZATION_PATTERNS)
 
 
@@ -65,7 +65,7 @@ def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
 # e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
 def get_default_output_activation_post_process_map(
     is_training,
-) -> Dict[Pattern, ObserverBase]:
+) -> dict[Pattern, ObserverBase]:
     if is_training:
         return copy.copy(_DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
     else:
@@ -81,8 +81,8 @@ def get_default_output_activation_post_process_map(
 
 
 def _sorted_patterns_dict(
-    patterns_dict: Dict[Pattern, QuantizeHandler]
-) -> Dict[Pattern, QuantizeHandler]:
+    patterns_dict: dict[Pattern, QuantizeHandler]
+) -> dict[Pattern, QuantizeHandler]:
     """
     Return a sorted version of the patterns dictionary such that longer patterns are matched first,
     e.g. match (F.relu, F.linear) before F.relu.

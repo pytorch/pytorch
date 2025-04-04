@@ -140,7 +140,6 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
-MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
@@ -382,6 +381,10 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
 
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSScalar& s, unsigned idx) {
+  [encoder setBytes:&s.value length:s.size atIndex:idx];
+}
+
 namespace detail {
 template <typename T>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {
@@ -422,9 +425,9 @@ static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& va
 }
 
 template <unsigned idx = 0, typename T, typename... Args>
-static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args&&... args) {
   detail::mtl_setArg(encoder, val, idx);
-  mtl_setArgs<idx + 1>(encoder, args...);
+  mtl_setArgs<idx + 1>(encoder, std::forward<Args>(args)...);
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,

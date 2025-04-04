@@ -10,9 +10,9 @@ import warnings
 
 
 try:
-    from .common import BenchmarkRunner, download_retry_decorator, main
+    from .common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 except ImportError:
-    from common import BenchmarkRunner, download_retry_decorator, main
+    from common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 
 import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
@@ -82,6 +82,10 @@ REQUIRE_HIGHER_TOLERANCE = {
     "convnext_base",
 }
 
+REQUIRE_HIGHER_TOLERANCE_AMP = {
+    "poolformer_m36",
+}
+
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "levit_128",
     "sebotnet33ts_256",
@@ -123,6 +127,7 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
     "cspdarknet53",
+    "gluon_inception_v3",
 }
 
 
@@ -213,6 +218,18 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def _config(self):
+        return load_yaml_file("timm_models.yaml")
+
+    @property
+    def _skip(self):
+        return self._config["skip"]
+
+    @property
+    def skip_models(self):
+        return self._skip["all"]
 
     @property
     def force_amp_for_fp16_bf16_models(self):
@@ -374,7 +391,9 @@ class TimmRunner(BenchmarkRunner):
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
                 tolerance = 8 * 1e-2
-            elif name in REQUIRE_HIGHER_TOLERANCE:
+            elif name in REQUIRE_HIGHER_TOLERANCE or (
+                self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            ):
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2

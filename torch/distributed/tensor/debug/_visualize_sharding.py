@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -89,7 +89,7 @@ def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh: DeviceMesh,
     placements: Sequence[Placement],
-    my_coordinate: List[int],
+    my_coordinate: list[int],
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Same as torch.distributed._tensor._utils.compute_local_shape_and_global_offset but
@@ -108,9 +108,9 @@ def _compute_local_shape_and_global_offset(
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
-                assert shard_dim < len(
-                    local_shape
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+                assert shard_dim < len(local_shape), (
+                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+                )
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],
                     mesh_dim_size,

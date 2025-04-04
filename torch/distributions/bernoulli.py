@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -12,6 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _Number
 
 
 __all__ = ["Bernoulli"]
@@ -36,6 +35,7 @@ class Bernoulli(ExponentialFamily):
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
@@ -47,10 +47,10 @@ class Bernoulli(ExponentialFamily):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:

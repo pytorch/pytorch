@@ -1,12 +1,18 @@
+import copy
 import dataclasses
 import logging
 import os
-import pickle
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.utils._appending_byte_serializer import (
+    AppendingByteSerializer,
+    BytesReader,
+    BytesWriter,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -33,6 +39,19 @@ class CacheArtifact:
     key: str
     content: bytes = dataclasses.field(repr=False)  # Do not display potential binary
 
+    @staticmethod
+    def serialize(writer: BytesWriter, cls: "CacheArtifact") -> None:
+        writer.write_uint64(cls.type.value)
+        writer.write_str(cls.key)
+        writer.write_bytes(cls.content)
+
+    @staticmethod
+    def deserialize(reader: BytesReader) -> "CacheArtifact":
+        type = reader.read_uint64()
+        key = reader.read_str()
+        content = reader.read_bytes()
+        return CacheArtifact(CacheArtifactType(type), key, content)
+
 
 @dataclasses.dataclass
 class CacheInfo:
@@ -41,10 +60,10 @@ class CacheInfo:
     instrumentation
     """
 
-    inductor_artifacts: List[str] = dataclasses.field(default_factory=list)
-    autotune_artifacts: List[str] = dataclasses.field(default_factory=list)
-    aot_autograd_artifacts: List[str] = dataclasses.field(default_factory=list)
-    pgo_artifacts: List[str] = dataclasses.field(default_factory=list)
+    inductor_artifacts: list[str] = dataclasses.field(default_factory=list)
+    autotune_artifacts: list[str] = dataclasses.field(default_factory=list)
+    aot_autograd_artifacts: list[str] = dataclasses.field(default_factory=list)
+    pgo_artifacts: list[str] = dataclasses.field(default_factory=list)
 
     def add(self, artifact: CacheArtifact) -> None:
         if artifact.type == CacheArtifactType.INDUCTOR:
@@ -57,6 +76,12 @@ class CacheInfo:
             self.pgo_artifacts.append(artifact.key)
         else:
             log.warning(f"Unsupported artifact type {artifact.type}")  # noqa: G004
+
+    def clear(self) -> None:
+        self.inductor_artifacts.clear()
+        self.autotune_artifacts.clear()
+        self.aot_autograd_artifacts.clear()
+        self.pgo_artifacts.clear()
 
 
 class CacheArtifactManager:
@@ -77,11 +102,24 @@ class CacheArtifactManager:
     """
 
     # Protected by the compile_lock
-    _cache_artifacts: List[CacheArtifact] = []
+    _new_cache_artifacts: list[CacheArtifact] = []
+    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    # This list will not be cleared between serialize() calls
+    _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
+    # When serialize() is called, artifacts are transferred from _cache_artifacts to
+    # internal data structure of the _serializer
+    # This allows us to only pay the cost of serialization if serialize() is called
+    _serializer: AppendingByteSerializer[CacheArtifact] = AppendingByteSerializer(
+        serialize_fn=CacheArtifact.serialize
+    )
+    _cache_info: CacheInfo = CacheInfo()
 
     @classmethod
     def clear(cls) -> None:
-        cls._cache_artifacts.clear()
+        cls._new_cache_artifacts.clear()
+        cls._seen_artifacts.clear()
+        cls._serializer.clear()
+        cls._cache_info.clear()
 
     @classmethod
     def record_artifact(
@@ -99,19 +137,36 @@ class CacheArtifactManager:
             serde = RemoteCacheJsonSerde()
             content = serde.encode(content)
         assert isinstance(content, bytes)
-        cls._cache_artifacts.append(CacheArtifact(artifact_type, key, content))
+        artifact = CacheArtifact(artifact_type, key, content)
+        if artifact in cls._seen_artifacts:
+            return
+        log.debug("Recording %s", str(artifact))
+        cls._new_cache_artifacts.append(artifact)
+        cls._seen_artifacts.add(artifact)
 
     @classmethod
-    def serialize(cls) -> Optional[Tuple[bytes, CacheInfo]]:
+    def need_serialize(cls) -> bool:
+        """
+        Have we seen new artifacts since last serialize call?
+        """
+        return len(cls._new_cache_artifacts) != 0
+
+    @classmethod
+    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
         """
         Converts the "mega" list into portable format
         """
-        info = CacheInfo()
-        for artifact in cls._cache_artifacts:
+        for artifact in cls._new_cache_artifacts:
             log.debug("saving: %s", artifact)
-            info.add(artifact)
+            cls._cache_info.add(artifact)
         try:
-            return (pickle.dumps(cls._cache_artifacts), info)
+            # We deep copy cls._cache_info since later compilations
+            # can keep adding to cache_info
+            info = copy.deepcopy(cls._cache_info)
+            cls._serializer.extend(cls._new_cache_artifacts)
+            artifact_bytes = cls._serializer.to_bytes()
+            cls._new_cache_artifacts.clear()
+            return artifact_bytes, info
         except Exception:
             log.warning("Failed to pickle cache artifacts", exc_info=True)
         return None
@@ -119,10 +174,12 @@ class CacheArtifactManager:
     @staticmethod
     def deserialize(serialized_artifacts: bytes) -> Optional[CacheInfo]:
         """
-        Converst the portable format back into various filesystem caches
+        Converts the portable format back into various filesystem caches
         """
         try:
-            artifacts = pickle.loads(serialized_artifacts)
+            artifacts = AppendingByteSerializer.to_list(
+                serialized_artifacts, deserialize_fn=CacheArtifact.deserialize
+            )
         except Exception:
             log.warning("Failed to un-pickle cache artifacts", exc_info=True)
             return None

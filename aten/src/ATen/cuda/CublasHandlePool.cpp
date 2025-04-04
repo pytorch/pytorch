@@ -124,8 +124,7 @@ size_t parseChosenWorkspaceSize() {
     val = getenv("ROCBLAS_WORKSPACE_CONFIG");
   }
   /* 32MiB default, 128MiB for MI300 */
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool gfx94 = properties != nullptr && properties->major == 9 && properties->minor == 4;
+  const bool gfx94 = at::detail::getCUDAHooks().isGPUArch({"gfx94"});
   const size_t default_size = gfx94 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper */

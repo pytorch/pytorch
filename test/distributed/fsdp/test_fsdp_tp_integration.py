@@ -2,7 +2,7 @@
 import copy
 import sys
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -62,11 +62,11 @@ class SimpleModel(torch.nn.Module):
         return self.net3(self.net2(self.relu(self.net1(x))))
 
     @staticmethod
-    def get_sharded_param_names() -> List[str]:
+    def get_sharded_param_names() -> list[str]:
         return ["net1.weight", "net1.bias", "net2.weight"]
 
     @staticmethod
-    def get_non_sharded_param_names() -> List[str]:
+    def get_non_sharded_param_names() -> list[str]:
         return ["net3.weight", "net3.bias"]
 
 
@@ -87,9 +87,9 @@ class TestTPFSDPIntegration(FSDPTest):
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
-        sharded_param_names: List[str],
+        sharded_param_names: list[str],
         tensor_parallel_size: int,
-    ) -> Tuple[Dict[str, int], Dict[str, Tuple[torch.Size, int]]]:
+    ) -> tuple[dict[str, int], dict[str, tuple[torch.Size, int]]]:
         """ """
         assert (
             type(model) is SimpleModel
@@ -131,8 +131,8 @@ class TestTPFSDPIntegration(FSDPTest):
         self,
         tp_fsdp_model: FSDP,
         tp_pg: dist.ProcessGroup,
-        param_name_to_numel: Dict[str, int],
-        non_sharded_param_names: List[str],
+        param_name_to_numel: dict[str, int],
+        non_sharded_param_names: list[str],
     ) -> None:
         """
         Syncs the tensor parallel parameters' gradients following the data
@@ -177,11 +177,11 @@ class TestTPFSDPIntegration(FSDPTest):
         self,
         model: FSDP,
         uses_tp: bool,
-        param_name_to_numel: Dict[str, int],
-        param_name_to_sharding_info: Dict[str, Tuple[torch.Size, int]],
+        param_name_to_numel: dict[str, int],
+        param_name_to_sharding_info: dict[str, tuple[torch.Size, int]],
         tp_pg: Optional[dist.ProcessGroup],
         fsdp_pg: Optional[dist.ProcessGroup],
-        sharded_param_names: Optional[List[str]],
+        sharded_param_names: Optional[list[str]],
     ) -> torch.Tensor:
         """
         Returns all unsharded gradients as a single flattened tensor. This

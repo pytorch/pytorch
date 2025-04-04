@@ -12,7 +12,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, Callable, cast, Dict, List, no_type_check, Optional, Type, Union
+from typing import Any, Callable, cast, no_type_check, Optional, Union
 from unittest import mock
 
 import torch
@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     TEST_CUDA,
     TEST_HPU,
+    TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
@@ -72,6 +73,10 @@ if TEST_CUDA:
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    DISTRIBUTED_BACKEND = "xccl"
+    DEVICE_COUNT = torch.xpu.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -199,7 +204,7 @@ def _broadcast_state_dict(rank, state_dict):
 
     olist = [state_dict if rank == 0 else None]
     dist.broadcast_object_list(olist)
-    state_dict = cast(Dict[str, torch.Tensor], olist[0])
+    state_dict = cast(dict[str, torch.Tensor], olist[0])
     # Ensure that the state is on DEVICE
     for param_name in state_dict.keys():
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
@@ -322,7 +327,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
         add_bn: bool = True,
     ) -> Union[nn.Module, FSDP]:
@@ -451,7 +456,7 @@ class NestedWrappedModule(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
     ) -> nn.Module:
         """
@@ -499,7 +504,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
     ):
         """
@@ -581,7 +586,7 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
     ):
         """
@@ -647,7 +652,7 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU:
+            if TEST_HPU or TEST_XPU:
                 time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
@@ -663,7 +668,7 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU:
+                elif TEST_HPU or TEST_XPU:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -674,7 +679,7 @@ class ModuleWithDelay(FSDPTestModel):
 
     @staticmethod
     def init(
-        module_class: Type[FSDPTestModel],
+        module_class: type[FSDPTestModel],
         *model_args: Any,
         delay_after_loss_ms: int,
         delay_before_reduction_ms: int,
@@ -706,7 +711,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode = DEVICEInitMode.DEVICE_AFTER,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
@@ -796,7 +801,7 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU:
+                    elif TEST_HPU or TEST_XPU:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -826,7 +831,7 @@ class MixtureOfExperts(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
         delay_before_free_ms: int = 0,
     ):
@@ -907,7 +912,7 @@ class MLP(nn.Module):
 
 class MLPStack(nn.Sequential):
     def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
-        modules: List[nn.Module] = [
+        modules: list[nn.Module] = [
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
@@ -1209,8 +1214,8 @@ class FSDPTest(MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA:
-            torch.cuda.set_device(device_id)
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
@@ -1237,7 +1242,7 @@ class FSDPTest(MultiProcessTestCase):
         mixed_precision: Optional[MixedPrecision] = None,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        sharded_grad_scaler_kwargs: Optional[Dict[str, Any]] = None,
+        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -1315,7 +1320,7 @@ class FSDPTest(MultiProcessTestCase):
 
     def _test_fsdp_parity(
         self,
-        model_class: Type[FSDPTestModel],
+        model_class: type[FSDPTestModel],
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
         ref_init_fn: Optional[Callable] = None,
@@ -1329,8 +1334,8 @@ class FSDPTest(MultiProcessTestCase):
         use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        init_kwargs: Optional[Dict[str, Any]] = None,
-        sharded_grad_scaler_kwargs: Optional[Dict[str, Any]] = None,
+        init_kwargs: Optional[dict[str, Any]] = None,
+        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
         **fsdp_kwargs,
     ):
         """
@@ -1435,7 +1440,7 @@ class FSDPTest(MultiProcessTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                "has parameters on cuda",
+                f"has parameters on {DEVICE_TYPE}",
             )
             if expects_device_error
             else nullcontext()

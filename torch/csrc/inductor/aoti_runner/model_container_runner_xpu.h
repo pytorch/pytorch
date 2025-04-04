@@ -19,17 +19,18 @@ class C10_EXPORT AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "xpu",
-      const std::string& kernel_bin_dir = "");
+      const std::string& kernel_bin_dir = "",
+      const bool run_single_threaded = false);
 
   ~AOTIModelContainerRunnerXpu() override;
 
-  std::vector<at::Tensor> run(
-      const std::vector<at::Tensor>& inputs,
-      void* stream_handle = nullptr) override;
+  std::vector<at::Tensor> run_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle) override;
 
   std::vector<at::Tensor> run_with_xpu_stream(
-      std::vector<at::Tensor>& inputs,
-      at::xpu::XPUStream xpu_stream);
+      const std::vector<at::Tensor>& inputs,
+      const at::xpu::XPUStream& xpu_stream);
 };
 
 } // namespace torch::inductor

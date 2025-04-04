@@ -3,7 +3,7 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, Dict, List, NamedTuple, Set
+from typing import Callable, NamedTuple
 
 import sympy
 
@@ -45,11 +45,11 @@ def _convert_range_to_int(range: ValueRanges):
 class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
     def __init__(
         self,
-        range_constraints: Dict[sympy.Symbol, ValueRanges],
+        range_constraints: dict[sympy.Symbol, ValueRanges],
     ):
         super().__init__()
-        self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
-        self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
+        self.range_constraints: dict[sympy.Symbol, ValueRanges] = range_constraints
+        self._asserts_generated_unbacked_symbols: set[sympy.Symbol] = set()
         self.counter = 0
 
     def _assert_range_constraint(self, node, lower, upper, assert_msg):
@@ -105,8 +105,8 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
                 # need the proxy for shape, which further requires the proxy for ret[1], etc.
 
                 def add_assertions(val):
-                    call_backs: List[Callable] = []
-                    messages: List[str] = []
+                    call_backs: list[Callable] = []
+                    messages: list[str] = []
                     if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                         symbol = val.node.expr
                         if symbol in self.existing_inline_assertions:
@@ -161,9 +161,9 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
 
 def _get_existing_inline_assertions(
     graph_module: torch.fx.GraphModule,
-    range_constraints: Dict[sympy.Symbol, ValueRanges],
-) -> Dict[sympy.Symbol, ValueRanges]:
-    existing_inline_assertions: Dict[sympy.Symbol, ValueRanges] = {}
+    range_constraints: dict[sympy.Symbol, ValueRanges],
+) -> dict[sympy.Symbol, ValueRanges]:
+    existing_inline_assertions: dict[sympy.Symbol, ValueRanges] = {}
 
     for module in graph_module.modules():
         if not isinstance(module, torch.fx.GraphModule):
