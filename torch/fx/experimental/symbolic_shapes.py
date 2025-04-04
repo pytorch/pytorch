@@ -1285,7 +1285,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 # a sympy expression Sympy.Or(u0==1, True) without evaluating the args first.
 
 # When the whole expression is passed to evaluation in that case, we do not throw a
-# data dependent error or guard because we can statically know the result is True 
+# data dependent error or guard because we can statically know the result is True
 # before unpacking the symbols.
 sym_or = operator.or_
 
