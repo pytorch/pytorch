@@ -146,7 +146,12 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    mtl_setArgs(computeEncoder, src, dst.has_storage() ? dst : output, src_sizes, src_strides, numThreads);
+    mtl_setArgs(computeEncoder,
+                ConstMTLBufferTensor(src),
+                dst.has_storage() ? dst : output,
+                src_sizes,
+                src_strides,
+                numThreads);
     if (src.dim() > 4) {
       mtl_setBytes<int32_t>(computeEncoder, src.dim(), 5);
     }
@@ -192,7 +197,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      mtl_setArgs(computeEncoder, src, output, output_sizes, output_strides, numThreads);
+      mtl_setArgs(computeEncoder, ConstMTLBufferTensor(src), output, output_sizes, output_strides, numThreads);
       if (output.dim() > 4) {
         mtl_setBytes<int32_t>(computeEncoder, output.dim(), 5);
       }
