@@ -19,21 +19,23 @@ inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
 }
 
 // Metal does not support SIMD reductions over 64-bit types
-// Simulate it using simd_shuffle_down over uint2 type
+// Simulate it accumulating over shuffled down int2 values
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
-    val += as_type<long>(::metal::simd_shuffle_down(as_type<uint2>(val), i));
+    val += as_type<T>(
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return val;
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
 }
 
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
-    val *= as_type<long>(::metal::simd_shuffle_down(as_type<uint2>(val), i));
+    val *= as_type<T>(
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return val;
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
 }
 
 // Below algorithms are  written with hardcoded assumption that simdgroup is 32
