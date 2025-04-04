@@ -70,7 +70,7 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
 
   auto state_tensor = at::detail::empty_cpu(
       {(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
-  auto rng_state = state_tensor.data_ptr<uint8_t>();
+  auto rng_state = state_tensor.mutable_data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto current_offset = this->get_offset();
 
