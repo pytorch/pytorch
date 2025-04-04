@@ -439,7 +439,7 @@ class CodeGen:
             global_name = namespace.create_name(name_hint, obj)
 
             if global_name in globals_:
-                assert globals_[global_name] is obj
+                assert globals_[global_name] == obj
                 return global_name
             globals_[global_name] = obj
             return global_name
