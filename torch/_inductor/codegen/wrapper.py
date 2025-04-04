@@ -430,9 +430,7 @@ class ExternKernelAllocLine(WrapperLine):
     args: list[str]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        V.graph.wrapper_code._generate_extern_kernel_alloc_helper(
-            code, self.node, self.args
-        )
+        self.wrapper._generate_extern_kernel_alloc_helper(code, self.node, self.args)
 
 
 @dataclasses.dataclass
