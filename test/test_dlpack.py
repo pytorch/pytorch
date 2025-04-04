@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import IS_JETSON, run_tests, TestCase
+from torch.testing._internal.common_utils import IS_JETSON, run_tests, skipIfTorchDynamo, TestCase
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -283,6 +283,7 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(tensor, new_tensor)
 
     @skipMeta
+    @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
     @onlyNativeDeviceTypes
     def test_max_version(self, device):
         def test(device, **kwargs):
@@ -303,9 +304,9 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCPU
     @dtypes(
+        # Note: NumPy DLPack bool support only landed in 1.25.
         *all_types_and_complex_and(
             torch.half,
-            torch.bool,
             torch.uint16,
             torch.uint32,
             torch.uint64,
