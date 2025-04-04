@@ -505,7 +505,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
 
             for save_full_state_dict in [True, False]:
                 # Save state dict with original model
-                base_model = _get_base_model().cuda()
+                base_model = _get_base_model(mlp_dim).cuda()
                 base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
                 # Save state dict with FSDP2 + TP model
