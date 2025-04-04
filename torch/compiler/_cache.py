@@ -3,7 +3,7 @@ import dataclasses
 import logging
 import os
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -120,6 +120,31 @@ class CacheArtifactManager:
         cls._seen_artifacts.clear()
         cls._serializer.clear()
         cls._cache_info.clear()
+
+    @classmethod
+    def with_fresh_cache(cls) -> Any:
+        class FreshCache:
+            def __enter__(self) -> "FreshCache":
+                self.original_new_cache_artifacts = cls._new_cache_artifacts
+                self.original_seen_artifacts = cls._seen_artifacts
+                self.original_serializer = cls._serializer
+                self.original_cache_info = cls._cache_info
+
+                cls._new_cache_artifacts = []
+                cls._seen_artifacts = OrderedSet()
+                cls._serializer = AppendingByteSerializer(
+                    serialize_fn=CacheArtifact.serialize
+                )
+                cls._cache_info = CacheInfo()
+                return self
+
+            def __exit__(self, *args: Any) -> None:
+                cls._new_cache_artifacts = self.original_new_cache_artifacts
+                cls._seen_artifacts = self.original_seen_artifacts
+                cls._serializer = self.original_serializer
+                cls._cache_info = self.original_cache_info
+
+        return FreshCache()
 
     @classmethod
     def record_artifact(
