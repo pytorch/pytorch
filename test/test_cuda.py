@@ -53,12 +53,12 @@ from torch.testing._internal.common_utils import (
     gcIfJetson,
     get_cycles_per_ms,
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    IS_X86,
     load_tests,
     parametrize,
     run_tests,
@@ -80,6 +80,10 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
 
 
+requiresCppContext = unittest.skipUnless(
+    IS_X86 and IS_LINUX, "cpp contexts are x86 linux only"
+)
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -99,7 +103,9 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
-TEST_PYNVML = not torch.cuda._HAS_PYNVML
+TEST_PYNVML = (
+    torch.cuda._HAS_PYNVML and not IS_JETSON
+)  # nvml not fully supported on jetson
 if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -473,6 +479,9 @@ class TestCuda(TestCase):
         finally:
             torch.cuda.set_per_process_memory_fraction(orig, 0)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @serialTest()
     def test_get_per_process_memory_fraction(self):
         # get the initial memory fraction
@@ -3687,7 +3696,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
 
@@ -3700,7 +3709,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3735,7 +3744,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_cycles(self):
         fired = False
 
@@ -3777,7 +3786,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
@@ -3813,7 +3822,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
@@ -3840,7 +3849,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_memory_plots_history_context(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3878,7 +3887,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @requiresCppContext
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
@@ -4143,6 +4152,9 @@ class TestCudaMallocAsync(TestCase):
             cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
             self.assertEqual(cuda_alloc_size, raw_alloc_size)
 
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     @parametrize("max_split_size_mb_setting", [False, True])
     def test_raises_oom(self, max_split_size_mb_setting):
         if max_split_size_mb_setting:
@@ -4259,19 +4271,19 @@ class TestCudaMallocAsync(TestCase):
         finally:
             random.setstate(state)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
             self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
         Verify used device memory in bytes
@@ -4289,15 +4301,15 @@ class TestCudaMallocAsync(TestCase):
         # test the order of magnitude
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
         """
@@ -4312,7 +4324,7 @@ class TestCudaMallocAsync(TestCase):
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
         """
@@ -4331,7 +4343,7 @@ class TestCudaMallocAsync(TestCase):
                 matching = False
         self.assertEqual(True, matching)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
         """
