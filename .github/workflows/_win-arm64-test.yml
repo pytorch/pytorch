@@ -45,8 +45,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     strategy:
       fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    runs-on: ${{ inputs.runner }}
     defaults:
       run:
         shell: bash
