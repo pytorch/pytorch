@@ -276,6 +276,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -348,7 +349,7 @@ class GraphArg:
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.source)
 
     def erase(self):
@@ -369,7 +370,7 @@ class BackwardStateGraphArg(GraphArg):
             is_tensor=False,
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         assert codegen.tx.output.backward_state_var
         codegen.add_push_null(
             lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")

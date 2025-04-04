@@ -97,6 +97,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -1507,7 +1508,7 @@ class RemovableHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
             codegen.add_push_null(
