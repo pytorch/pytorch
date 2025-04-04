@@ -24,6 +24,7 @@ import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
@@ -2526,10 +2527,32 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).fake_impl.kernel
         if maybe_fake_impl:
-            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_fake_impl(*args, **kwargs)
-                return maybe_propagate_real_tensors(result)
+            try:
+                ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                    result = maybe_fake_impl(*args, **kwargs)
+                    return maybe_propagate_real_tensors(result)
+
+            except MissingOpProfile as e:
+                # If we have a fake kernel registered generated from OpProfiles
+                # but there doesn't exist a profile for the existing inputs, and we are in
+                if (
+                    self.propagate_real_tensors
+                    and real_out is not nil
+                    and not library_utils.is_builtin(func)
+                    and self.shape_env is not None
+                ):
+                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
+
+                    dtrace_structured(
+                        "missing_fake_kernel",
+                        metadata_fn=lambda: {
+                            "op": str(func),
+                        },
+                    )
+                    return maybe_propagate_real_tensors(result)
+                else:
+                    raise e
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors

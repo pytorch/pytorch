@@ -30,6 +30,7 @@ from torch._library.custom_ops import (
 )
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.triton import triton_op, wrap_triton
+from torch._library.utils import config
 from torch._ops import OpOverload
 from torch.types import _dtype
 
@@ -273,7 +274,8 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in _impls:
+
+        if (not config._allow_duplicate_registration) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
             raise RuntimeError(
@@ -332,7 +334,7 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in _impls:
+        if (not config._allow_duplicate_registration) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(

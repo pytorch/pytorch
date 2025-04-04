@@ -1,12 +1,22 @@
+import contextlib
 import logging
-from collections import defaultdict
+from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
+from torch._library.custom_ops import _maybe_get_opdef
+from torch._library.utils import config, Kernel
 
 
 log = logging.getLogger(__name__)
+
+
+class MissingOpProfile(RuntimeError):
+    """
+    This is raised when we don't have an operator profile available for the
+    given inputs.
+    """
 
 
 @dataclass(frozen=True)
@@ -29,51 +39,7 @@ class OpProfile:
     out_profile: Union[TensorMetadata, tuple[TensorMetadata]]
 
 
-def get_op_profile(node: torch.fx.Node) -> OpProfile:
-    args_profile = tuple(
-        [
-            TensorMetadata.maybe_from_tensor(arg.meta.get("val"))
-            if isinstance(arg, torch.fx.Node)
-            else None
-            for arg in (*node.args, *node.kwargs.values())
-        ]
-    )
-
-    out_profile = None
-    meta = node.meta.get("val")
-    assert meta is not None
-    if isinstance(meta, torch.Tensor):
-        out_profile = TensorMetadata.maybe_from_tensor(meta)
-    elif isinstance(meta, (list, tuple)):
-        out_profile = tuple([TensorMetadata.maybe_from_tensor(m) for m in meta])  # type: ignore[assignment]
-    assert out_profile is not None
-
-    return OpProfile(args_profile, out_profile)  # type: ignore[arg-type]
-
-
-def get_custom_op_profiles(
-    gm: torch.fx.GraphModule, ops_to_guard: set[str]
-) -> dict[str, set[OpProfile]]:
-    """
-    This is used by draft_export to get a list of custom operator profiles so
-    that we can generate fake kernels.
-    """
-
-    custom_op_profiles: dict[str, set[OpProfile]] = defaultdict(set)
-
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and str(node.target) in ops_to_guard:
-            custom_op_profiles[str(node.target)].add(get_op_profile(node))
-
-    return custom_op_profiles
-
-
-def generate_and_register_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> None:
-    """
-    Given the op profiles, we will generate a fake kernel which generates fake
-    tensors with unbacked shapes based on the profiles we recorded beforehand.
-    """
-
+def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
     def _match_args(args_profile: tuple[Optional[TensorMetadata]], args: Any) -> bool:
         return all(
             TensorMetadata.maybe_from_tensor(arg) == args_profile[i]
@@ -107,27 +73,88 @@ def generate_and_register_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -
         else:
             return [_generate_tensor_out(t) for t in out_profile]
 
+    def _fake_kernel(*args, **kwargs):  # type: ignore[no-untyped-def]
+        for profile in op_profile:
+            if _match_args(profile.args_profile, (*args, *kwargs.values())):
+                return _generate_res(profile.out_profile)
+
+        raise MissingOpProfile(
+            f"No fake kernel was found for {op_name}, and although we have "
+            "previously registered some profiles to generate a fake kernel, "
+            f"no profiles match the given inputs: {args, kwargs}."
+        )
+
+    return _fake_kernel
+
+
+@contextlib.contextmanager
+def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
+    """
+    Registers a fake kernel based on the given operator profiles. This fake
+    kernel registration will override any existing fake kernel registrations.
+
+    The input is a dictionary mapping operator names to a set of operator
+    profiles, which we will use to generate fake kernels. The operator profiles
+    are a record of the input and output tensor metadata. Based on this
+    information we will match a given input to the recorded profile, and return
+    an output with the same metadata as in the recorded profile. If a profile
+    doesn't exist then an exception will be thrown.
+
+    Args:
+        op_profiles (dict[str, set[OpProfile]]): A dictionary mapping operator
+            name to a set of operator profiles from which we will generate fake
+            kernels.
+    """
+
+    _old_config = config._allow_duplicate_registration
+    config._allow_duplicate_registration = True
+
+    libs: list[torch.library.Library] = []
+    old_fake_impls: dict[str, Union[Callable, Kernel]] = {}
     for op_name, profiles in op_profiles.items():
-        log.warning("Generating fake kernel for %s", op_name)
+        log.warning(
+            "Registering fake profile for %s. This will override any existing "
+            "fake kernel registration.",
+            op_name,
+        )
 
         op_name_split = op_name.split(".")
-        op_str = f"{op_name_split[0]}::{op_name_split[1]}"
+        namespace, op_name_str = op_name_split[0], op_name_split[1]
+        op_str = f"{namespace}::{op_name_str}"
 
-        @torch.library.register_fake(op_str)
-        def _(*args, **kwargs):  # type: ignore[no-untyped-def]
-            for profile in profiles:
-                if _match_args(profile.args_profile, (*args, *kwargs.values())):
-                    return _generate_res(profile.out_profile)
+        newlib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
+        fake_kernel = _generate_fake_kernel(op_str, profiles)
 
-            # No operator profiles match the existing inputs
-            # If we are in the mode where we want to generate fake kernels if
-            # there are any meta kernel mismatches, then we can return None and
-            # have maybe_infer_fake update the result.
-            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                return None
+        # Check if there are any fake kernels already registered
+        if opdef := _maybe_get_opdef(op_str):
+            if opdef._abstract_fn is not None:
+                old_fake_impls[op_str] = opdef._abstract_fn
+        elif fake_impl_holder := torch._library.simple_registry.singleton.find(
+            op_str
+        ).fake_impl:
+            if fake_impl_holder.kernel is not None:
+                old_fake_impls[op_str] = fake_impl_holder.kernel
 
-            raise RuntimeError(
-                f"No fake kernel was found for {op_name}, and although we have "
-                "previously registered some profiles to generate a fake kernel, "
-                f"no profiles match the given inputs: {args, kwargs}."
-            )
+        torch.library.register_fake(op_str, fake_kernel, lib=newlib)
+        libs.append(newlib)
+
+    try:
+        yield libs
+    finally:
+        for lib in libs:
+            lib._destroy()
+
+        for op_str, old_fake in old_fake_impls.items():
+            if isinstance(old_fake, Kernel):
+                torch.library.register_fake(op_str, old_fake.func)
+                fake_impl_holder = torch._library.simple_registry.singleton.find(
+                    op_str
+                ).fake_impl
+                assert fake_impl_holder.kernel is not None
+                fake_impl_holder.kernel.source = (
+                    old_fake.source
+                )  # Update the source information to be the original one
+            else:
+                torch.library.register_fake(op_str, old_fake)
+
+        config._allow_duplicate_registration = _old_config

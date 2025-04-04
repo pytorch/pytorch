@@ -11,10 +11,9 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._logging._internal
 import torch._logging.structured
-from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
-from torch._subclasses.fake_profile import (
-    generate_and_register_fake_kernels,
-    get_custom_op_profiles,
+from torch._export.passes.insert_custom_op_guards import (
+    get_op_profiles,
+    insert_custom_op_guards,
     OpProfile,
 )
 from torch.export import ExportedProgram
@@ -156,12 +155,12 @@ class DraftExportReport:
         failures: list[FailureReport],
         str_to_filename: dict[int, str],
         expressions_created: dict[int, dict[str, Any]],
-        custom_op_profiles: dict[str, set[OpProfile]],
+        op_profiles: dict[str, set[OpProfile]],
     ):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
         self.expressions_created: dict[int, dict[str, Any]] = expressions_created
-        self.custom_op_profiles = custom_op_profiles
+        self.op_profiles = op_profiles
 
     def successful(self) -> bool:
         return len(self.failures) == 0 or all(
@@ -199,9 +198,6 @@ Please follow the instructions to fix the errors.
 
     def apply_suggested_fixes(self) -> None:
         raise NotImplementedError("Not implemented yet")
-
-    def generate_and_register_fake_kernels(self) -> None:
-        generate_and_register_fake_kernels(self.custom_op_profiles)
 
 
 @dataclass
@@ -453,13 +449,10 @@ def draft_export(
             if v.visited:
                 expressions_created[k] = v.record
 
-        custom_op_profiles = get_custom_op_profiles(
-            ep.graph_module, incorrect_custom_ops
-        )
+        op_profiles = get_op_profiles(ep.graph_module, incorrect_custom_ops)
         report = DraftExportReport(
-            failures, str_to_filename, expressions_created, custom_op_profiles
+            failures, str_to_filename, expressions_created, op_profiles
         )
-        report.generate_and_register_fake_kernels()
 
         # Add asserts around custom ops
         insert_custom_op_guards(ep.graph_module, incorrect_custom_ops)
@@ -468,18 +461,29 @@ def draft_export(
     if not report.successful():
         log_filename = capture_structured_log.stream.name
 
-        log.warning(
-            """
+        warning_msg = f"""
 ###################################################################################################
-WARNING: %s issue(s) found during export, and it was not able to soundly produce a graph.
+WARNING: {len(report.failures)} issue(s) found during export, and it was not able to soundly produce a graph.
 To view the report of failures in an html page, please run the command:
-    `tlparse %s --export`
+    `tlparse {log_filename} --export`
 Or, you can view the errors in python by inspecting `print(ep._report)`.
-###################################################################################################
-        """,
-            len(report.failures),
-            log_filename,
-        )
+"""
+
+        if len(report.op_profiles) > 0:
+            warning_msg += f"""
+While tracing we found {len(report.op_profiles)} operator(s) which do not have a fake kernel registered.
+If you intend to retrace the exported graph or run it with fake tensors, please run it under the
+following context manager, which will register a fake kernel for those operators.
+```
+with torch._library.fake_profile.register_fake_profile(ep._report.op_profiles):
+    # run with fake tensors
+```
+"""
+
+        warning_msg += """#################################################################################################"""
+
+        log.warning(warning_msg)
+
     else:
         log.info(
             """

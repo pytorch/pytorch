@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 import torch
+from torch._library.fake_profile import MissingOpProfile, OpProfile, TensorMetadata
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
@@ -31,7 +32,7 @@ class TestDraftExport(TestCase):
     def tearDown(self):
         return
 
-    def test_missing_meta_kernel_custom_opb(self):
+    def test_missing_meta_kernel_custom_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
             @torch.library.custom_op("mylib::foo2", mutates_args={})
@@ -55,7 +56,9 @@ class TestDraftExport(TestCase):
 
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
-            ep.run_decompositions()
+
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                ep.run_decompositions()
 
     def test_missing_meta_kernel_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -67,7 +70,7 @@ class TestDraftExport(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            def foo_impl(a, b):
+            def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
                 return a + b
 
             class M(torch.nn.Module):
@@ -89,10 +92,12 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
-            self.assertEqual(len(report.custom_op_profiles), 1)
-            self.assertEqual(len(report.custom_op_profiles["mylib.foo.default"]), 1)
+            self.assertEqual(len(report.op_profiles), 1)
+            self.assertEqual(len(report.op_profiles["mylib.foo.default"]), 1)
+            print(report.op_profiles)
 
-            ep = ep.run_decompositions()
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                ep = ep.run_decompositions()
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
     def test_missing_meta_kernel_custom_op_multiple_profiles(self):
@@ -122,10 +127,11 @@ class TestDraftExport(TestCase):
             self.assertEqual(
                 report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
             )
-            self.assertEqual(len(report.custom_op_profiles), 1)
-            self.assertEqual(len(report.custom_op_profiles["mylib.foo3.default"]), 2)
+            self.assertEqual(len(report.op_profiles), 1)
+            self.assertEqual(len(report.op_profiles["mylib.foo3.default"]), 2)
 
-            ep.run_decompositions()
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                ep.run_decompositions()
 
     def test_missing_meta_kernel_custom_op_update_profile(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
@@ -146,27 +152,31 @@ class TestDraftExport(TestCase):
 
             ep = draft_export(M(), inp)
             report = ep._report
-            self.assertEqual(len(report.custom_op_profiles), 1)
-            self.assertEqual(len(report.custom_op_profiles["mylib.foo8.default"]), 1)
+            self.assertEqual(len(report.op_profiles), 1)
+            self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
             new_inp = (
                 torch.ones(2, 3, 4),
                 torch.ones(2, 3, 4),
             )
 
-            with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
-                torch.ops.mylib.foo8(*inp)
-                with self.assertRaisesRegex(
-                    RuntimeError, "no profiles match the given inputs"
-                ):
-                    torch.ops.mylib.foo8(*new_inp)
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+                    torch.ops.mylib.foo8(*inp)
+                    with self.assertRaisesRegex(
+                        RuntimeError, "no profiles match the given inputs"
+                    ):
+                        torch.ops.mylib.foo8(*new_inp)
 
-            ep = draft_export(M(), new_inp)
+                ep = draft_export(M(), new_inp)
+
             report = ep._report
-            self.assertEqual(len(report.custom_op_profiles), 1)
-            self.assertEqual(len(report.custom_op_profiles["mylib.foo8.default"]), 1)
+            self.assertEqual(len(report.op_profiles), 1)
+            self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with torch._library.fake_profile.register_fake_profile(
+                report.op_profiles
+            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new
@@ -524,7 +534,6 @@ class TestDraftExport(TestCase):
                     export(mod, inputs, strict=True)
 
             ep = draft_export(mod, inputs)
-            print(ep)
             report = ep._report
             for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
                 self.assertTrue(torch.allclose(ep_out, eager_out))
@@ -545,7 +554,8 @@ class TestDraftExport(TestCase):
                 ],
             )
 
-            ep.run_decompositions()
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                ep.run_decompositions()
 
     def test_override_incorrectly_aliasing_kernel(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
@@ -625,7 +635,8 @@ class TestDraftExport(TestCase):
                 report.failures[0].data["reason"],
                 "Dtypes torch.bfloat16 and torch.float32 are not equal!",
             )
-            ep = ep.run_decompositions()
+            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+                ep.run_decompositions()
 
     # https://github.com/pytorch/pytorch/issues/140625
     @unittest.skipIf(IS_WINDOWS, "aoti_compile_and_package not supported on Windows")
@@ -644,6 +655,135 @@ class TestDraftExport(TestCase):
                 draft_ep,
                 package_path=f.name,
             )
+
+
+class TestOpProfiles(TestCase):
+    def get_sample_op_profile(self) -> dict[str, set[OpProfile]]:
+        return {
+            "mylib.foo12.default": {
+                OpProfile(
+                    args_profile=(
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                    ),
+                    out_profile=TensorMetadata(
+                        rank=2,
+                        dtype=torch.float32,
+                        device=torch.device("cpu"),
+                        layout=torch.strided,
+                    ),
+                )
+            }
+        }
+
+    def test_fake_registration(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo12",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo12", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                "mylib.foo12.default",
+            ), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo12"):
+                    torch.ops.mylib.foo12(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
+
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                "mylib.foo12.default",
+            ), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+    def test_duplicate_registration_impl(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo12",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo12", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            @torch.library.register_fake("mylib::foo12", lib=lib)
+            def foo_impl_fake(a, b):
+                return (a + b).to(dtype=torch.bfloat16)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.bfloat16)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles):
+                with fm:
+                    self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.float32)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.bfloat16)
+
+    def test_duplicate_registration_custom_op(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        @torch.library.custom_op("mylib::foo13", mutates_args=())
+        def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @torch.library.register_fake("mylib::foo13")
+        def foo_impl_fake(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.bfloat16)
+
+        op_profiles = {
+            "mylib.foo13.default": self.get_sample_op_profile()["mylib.foo12.default"]
+        }
+
+        with torch._library.fake_profile.register_fake_profile(op_profiles):
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.float32)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.bfloat16)
 
 
 if __name__ == "__main__":

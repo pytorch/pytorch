@@ -5,7 +5,7 @@ from typing import Callable, Optional
 from typing_extensions import deprecated
 
 import torch
-from torch._library.utils import Kernel, RegistrationHandle
+from torch._library.utils import config, Kernel, RegistrationHandle
 
 
 class FakeImplHolder:
@@ -22,35 +22,37 @@ class FakeImplHolder:
         Returns a RegistrationHandle that one can use to de-register this
         fake impl.
         """
-        if self.kernel is not None:
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an fake impl registered at "
-                f"{self.kernel.source}."
-            )
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an DispatchKey::Meta implementation via a "
-                f"pre-existing torch.library or TORCH_LIBRARY registration. "
-                f"Please either remove that registration or don't call "
-                f"register_fake."
-            )
 
-        if torch._C._dispatch_has_kernel_for_dispatch_key(
-            self.qualname, "CompositeImplicitAutograd"
-        ):
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an implementation for this device type via a "
-                f"pre-existing registration to "
-                f"DispatchKey::CompositeImplicitAutograd."
-                f"CompositeImplicitAutograd operators do not need an fake "
-                f"impl; "
-                f"instead, the operator will decompose into its constituents "
-                f"and those "
-                f"can have fake impls defined on them."
-            )
+        if not config._allow_duplicate_registration:
+            if self.kernel is not None:
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an fake impl registered at "
+                    f"{self.kernel.source}."
+                )
+            if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an DispatchKey::Meta implementation via a "
+                    f"pre-existing torch.library or TORCH_LIBRARY registration. "
+                    f"Please either remove that registration or don't call "
+                    f"register_fake."
+                )
+
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                self.qualname, "CompositeImplicitAutograd"
+            ):
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an implementation for this device type via a "
+                    f"pre-existing registration to "
+                    f"DispatchKey::CompositeImplicitAutograd."
+                    f"CompositeImplicitAutograd operators do not need an fake "
+                    f"impl; "
+                    f"instead, the operator will decompose into its constituents "
+                    f"and those "
+                    f"can have fake impls defined on them."
+                )
 
         # Store the kernel in this holder
         self.kernel = Kernel(func, source)
