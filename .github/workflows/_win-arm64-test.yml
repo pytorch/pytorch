@@ -93,17 +93,7 @@ jobs:
           set -eux
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
-        # checks for labels and re-enabled test issues.  It does not actually do
-        # any filtering.  All filtering is done in the build step.
-        id: keep-going
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          job-name: ${{ steps.get-job-id.outputs.job-name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}      
 
       - name: Set Test step time
         id: test-timeout
