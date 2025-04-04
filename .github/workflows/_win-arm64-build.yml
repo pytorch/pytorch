@@ -116,15 +116,13 @@ jobs:
         run: python pytorch/.github/scripts/parse_ref.py
 
       - name: Get workflow job id
-      # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
-      # timeout-minutes: 10
         shell: bash
         id: get-job-id
         run: |
           set -eux
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
-          GITHUB_TOKEN: ${{ inputs.github-token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Bootstrap Build Tools
         shell: cmd
