@@ -40,6 +40,10 @@ def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
 
 
+def nontraceable_subclass(c):
+    return torch._dynamo.config.patch("nontraceable_tensor_subclasses", {c})
+
+
 def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
     actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
     self.assertEqual(actual_recompiles, expected_recompiles)
@@ -757,26 +761,22 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
                 return super().__torch_function__(func, types, args, kwargs)
 
             def sigmoid(self):
                 return None
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             x.sigmoid()
 
-        msg = (
-            "Accessing overridden method/attribute sigmoid on a tensor"
-            " subclass with a __torch_function__ override is not supported"
-        )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            x = torch.ones(2, 2).as_subclass(LocalSubclass)
-            fn(x)
+        x = torch.ones(2, 2).as_subclass(LocalSubclass)
+        fn_opt = compile_full_eager(fn)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_user_overidden_attr_unsupported(self):
         class LocalSubclass(torch.Tensor):
@@ -792,10 +792,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = (
-            "Accessing overridden method/attribute ndim on a tensor"
-            " subclass with a __torch_function__ override is not supported"
-        )
+        msg = "Currently only support accessing overridden attributes that are functions or properties, but got <class 'int'>"
         with torch._dynamo.config.patch(
             "traceable_tensor_subclasses", {LocalSubclass}
         ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
@@ -804,13 +801,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self) -> None:
+            def __init__(self, *args, **kwargs) -> None:
                 self._ndim = 10
 
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
                 return super().__torch_function__(func, types, args, kwargs)
 
             @property
@@ -821,19 +816,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def ndim(self, value):
                 self._ndim = value
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            return x.ndim
+            return x + x.ndim
 
-        msg = (
-            "Accessing overridden method/attribute ndim on a tensor"
-            " subclass with a __torch_function__ override is not supported"
-        )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            x = torch.ones(2, 2).as_subclass(LocalSubclass)
-            fn(x)
+        x = LocalSubclass(torch.ones(2, 2))
+        fn_opt = compile_full_eager(fn)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_overridden_method_guarding(self):
         class LocalSubclass(torch.Tensor):
@@ -953,6 +946,275 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res_exp = fn(input)
             res_act = fn_opt(input)
             self.assertEqual(res_exp, res_act)
+
+    def test_make_subclass(self):
+        # Make sure `torch.Tensor._make_subclass` is traceable, and Dynamo
+        # models its aliasing relationships correctly.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            # Downcast then upcast
+            y = torch.Tensor._make_subclass(MySubclass, x)
+            z = torch.Tensor._make_subclass(torch.Tensor, x)
+            # Now `x, y, z` should have the same underlying data.
+            x += 1
+            y += 2
+            z += 3
+            res = x * y + z
+            return res
+
+        with traceable_subclass(MySubclass):
+            x0 = torch.randn(2, 2)
+            x1 = x0.clone()
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x0)
+            res_act = fn_opt(x1)
+            self.assertEqual(res_exp, res_act)
+            self.assertEqual(x0, x1)
+
+    def test_subclass_override_shape_and_to(self):
+        # This is a slight variabtion of
+        # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
+        class MySubclass(torch.Tensor):
+            def to(self, *args, **kwargs):
+                new = super().to(*args, **kwargs)
+                new.tensor_shape = getattr(self, "tensor_shape", new.data.shape)
+                return new
+
+            @property
+            def shape(self):
+                if not hasattr(self, "tensor_shape"):
+                    self.tensor_shape = self.size()
+                return self.tensor_shape
+
+        def fn(x):
+            x_shape = x.shape
+            y = x.to("cpu")
+            return x + 1, y + 2, x_shape, x.tensor_shape, y.tensor_shape
+
+        with traceable_subclass(MySubclass):
+            x0 = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+            x1 = torch.nn.Parameter(x0.clone().as_subclass(MySubclass))
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x0)
+            res_act = fn_opt(x1)
+            self.assertEqual(res_exp, res_act)
+            self.assertEqual(x0, x1)
+            self.assertEqual(x0.tensor_shape, x1.tensor_shape)
+
+    def test_subclass_dont_invoke_torch_function_on_overriden_method(self):
+        # We shouldn't fire `__torch_function__` for overriden tensor methods.
+        class MySubclass(torch.Tensor):
+            def to(self, device):
+                return self * len(device)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.to:
+                    torch._dynamo.graph_break()
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return x.to("cpu")
+
+        with traceable_subclass(MySubclass):
+            x = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+            self.assertEqual(res_exp, res_act)
+
+    def test_subclass_dont_invoke_torch_function_on_overriden_attr(self):
+        from types import MethodWrapperType
+
+        # We shouldn't fire `__torch_function__` for overriden tensor attrs.
+        class MySubclass(torch.Tensor):
+            def ndim(self):
+                return 42
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if type(func) is MethodWrapperType and func.__name__ == "ndim":
+                    torch._dynamo.graph_break()
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return x + x.ndim()
+
+        with traceable_subclass(MySubclass):
+            x = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x)
+            res_act = fn_opt(x)
+            self.assertEqual(res_exp, res_act)
+
+    def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
+        # This is a slight variation of
+        # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
+        # which basically
+        # 1. uses tensor subclass to attach quantization metadata onto tensors
+        # 2. preserve them across torch ops
+        # 3. use the metadata to dequantize the tensor
+        # 4. convert it to a regular tensor.
+        #
+        # The test is meant to make sure Dynamo won't graph break over it.
+        class GGUFParameter(torch.nn.Parameter):
+            def __new__(cls, data, requires_grad=False, quant_type=None):
+                data = data if data is not None else torch.empty(0)
+                self = torch.Tensor._make_subclass(cls, data, requires_grad)
+                return self
+
+            def __init__(self, *args, quant_type=None, **kwargs):
+                self.quant_type = quant_type
+
+            def as_tensor(self):
+                return torch.Tensor._make_subclass(
+                    torch.Tensor, self, self.requires_grad
+                )
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                result = super().__torch_function__(func, types, args, kwargs)
+
+                quant_type = None
+                for arg in args:
+                    if isinstance(arg, list) and isinstance(arg[0], GGUFParameter):
+                        quant_type = arg[0].quant_type
+                        break
+                    if isinstance(arg, GGUFParameter):
+                        quant_type = arg.quant_type
+                        break
+                if isinstance(result, torch.Tensor):
+                    return cls(result, quant_type=quant_type)
+                # Handle tuples and lists
+                elif isinstance(result, (tuple, list)):
+                    # Preserve the original type (tuple or list)
+                    wrapped = [
+                        cls(x, quant_type=quant_type)
+                        if isinstance(x, torch.Tensor)
+                        else x
+                        for x in result
+                    ]
+                    return type(result)(wrapped)
+                else:
+                    return result
+
+        def f(x):
+            tmp = x * 2
+            tmp = tmp + tmp.quant_type
+            tmp = tmp.as_tensor()
+            return tmp * 3
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = GGUFParameter(torch.ones(2), quant_type=42)
+        with traceable_subclass(GGUFParameter):
+            res = f(x)
+            ref = opt_f(x)
+        self.assertEqual(res, ref)
+
+    def test_newly_constructed_tensor_subclass_attr_mutation(self):
+        # Make sure the attribute mutation for newly constructed tensor subclass
+        # object (from constructor call) is handled both during Dynamo tracing
+        # and codegen-ed to be visible outside `torch.compile`.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def f():
+            x = MySubclass(torch.ones(2))
+            x.bar = 42
+            return x, x * x.bar
+
+        opt_f = compile_full_eager(f)
+
+        with traceable_subclass(MySubclass):
+            res = f()
+            ref = opt_f()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res[0].bar, ref[0].bar)
+
+    def test_as_subclass_attr_mutation(self):
+        # Make sure the attribute mutation for newly constructed tensor subclass
+        # object (from as_subclass call) is handled both during Dynamo tracing
+        # and codegen-ed to be visible outside `torch.compile`.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def f():
+            x = torch.ones(2).as_subclass(MySubclass)
+            x.bar = 42
+            return x, x * x.bar
+
+        opt_f = compile_full_eager(f)
+
+        with traceable_subclass(MySubclass):
+            res = f()
+            ref = opt_f()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res[0].bar, ref[0].bar)
+
+    def test_tensor_subclass_attr_codegen_tos(self):
+        # This repros a very subtle interaction between
+        # `TensorWithTFOverrideVariable` attribute mutation codegen and
+        # `PyCodegen.top_of_stack`. It was uncovered from
+        # `test_tensor_subclass_deepcopy`.
+        class MySubclass(torch.Tensor):
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_subclass(cls, torch.ones(0))
+                r.elem = elem
+                return r
+
+        def f(t):
+            return MySubclass(t.elem.clone())
+
+        opt_f = compile_full_eager(f)
+
+        t = MySubclass(torch.ones(2))
+        with traceable_subclass(MySubclass):
+            res = f(t)
+            ref = opt_f(t)
+
+        self.assertEqual(res, ref)
+        self.assertEqual(res.elem, ref.elem)
+        self.assertEqual(type(res), type(ref))
+
+    def test_nontraceable_tensor_subclass(self):
+        # This will error if Dynamo tries to wrap it as a tensor variable,
+        # because that involves calling certain methods to inspect the tensor
+        # property, which will blow up in the overriden `__torch_function__`.
+        class MySubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("one shall not pass")
+
+        def f(t):
+            return t.foo + torch.ones(10)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=False)
+
+        t = MySubclass(torch.ones(2))
+        t.foo = 42
+        # Make sure the `nontraceable_tensor_subclasses` config prevents Dynamo
+        # from wrapping `t`.
+        with nontraceable_subclass(MySubclass):
+            res = f(t)
+            ref = opt_f(t)
+
+        self.assertEqual(res, ref)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
