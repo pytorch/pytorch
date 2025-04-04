@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import sys
 import unittest
 import warnings
 from itertools import product
 
 import torch
+import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
@@ -28,9 +30,26 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
         self.assertEqual(z, 1)
 
 
-class CPythonTest_Assertions(torch._dynamo.test_case.CPythonTestCase):
+class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_unittest/test_assertions.py
     # https://github.com/python/cpython/blob/3.13/Lib/test/test_unittest/test_assertions.py
+    _stack: contextlib.ExitStack
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._stack.close()
+        super().tearDownClass()
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Skip test if python versions doesn't match
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
+            config.patch(
+                enable_trace_unittest=True,
+            ),
+        )
 
     @make_dynamo_test
     def test_AlmostEqual(self):
@@ -141,10 +160,28 @@ class CPythonTest_Assertions(torch._dynamo.test_case.CPythonTestCase):
             self.fail("assertNotRegex should have failed.")
 
 
-class CPythonTestLongMessage(torch._dynamo.test_case.CPythonTestCase):
+class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
     """Test that the individual asserts honour longMessage.
     This actually tests all the message behaviour for
     asserts that use longMessage."""
+
+    _stack: contextlib.ExitStack
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._stack.close()
+        super().tearDownClass()
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Skip test if python versions doesn't match
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
+            config.patch(
+                enable_trace_unittest=True,
+            ),
+        )
 
     def setUp(self):
         super().setUp()
