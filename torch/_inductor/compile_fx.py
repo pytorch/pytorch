@@ -2386,7 +2386,7 @@ class CompiledArtifact:
     def save(self, filename: str) -> None:
         with dynamo_timed("CompiledArtifact.save"):
             if self._artifacts is None:
-                raise Exception(
+                raise RuntimeError(
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
@@ -2464,7 +2464,8 @@ def standalone_compile(
         artifacts = torch.compiler.save_cache_artifacts()
         if artifacts is None:
             log.warning(
-                "standalone_compile artifact generation failed, cannot save. Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
+                "standalone_compile artifact generation failed, cannot save. "
+                "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
     return CompiledArtifact(compiled_fn, artifacts)
