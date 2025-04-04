@@ -80,7 +80,12 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -402,8 +407,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             assert len(args) == 1
             assert len(kwargs) == 0
+            dict_vt = variables.ConstDictVariable({}, mutation_type=ValueMutationNew())
             return UserDefinedDictVariable(
-                edict(), dict_ct={}, mutation_type=ValueMutationNew()
+                edict(), dict_vt=dict_vt, mutation_type=AttributeMutationNew()
             )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
@@ -441,7 +447,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import NullContextVariable
 
             return NullContextVariable()
-        elif self.value is collections.OrderedDict or (edict and self.value is edict):
+        elif self.value is collections.OrderedDict:
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.construct_dict),
                 [self, *args],
@@ -457,6 +463,36 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 collections.defaultdict,
                 args[0],
                 mutation_type=ValueMutationNew(),
+            )
+        elif edict and self.value is edict:
+            ed = edict()
+            if args:
+                assert len(args) == 1
+                assert isinstance(args[0], variables.ConstDictVariable)
+                ed.update(
+                    **{
+                        k.vt.as_python_constant(): v.as_python_constant()
+                        for k, v in args[0].items.items()
+                    }
+                )
+            if kwargs:
+                ed.update(**{k: v.as_python_constant() for k, v in kwargs.items()})
+
+            def build_key_value(k, v):
+                key = variables.ConstantVariable.create(k)
+                source_key = k
+
+                source_value = GetItemSource(self.source, source_key)
+                value = variables.LazyVariableTracker.create(v, source_value)
+
+                return key, value
+
+            items = dict(build_key_value(k, v) for k, v in ed.items())
+            dict_vt = variables.ConstDictVariable(
+                items, mutation_type=ValueMutationNew()
+            )
+            return UserDefinedDictVariable(
+                ed, dict_vt=dict_vt, mutation_type=AttributeMutationNew()
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
