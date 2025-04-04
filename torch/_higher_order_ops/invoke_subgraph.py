@@ -332,13 +332,12 @@ def trace_joint_graph_as_bwd(
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             joint_operands = [_from_fun(arg) for arg in joint_operands]
-
-    with contextlib.ExitStack() as stack:
-        stack.enter_context(
-            torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
-        )
-        with torch.enable_grad():
-            return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+                )
+                with torch.enable_grad():
+                    return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
