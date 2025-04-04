@@ -414,13 +414,23 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # to extract the grads.
         primals_and_tangents = primals + contiguous_grad_outs
 
-        bw_graph = trace_joint_graph_as_bwd(
-            subgraph,
-            len(primals),
-            primals_and_tangents,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-        )
+        # Check if we have already traced the bwd subgraph.
+        bw_graph = None
+        invoke_subgraph_cache = get_invoke_subgraph_cache()
+        if invoke_subgraph_cache:
+            bw_graph = invoke_subgraph_cache.get_lazy_bwd_entry(identifier)
+
+        if bw_graph is None:
+            bw_graph = trace_joint_graph_as_bwd(
+                subgraph,
+                len(primals),
+                primals_and_tangents,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+            )
+
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_lazy_bwd_entry(identifier, bw_graph)
 
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents
