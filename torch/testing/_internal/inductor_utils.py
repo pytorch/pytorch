@@ -5,14 +5,21 @@ import torch
 import re
 import unittest
 import functools
+import contextlib
 import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._inductor.graph import GraphLowering
+from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
-from torch._inductor.utils import GPU_TYPES, get_gpu_type
+from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
 from torch.utils._triton import has_triton
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
@@ -61,6 +68,17 @@ GPU_TYPE = get_gpu_type()
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES
+)
+
+_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
+RUN_GPU = (
+    HAS_GPU
+    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
+)
+
+RUN_CPU = (
+    HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
 )
 
 def _check_has_dynamic_shape(
@@ -140,3 +158,67 @@ IS_H100 = LazyVal(
 )
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+def dummy_graph() -> GraphLowering:
+    """
+    Create a graph. This is useful for unit testing code which accesses
+    V.graph.sizevars.
+    """
+    example_inputs = [torch.randn(10) for _ in range(2)]
+    gm = make_fx(torch.add, tracing_mode="fake")(*example_inputs)
+    shape_env = shape_env_from_inputs(example_inputs)
+    graph = GraphLowering(
+        gm,
+        shape_env=shape_env,
+    )
+
+    return graph
+
+def maybe_skip_size_asserts(op):
+    """
+    For certain ops, there meta and eager implementation returns differents
+    strides. This cause size/strides assert fail. Skip adding those
+    asserts for now.
+    """
+    if (
+        op.aten_name
+        in (
+            "fft_hfftn",
+            "fft_hfft",
+            "fft_hfft2",
+            "fft_ihfftn",
+            "fft_fft",
+            "fft_fft2",
+            "fft_fftn",
+            "fft_ifft",
+            "fft_ifft2",
+            "fft_ifftn",
+            "fft_irfft",
+            "fft_irfft2",
+            "fft_irfftn",
+            "fft_ihfft",
+            "fft_ihfft2",
+            "fft_rfft",
+            "fft_rfft2",
+            "fft_rfftn",
+            "linalg_eig",
+            "linalg_eigvals",
+        )
+        and "TORCHINDUCTOR_SIZE_ASSERTS" not in os.environ
+    ):
+        return torch._inductor.config.patch(size_asserts=False)
+    else:
+        return contextlib.nullcontext()
+
+def clone_preserve_strides_offset(x, device=None):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    )
+    if not device:
+        buffer = buffer.clone()
+    else:
+        buffer = buffer.to(device, copy=True)
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out

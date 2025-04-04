@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 6)
+SCHEMA_VERSION = (8, 7)
 TREESPEC_VERSION = 1
 
 
@@ -447,3 +447,40 @@ class Model:
     # key is the FQN of constant in exported program (constant tensor or torchbind objs)
     # value is the archive path of serialized constants
     constantPaths: Annotated[dict[str, str], 70]
+
+#
+# The structure is used to serialize instances of AOTInductorModel to pass
+# them from the publishing pipeline to the predictor.
+#
+# All new fields should be marked as optional.
+#
+@dataclass
+class AOTInductorModelPickleData:
+    # Base name of an associated .so AOTInductor library. Typically looks like:
+    # "abc.so".
+    library_basename: Annotated[str, 1]
+
+    # AOTInductor engine input names.
+    input_names: Annotated[list[str], 2]
+
+    # AOTInductor engine output names.
+    output_names: Annotated[list[str], 3]
+
+    # These fields tell whether floating point inputs/outputs should be converted to
+    # a certain type. If None, the dtypes that the AOTInductor engine inferred from the sample
+    # inputs are used.
+    floating_point_input_dtype: Annotated[Optional[int], 4] = None
+    floating_point_output_dtype: Annotated[Optional[int], 5] = None
+
+    # Whether AOTInductor runtime is for CPU.
+    aot_inductor_model_is_cpu: Annotated[Optional[bool], 6] = None
+
+@dataclass
+class ExternKernelNode:
+    # name is not the unique identifier of the node
+    name: Annotated[str, 10]
+    node: Annotated[Node, 20]
+
+@dataclass
+class ExternKernelNodes:
+    nodes: Annotated[list[ExternKernelNode], 10]

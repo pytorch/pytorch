@@ -19,8 +19,7 @@ T = TypeVar("T")
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
@@ -182,7 +181,7 @@ class DtypePropagationOpsHandler:
         ):
             return upcast_compute_type(dtype)
 
-        return torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        return V.kernel.get_index_dtype_as_torch_dtype()
 
     @staticmethod
     def to_dtype(
@@ -367,6 +366,16 @@ class DtypePropagationOpsHandler:
         expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
         return None
+
+    def output(self, *args: DTypeArg) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear here"
+        )
+
+    def placeholder(self, index: int) -> torch.dtype:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear here"
+        )
 
 
 if TYPE_CHECKING:

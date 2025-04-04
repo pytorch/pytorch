@@ -1,6 +1,17 @@
+"""Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
+
+This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
+It includes:
+- A custom TestCase class that handles Dynamo-specific setup/teardown
+- Test running utilities with dependency checking
+- Automatic reset of Dynamo state between tests
+- Proper handling of gradient mode state
+"""
+
 import contextlib
 import importlib
 import logging
+import os
 from typing import Union
 
 import torch
@@ -22,8 +33,15 @@ log = logging.getLogger(__name__)
 def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
-    if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:
+    if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
+
+    if (
+        not torch.xpu.is_available()
+        and IS_WINDOWS
+        and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
+    ):
+        return
 
     if isinstance(needs, str):
         needs = (needs,)
