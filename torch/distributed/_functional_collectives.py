@@ -155,7 +155,7 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
-def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = "", wrap=True):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -174,7 +174,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     group_name = _resolve_group_name(group, tag)
     tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
-    return _maybe_wrap_tensor(tensor)
+    return _maybe_wrap_tensor(tensor, wrap)
 
 
 def all_gather_tensor(
@@ -620,6 +620,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
+        print("TRIGGERING WAIT")
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
@@ -629,6 +630,14 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     def wait(self) -> torch.Tensor:
         return wait_tensor(self.elem)
+
+    def as_work(self) -> "Work":
+        """
+        Asserts that there's a single ongoing collective for the tensor, then returns its Work object.
+        """
+        work = dist.group.WORLD.as_work(self.elem)
+        self.completed = True  # don't keep using AsyncCollectiveTensor after this? wish there was move semantics...
+        return work
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -820,9 +829,14 @@ def _are_we_tracing() -> bool:
     return get_proxy_mode() is not None
 
 
-def _maybe_wrap_tensor(self) -> torch.Tensor:
+def _maybe_wrap_tensor(self, wrap=True) -> torch.Tensor:
     if _are_we_tracing():
-        return wait_tensor(self)
+        if wrap:
+            # non-async
+            return wait_tensor(self)
+        # return self
+
+    # eager or async
     res = AsyncCollectiveTensor(self)
     return cast(torch.Tensor, res)
 
@@ -1108,14 +1122,17 @@ def all_reduce_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
-
+    if not _are_we_tracing():
+        dist.breakpoint()
+    # assert not async_op, (
+    #     "Can't remap async version of inplace op to functional collective"
+    # )
     group = group or dist.group.WORLD
     assert group is not None
 
-    return tensor.copy_(all_reduce(tensor, op, group, tag))
+    return tensor.copy_(all_reduce(tensor, op, group, tag, not async_op))
+    # return torch.ops._c10d_functional.wait_tensor(tensor.copy_(all_reduce(tensor, op, group, tag, not async_op)))
+
 
 
 def all_to_all_inplace(
