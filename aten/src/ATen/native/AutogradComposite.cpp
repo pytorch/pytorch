@@ -94,7 +94,9 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 }
 
 Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
-  optional<c10::Allocator*> allocator_opt = nullopt;
+  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
+  c10::intrusive_ptr<c10::StorageImpl> storage = nullptr;
+
   if (device_opt.has_value()) {
     c10::Device src_device = self.device();
     c10::Device dst_device = device_opt.value();
@@ -110,14 +112,19 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
       "or between the same device. Got ", src_device, " to ", dst_device
     );
 
+    c10::Allocator* allocator = nullptr;
+
     if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
       // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
       // the regular CPU allocator.
-      allocator_opt = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
-      TORCH_INTERNAL_ASSERT(allocator_opt.value()->has_unified_memory());
+      allocator = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
+      TORCH_INTERNAL_ASSERT(allocator != nullptr);
+      TORCH_INTERNAL_ASSERT(allocator->has_unified_memory());
     } else {
-      allocator_opt = at::empty({}, at::TensorOptions().device(dst_device)).storage().allocator();
+      allocator = at::empty({}, at::TensorOptions().device(dst_device)).storage().allocator();
+      TORCH_INTERNAL_ASSERT(allocator != nullptr);
     }
+
 
     if (src_device_type == c10::kCPU && dst_device_type == c10::kMPS) {
       TORCH_CHECK(self.is_pinned(),
@@ -125,10 +132,10 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
         "is pinned.");
       TORCH_INTERNAL_ASSERT(self.storage().allocator()->has_unified_memory());
     }
+    storage = c10::impl::cow::lazy_clone_storage(*self_storage, device_opt.value(), *allocator);
+  } else {
+    storage = c10::impl::cow::lazy_clone_storage(*self_storage);
   }
-  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
-  c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage, device_opt, allocator_opt);
   TORCH_CHECK(storage != nullptr);
   c10::DispatchKeySet key_set = self.key_set();
   // If the target device differs, then we must change the key set

@@ -75,12 +75,8 @@ static void check_clone_between_devices(
       "'.");
 }
 
-c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
-    StorageImpl& storage,
-    c10::optional<c10::Device> device_opt,
-    c10::optional<c10::Allocator*> allocator_opt) {
-  TORCH_INTERNAL_ASSERT(device_opt.has_value() == allocator_opt.has_value());
-
+static c10::optional<at::DataPtr> lazy_clone_storage_data_ptr(
+    StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -130,54 +126,21 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
-    return nullptr;
+    return c10::nullopt;
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr_opt.has_value());
+  return new_data_ptr_opt;
+}
 
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
+  c10::optional<at::DataPtr> new_data_ptr_opt =
+      lazy_clone_storage_data_ptr(storage);
+  if (!new_data_ptr_opt.has_value()) {
+    return nullptr;
+  }
   c10::Allocator* allocator = storage.allocator();
   c10::DeviceType device_type = storage.device_type();
-
-  if (device_opt.has_value()) {
-    TORCH_INTERNAL_ASSERT(allocator_opt.has_value());
-    allocator = allocator_opt.value();
-
-    DeviceGuard device_guard(device_opt.value());
-    Device dst_device = device_guard.current_device();
-
-    // If a different target device was given, then convert the data pointer to
-    // that device.
-    if (dst_device != storage.device()) {
-      check_clone_between_devices(storage.device_type(), dst_device.type());
-
-      DataPtr& new_data_ptr = new_data_ptr_opt.value();
-      auto* ctx = new_data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(
-          c10::impl::cow::cow_deleter);
-      device_type = dst_device.type();
-      void* ptr_value = new_data_ptr.get();
-
-      new_data_ptr.release_context();
-
-      if (storage.device_type() == c10::kCPU &&
-          dst_device.type() == c10::kMPS) {
-        // If the source was CPU, its data pointer is in CPU address space, so
-        // need to translate it to MPS address space.
-        TORCH_INTERNAL_ASSERT(allocator->has_unified_memory());
-        ptr_value = allocator->get_device_ptr_from_cpu_ptr(ptr_value);
-      } else if (
-          storage.device_type() == c10::kMPS &&
-          dst_device.type() == c10::kCPU) {
-        // If the source was MPS, its data pointer is in MPS address space, so
-        // need to translate it to CPU address space.
-        TORCH_INTERNAL_ASSERT(allocator->has_unified_memory());
-        ptr_value = storage.allocator()->get_cpu_ptr_from_device_ptr(ptr_value);
-      }
-
-      new_data_ptr_opt =
-          c10::DataPtr(ptr_value, ctx, c10::impl::cow::cow_deleter, dst_device);
-    }
-  }
-
   return make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
@@ -185,6 +148,58 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       allocator,
       storage.resizable(),
       device_type);
+}
+
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
+    StorageImpl& storage,
+    c10::Device device,
+    c10::Allocator& allocator) {
+  c10::optional<at::DataPtr> new_data_ptr_opt =
+      lazy_clone_storage_data_ptr(storage);
+  if (!new_data_ptr_opt.has_value()) {
+    return nullptr;
+  }
+
+  DeviceGuard device_guard(device);
+  Device dst_device = device_guard.current_device();
+  c10::DeviceType dst_device_type = dst_device.type();
+
+  // If a different target device was given, then convert the data pointer to
+  // that device.
+  if (dst_device != storage.device()) {
+    c10::DeviceType src_device_type = storage.device_type();
+    check_clone_between_devices(src_device_type, dst_device_type);
+
+    DataPtr& new_data_ptr = new_data_ptr_opt.value();
+    auto* ctx = new_data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(
+        c10::impl::cow::cow_deleter);
+    void* ptr_value = new_data_ptr.get();
+
+    new_data_ptr.release_context();
+
+    if (src_device_type == c10::kCPU && dst_device.type() == c10::kMPS) {
+      // If the source was CPU, its data pointer is in CPU address space, so
+      // need to translate it to MPS address space.
+      TORCH_INTERNAL_ASSERT(allocator.has_unified_memory());
+      ptr_value = allocator.get_device_ptr_from_cpu_ptr(ptr_value);
+    } else if (src_device_type == c10::kMPS && dst_device.type() == c10::kCPU) {
+      // If the source was MPS, its data pointer is in MPS address space, so
+      // need to translate it to CPU address space.
+      TORCH_INTERNAL_ASSERT(allocator.has_unified_memory());
+      ptr_value = allocator.get_cpu_ptr_from_device_ptr(ptr_value);
+    }
+
+    new_data_ptr_opt =
+        c10::DataPtr(ptr_value, ctx, c10::impl::cow::cow_deleter, dst_device);
+  }
+
+  return make_storage_impl(
+      StorageImpl::use_byte_size_t(),
+      storage.sym_nbytes(),
+      *std::move(new_data_ptr_opt),
+      &allocator,
+      storage.resizable(),
+      dst_device_type);
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
