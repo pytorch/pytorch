@@ -117,11 +117,6 @@ jobs:
           USE_CUDA: '0'
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: "3.12"
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
-          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
-          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
-          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           VC_PRODUCT: "BuildTools"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
