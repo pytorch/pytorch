@@ -34,7 +34,7 @@ C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
 // Check if a storage has a simple DataPtr with no abnormal context
 C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
 
-// Check if a DataPtr is COW.
+// Check if a DataPtr is COW
 C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 
 // Check if a DataPtr is COW and the DataPtr points to data on the given device.

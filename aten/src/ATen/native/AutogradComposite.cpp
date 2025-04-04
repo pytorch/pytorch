@@ -125,7 +125,6 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
       TORCH_INTERNAL_ASSERT(allocator != nullptr);
     }
 
-
     if (src_device_type == c10::kCPU && dst_device_type == c10::kMPS) {
       TORCH_CHECK(self.is_pinned(),
         "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
