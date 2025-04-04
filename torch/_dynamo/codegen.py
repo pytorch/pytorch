@@ -55,7 +55,7 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 if TYPE_CHECKING:
-    from .symbolic_convert import InstructionTranslator
+    from .symbolic_convert import InstructionTranslatorBase
 
 
 @dataclasses.dataclass
@@ -71,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
