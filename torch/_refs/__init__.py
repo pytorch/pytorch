@@ -3793,10 +3793,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             idx = idx + 1
             continue
 
-        # Skips dimensions that are already the correct length
-        if guard_size_oblivious(length == a_.shape[idx]):
-            idx = idx + 1
-            continue
+        # # Skips dimensions that are already the correct length
+        # if guard_size_oblivious(length == a_.shape[idx]):
+        #     idx = idx + 1
+        #     continue
 
         # Gathers enough original dimensions such that this new dimension can be created
         # Note that this accumulation will terminate because we've verified a and the shape
