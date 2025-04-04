@@ -20,12 +20,12 @@ namespace c10::impl::cow {
 // storage's DataPtr has some context (`DataPtr::get_context()`) which is not
 // equal to the data pointer (`DataPtr::get()`). In this case, a nullptr is
 // returned.
-//
-// If `device_opt` is given, the output will be copied to the specified device
-// when materialization occurs.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage);
 
+// Create a COW clone of the storage, but the output storage is assigned the
+// given device and allocator. Upon materialization, the data is copied from the
+// original device to the new device using the given allocator.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
     Device device,
