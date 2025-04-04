@@ -87,11 +87,13 @@ jobs:
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
 
       - name: Get workflow job id
+        shell: bash
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
