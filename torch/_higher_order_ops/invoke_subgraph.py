@@ -58,6 +58,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         self.subgraph_indexes = [
             0,
         ]
+        self.call_subgraph_fn = lambda *args, **kwargs: args[0](*args[2])
+        self.identifier_fn = lambda *args: args[1]
 
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
