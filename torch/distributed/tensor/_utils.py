@@ -29,9 +29,11 @@ def _explicit_order_placements(
     [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
 
     """
-    if not any(isinstance(p, _StridedShard) for p in placements):
-        return list(enumerate(placements))
-
+    if not len(placements) == len(mesh_shape):
+        raise RuntimeError(
+            "Expected one placement per mesh dim, "
+            f"but found {len(placements)} placements and {len(mesh_shape)} mesh dims."
+        )
     ordered = []
     deferred_strided_placements = defaultdict(list)
     strided_part_ended_for_dim = set()
@@ -55,22 +57,14 @@ def _explicit_order_placements(
                     strided_placements = deferred_strided_placements.pop(p.dim)
                     aggregate_size = mesh_shape[mesh_dim]
                     while len(strided_placements) > 0:
-                        # We can process multiple strided shardings in reverse-order
-                        # (e.g. [_StridedShard(0, split_factor=4), _StridedShard(0, split_factor=2), Shard(0)])
-                        # TODO- validate this logic and enable it (mainly, validate aggregate_size part)
-                        if len(strided_placements) > 1:
-                            raise NotImplementedError(
-                                "NYI nested strided sharding conversion to ordered"
-                            )
-
-                        strided_dim, strided = strided_placements.pop()
+                        strided_mesh_dim, strided = strided_placements.pop()
                         if not strided.split_factor == aggregate_size:
                             raise RuntimeError(
                                 f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
                                 f" == aggregate mesh size ({aggregate_size})"
                             )
-                        aggregate_size *= mesh_shape[strided_dim]
-                        ordered.append((strided_dim, Shard(p.dim)))
+                        aggregate_size *= mesh_shape[strided_mesh_dim]
+                        ordered.append((strided_mesh_dim, Shard(p.dim)))
 
     return ordered
 
