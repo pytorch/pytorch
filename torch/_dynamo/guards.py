@@ -107,6 +107,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    is_from_global_source,
     ListGetItemSource,
     LocalSource,
     NNModuleSource,
@@ -2444,6 +2445,7 @@ class CheckFunctionManager:
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
+        guard_filter_fn: Optional[Callable[[str, object, str, bool, Any], bool]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2500,6 +2502,23 @@ class CheckFunctionManager:
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         for guard in sorted(guards or (), key=Guard.sort_key):
+            if guard_filter_fn:
+                name = strip_local_scope(guard.name)
+                if name == "":
+                    value = None
+                else:
+                    value = builder.get(guard.name)
+                is_global = is_from_global_source(guard.originating_source)
+                guard_fn = guard.create_fn
+                if isinstance(guard_fn, functools.partial):
+                    guard_fn = guard.create_fn.func
+                guard_fn_name = guard_fn.__name__
+                guard_source = guard.originating_source
+
+                if guard_filter_fn(name, value, guard_fn_name, is_global, guard_source):
+                    guards_log.debug("Filtering out guard: %s", guard)
+                    continue
+
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
