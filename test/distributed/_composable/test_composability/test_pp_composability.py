@@ -35,10 +35,13 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     run_tests,
+    runOnRocmArch,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -197,6 +200,7 @@ class ComposabilityTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 8+ GPUs")
+    @runOnRocmArch(MI300_ARCH)
     @parametrize(
         "ScheduleClass",
         [
@@ -215,7 +219,6 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        _device_raii = torch.device("cuda", self.device)
         torch.cuda.set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
