@@ -472,6 +472,9 @@ class _StridedShard(Shard):
             f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
 
+        # num_chunks represents the size of this StridedShard mesh dim, while self.split_factor
+        # represents the aggregate num chunks for other shardings applied logically earlier than this strided shard.
+        # (e.g. in FSDP+TP case, num_chunks is size(dp dim), split_factor is size(tp dim))
         total_split = num_chunks * self.split_factor
         assert tensor.size(self.dim) % total_split == 0, (
             "_StridedShard currently only allows even sharding but got tensor size"
