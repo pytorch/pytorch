@@ -155,7 +155,7 @@ def arch_type(arch_version: str) -> str:
 
 
 # This can be updated to the release version when cutting release branch, i.e. 2.1
-DEFAULT_TAG = "f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40"
+DEFAULT_TAG = "01acc5d0f52e95fce0e5592da884414319ccdd53"
 
 WHEEL_CONTAINER_IMAGES = {
     **{
@@ -181,14 +181,14 @@ DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     **{
-        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cuda{gpu_arch}:333eb7ca4002e7a3bf4e9a84344d657b6e74f538"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cuda{gpu_arch}:27840556010a6ab06af868ac3484dc4d64eeee18"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-rocm{gpu_arch}:333eb7ca4002e7a3bf4e9a84344d657b6e74f538"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-rocm{gpu_arch}:27840556010a6ab06af868ac3484dc4d64eeee18"
         for gpu_arch in ROCM_ARCHES
     },
-    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cpu:333eb7ca4002e7a3bf4e9a84344d657b6e74f538",
+    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/libtorch-cxx11-builder-cpu:27840556010a6ab06af868ac3484dc4d64eeee18",
 }
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]

@@ -147,7 +147,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cpu
       use_s3: False
@@ -271,7 +271,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cpu
       use_s3: False
@@ -395,7 +395,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.11"
       build_name: wheel-py3_11-cpu
       use_s3: False
@@ -519,7 +519,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.12"
       build_name: wheel-py3_12-cpu
       use_s3: False
@@ -643,7 +643,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.13"
       build_name: wheel-py3_13-cpu
       use_s3: False
@@ -767,7 +767,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:f8555c14c97c7831a7f9e6eb8220b15ecbc8cb40
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:01acc5d0f52e95fce0e5592da884414319ccdd53
       DESIRED_PYTHON: "3.13t"
       build_name: wheel-py3_13t-cpu
       use_s3: False
