@@ -69,12 +69,6 @@ pushd cppdocs
 mkdir /tmp/cppdocs-sync
 mv _config.yml README.md /tmp/cppdocs-sync/
 rm -rf ./*
-rm -rf _static/*
-# Verify _static is empty
-if [ -n "$(ls -A _static 2>/dev/null)" ]; then
-  echo "Warning: _static directory is not empty after cleanup"
-  ls -la _static
-fi
 
 
 # Copy over all the newly generated HTML
