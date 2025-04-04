@@ -8,6 +8,7 @@ import unittest
 from typing import Callable
 
 import torch
+import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
@@ -26,15 +27,15 @@ from torch.testing._internal.inductor_utils import (
 
 
 @requires_gpu()
+@config.patch(
+    compile_threads=1, size_asserts=False, scalar_asserts=False, nan_asserts=False
+)
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
 
-    @config.patch(
-        compile_threads=1, size_asserts=False, scalar_asserts=False, nan_asserts=False
-    )
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
 
@@ -67,7 +68,7 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(num_kernels, expected_num_triton_kernels)
 
         # Check accuracy
-        result = gm(*args)
+        result = opt(*args)
         ref = func(*args)
         if metadata_only:
             # When we only want to check metadata, fill in zeros for tensor data.
@@ -88,7 +89,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_basic(self):
         func = torch.add
-        args = [torch.rand(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
 
         self._compile_and_check(func, args)
 
@@ -96,7 +97,7 @@ class FxirTestCase(InductorTestCase):
         def foo(x, y):
             return x.sum() + y.sum()
 
-        args = [torch.rand(length, device=self.device) for length in [517, 1029]]
+        args = [torch.randn(length, device=self.device) for length in [517, 1029]]
         self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
     def test_free(self):
@@ -108,7 +109,7 @@ class FxirTestCase(InductorTestCase):
             w = x.sum() + y
             return z.sum() + w.sum()
 
-        args = [torch.rand(length, device=self.device) for length in [517, 1029, 123]]
+        args = [torch.randn(length, device=self.device) for length in [517, 1029, 123]]
         gm = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
 
         # Check for frees
@@ -123,7 +124,9 @@ class FxirTestCase(InductorTestCase):
         def foo(x, y):
             return x @ y + y.sum()
 
-        args = [torch.rand(size, device=self.device) for size in [(129, 129), (129, 1)]]
+        args = [
+            torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
+        ]
         gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
@@ -140,7 +143,7 @@ class FxirTestCase(InductorTestCase):
         def foo(x):
             return x + torch.randn(1, device=self.device)
 
-        args = (torch.rand(length, device=self.device),)
+        args = (torch.randn(length, device=self.device),)
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
@@ -160,7 +163,7 @@ class FxirTestCase(InductorTestCase):
         def foo(x, y):
             return torch.cat((x, y)) + 1
 
-        args = [torch.rand(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
     def test_cat_to_alloc(self):
@@ -175,7 +178,7 @@ class FxirTestCase(InductorTestCase):
             )
             return x + torch.cat((y, z))
 
-        args = [torch.rand(length, device=self.device)]
+        args = [torch.randn(length, device=self.device)]
         gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Expect a single allocation, even though eager mode would use 2.
@@ -189,10 +192,10 @@ class FxirTestCase(InductorTestCase):
         length = 8
 
         def foo(x):
-            y, z = tuple(torch.rand(length // 2, device=self.device) for _ in range(2))
+            y, z = tuple(torch.randn(length // 2, device=self.device) for _ in range(2))
             return x + torch.cat((y, z))
 
-        args = [torch.rand(length, device=self.device)]
+        args = [torch.randn(length, device=self.device)]
 
         # Since this test generates random numbers, check metadata only.
         gm = self._compile_and_check(
@@ -211,7 +214,7 @@ class FxirTestCase(InductorTestCase):
         def foo(x, y):
             return torch.reshape(x + y, (8,))
 
-        args = [torch.rand((2, 4), device=self.device) for _ in range(2)]
+        args = [torch.randn((2, 4), device=self.device) for _ in range(2)]
         gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for as_strided. We map ReinterpretView to this.
@@ -228,7 +231,7 @@ class FxirTestCase(InductorTestCase):
             top, idx = torch.topk(x, 2)
             return top + 1, idx * 2
 
-        args = [torch.rand(8, device=self.device)]
+        args = [torch.randn(8, device=self.device)]
         gm = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
         # Check for multiple kernel outputs via getitems.
@@ -238,6 +241,38 @@ class FxirTestCase(InductorTestCase):
         # Check for multiple graph outputs.
         output_node = gm.graph.find_nodes(op="output")[0]
         self.assertEqual(len(output_node.args[0]), 2)
+
+    def test_custom_compiler(self):
+        """
+        Test a derived backend with a custom compiler.
+        """
+        offset = 1
+
+        class CustomWrapperCodegen(WrapperFxCodegen):
+            def compile_graph(self, gm):
+                def compiled_fn(*args):
+                    # Adds an offset to the program's outputs.
+                    outputs = gm(*args)
+                    return pytree.tree_map(lambda x: x + 1, outputs)
+
+                return compiled_fn
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        custom_backend = common.DeviceCodegen(
+            TritonScheduling, CustomWrapperCodegen, None
+        )
+        with unittest.mock.patch.dict(
+            common.device_codegens, {self.device: custom_backend}
+        ):
+            func = torch.add
+            opt = torch.compile(func)
+            result = opt(*args)
+
+        # Check the output is offset from eager mode.
+        ref = func(*args)
+        self.assertFalse(same(result, ref))
+        self.assertNotEqual(offset, 0)
+        self.assertTrue(same(result - offset, ref))
 
 
 if __name__ == "__main__":

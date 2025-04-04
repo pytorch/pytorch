@@ -3,7 +3,6 @@ import dataclasses
 import operator
 import random
 import textwrap
-import types
 from collections import Counter
 from typing import Any, Callable, Optional, Union
 
@@ -105,14 +104,16 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self._unique_symbol_ids[prefix] += 1
         return f"{prefix}_{unique_id}"
 
-    @staticmethod
+    @classmethod
     def create(
+        cls,
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
-        return WrapperFxCodegen()
+        # For derived backends, this could be a subclass.
+        return cls()
 
     def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
         """
@@ -122,13 +123,22 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         return gm.forward
 
-    def _import_kernel(self, code: str) -> types.ModuleType:
+    def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
         """
-        Imports a kernel as a python module.
+        Imports a kernel from source.
         """
-        module_code = self.imports.getvalue() + self.header.getvalue() + code
+        module_code = "\n".join(
+            [
+                self.imports.getvalue(),
+                self.header.getvalue(),
+                code,
+            ]
+        )
         mod = PyCodeCache.load(module_code)
-        return mod
+        kernel = getattr(mod, kernel_name)
+
+        assert isinstance(kernel, CachingAutotuner)
+        return kernel
 
     def _fake_tensor(self, size, stride, **kwargs) -> torch.Tensor:
         with V.fake_mode:
@@ -596,7 +606,5 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         )
 
         # Import the module and store the JIT kernel.
-        mod = self._import_kernel(kernel_code)
-        kernel = getattr(mod, line.kernel_name)
-        assert isinstance(kernel, CachingAutotuner)
+        kernel = self._import_kernel(kernel_code, line.kernel_name)
         self.kernels[line.kernel_name] = TritonKernel(kernel)
