@@ -1591,6 +1591,27 @@ class GuardBuilder(GuardBuilderBase):
             fn, get_verbose_code_parts(code, guard)
         )
 
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard):
+        def hooks_ids_fn(hooks):
+            if hooks is None:
+                return None
+            return tuple(map(id, hooks))
+
+        hooks_ids = hooks_ids_fn(
+            torch._C._autograd._top_saved_tensors_default_hooks(True)
+        )
+        code = ["torch._C._autograd._top_saved_tensors_default_hooks(True)"]
+        self._set_guard_export_info(guard, code)
+
+        def fn(x):
+            return hooks_ids == hooks_ids_fn(
+                torch._C._autograd._top_saved_tensors_default_hooks(True)
+            )
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard)
+        )
+
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
         value = self.get(guard.name)
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])

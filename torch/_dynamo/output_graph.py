@@ -542,6 +542,9 @@ class OutputGraph:
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS)
+        )
 
     def synthetic_graph_input(self, fn, args):
         """

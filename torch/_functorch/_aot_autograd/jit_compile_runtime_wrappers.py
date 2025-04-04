@@ -36,6 +36,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
@@ -68,7 +69,12 @@ from .runtime_wrappers import (
     RuntimeWrapper,
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+    create_subclass_meta,
+    unwrap_tensor_subclasses,
+    wrap_tensor_subclasses,
+)
 from .utils import (
     _get_symint_hints,
     contain_metadata_mutation_ops,
@@ -886,10 +892,7 @@ def aot_dispatch_autograd(
             ]
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-            # TODO XXX: Note about handling saved_tensors_hooks
             hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-            # TODO XXX: compilation guards on hooks py objects,
-            # to recompile if previous hooks changed
             if (
                 not torch._dynamo.compiled_autograd.in_compiled_autograd_region
                 and hooks
@@ -939,7 +942,37 @@ def aot_dispatch_autograd(
                     if not isinstance(val, torch.Tensor):
                         continue
 
-                    pack_gm = make_fx(pack_hook)(val)
+                    pack_hook_fn_out = pack_hook(val)
+
+                    requires_sc_handling = is_traceable_wrapper_subclass(val) or any(
+                        is_traceable_wrapper_subclass(x)
+                        for x in pytree.tree_leaves(pack_hook_fn_out)
+                    )
+
+                    subclass_p_inp_meta = create_subclass_meta(
+                        (val,), count_symints=False
+                    )
+                    pack_hook_fn_out_flat, p_out_spec = pytree.tree_flatten(
+                        pack_hook_fn_out
+                    )
+                    subclass_p_out_meta = create_subclass_meta(
+                        pack_hook_fn_out_flat, count_symints=False
+                    )
+                    pack_hook_fn_to_trace = pack_hook
+                    if requires_sc_handling:
+
+                        def pack_hook_sc_wrapper(arg):
+                            args_sc = wrap_tensor_subclasses(
+                                (arg,), subclass_metas=subclass_p_inp_meta
+                            )
+                            outs = pack_hook(*args_sc)
+                            return unwrap_tensor_subclasses(
+                                pytree.tree_leaves(outs), append_symints=False
+                            )
+
+                        pack_hook_fn_to_trace = pack_hook_sc_wrapper
+
+                    pack_gm = make_fx(pack_hook_fn_to_trace)(val)
                     pack_g = pack_gm.graph
                     if aot_config.enable_log:
                         log_graph(
@@ -977,6 +1010,8 @@ def aot_dispatch_autograd(
                     for n in pytree.tree_leaves(fw_pack_out_n.args[0]):
                         if not isinstance(n, torch.fx.Node):
                             continue
+                        if "val" not in n.meta:
+                            breakpoint()
 
                         if isinstance(n.meta["val"], torch.Tensor):
                             fw_outs_packed_tensors.append(n)
@@ -987,11 +1022,25 @@ def aot_dispatch_autograd(
                     # Install unpack hook graph as a prologue of backward graph
                     # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
                     # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-                    unpack_gm = make_fx(unpack_hook)(pack_out_val)
+                    unpack_hook_fn_to_trace = unpack_hook
+                    if requires_sc_handling:
+
+                        def unpack_hook_sc_wrapper(*args_unwrap):
+                            args_flat = wrap_tensor_subclasses(
+                                pytree.tree_leaves(args_unwrap),
+                                subclass_metas=subclass_p_out_meta,
+                            )
+                            args_unflat = pytree.tree_unflatten(args_flat, p_out_spec)
+                            return unwrap_tensor_subclasses(
+                                [unpack_hook(args_unflat)], append_symints=False
+                            )
+
+                        unpack_hook_fn_to_trace = unpack_hook_sc_wrapper
+                    unpack_gm = make_fx(unpack_hook_fn_to_trace)(pack_out_val)
                     unpack_g = unpack_gm.graph
                     if aot_config.enable_log:
                         log_graph(
-                            pack_gm,
+                            unpack_gm,
                             f"saved_tensors_unpack_hook {saved.name}",
                             "aot_saved_tensors_hooks_unpack",
                         )
