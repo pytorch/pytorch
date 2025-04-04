@@ -89,6 +89,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -963,6 +964,16 @@ if sys.version_info >= (3, 12):
         typing.TypeVarTuple,
         typing.TypeAliasType,
     )
+
+
+def get_inputs_devices(
+    inputs: collections.abc.Sequence[object],
+) -> list[Optional[torch.device]]:
+    return list(
+        OrderedSet(
+            [i.device for i in pytree.tree_flatten(inputs)[0] if hasattr(i, "device")]
+        )
+    ) + [None]
 
 
 def is_typing(value):
