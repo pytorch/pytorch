@@ -11,6 +11,7 @@ import torch.fx
 
 
 if TYPE_CHECKING:
+    from torch._inductor.compile_fx import CompiledArtifact
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
     from torch.types import FileLike
@@ -20,6 +21,7 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
+    "standalone_compile",
 ]
 
 
@@ -358,3 +360,17 @@ def cudagraph_mark_step_begin():
     from .cudagraph_trees import mark_step_begin
 
     mark_step_begin()
+
+
+def standalone_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: list[InputType],
+    options: Optional[dict[str, Any]] = None,
+) -> CompiledArtifact:
+    """
+    TODO: precompilation using caching
+    """
+    from torch._inductor.compile_fx import standalone_compile
+
+    options = options if options else {}
+    return standalone_compile(gm, example_inputs, **options)

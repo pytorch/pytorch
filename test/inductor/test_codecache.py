@@ -11,6 +11,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -1325,6 +1326,60 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(
             counters["inductor"]["fxgraph_cache_hit"], 0 if inlinable else 1
         )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_vllm(self):
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        with fresh_inductor_cache():
+
+            def capture(fn):
+                def inner(*args):
+                    gm = None
+                    actual_args = None
+                    kwargs = None
+
+                    def backend(gm_, args_, **kwargs_):
+                        nonlocal gm
+                        nonlocal actual_args
+                        nonlocal kwargs
+                        gm = gm_
+                        actual_args = args_
+                        kwargs = kwargs_
+                        return gm
+
+                    _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
+                    return gm, actual_args, kwargs
+
+                return inner
+
+            gm, args, kwargs = capture(f)(x)
+            assert not kwargs
+
+            # Problem 1: args is a SymInt, which needs a shape_env.
+            # How do we pass that to inductor_compile?
+            compiled_artifact = torch._inductor.standalone_compile(gm, args)
+            print("inductor compile")
+            compiled_artifact.save("compiled_artifact.bin")
+            print("saved artifact")
+
+        with fresh_inductor_cache():
+            loaded = torch._inductor.compile_fx.CompiledArtifact.load(
+                "compiled_artifact.bin", args
+            )
+            print("loaded artifact")
+            compiled_out = loaded(*args)
+            self.assertEqual(eager_out, compiled_out)
 
 
 class TestFxGraphCacheHashing(TestCase):
