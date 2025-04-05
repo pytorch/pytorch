@@ -1500,3 +1500,5 @@ REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native
+
+// This is a dummy change just to test the CI.
