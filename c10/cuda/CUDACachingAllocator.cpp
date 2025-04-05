@@ -825,7 +825,7 @@ class EventPool {
 // CUDA graphs helper
 struct PrivatePool {
   PrivatePool(MempoolId_t id)
-      : id(id),
+      : id(std::move(id)),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -1986,7 +1986,8 @@ class DeviceCachingAllocator {
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
       MempoolId_t id = head_block->pool->owner_MempoolId();
-      if ((mempool_id.first == 0 && mempool_id.second == 0) || id == mempool_id) {
+      if ((mempool_id.first == 0 && mempool_id.second == 0) ||
+          id == mempool_id) {
         segment_info.owner_private_pool_id = id;
       }
 
