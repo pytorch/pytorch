@@ -117,8 +117,8 @@ ENV PATH /opt/cache/bin:$PATH
 RUN chown -R jenkins:jenkins /opt/conda
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
+ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 ARG HALIDE
 # Build and install halide
@@ -127,13 +127,6 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/halide.txt halide.txt
 RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
-
-# See https://github.com/pytorch/pytorch/issues/82174
-# TODO(sdym@fb.com):
-# check if this is needed after full off Xenial migration
-ENV CARGO_NET_GIT_FETCH_WITH_CLI true
-RUN bash ./install_cache.sh && rm install_cache.sh
-ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh
