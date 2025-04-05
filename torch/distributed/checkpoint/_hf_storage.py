@@ -7,6 +7,11 @@ from typing import Optional
 import fsspec  # type: ignore[import-untyped]
 
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint._hf_planner import (
+    _FqnToFileMapping,
+    _HuggingFaceLoadPlanner,
+)
+from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
@@ -60,15 +65,20 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
 
-        super().__init__(path=path, token=token)
+        super().__init__(
+            path=path,
+            token=token,
+            serialization_format=SerializationFormat.SAFETENSORS,
+        )
         self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        super().prepare_local_plan(plan)
-        return dataclasses.replace(plan, storage_data=self._fqn_to_index_mapping)
+        plan = super().prepare_local_plan(plan)
+        return dataclasses.replace(
+            plan, storage_data=_FqnToFileMapping(self._fqn_to_index_mapping)
+        )
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
-        assert len(plans) == 1, "distributed checkpointing is not yet supported"
         return plans
 
     def write_data(
@@ -76,11 +86,16 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         plan: SavePlan,
         planner: SavePlanner,
     ) -> Future[list[WriteResult]]:
+        if len(plan.items) == 0:
+            fut: Future = Future()
+            fut.set_result([])
+            return fut
+
         # storage_plan is a map from key to file index
-        storage_plan: dict[str, int] = plan.storage_data
+        storage_plan: dict[str, int] = plan.storage_data.fqn_to_file_index_mapping
 
         buckets = self._split_by_storage_plan(storage_plan, plan.items)
-        highest_index = max(buckets.keys())
+        highest_index = max(storage_plan.values())
 
         file_queue: queue.Queue = queue.Queue()
         for file_index, write_items in buckets.items():
@@ -89,7 +104,7 @@ class _HuggingFaceStorageWriter(FsspecWriter):
                 (self.fs.concat_path(self.path, file_name), file_name, write_items)
             )
 
-        return super()._write_data(planner, file_queue, safe_tensors=True)
+        return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         metadata_to_write = {}
@@ -172,8 +187,17 @@ class _HuggingFaceStorageReader(FsspecReader):
                 for req in reqs:
                     tensor = loaded_tensors[req.dest_index.fqn]
 
-                    target_tensor = planner.resolve_tensor(req).detach()
-                    target_tensor.resize_(tensor.size())
+                    target_tensor = planner.resolve_tensor(req)
+                    if (
+                        isinstance(planner, _HuggingFaceLoadPlanner)
+                        and planner.allow_tensor_resize
+                    ):
+                        target_tensor.resize_(tensor.size())
+                    else:
+                        assert target_tensor.size() == tensor.size(), (
+                            f"Tensor size mismatch for {req.dest_index.fqn}: {target_tensor.size()} != {tensor.size()}"
+                        )
+                    target_tensor = target_tensor.detach()
                     target_tensor.copy_(tensor)
                     planner.commit_tensor(req, target_tensor)
 
