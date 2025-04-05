@@ -334,14 +334,29 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     arg_list_keyword.insert(flag_pos, "*")
     return {
         name: [
-            defs(name, arg_list, "Tensor").format(
-                return_indices="return_indices: Literal[False] = False",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[False] = False")
+                    for arg in arg_list
+                ],
+                "Tensor",
             ),
-            defs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_positional
+                ],
+                "tuple[Tensor, Tensor]",
             ),
-            defs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_keyword
+                ],
+                "tuple[Tensor, Tensor]",
             ),
         ]
     }
