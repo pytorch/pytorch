@@ -2177,7 +2177,7 @@ class FakeTensorDispatchCache(TestCase):
         printcpp = '''
         std::string dur_print(const at::Tensor &t) {
             std::ostringstream oss;
-            oss << t << std::endl;
+            oss << t;
             return oss.str();
         }
         '''
@@ -2188,12 +2188,8 @@ class FakeTensorDispatchCache(TestCase):
         )
         s1 = bohb.dur_print(t1)
         s2 = bohb.dur_print(t2)
-        self.assertTrue('FakeTensor' in s1)
-        self.assertTrue('(s0)' in s1)
-
-        self.assertTrue('FakeTensor' in s2)
-        self.assertTrue('s1' in s2)
-        self.assertTrue('s2' in s2)
+        self.assertEqual(s1, '[ Symbolic tensor: size=(s0)]')
+        self.assertEqual(s2, '[ Symbolic tensor: size=(s1, s2)]')
 
     def test_cache_aten_index(self):
         with FakeTensorMode():

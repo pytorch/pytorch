@@ -270,7 +270,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else if (tensor_.sym_numel().is_symbolic()) {
-    stream << "[ FakeTensor size=(";
+    stream << "[ Symbolic tensor: size=(";
     bool first = true;
     for (auto const &sz : tensor_.sym_sizes()) {
       stream << (first ? "" : ", ") << sz;
