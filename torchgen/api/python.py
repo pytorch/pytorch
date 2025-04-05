@@ -285,7 +285,7 @@ class PythonArgument:
 
         # pyi merges the _out and functional variants into the same signature, with an optional out arg
         if name == "out" and type_str == "Tensor" and not deprecated:
-            type_str = (type_str + " | None").replace(" | None | None", " | None")
+            type_str = f"{type_str} | None".replace(" | None | None", " | None")
 
         # pyi deprecated signatures don't get defaults for their out arg
         treat_as_no_default = (
@@ -991,7 +991,7 @@ def argument_type_str_pyi(t: Type) -> str:
         raise RuntimeError(f"unrecognized type {repr(t)}")
 
     if add_optional:
-        ret = (ret + " | None").replace(" | None | None", " | None")
+        ret = f"{ret} | None".replace(" | None | None", " | None")
 
     return ret
 
@@ -1002,7 +1002,7 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, OptionalType):
         inner = return_type_str_pyi(t.elem)
-        return (f"{inner} | None").replace(" | None | None", " | None")
+        return f"{inner} | None".replace(" | None | None", " | None")
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
