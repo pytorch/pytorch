@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -393,6 +394,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
+    @unittest.expectedFailure  # deprecating this option with backed_size_oblivious
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
         counter = torch._dynamo.testing.CompileCounter()
