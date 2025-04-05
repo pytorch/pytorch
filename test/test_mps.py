@@ -12937,6 +12937,27 @@ class TestMetalLibrary(TestCaseMPS):
         lib = torch.mps.compile_shader("#include <c10/metal/special_math.h>")
         self.assertIsNotNone(lib)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int64])
+    def test_reduction_utils(self, dtype):
+        if dtype == torch.int64 and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Using simd_shuffle_down_and_fill results in ICE on MacOS-13")
+        from torch._inductor.codegen.mps import DTYPE_TO_METAL
+        lib = torch.mps.compile_shader(f"""
+            #include <c10/metal/reduction_utils.h>
+            kernel void do_sum(device {DTYPE_TO_METAL[dtype]}* out,
+                               constant {DTYPE_TO_METAL[dtype]}* inp,
+                               uint idx [[thread_position_in_grid]]) {{
+                out[idx] = c10::metal::simd_sum(inp[idx]);
+            }}
+        """)
+        x = torch.testing.make_tensor(28, device="mps", dtype=dtype)
+        y = torch.empty_like(x)
+        lib.do_sum(y, x)
+        x_sum = x.sum()
+        max_err = (y - x_sum).abs().max().item()
+        self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
+                        f"results are {y}, but all elements should have been {x_sum.item()}")
+
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
@@ -12968,6 +12989,7 @@ instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
+instantiate_parametrized_tests(TestMetalLibrary)
 
 if __name__ == "__main__":
     run_tests()
