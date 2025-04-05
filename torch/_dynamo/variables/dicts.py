@@ -44,6 +44,7 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -263,7 +264,7 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -546,7 +547,7 @@ class MappingProxyVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # load types.MappingProxyType
         if self.source:
             unimplemented(
@@ -681,7 +682,7 @@ class SetVariable(ConstDictVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
@@ -786,7 +787,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -879,7 +880,7 @@ class DictViewVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.view_items_vt
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
