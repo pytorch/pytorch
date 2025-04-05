@@ -44,7 +44,10 @@ from torch._C._distributed_c10d import (
     Store,
     Work,
 )
-from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+from torch._utils_internal import (
+    maybe_enable_numa_binding,
+    set_pytorch_distributed_envs_from_justknobs,
+)
 from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
@@ -1668,6 +1671,14 @@ def init_process_group(
         # Note: 3rd-party devices can register default backend through the
         # default map below.
         backend = Backend.default_device_backend_map.get(device_id.type)
+
+
+    # If device_id is provide try to bind current process to the
+    # NUMA node attached to the device
+    if device_id is not None:
+        maybe_enable_numa_binding(device_type=device_id.type, device_id=device_id.index)
+    else:
+        maybe_enable_numa_binding()
 
     # If we still cannot figure it out, e.g.
     # >>> init_process_group()
