@@ -1003,10 +1003,10 @@ class _ModuleFrame:
         signature = module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
-            args_spec = signature.in_spec.children_specs[0]
-            kwargs_spec = signature.in_spec.children_specs[1]
-            assert args_spec.context is None
-            assert kwargs_spec.context is not None
+            assert signature.in_spec.type is tuple
+            args_spec, kwargs_spec = signature.in_spec.children()
+            assert args_spec.type is tuple
+            assert kwargs_spec.type is dict
 
             with self.graph.inserting_after(None):
                 arg_nodes = [
