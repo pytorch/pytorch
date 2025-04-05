@@ -1050,7 +1050,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
                 "    ) -> Self:  # fmt: skip",
                 "        ...",
                 f"    n_fields: Final[_int] = {len(field_names)}",
-                f"    n_sequeunce_fields: Final[_int] = {len(field_names)}",
+                f"    n_sequence_fields: Final[_int] = {len(field_names)}",
                 "    n_unnamed_fields: Final[_int] = 0",
                 "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
                 "",  # add an extra newline
@@ -1070,7 +1070,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         #     "    ) -> Self:  # fmt: skip\n"
         #     "        ...\n"
         #     "    n_fields: Final[_int] = 2",
-        #     "    n_sequeunce_fields: Final[_int] = 2",
+        #     "    n_sequence_fields: Final[_int] = 2",
         #     "    n_unnamed_fields: Final[_int] = 0",
         #     "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
         # )
