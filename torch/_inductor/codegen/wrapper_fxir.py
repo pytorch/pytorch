@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import dataclasses
 import operator
 import random
 import textwrap
@@ -50,7 +49,6 @@ from .wrapper import (
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
-    WrapperLine,
 )
 
 
@@ -59,16 +57,6 @@ def delete(x: torch.Tensor) -> None:
     This function is used as an FX op to delete a tensor.
     """
     del x
-
-
-"""
-Extra wrapper IR nodes for FX codegen.
-"""
-
-
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: list[BufferLike]
 
 
 class TritonKernel:
@@ -206,22 +194,20 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
-    def _codegen_outputs_wrapper_ir(self):
+    def _generate_buffer(self, node: ir.IRNode) -> Optional[torch.fx.Node]:
         """
-        Graph outputs can perform some operations, like ReinterpretView.
-        Convert these ops to Wrapper IR.
+        Generates FX IR for transformations on a buffer, such as ReinterpretView.
+        Does nothing if no such transformations are present.
         """
-        # TODO: This IR is also applicable to other backends. Move into wrapper.py, and
-        # possibly delete get_output_refs() which does direct codegen.
 
-        def codegen_output(node: ir.IRNode) -> BufferLike:
-            """
-            Generates wrapper IR for output transformations, such as ReinterpretView.
-            """
+        def generate_to_buffer(node: ir.IRNode) -> Optional[BufferLike]:
             if isinstance(node, (ir.Buffer, WorkspaceArg)):
                 return node
+            elif isinstance(node, ir.NoneAsConstantBuffer):
+                self.buffer_to_node[None] = None
+                return None
             elif isinstance(node, ir.StorageBox):
-                return codegen_output(node.data)
+                return generate_to_buffer(node.data)
             elif isinstance(node, ir.ReinterpretView):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
                 # Use a WorkspaceArg for this.
@@ -237,19 +223,35 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                     outer_name=f"{input_name}_view_{unique_suffix}",
                     dtype=buffer.get_dtype(),
                 )
-                self.writeline(ReinterpretLine(self, buffer, reused_as, node.layout))
+
+                # Generate FX IR for the view.
+                self._generate_reinterpret(
+                    ReinterpretLine(self, buffer, reused_as, node.layout)
+                )
+
                 return reused_as
             else:
-                raise NotImplementedError(f"Unrecognized output node: {node}")
+                raise NotImplementedError(f"Unrecognized buffer/view node: {node}")
 
-        output_refs = [
-            codegen_output(node) for idx, node in enumerate(V.graph.graph_outputs)
+        buffer = generate_to_buffer(node)
+        return self.buffer_to_node[buffer.get_name()] if buffer is not None else None
+
+    def _generate_output(self):
+        """
+        Generate FX IR for graph outputs.
+        """
+        output_nodes = [
+            self._generate_buffer(node)
+            for idx, node in enumerate(V.graph.graph_outputs)
         ]
-        self.writeline(OutputLine(output_refs))
+
+        # Single return elements don't use a tuple.
+        if len(output_nodes) == 1:
+            output_nodes = output_nodes[0]
+
+        self.gm.graph.output(output_nodes)
 
     def _generate(self, is_inference) -> tuple[WrapperGraphModule, None]:
-        self._codegen_outputs_wrapper_ir()
-
         # We disable planning during training because it presently increases peak memory consumption.
         # TODO don't duplicate this code. Refactor into a helper in the base class.
         if is_inference and config.memory_planning:
@@ -277,7 +279,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 ReuseLine: self._generate_reuse,
                 MultiOutputLine: self._generate_multi_output,
                 NullLine: self._generate_null,
-                OutputLine: self._generate_output,
                 CommBufferLine: self._generate_comm_buffer,
                 CommBufferAllocateLine: self._generate_comm_buffer_allocate,
                 CommBufferFreeLine: self._generate_comm_buffer_free,
@@ -300,6 +301,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
             conversion_func(line)
 
+        self._generate_output()
         self.gm.recompile()
         compiled_fn = self.compile_graph(self.gm)
 
@@ -367,19 +369,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_line_context(self, line: Line) -> None:
         assert isinstance(line, LineContext)
         # We ignore line context in FX IR.
-
-    def _generate_output(self, line: Line) -> None:
-        assert isinstance(line, OutputLine)
-
-        outputs = tuple(
-            self.buffer_to_node[buffer.get_name()] for buffer in line.buffers
-        )
-
-        # Single return elements don't use a tuple.
-        if len(outputs) == 1:
-            outputs = outputs[0]
-
-        self.gm.graph.output(outputs)
 
     def _generate_reinterpret(self, line: Line) -> None:
         assert isinstance(line, ReinterpretLine)
@@ -550,9 +539,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Generates FX IR from either ExternKernelAlloc or ExternKernelOut.
         """
 
-        # Get the call args in their original types.
-        tensor_args = tuple(x.codegen_reference() for x in kernel.inputs)
-        call_args = tensor_args + tuple(kernel.constant_args)
+        # Get FX nodes corresponding to the call args.
+        tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
+        args = tensor_nodes + tuple(kernel.constant_args)
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
@@ -570,9 +559,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         for subname in kernel_name.split("."):
             op = getattr(op, subname)  # E.g. extern_kernels.addmm
 
-        # Look up FX nodes corresponding to call args.
-        arg_fx_nodes = self._lookup_args(call_args)
-        fx_node = self.gm.graph.call_function(op, args=arg_fx_nodes, kwargs=kwargs)
+        fx_node = self.gm.graph.call_function(op, args=args, kwargs=kwargs)
 
         # Assign the result to the given name.
         if result_buffer:
@@ -584,7 +571,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
             arg_tensors = [
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in arg_fx_nodes
+                for arg in args
             ]
 
             # Run the operation to propagate metadata.

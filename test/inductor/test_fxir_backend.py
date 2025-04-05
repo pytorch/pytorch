@@ -58,13 +58,15 @@ class FxirTestCase(InductorTestCase):
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
     ):
-        opt = torch.compile(func, fullgraph=True)
+        opt = torch.compile(func)
 
         # Get the FX graph from the backend.
-        (gm,) = self._run_and_capture_graphs(opt, args)
+        gms = self._run_and_capture_graphs(opt, args)
 
         # Check code
-        num_kernels = self._count_ops(gm, triton_kernel_wrapper_mutation)
+        num_kernels = sum(
+            self._count_ops(gm, triton_kernel_wrapper_mutation) for gm in gms
+        )
         self.assertEqual(num_kernels, expected_num_triton_kernels)
 
         # Check accuracy
@@ -78,7 +80,7 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
-        return gm
+        return gms
 
     @classmethod
     def setUpClass(cls):
@@ -110,7 +112,7 @@ class FxirTestCase(InductorTestCase):
             return z.sum() + w.sum()
 
         args = [torch.randn(length, device=self.device) for length in [517, 1029, 123]]
-        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
 
         # Check for frees
         num_frees = self._count_ops(gm, delete)
@@ -127,7 +129,7 @@ class FxirTestCase(InductorTestCase):
         args = [
             torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
         ]
-        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
         num_extern = self._count_ops(gm, extern_kernels.addmm)
@@ -147,7 +149,7 @@ class FxirTestCase(InductorTestCase):
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
-        gm = self._compile_and_check(
+        (gm,) = self._compile_and_check(
             foo, args, expected_num_triton_kernels=2, metadata_only=True
         )
 
@@ -179,7 +181,7 @@ class FxirTestCase(InductorTestCase):
             return x + torch.cat((y, z))
 
         args = [torch.randn(length, device=self.device)]
-        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Expect a single allocation, even though eager mode would use 2.
         num_allocs = self._count_ops(gm, torch.empty_strided)
@@ -198,7 +200,7 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(length, device=self.device)]
 
         # Since this test generates random numbers, check metadata only.
-        gm = self._compile_and_check(
+        (gm,) = self._compile_and_check(
             foo, args, expected_num_triton_kernels=3, metadata_only=True
         )
 
@@ -215,7 +217,7 @@ class FxirTestCase(InductorTestCase):
             return torch.reshape(x + y, (8,))
 
         args = [torch.randn((2, 4), device=self.device) for _ in range(2)]
-        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for as_strided. We map ReinterpretView to this.
         num_as_strided = self._count_ops(gm, torch.as_strided)
@@ -232,7 +234,7 @@ class FxirTestCase(InductorTestCase):
             return top + 1, idx * 2
 
         args = [torch.randn(8, device=self.device)]
-        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
         # Check for multiple kernel outputs via getitems.
         num_getitems = self._count_ops(gm, operator.getitem)
@@ -248,10 +250,32 @@ class FxirTestCase(InductorTestCase):
         """
 
         args = [torch.randn(4, device=self.device)] * 2
-        gm = self._compile_and_check(torch.add, args, expected_num_triton_kernels=1)
+        (gm,) = self._compile_and_check(torch.add, args, expected_num_triton_kernels=1)
 
         num_placeholders = len(gm.graph.find_nodes(op="placeholder"))
         self.assertEqual(num_placeholders, 1)
+
+    def test_backward(self):
+        """
+        Test a program with a backward pass.
+        """
+
+        x = torch.ones(5, device=self.device)  # input tensor
+        y = torch.zeros(3, device=self.device)  # expected output
+        w = torch.randn(5, 3, requires_grad=True, device=self.device)
+        b = torch.randn(3, requires_grad=True, device=self.device)
+
+        def foo(x, y):
+            z = torch.matmul(x, w) + b
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            # loss = torch.nn.CrossEntropyLoss()(z, y)
+            loss.backward()
+            return w.grad, b.grad
+
+        # Expect separate forward and backward graphs.
+        (forward_gm, backward_gm) = self._compile_and_check(
+            foo, (x, y), expected_num_triton_kernels=3
+        )
 
     def test_custom_compiler(self):
         """
