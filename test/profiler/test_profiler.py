@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_LINUX,
+    IS_S390X,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -69,6 +70,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
+    xfailIfS390X,
 )
 
 
@@ -340,6 +342,7 @@ class TestProfiler(TestCase):
     )
     @serialTest()
     @parametrize("work_in_main_thread", [True, False])
+    @xfailIfS390X
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
@@ -2868,7 +2871,7 @@ aten::mm""",
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipIf(IS_ARM64 or IS_S390X or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_fuzz_symbolize(self):
         # generate some random addresses in the text section and make sure the
         # symbolizers do not throw exceptions/crash
