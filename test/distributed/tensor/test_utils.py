@@ -212,14 +212,8 @@ class UtilTest(DTensorTestBase):
             global_tensor_shape, global_mesh, placements
         )
         rank = global_mesh.get_rank()
-        if dp_size == 2:
-            expected_shapes = [4, 4, 4, 3]
-            expected_offsets = [0, 8, 4, 12]
-        elif dp_size == 4:
-            expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
-            expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
-        else:
-            raise RuntimeError("Expected dp_size 2 or 4")
+        expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
+        expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
         self.assertEqual(local_shape[0], expected_shapes[rank])
         self.assertEqual(global_offset[0], expected_offsets[rank])
 

@@ -514,8 +514,7 @@ class _StridedShard(Shard):
 
         fsdp+tp sharded tensor
         ----------------------
-        `dp_tp = ...` (the process of creating a strided-shard tensor is skipped over as it is hacky and complicated
-        #TODO put an example somewhre and ref to it)
+        `dp_tp = ...` (the process of creating a strided-shard tensor is skipped over as it is complicated
         dp_tp has placement (_StridedShard(0, split_factor=2), Shard(0))
         local_tensors:
         rank0: [0,1]  rank1: [3]
@@ -531,13 +530,13 @@ class _StridedShard(Shard):
 
         local_tensors:
         rank0: [0,1,3]  rank1: [0,1,3]
-        rank1: [2,4]    rank3: [2,4]
+        rank2: [2,4]    rank3: [2,4]
 
         Step 1: replicate over the DP dimension.  Afterwards, each rank can locally sort the values.
           note: we need padding to do this allgather, and we'll need to keep track of the padding amount for later
                 local_tensors:
         rank0: [0,1,3,2,4]    rank1: [0,1,3,2,4]
-        rank1: [0,1,3,2,4]    rank3: [0,1,3,2,4]
+        rank2: [0,1,3,2,4]    rank3: [0,1,3,2,4]
 
         Step 2: chunk and shuffle values around to account for the wrong order of operations above
         and get the original tensor content back
@@ -548,14 +547,19 @@ class _StridedShard(Shard):
         01, 3, 2, 4  <- chunk each chunk, 'undoing' the initial (wrong) TP allgather performed by Shard(0)->Replicate()
         012, 34      <- interleave with stride=TP mesh dim size
         01234        <- concatenate
+
+        Note: the current implementation of this function is incomplete, and supports only the common pattern of one
+        strided shard placement, which is used in the FSDP + TP case.  We could extend this implementation to handle
+        multiple strided shardings (e.g. [StridedShard, StridedShard, Shard]), by repeating the chunking step more times
+        and handling more complex shuffling in the last step.  On the other hand, we plan to replace 'StridedShard'
+        with using just Shard and specifying a sharding order, so it may be ok to leave this as-is for the time being.
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         logical_dim_size = current_logical_shape[self.dim]
         full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
         local_pad_size = full_chunk_size - local_tensor.size(self.dim)
 
-        if local_pad_size > 0:
-            local_tensor = pad_tensor(local_tensor, self.dim, local_pad_size)
+        local_tensor = pad_tensor(local_tensor, self.dim, local_pad_size)
 
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
@@ -574,15 +578,15 @@ class _StridedShard(Shard):
             )
 
         # this reverses our 'all_gather' but gives every rank a copy
-        dp_shards = torch.chunk(result, num_chunks, dim=self.dim)
+        outer_shards = torch.chunk(result, num_chunks, dim=self.dim)
         # this undoes the 'Shard(0)' -> Replicate() that happened over the wrong mesh dim in the first place
-        tp_shards: list[torch.Tensor] = []
-        for p in dp_shards:
-            tp_shards.extend(torch.chunk(p, self.split_factor, dim=self.dim))
+        inner_shards: list[torch.Tensor] = []
+        for p in outer_shards:
+            inner_shards.extend(torch.chunk(p, self.split_factor, dim=self.dim))
         # now we just have to correctly stride the shards
         reordered_shards = []
         for i in range(self.split_factor):
-            reordered_shards.extend(tp_shards[i :: self.split_factor])
+            reordered_shards.extend(inner_shards[i :: self.split_factor])
         return torch.cat(reordered_shards, dim=self.dim).contiguous()
 
 
