@@ -2180,12 +2180,8 @@ class FakeTensorDispatchCache(TestCase):
         )
         s1 = bohb.dur_print(t1)
         s2 = bohb.dur_print(t2)
-        self.assertTrue('FakeTensor' in s1)
-        self.assertTrue('(s0)' in s1)
-
-        self.assertTrue('FakeTensor' in s2)
-        self.assertTrue('s1' in s2)
-        self.assertTrue('s2' in s2)
+        self.assertEqual(s1, '[ Symbolic tensor: size=(s0)]\n')
+        self.assertEqual(s2, '[ Symbolic tensor: size=(s1, s2)]\n')
         
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):
