@@ -2,8 +2,10 @@ import copy
 import dataclasses
 import logging
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -122,29 +124,24 @@ class CacheArtifactManager:
         cls._cache_info.clear()
 
     @classmethod
-    def with_fresh_cache(cls) -> Any:
-        class FreshCache:
-            def __enter__(self) -> "FreshCache":
-                self.original_new_cache_artifacts = cls._new_cache_artifacts
-                self.original_seen_artifacts = cls._seen_artifacts
-                self.original_serializer = cls._serializer
-                self.original_cache_info = cls._cache_info
+    @contextmanager
+    def with_fresh_cache(cls) -> Generator[None, None, None]:
+        original_new_cache_artifacts = cls._new_cache_artifacts
+        original_seen_artifacts = cls._seen_artifacts
+        original_serializer = cls._serializer
+        original_cache_info = cls._cache_info
 
-                cls._new_cache_artifacts = []
-                cls._seen_artifacts = OrderedSet()
-                cls._serializer = AppendingByteSerializer(
-                    serialize_fn=CacheArtifact.serialize
-                )
-                cls._cache_info = CacheInfo()
-                return self
-
-            def __exit__(self, *args: Any) -> None:
-                cls._new_cache_artifacts = self.original_new_cache_artifacts
-                cls._seen_artifacts = self.original_seen_artifacts
-                cls._serializer = self.original_serializer
-                cls._cache_info = self.original_cache_info
-
-        return FreshCache()
+        cls._new_cache_artifacts = []
+        cls._seen_artifacts = OrderedSet()
+        cls._serializer = AppendingByteSerializer(serialize_fn=CacheArtifact.serialize)
+        cls._cache_info = CacheInfo()
+        try:
+            yield
+        finally:
+            cls._new_cache_artifacts = original_new_cache_artifacts
+            cls._seen_artifacts = original_seen_artifacts
+            cls._serializer = original_serializer
+            cls._cache_info = original_cache_info
 
     @classmethod
     def record_artifact(

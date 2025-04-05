@@ -84,7 +84,11 @@ from torch._inductor.utils import (
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    ShapeEnv,
+    SymExprPrinter,
+)
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
@@ -2438,19 +2442,19 @@ class CompiledArtifact:
             return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
+def get_shape_env_from_example_inputs(example_inputs: Sequence[InputType]) -> ShapeEnv:
+    for e in example_inputs:
+        if isinstance(e, torch.SymInt):
+            return e.node.shape_env
+    return ShapeEnv()
+
+
 def standalone_compile(
     gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
 ) -> CompiledArtifact:
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-    shape_env = ShapeEnv()
-    for e in example_inputs:
-        if isinstance(e, torch.SymInt):
-            shape_env = e.node.shape_env
-            break
-
     from torch._subclasses import FakeTensorMode
 
+    shape_env = get_shape_env_from_example_inputs(example_inputs)
     torch._guards._TLS.tracing_context = torch._guards.TracingContext(
         FakeTensorMode(shape_env=shape_env)
     )
