@@ -16,6 +16,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor, SymInt
 from torch.types import (
