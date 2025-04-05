@@ -501,3 +501,10 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]
             else:
                 idxs.append(i)
     return idxs, keys
+
+
+class Config:
+    _allow_duplicate_registration = False
+
+
+config = Config()
