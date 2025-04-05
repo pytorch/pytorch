@@ -27,6 +27,7 @@ from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
     _DimHint,
+    _DimHintType,
     _process_dynamic_shapes,
     _RelaxedConstraint,
     _tree_map_with_path,
@@ -435,10 +436,19 @@ def make_constraints(
                         upper=int_oo if dim.max is None else dim.max,
                     )
                     if is_int(d):
-                        trace_vr & user_vr
+                        out_vr = trace_vr & user_vr
                     else:
                         range_constraints[d.node.expr] &= user_vr
                         shape_env.var_to_range[d.node._expr] &= user_vr
+                        out_vr = range_constraints[d.node.expr]
+                    # check for specializations
+                    if dim.type == _DimHintType.DYNAMIC and out_vr.is_singleton():
+                        msg = (
+                            f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                            f"but tracing inferred a static shape of {out_vr.lower} for dimension "
+                            f"inputs{pytree.keystr(flat_paths[input_index])}.shape[{i}]."
+                        )
+                        range_violations.append(msg)
                 except torch.utils._sympy.value_ranges.ValueRangeError:
                     msg = (
                         f"- Received user-specified min/max range of [{dim.min}, {dim.max}], "
