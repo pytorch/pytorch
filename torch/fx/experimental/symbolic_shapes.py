@@ -232,7 +232,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[Union[SymInt, int], int],
+    tup: tuple[Union[SymInt, int], int]
 ) -> tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
@@ -1296,7 +1296,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
 ) -> Union[bool, int, float]:
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -1926,7 +1926,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2162,7 +2162,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool],
+    symbool: Union[bool, torch.SymBool]
 ) -> Union[int, torch.SymInt]:
     if isinstance(symbool, bool):
         return 1 if symbool else 0
@@ -7336,10 +7336,7 @@ def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
             left = cond.lhs
             right = cond.rhs
             if right == 0:
-                if isinstance(left, (sympy.Symbol, sympy.Mul, sympy.Add)):
-                    return (
-                        str(left) if not isinstance(left, sympy.Symbol) else left.name
-                    )
+                return str(left)
     return None
 
 
@@ -7366,9 +7363,8 @@ def _suggest_torch_checks(
     if var_name:
         suggested_fixes = [
             f"You can add either: torch._check_is_size({var_name}) or torch._check({var_name}>=0)"
-            f" Note: torch._check_is_size({var_name}) will get you data dependent errors that"
-            + " happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning,"
-            + " but semantics could deviate slightly."
+            f" Note: torch._check_is_size({var_name}) could prevent data dependent errors that"
+            + " happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning."
             + " See documentation on guard_size_oblivious for more details:"
             + " https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html",
             f"torch._check({not_cond_str})",
