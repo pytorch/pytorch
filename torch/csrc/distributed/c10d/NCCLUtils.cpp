@@ -92,7 +92,9 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
     int rank,
     std::vector<ncclUniqueId>& commIds,
+    at::DeviceIndex deviceIndex,
     ncclConfig_t& config) {
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
   auto comm = std::make_shared<NCCLComm>();
   comm->nonBlocking_ = config.blocking == 0;
   LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
@@ -112,6 +114,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   // in the log file and in the replay tool.
   comm->ncclId_ = commIds[0];
   comm->rank_ = rank;
+  comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
@@ -148,6 +151,10 @@ ncclComm_t NCCLComm::getNcclComm() {
               << " is initialized.";
   }
   return ncclComm_;
+}
+
+at::DeviceIndex NCCLComm::getDeviceIndex() {
+  return deviceIndex_;
 }
 
 // Wait for the communicator to be ready. This is a blocking function.
