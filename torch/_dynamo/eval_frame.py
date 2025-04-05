@@ -672,9 +672,16 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
-                    torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                        saved_dynamic_layer_stack_depth
-                    )
+                    try:
+                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                            saved_dynamic_layer_stack_depth
+                        )
+                    except RuntimeError as e:
+                        if (
+                            torch._C._functorch.get_dynamic_layer_stack_depth()
+                            != saved_dynamic_layer_stack_depth
+                        ):
+                            raise e
 
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
