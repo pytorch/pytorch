@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Union
+from typing import Any, Callable, Union, Type
 
 import torch
 from torch._inductor import config
@@ -187,6 +187,14 @@ class VecSVE256(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
+# Add the necessary flags to enable bf16 on an Arm ISA
+def enable_arm_bf16(isa: Type[VecISA]):
+    isa._macro.append("__ARM_FEATURE_BF16")
+    _arch_flags = isa._arch_flags.split(" ")
+    _arch_flags[0] += "+bf16"
+    isa._arch_flags = " ".join(_arch_flags)
+
+
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
@@ -332,7 +340,13 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE256(),
+]
 
 
 def get_isa_from_cpu_capability(
@@ -394,9 +408,12 @@ def valid_vec_isa_list() -> list[VecISA]:
         isa_list.append(VecVSX())
     elif arch == "aarch64":
         if torch.backends.cpu.get_cpu_capability() == "SVE256":
+            if torch.backends.cpu.get_cpu_capability() == "ARM_BF16":
+                enable_arm_bf16(VecSVE256)
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
+
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
