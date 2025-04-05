@@ -18,8 +18,12 @@ inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
   return ::metal::simd_product(val);
 }
 
-// Metal does not support SIMD reductions over 64-bit types
-// Simulate it accumulating over shuffled down int2 values
+// Metal does not support SIMD reductions over 64-bit types, but it could be
+// implement using simd_shuffle_down, that yields result in log2(simdgroup_size)
+// iterations Use fill variant, as shuffle down returns garbage if inactive
+// thread is referenced (on M1/M2, works fine on M4) and broadcast result to all
+// threads in the end. Implementation heavily borrows from
+// https://github.com/ml-explore/mlx/blob/86389bf9707f46101af45d90510e8e97c8a90b93/mlx/backend/metal/kernels/reduction/ops.h#L16
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
