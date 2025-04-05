@@ -44,7 +44,7 @@ class Distribution:
         batch_shape: torch.Size = torch.Size(),
         event_shape: torch.Size = torch.Size(),
         validate_args: Optional[bool] = None,
-    ):
+    ) -> None:
         self._batch_shape = batch_shape
         self._event_shape = event_shape
         if validate_args is not None:
