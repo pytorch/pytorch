@@ -5635,11 +5635,12 @@ class ExternKernel(InputsKernel):
                 result.append(V.graph.wrapper_code.val_to_arg_str(x, type_, code=code))
             return result
         else:
-            return map(
-                V.graph.wrapper_code.val_to_arg_str, self.constant_args, code=code
-            )
+            return [
+                V.graph.wrapper_code.val_to_arg_str(arg, code=code)
+                for arg in self.constant_args
+            ]
 
-    def codegen_args(self, code: IndentedBuffer):  # type: ignore[no-untyped-def]
+    def codegen_args(self, code: Optional[IndentedBuffer] = None):  # type: ignore[no-untyped-def]
         if V.graph.cpp_wrapper and self.op_overload is not None:
             # cpp wrapper needs special logic to fill in missing args with default values
             inputs = self.fill_non_provided_args(
