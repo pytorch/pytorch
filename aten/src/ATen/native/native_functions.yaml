@@ -7076,6 +7076,11 @@
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
 
+- func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _grouped_mm_cuda
+
 # NOTE [ Sparse: autograd and API ]
 #
 #
