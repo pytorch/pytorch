@@ -23,7 +23,7 @@ static void checkInput(const at::Tensor& input, int deviceIdx) {
 }
 
 bool isIntraNodeCommSupported() {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   return false;
 #else
   return true;
