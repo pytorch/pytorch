@@ -10,9 +10,9 @@ namespace c10::cuda {
 
 void c10_cuda_check_implementation(
     const int32_t err,
-    const char* filename,
-    const char* function_name,
-    const int line_number,
+    const char* /*filename*/,
+    const char* /*function_name*/,
+    const int /*line_number*/,
     const bool include_device_assertions) {
   const auto cuda_error = static_cast<cudaError_t>(err);
   const auto cuda_kernel_failure = include_device_assertions
