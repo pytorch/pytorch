@@ -3,6 +3,7 @@
 # mypy: allow-untyped-defs
 
 import builtins
+from types import EllipsisType
 from typing import (
     Any,
     Callable,
