@@ -40,8 +40,7 @@ kernel void ampNonFiniteCheckAndUnscale(
     uint index = offset + i;
     T val = data[index];
     if (!isfinite(val)) {
-      device atomic_float* flag = (device atomic_float*)foundInf;
-      atomic_store_explicit(flag, 1.0f, memory_order_relaxed);
+      foundInf[0] = 1.0f;
     }
     data[index] = (invScale == static_cast<T>(1.0) ? val : val * invScale);
   }
@@ -55,8 +54,7 @@ kernel void ampNonFiniteCheckAndUnscaleSingle(
     uint tid [[thread_position_in_grid]]) {
   T val = data[tid];
   if (!isfinite(val)) {
-    device atomic_float* flag = (device atomic_float*)foundInf;
-    atomic_store_explicit(flag, 1.0f, memory_order_relaxed);
+    foundInf[0] = 1.0f;
   }
   data[tid] = (invScale == T(1.0) ? val : val * invScale);
 }

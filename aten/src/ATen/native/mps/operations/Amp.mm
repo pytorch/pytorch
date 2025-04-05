@@ -27,6 +27,7 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
   if (scaled_grad.numel() == 0) {
     return;
   }
+  TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
   float inv_scale_val = inv_scale.item<float>();
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -40,8 +41,6 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     auto computeEncoder = stream->commandEncoder();
-    TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
-
     [computeEncoder setComputePipelineState:ampPipelineState];
     mtl_setArgs(computeEncoder, scaled_grad, found_inf, inv_scale_val);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
