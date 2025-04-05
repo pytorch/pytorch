@@ -51,7 +51,8 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda11.8
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -74,7 +75,8 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda11.8
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
@@ -96,7 +98,8 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -119,7 +122,8 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
@@ -141,7 +145,8 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -164,7 +169,8 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_8

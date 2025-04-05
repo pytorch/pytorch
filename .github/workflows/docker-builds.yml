@@ -2,11 +2,11 @@ name: docker-builds
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .ci/docker/**
-      - .github/workflows/docker-builds.yml
-      - .lintrunner.toml
+  # pull_request:
+  #   paths:
+  #     - .ci/docker/**
+  #     - .github/workflows/docker-builds.yml
+  #     - .lintrunner.toml
   push:
     branches:
       - main
