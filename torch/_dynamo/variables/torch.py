@@ -223,7 +223,7 @@ class BaseTorchVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         try:
             name = f"{self.value.__module__}.{self.value.__name__}"
         except Exception:
