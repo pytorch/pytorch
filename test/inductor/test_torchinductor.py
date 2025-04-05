@@ -5360,6 +5360,19 @@ class CommonTemplate:
             (torch.randint(10, [2, 8]),),
         )
 
+    def test_embedding_sparse(self):
+        # Fix https://github.com/pytorch/pytorch/issues/150656
+        def fn(weight, indices):
+            return F.embedding(indices, weight, sparse=True)
+
+        indices = torch.randint(10, (2, 3))
+        weight = torch.randn(10, 3, requires_grad=True)
+
+        self.common(
+            fn,
+            (weight, indices),
+        )
+
     def test_mean(self):
         def fn(x):
             return (
