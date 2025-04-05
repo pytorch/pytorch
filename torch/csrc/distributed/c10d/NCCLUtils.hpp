@@ -221,6 +221,7 @@ class NCCLComm {
       int numRanks,
       int rank,
       std::vector<ncclUniqueId>& commIds,
+      at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
 #endif // NCCL_HAS_INIT_RANK_SCALABLE
 #endif // NCCL_HAS_CONFIG
@@ -239,6 +240,7 @@ class NCCLComm {
 #endif
 
   ncclUniqueId getNcclId();
+  at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;
