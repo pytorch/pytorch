@@ -27,7 +27,9 @@ from __future__ import annotations
 import argparse
 import collections
 import importlib
+import inspect
 import sys
+import textwrap
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 from warnings import warn
@@ -132,7 +134,7 @@ _leaf_types = (
     "_bool | _int | slice | EllipsisType | Tensor | None"  # not SupportsIndex!
 )
 _index_types = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
-_index_type_def = f"_Index: TypeAlias = {_index_types}"
+_index_type_def = f"_Index: TypeAlias = {_index_types}  # fmt: skip"
 INDICES = "indices: _Index | tuple[_Index, ...]"
 
 blocklist = [
@@ -252,6 +254,11 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[has-type]"
         ]
     elif name in arithmetic_ops:
+        if name.startswith("i"):
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            return [
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+            ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
         return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
@@ -327,14 +334,29 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     arg_list_keyword.insert(flag_pos, "*")
     return {
         name: [
-            defs(name, arg_list, "Tensor").format(
-                return_indices="return_indices: Literal[False] = False",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[False] = False")
+                    for arg in arg_list
+                ],
+                "Tensor",
             ),
-            defs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_positional
+                ],
+                "tuple[Tensor, Tensor]",
             ),
-            defs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_keyword
+                ],
+                "tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -669,12 +691,16 @@ def gather_docstrs() -> dict[str, str]:
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        hint = hint[:-3]  # remove "..."
-        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
-    else:  # attribute or property
-        return f'{hint}\nr"""{docstr}"""\n'
+        hint = hint[:-3].rstrip()  # remove "..."
+        content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
+        # Remove trailing whitespace on each line
+        return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
+
+    # attribute or property
+    return f'{hint}\nr"""{docstr}"""'
 
 
 def gen_pyi(
@@ -1557,7 +1583,7 @@ def gen_pyi(
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    legacy_storage_base_hints = ["class StorageBase(object): ..."]
+    legacy_storage_base_hints = ["class StorageBase: ..."]
 
     legacy_class_hints = []
     for c in (
