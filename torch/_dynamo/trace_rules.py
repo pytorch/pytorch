@@ -3234,6 +3234,7 @@ def _module_dir(m: types.ModuleType):
 LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
     "torch._export.db.examples",
+    "torch._export.utils",
     "torch._export.wrappers",
     "torch._functorch.apis",
     "torch._functorch.deprecated",
