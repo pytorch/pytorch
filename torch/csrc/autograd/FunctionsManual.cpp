@@ -3691,17 +3691,26 @@ Tensor linalg_eig_backward(
   at::NoTF32Guard disable_tf32;
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
-  // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
+  // gA = V^{-H} (diag(gL) + F* ⊙ (V^H gV - V^H V (real(V^H gV) ⊙ I))) V^H
   // Where:
-  //   - E_{ij} = L_j - L_i if i != j
-  //              1         otherwise
-  //   - diag_embed takes a vector into a diagonal matrix
-  //   - diag zeroes out elements outside of the diagonal
-
-  // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the
+  //   - F_{ij} = E_{ij}^{-1} if i != j
+  //              0           otherwise
+  //   - E_{ij} = L_j - L_i
+  //   - diag(x) constructs a diagonal matrix with the entries of x on its
+  //     main diagonal
+  //   - real(·) extracts the real part
+  //   - ⊙ denotes the Hadamard (elementwise) product
+  //   - I is the identity matrix
+  //   - Multiplying x elementwise by I retains only x’s diagonal elements and
+  //     zeroes out the rest
+  //
+  // Note: Computing Hadamard product with I retains only diagonal elements and
+  // zeroes out the rest.
+  //
+  // Note: the term '- V^H V (real(V^H gV) ⊙ I)' comes from the fact that the
   // eigenvalue decomposition is returned with eigenvectors normalized to have
   // norm one.
-
+  //
   // Note: The Hermitian case is a simplification of this formula using that
   // V^{-1} = V^H and that L is real
 
@@ -3743,17 +3752,36 @@ Tensor linalg_eig_backward(
         "by e^{i phi}. The specified loss function depends on this quantity, so it is ill-defined.");
   }
 
-  if (is_hermitian) {
-    // Project onto the tangent space at the identity of U(n), that is, the
-    // skew-Hermitian matrices
-    VhgV = 0.5 * (VhgV - VhgV.mH());
-  } else {
-    // Project onto the tangent space at V^H V of complex matrices with columns
-    // of norm 1
+  // Below we compute the `V^H gV - V^H V (real(V^H gV) ⊙ I)` part
+  // For hermitian case, V^H V = I, thus it simplifies to
+  // `V^H gV - (real(V^H gV) ⊙ I)`
+  // which is effectively just zeroing out the real part of the diagonal
+  // of `V^H gV`
+  // However, since diagonal entries of F are zeros anyway, we do not have
+  // to explicitly zero-out diagonal of VhgV, therefore we do not do
+  // anything for hermitian case
+  if (!is_hermitian) {
+    // Project onto the tangent space at V^H V
     VhgV = VhgV - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
   }
 
   auto gA = [&, VhgV = std::move(VhgV)] {
+    // We need to permorm hadamard product with F*, where
+    //
+    // F_{ij} = E_{ij}^-1 if i != j
+    //        = 0         otherwise
+    //
+    // E_{ij} = L_j - L_i 
+    //
+    // We use the fact that conjugate is distributive over addition, 
+    // subtraction, multiplication and division (hense also reciprocal).
+    // Therefore, we can compute first conjugate of L since it is a smaller
+    // tensor.
+    // Then, we do not explicitly materialize F*. Instead we compute E*
+    // and do hadamard devision by E*. Which means that we have to zero-out
+    // the diagonal of the result afterwards.
+    // In order to avoid division by zero, diagonal of E* is set to arbitrary
+    // non-zero values, we pick 1.0 for that purpose. 
     auto Econj = [&L] {
       auto Lconj = L.conj();
       auto ret = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
@@ -3762,7 +3790,13 @@ Tensor linalg_eig_backward(
     }();
 
     auto ret = VhgV.div_(Econj);
-
+    
+    // As we noted above, we need to zero-out the diagonal of the result to
+    // accout for F_{ii} = 0.
+    // If gL is defined we replace the diagonal with values from gL.
+    // This is the same as setting diagonal entries to zero and then adding
+    // `diag(gL)`. If gL is not defined, we need to zero out the diagonal
+    // explicitly.
     if (gL.defined()) {
       // For CompositeCompliance, if `gL` is subclass but `ret`
       // is a regular Tensor, then use out-of-place version of diagonal
@@ -3772,6 +3806,10 @@ Tensor linalg_eig_backward(
       } else {
         ret.diagonal(0, -2, -1).copy_(gL);
       }
+    }
+    else
+    {
+      ret.diagonal(0, -2, -1).fill_(0.);
     }
     return ret;
   }();
