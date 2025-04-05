@@ -87,8 +87,6 @@ def get_gpu_type() -> str:
 
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
-from torch.autograd import DeviceType
-from torch.autograd.profiler_util import EventList
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import (
@@ -182,7 +180,7 @@ def do_bench_using_profiling(
 
     fn()
     torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    cache = torch.empty(int(256e6 // 4), dtype=torch.float16, device="cuda")
 
     # Estimate the runtime of the function
     start_event = torch.cuda.Event(enable_timing=True)
@@ -203,52 +201,28 @@ def do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
+    start_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
+    end_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CUDA,
         ]
     ) as p:
-        # Benchmark
-        for i in range(n_repeat):
-            # we clear the L2 cache before each run
-            cache.zero_()
-            # record time of `fn`
-            fn()
-        # Record clocks
         torch.cuda.synchronize()
+        for i in range(n_repeat):
+            cache.zero_()
+            start_event[i].record()
+            with torch.cuda.nvtx.range("RunCudaModule"):
+                fn()
+            end_event[i].record()
+        torch.cuda.synchronize()
+        times = torch.tensor(
+            [s.elapsed_time(e) for s, e in zip(start_event, end_event)]
+        )
 
+    res = torch.mean(times).item()
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
-
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
-        ]
-    )
-    if len(filtered_events) % n_repeat != 0:
-        raise RuntimeError(
-            "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
-            len(filtered_events),
-            n_repeat,
-        )
-    num_event_per_group = len(filtered_events) / n_repeat
-    actual_events = EventList(
-        [
-            event
-            for i, event in enumerate(filtered_events)
-            if i % num_event_per_group != 0
-        ]
-    )
-    actual_events._build_tree()
-    actual_events = actual_events.key_averages()
-
-    log.debug("profiling time breakdown")
-    log.debug(actual_events.table(row_limit=-1))
-
-    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
