@@ -361,7 +361,8 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
-    const std::string& name) {
+    const std::string& name,
+    at::Allocator* allocator) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -371,7 +372,10 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  if (allocator == nullptr) {
+    allocator = c10::GetCPUAllocator();
+  }
+  at::DataPtr retval = allocator->allocate(stat.m_uncomp_size);
   mz_zip_reader_extract_to_mem(
       ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
@@ -449,10 +453,11 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
 // read record with multi clients
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     const std::string& name,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+    at::Allocator* allocator) {
   if (additionalReaders.empty()) {
     // No additional readers or record too small, use single threaded version
-    return getRecord(name);
+    return getRecord(name, allocator);
   }
 
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
@@ -469,7 +474,10 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     return getRecord(name);
   }
 
-  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  if (allocator == nullptr) {
+    allocator = c10::GetCPUAllocator();
+  }
+  at::DataPtr retval = allocator->allocate(stat.m_uncomp_size);
   void* dst = retval.get();
   PyTorchStreamReader::getRecordMultiReaders(name, additionalReaders, dst, n);
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
