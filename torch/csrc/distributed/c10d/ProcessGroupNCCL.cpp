@@ -2144,13 +2144,6 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
   }
-  // Give time for dumping before throwing exception for all ranks.
-  // It is hard to presume or control what the pattern of watchdog might look
-  // like, so it is better to let all ranks universally sleep for a short period
-  // of time, in this case, 60 seconds, which is also the maximum time we leave
-  // for FR dump.
-  std::this_thread::sleep_for(
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
 }
 
 void ProcessGroupNCCL::checkAndSetRemoteError() {
@@ -2324,6 +2317,13 @@ void ProcessGroupNCCL::watchdogHandler() {
         // recorder behavior is independent of desync Debug.
         if (dumpOnTimeoutOrEx_) {
           broadcastDumpSignal();
+          // Give time for dumping before throwing exception for all ranks.
+          // It is hard to presume or control what the pattern of watchdog might
+          // look like, so it is better to let all ranks universally sleep for a
+          // short period of time, in this case, 60 seconds, which is also the
+          // maximum time we leave for FR dump.
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
