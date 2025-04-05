@@ -117,10 +117,10 @@ class Shard(Placement):
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
-        (generally equal to the size of the current sharding dim).
+        (num_chunks is generally equal to the size of the current sharding dim).
 
-        # TODO(whc) is offset computed relative to the global tensor shape or relative to the original 'local'
-        # shape before the newest sharding?
+        Note: new local shard offset is relative to the current sharded tensor, not the global tensor.
+        See `_utils.compute_local_shape_and_global_offset` for computing global offset.
 
         Returns (new local shard size, offset)
 
