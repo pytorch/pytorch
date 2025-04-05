@@ -124,7 +124,7 @@ struct TraceEntry {
         context_(std::move(context)),
         stream_(stream),
         size_(size),
-        mempool_(mempool) {
+        mempool_(std::move(mempool)) {
     time_.approx_t_ = time;
   }
   Action action_;
