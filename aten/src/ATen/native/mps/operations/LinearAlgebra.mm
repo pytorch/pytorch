@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 // For MTLLanguageVersion_3_1
@@ -22,6 +23,7 @@
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_cholesky_native.h>
+#include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
@@ -261,14 +263,14 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
   }
 }
 
-static void linalg_solve_out_mps_impl(const at::Tensor& A,
-                                      const at::Tensor& B,
+static void linalg_solve_out_mps_impl(const Tensor& A,
+                                      const Tensor& B,
                                       bool left,
                                       bool check_errors,
-                                      const at::Tensor& result,
-                                      const at::Tensor& LU,
-                                      const at::Tensor& pivots,
-                                      const at::Tensor& info) {
+                                      const Tensor& result,
+                                      const Tensor& LU,
+                                      const Tensor& pivots,
+                                      const Tensor& info) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
@@ -434,6 +436,32 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
     // If this was a right solve, transpose the result back
     result.copy_(result_t.transpose(-2, -1).contiguous());
   }
+}
+
+static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
+  using namespace mps;
+  TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
+  TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
+  using CachedGraph = MPSUnaryCachedGraph;
+
+  MPSStream* stream = getCurrentMPSStream();
+  info.zero_();
+
+  if (A.numel() == 0) {
+    return;
+  }
+
+  if (!result.is_contiguous()) {
+    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+  }
+  auto A_sizes = A.sizes();
+  int ndim = A.dim();
+
+  Tensor LU = empty_like(A);
+  Tensor identity = zeros_like(A);
+  Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
+  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -1426,5 +1454,9 @@ TORCH_IMPL_FUNC(lu_unpack_out_mps)
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
+}
+
+TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
+  mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
 } // namespace at::native
