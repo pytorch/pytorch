@@ -5,6 +5,7 @@ from typing import (
     Any,
     Callable,
     ContextManager,
+    Final,
     Iterator,
     Literal,
     NamedTuple,
