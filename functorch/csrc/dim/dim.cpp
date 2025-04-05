@@ -7,14 +7,14 @@
 #include <torch/csrc/utils/python_compat.h>
 
 
-// Many APIs have changed/don't exist anymore
-#if IS_PYTHON_3_12_PLUS
+// Untested on 3.14
+#if IS_PYTHON_3_14_PLUS
 
 #include "dim.h"
 
 // Re-enable this some day
 PyObject* Dim_init() {
-    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
+    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.13");
     return nullptr;
 }
 
@@ -38,10 +38,20 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
-
+#define Py_BUILD_CORE_MODULE
 #define Py_BUILD_CORE
+#if IS_PYTHON_3_13_PLUS
+// see https://github.com/python/cpython/issues/112136
+#include <internal/pycore_modsupport.h>
+#include <internal/pycore_code.h> // To get _Py_OPARG
+#define NEED_OPCODE_METADATA
+#include "internal/pycore_opcode_metadata.h"
+#undef NEED_OPCODE_METADATA
+#else
 #include "internal/pycore_opcode.h"
+#endif
 #undef Py_BUILD_CORE
+#undef Py_BUILD_CORE_MODULE
 #endif
 
 // C++ API functions for objects to
@@ -431,7 +441,14 @@ static PyObject* DimList_bind(DimList *self,
     PY_BEGIN
     mpy::handle sizes;
     static const char * const _keywords[] = {"sizes", nullptr};
-    static _PyArg_Parser parser = {"O", _keywords, 0};
+#if IS_PYTHON_3_12_PLUS
+    static _PyArg_Parser parser = {
+      .format = "O",
+      .keywords = _keywords,
+      .kwtuple = 0};
+#else
+static _PyArg_Parser parser = {"O", _keywords, 0};
+#endif
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &sizes)) {
         return nullptr;
     }
@@ -455,7 +472,14 @@ static PyObject* DimList_bind_len(DimList *self,
     PY_BEGIN
     int size;
     static const char * const _keywords[] = {"N", nullptr};
+#if IS_PYTHON_3_12_PLUS
+    static _PyArg_Parser parser = {
+            .format = "i",
+            .keywords =  _keywords,
+            .kwtuple = 0};
+#else
     static _PyArg_Parser parser = {"i", _keywords, 0};
+#endif
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &size)) {
         return nullptr;
     }
@@ -1457,8 +1481,11 @@ PyTypeObject Tensor::Type = {
 
 
 // dim() --------------------
-
+#if !(IS_PYTHON_3_12_PLUS)
 static bool relevant_op(_Py_CODEUNIT c) {
+#else
+static bool relevant_op(uint8_t c) {
+#endif
     switch(c) {
         case STORE_NAME:
         case STORE_GLOBAL:
@@ -1577,12 +1604,16 @@ static PyObject* _dims(PyObject *self,
     auto c = mpy::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !(IS_PYTHON_3_12_PLUS)
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
     if (decoder.opcode() == PRECALL) {
         decoder.next();
     }
+    if (decoder.opcode() != CALL) {
+      std::cout << " not CALL, got: " << (uint8_t) decoder.opcode() << std::endl;
+    }
+    // note that this opcode was removed in 3.12
     #endif
     decoder.next();
 
