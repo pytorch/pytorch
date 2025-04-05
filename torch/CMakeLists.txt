@@ -126,7 +126,7 @@ if(USE_ITT)
 endif()
 
 if(USE_CUDA)
-    include(${TORCH_ROOT}/cmake/public/cuda.cmake)
+    include(${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
     list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
