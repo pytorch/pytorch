@@ -522,7 +522,7 @@ at::Tensor one_shot_all_reduce_out(
     std::string group_name,
     at::Tensor out) {
   return one_shot_all_reduce_out_impl(
-      input, std::nullopt, reduce_op, group_name, out);
+      input, c10::nullopt, reduce_op, group_name, out);
 }
 
 at::Tensor one_shot_all_reduce_copy_out(

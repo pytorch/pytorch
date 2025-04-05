@@ -970,7 +970,7 @@ class BundledShaderLibary : public MetalShaderLibrary {
 
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
-                                           std::optional<int64_t> extra) {
+                                           c10::optional<int64_t> extra) {
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
   bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
