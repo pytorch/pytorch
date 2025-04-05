@@ -87,6 +87,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 if TYPE_CHECKING:
     # Cyclic dependency...
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 log = logging.getLogger(__name__)
@@ -730,7 +731,7 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen"):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
