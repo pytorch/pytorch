@@ -2,64 +2,34 @@ import logging
 from typing import Any, Callable, Dict
 
 import torch
-from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
-
-from ..ir import IRNode
 
 
 log = logging.getLogger(__name__)
 
 
-def generate_inputs(node: IRNode) -> torch.Tensor:
-    size = V.graph.sizevars.size_hints(
-        node.get_size(),
-    )
-    stride = V.graph.sizevars.size_hints(
-        node.get_stride(),
-    )
-    device = node.get_device()
-    dtype = node.get_dtype()
-    extra_size = node.get_layout().offset
-    allocation_size = V.graph.sizevars.size_hints(
-        V.graph.get_allocation_size(node),
-    )
-
-    with preserve_rng_state():
-        if allocation_size is None or allocation_size == size:
-            return rand_strided(
-                size,
-                stride,
-                device=device if device is not None else "cpu",
-                dtype=dtype,
-                extra_size=extra_size,
-            )
-        else:
-            return rand_strided(
-                allocation_size,
-                stride,
-                device=device if device is not None else "cpu",
-                dtype=dtype,
-                extra_size=extra_size,
-            ).as_strided(size, stride)
-
-
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     def __init__(
-        self, name, input_nodes, layout, description, gm, example_inputs
+        self,
+        name: str,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        description: str,
+        gm: torch.fx.GraphModule,
+        example_inputs: list[Any],
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
-        self.gm = gm
-        self.example_inputs = example_inputs
+        self.gm: torch.fx.GraphModule = gm
+        self.example_inputs: list[Any] = example_inputs
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args: list[Any], out: torch.Tensor):
         import torch._inductor.config as inductor_config
         from torch._inductor.compile_fx import compile_fx_inner
 
@@ -119,7 +89,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             "kernel_name": self.name,
         }
 
-    def autoheuristic_id(self):
+    def autoheuristic_id(self) -> str:
         return f"subgraph_{self.name}"
 
 
@@ -148,7 +118,11 @@ class SubgraphTemplate(KernelTemplate):
         self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]
-        self, input_nodes, layout, example_inputs, **kwargs: Any
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        example_inputs: list[Any],
+        **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         gm = self.make_fx_graph(*example_inputs)
 

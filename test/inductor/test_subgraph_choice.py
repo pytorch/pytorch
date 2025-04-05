@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import unittest
 from unittest.mock import Mock
 
 import torch
@@ -13,7 +14,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class TestFlexAttention(TestCase):
@@ -26,6 +30,7 @@ class TestFlexAttention(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    @requires_cuda
     def test_subgraph_decompose_k(self):
         def decomposeK(a, b, kPartitions):
             m = a.shape[0]
