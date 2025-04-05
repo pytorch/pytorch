@@ -3302,6 +3302,18 @@
   dispatch:
     CompositeImplicitAutograd: rms_norm_symint
 
+- func: native_rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> (Tensor output, Tensor x_norm, Tensor inverse_rms)
+  variants: function
+  dispatch:
+    CPU: rms_norm_cpu
+    CUDA: rms_norm_cuda
+
+- func: native_rms_norm_backward(Tensor grad_output, Tensor input, Tensor? weight, float? eps, Tensor output, Tensor x_norm, Tensor inverse_rms, bool[2] output_mask) -> (Tensor grad_input, Tensor grad_weight)
+  variants: function
+  dispatch:
+    CPU: rms_norm_backward_cpu
+    CUDA: rms_norm_backward_cuda
+
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
   dispatch:

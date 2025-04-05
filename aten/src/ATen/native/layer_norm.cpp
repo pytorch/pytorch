@@ -12,17 +12,23 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/div.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/native_rms_norm_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -327,4 +333,109 @@ Tensor rms_norm_symint(
   return result.type_as(input);
 
 }
+
+std::tuple<Tensor, Tensor, Tensor> rms_norm_cpu(
+  at::Tensor const& input,
+  c10::ArrayRef<long> normalized_shape,
+  std::optional<at::Tensor> const& weight_opt,
+  std::optional<double> eps_opt) {
+  // Use a default epsilon if not provided
+  double eps = eps_opt.has_value() ? eps_opt.value() : 1e-6;
+
+  // Calculate the number of elements in the normalized dimensions.
+  int64_t norm_numel = 1;
+  for (auto dim : normalized_shape) {
+    norm_numel *= dim;
+  }
+
+  // Square the input.
+  auto squared = input.pow(2);
+
+  // Determine the dimensions to reduce over.
+  // Assuming normalized_shape corresponds to the trailing dimensions.
+  int64_t input_dims = input.dim();
+  int64_t num_normalized_dims = normalized_shape.size();
+  std::vector<int64_t> reduce_dims;
+  for (int64_t i = input_dims - num_normalized_dims; i < input_dims; i++) {
+    reduce_dims.push_back(i);
+  }
+
+  // Compute the mean over the normalized dimensions and keep dimensions for broadcasting.
+  auto mean_squared = squared.mean(reduce_dims, /*keepdim=*/true);
+
+  // Compute the inverse RMS: 1 / sqrt(mean_squared + eps)
+  auto inv_rms = at::rsqrt(mean_squared.add_(eps));
+
+  // Normalize the input.
+  auto x_norm = at::mul(input, inv_rms);
+
+  // If a weight is provided, apply it elementwise; otherwise, output is just x_norm.
+  at::Tensor output;
+  if (weight_opt.has_value() && weight_opt.value().defined()) {
+    // Assumes weight is broadcastable to the shape of x_norm.
+    output = at::mul(x_norm, weight_opt.value());
+  } else {
+    output = x_norm;
+  }
+  // Return the tuple: (output, x_norm, inv_rms)
+  return std::make_tuple(output, x_norm, inv_rms);
+}
+
+std::tuple<Tensor, Tensor>
+rms_norm_backward_cpu(
+  const Tensor &grad,                      // Gradient with respect to the output y
+  const Tensor &input,                     // Original input x
+  const std::optional<Tensor> &weight,       // Optional weight (scaling factor)
+  const std::optional<double> eps,         // Optional epsilon (not used here as inverse_rms is provided)
+  const Tensor &output,                    // Output from the forward pass (unused in this backward computation)
+  const Tensor &x_norm,                    // Normalized input (x multiplied by inverse_rms)
+  const Tensor &inverse_rms,               // Inverse RMS factor: 1 / sqrt(mean(x^2) + eps)
+  std::array<bool, 2ul> grad_input_mask    // Mask: [compute_grad_input, compute_grad_weight]
+) {
+  // Initialize outputs as empty tensors.
+  Tensor grad_input = at::Tensor();
+  Tensor grad_weight = at::Tensor();
+  
+  // Assume normalization over the last dimension.
+  const int64_t D = input.size(-1);
+  const double D_float = static_cast<double>(D);
+  
+  // Compute gradient with respect to input if requested.
+  if (grad_input_mask[0]) {
+    // If weight is provided, use it to scale grad; otherwise, use grad directly.
+    Tensor grad_weighted = weight.has_value() ? at::mul(grad, weight.value()) : grad;
+    
+    // Compute dot = sum(grad_weighted * input) over the last dimension, keeping the dimension.
+    Tensor dot = at::sum(at::mul(grad_weighted, input), -1, /*keepdim=*/true);
+    
+    // Compute r^3 using at::pow.
+    Tensor r_cubed = at::pow(inverse_rms, 3);
+    
+    // Compute the first term: grad_weighted * inverse_rms.
+    Tensor term1 = at::mul(grad_weighted, inverse_rms);
+    
+    // Compute the second term: input * (r^3 * (dot / D)).
+    Tensor dot_div = at::div(dot, D_float);
+    Tensor term2 = at::mul(input, at::mul(r_cubed, dot_div));
+    
+    // Combine the terms to get grad_input.
+    grad_input = at::sub(term1, term2);
+  }
+  
+  // Compute gradient with respect to weight if requested and if weight is provided.
+  if (grad_input_mask[1] && weight.has_value()) {
+    // For weight gradient, sum over all dimensions except the normalized one.
+    std::vector<int64_t> reduce_dims;
+    for (int64_t i = 0; i < input.dim() - 1; ++i) {
+      reduce_dims.push_back(i);
+    }
+    grad_weight = at::sum(at::mul(grad, x_norm), reduce_dims);
+  }
+  
+  return std::make_tuple(grad_input, grad_weight);
+}
+
+DEFINE_DISPATCH(RMSNormKernel);
+
+
 } // namespace at::native
