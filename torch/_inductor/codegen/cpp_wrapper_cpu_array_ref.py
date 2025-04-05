@@ -10,6 +10,7 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
+from .common import IndentedBuffer
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
@@ -87,8 +88,24 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
-    def generate_kernel_call(
+    def generate_extern_kernel_alloc(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_alloc(*args, **kwargs)
+
+    def generate_extern_kernel_out(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_out(*args, **kwargs)
+
+    def generate_fallback_kernel(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_fallback_kernel(*args, **kwargs)
+
+    def _generate_kernel_call_helper(
         self,
+        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -98,6 +115,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -117,7 +135,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
                 var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                code.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
                 new_args.append(f"({arg_types[idx]})({var_name})")
             else:
                 # arg is a scalar
@@ -125,6 +143,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
+            code.writeline,
             call_args,
             kernel_name,
             None,
@@ -132,7 +151,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             "cpp",
         )
         with debug_printer_manager:
-            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            code.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -642,7 +661,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self, code: IndentedBuffer, kernel: str, args: list[str], device: str, **_
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -664,7 +683,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            code, kernel, wrapped_args, device, debug_args=args
         )
 
     def generate_scatter_fallback(
@@ -861,14 +880,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             data, size, stride, offset, writeline, dtype
         )
 
-    def val_to_arg_str(self, val, type_=None) -> str:
+    def val_to_arg_str(
+        self, val, type_=None, code: Optional[IndentedBuffer] = None
+    ) -> str:
         if (
             val is not None
             and isinstance(type_, torch.OptionalType)
             and isinstance(type_.getElementType(), torch.TensorType)
         ):
             # Handle optional tensors as a special case, as in the parent class.
-            base_handle = self.val_to_arg_str(val, torch.TensorType)
+            base_handle = self.val_to_arg_str(val, torch.TensorType, code)
             if config.aot_inductor.use_minimal_arrayref_interface:
                 if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
                     base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
@@ -876,7 +897,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
             return f"&temporary_reference({base_handle}.get())"
 
-        return super().val_to_arg_str(val, type_)
+        return super().val_to_arg_str(val, type_, code)
 
     def codegen_tensor_item(
         self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None

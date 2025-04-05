@@ -102,8 +102,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
+        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -113,6 +114,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -135,6 +137,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
+            code.writeline,
             call_args,
             kernel_name,
             None,
@@ -142,7 +145,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "cpp",
         )
         with debug_printer_manager:
-            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            code.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -908,7 +911,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1102,6 +1105,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_c_shim_extern_kernel_call(
         self,
+        code: IndentedBuffer,
         kernel: str,
         args: list[str],
         device: str,
@@ -1115,16 +1119,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
-            debug_args if debug_args is not None else args, kernel, None, None, "extern"
+            code.writeline,
+            debug_args if debug_args is not None else args,
+            kernel,
+            None,
+            None,
+            "extern",
         )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
+            code.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
 
     def generate_c_shim_extern_kernel_alloc(
-        self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
+        self, code: IndentedBuffer, extern_kernel: ir.ExternKernelAlloc, args: list[str]
     ) -> None:
         # registered output buffer name
         name = extern_kernel.name
@@ -1135,26 +1144,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
         if not is_inplace:
-            self.writeline(f"AtenTensorHandle {output_handle_name};")
+            code.writeline(f"AtenTensorHandle {output_handle_name};")
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            code, extern_kernel.get_kernel_name(), args, device
         )
 
         if not is_inplace:
-            self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+            code.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(
+        self, code: IndentedBuffer, extern_kernel, args
+    ):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
-            self.generate_c_shim_fallback_kernel(extern_kernel, args)
+            self.generate_c_shim_fallback_kernel(code, extern_kernel, args)
         else:
-            self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
+            self.generate_c_shim_extern_kernel_alloc(code, extern_kernel, args)
 
     def generate_c_shim_fallback_kernel(
-        self, fallback_kernel: ir.FallbackKernel, args: list[str]
+        self, code: IndentedBuffer, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
         output_args = []
         output_raii_handles = []
@@ -1168,18 +1179,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     assert output.indices[0][1] == idx, (
                         f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                     )
-                self.writeline(f"AtenTensorHandle {output_handle_name};")
+                code.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
                     f"RAIIAtenTensorHandle {name}({output_handle_name});"
                 )
             elif isinstance(output, int):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"int64_t {output_name} = {output};")
+                code.writeline(f"int64_t {output_name} = {output};")
                 output_args.append(f"&{output_name}")
             elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {cexpr(output)};")
+                code.writeline(f"auto {output_name} = {cexpr(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1188,18 +1199,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
+            code,
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
         )
         for raii_handle in output_raii_handles:
-            self.writeline(raii_handle)
+            code.writeline(raii_handle)
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
-        self.generate_c_shim_fallback_kernel(fallback_kernel, args)
-
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_out_helper(
         self,
+        code: IndentedBuffer,
         kernel: str,
         out: str,
         out_view: Optional[str],
@@ -1208,12 +1218,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
-            self.writeline(f"auto {out_name} = {out_view};")
+            code.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(code, kernel, args, device)
 
     def generate_scatter_fallback(
         self,
@@ -1643,7 +1653,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
-    def codegen_multi_output(self, name, value):
+    def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
         pass
@@ -2326,7 +2336,9 @@ if (!custom_op_wrapper) {
         else:
             raise AssertionError(f"Unexpected type in c_type_for_prim_type: {type_=}")
 
-    def val_to_arg_str_for_prim_type(self, val, type_) -> str:
+    def val_to_arg_str_for_prim_type(
+        self, val, type_, code: Optional[IndentedBuffer] = None
+    ) -> str:
         # TODO: not using type_ as the first step of refactoring. Will update this later.
         if isinstance(val, bool):
             return "1" if val else "0"
@@ -2340,7 +2352,7 @@ if (!custom_op_wrapper) {
         elif isinstance(
             val, (ir.Buffer, ir.ReinterpretView, ir.StorageBox, ir.TensorBox)
         ):
-            return val.codegen_reference()
+            return val.codegen_reference(code)
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
@@ -2361,7 +2373,10 @@ if (!custom_op_wrapper) {
         else:
             return repr(val)
 
-    def val_to_arg_str(self, val, type_=None) -> str:
+    def val_to_arg_str(
+        self, val, type_=None, code: Optional[IndentedBuffer] = None
+    ) -> str:
+        writeline = code.writeline if code else self.writeline
         if val is None:
             # None needs special care. It either represent nullopt or an empty tensor
             if type_ is None or isinstance(type_, torch.OptionalType):
@@ -2379,11 +2394,11 @@ if (!custom_op_wrapper) {
             if isinstance(type_, torch.TensorType):
                 # create an empty tensor, the equivalent of at::Tensor()
                 var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name}_handle;")
-                self.writeline(
+                writeline(f"AtenTensorHandle {var_name}_handle;")
+                writeline(
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
                 )
-                self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
+                writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
                 return var_name
 
             raise AssertionError("Can not map None to a known data type")
@@ -2448,7 +2463,7 @@ if (!custom_op_wrapper) {
             val_str = self.val_to_arg_str_for_prim_type(val, None)
             return self.codegen_scalar_to_tensor(val_str)
 
-        return self.val_to_arg_str_for_prim_type(val, type_)
+        return self.val_to_arg_str_for_prim_type(val, type_, code)
 
     def create_tmp_raii_handle_var_if_needed(
         self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None

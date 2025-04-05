@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 from torch import dtype as torch_dtype
@@ -57,12 +57,17 @@ class DebugPrinterManager:
         self,
         debug_printer_level,
         use_array_ref: bool,
+        writeline: Optional[Callable[..., None]] = None,
         args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
         arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
+        def null_writeline():
+            pass
+
+        self.writeline = writeline if writeline else null_writeline
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
         self.use_array_ref = use_array_ref
         if args_to_print_or_save is None:
@@ -137,12 +142,15 @@ class DebugPrinterManager:
 
     def set_printer_args(
         self,
+        writeline: Callable[..., None],
         args_to_print_or_save: list[str],
         kernel_name: str,
         arg_signatures: Optional[list[type]],
         kernel,
         kernel_type=None,
     ):
+        self.writeline = writeline
+
         # Note: MultiKernel debug printing is not supported for now
         if isinstance(kernel, MultiKernel):
             log.info(
@@ -199,7 +207,7 @@ class DebugPrinterManager:
                 continue
             launch_prefix = "before_launch" if before_launch else "after_launch"
             if V.graph.cpp_wrapper:
-                V.graph.wrapper_code.writeline(
+                self.writeline(
                     f'aoti_torch_save_tensor_handle({arg}, "{arg}", "{launch_prefix}", "{kernel_name}");'
                 )
             else:
@@ -219,7 +227,7 @@ class DebugPrinterManager:
                     saved_path,
                 )
                 line = f"torch.save({arg}, '{saved_path}')"
-                V.graph.wrapper_code.writeline(line)
+                self.writeline(line)
 
     def codegen_intermediate_tensor_value_print(
         self,
@@ -237,9 +245,7 @@ class DebugPrinterManager:
             == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
         ):
             if V.graph.cpp_wrapper:
-                V.graph.wrapper_code.writeline(
-                    f'printf("[ {launch_prefix}: {kernel_name} ]\\n");'
-                )
+                self.writeline(f'printf("[ {launch_prefix}: {kernel_name} ]\\n");')
             return
 
         if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
@@ -257,7 +263,7 @@ class DebugPrinterManager:
                     arg_signatures[i], torch_dtype
                 ):
                     # infer from the arg data type (has torch.dtype) to see if it is a tensor type
-                    V.graph.wrapper_code.writeline(
+                    self.writeline(
                         f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
                     )
                 elif arg_signatures is not None and isinstance(
@@ -269,15 +275,15 @@ class DebugPrinterManager:
                         type(bool),
                     ),
                 ):
-                    V.graph.wrapper_code.writeline(
+                    self.writeline(
                         f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\\\n");'
                     )
                 else:
                     if arg_signatures is None and self.kernel_type == "cpp" or "extern":
-                        V.graph.wrapper_code.writeline(
+                        self.writeline(
                             f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
                         )
             else:
-                V.graph.wrapper_code.writeline(
+                self.writeline(
                     f'_print_debugging_tensor_value_info("inductor: {launch_prefix} - {kernel_name} - {arg}", {arg})'
                 )
