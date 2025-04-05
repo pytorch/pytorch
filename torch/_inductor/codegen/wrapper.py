@@ -427,20 +427,21 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
-    args: list[str]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_extern_kernel_alloc_helper(code, self.node, self.args)
+        node = self.node
+        args = [*node.codegen_args(code), *node.codegen_kwargs(code=code)]
+        self.wrapper._generate_extern_kernel_alloc_helper(code, self.node, args)
 
 
 @dataclasses.dataclass
 class ExternKernelOutLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelOut
-    args: list[str]
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
+        args = [*node.codegen_args(code), *node.codegen_kwargs(code, skip_out=True)]
         kernel_name = node.get_kernel_name()
         if (
             V.graph.cpp_wrapper
@@ -456,7 +457,7 @@ class ExternKernelOutLine(WrapperLine):
             kernel_name,
             node.codegen_reference(),
             node.output_view.codegen_reference() if node.output_view else None,
-            self.args,
+            args,
             device,
         )
 
@@ -1204,13 +1205,11 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
-        self.writeline(ExternKernelAllocLine(self, node, args))
+        self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
-        self.writeline(ExternKernelAllocLine(self, node, args))
+        self.writeline(ExternKernelAllocLine(self, node))
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
 
@@ -1250,8 +1249,7 @@ class PythonWrapperCodegen(CodeGen):
         node: ir.ExternKernelOut,
     ) -> None:
         node.codegen_comment(self)
-        args = [*node.codegen_args(), *node.codegen_kwargs(skip_out=True)]
-        self.writeline(ExternKernelOutLine(self, node, args))
+        self.writeline(ExternKernelOutLine(self, node))
 
     def _generate_extern_kernel_out_helper(
         self,
@@ -2497,7 +2495,7 @@ class PythonWrapperCodegen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_arg_str(self, s, type_=None):
+    def val_to_arg_str(self, s, type_=None, code: Optional[IndentedBuffer] = None):
         from torch.utils._triton import dtype_to_string, has_triton_package
 
         if has_triton_package():
@@ -2523,11 +2521,11 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
-            return s.codegen_reference()
+            return s.codegen_reference(writer=code)
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
         elif isinstance(s, ir.GeneratorState):
-            return s.codegen_reference()
+            return s.codegen_reference(writer=code)
         else:
             return repr(s)
 

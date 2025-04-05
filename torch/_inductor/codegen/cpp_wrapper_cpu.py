@@ -2336,7 +2336,9 @@ if (!custom_op_wrapper) {
         else:
             raise AssertionError(f"Unexpected type in c_type_for_prim_type: {type_=}")
 
-    def val_to_arg_str_for_prim_type(self, val, type_) -> str:
+    def val_to_arg_str_for_prim_type(
+        self, val, type_, code: Optional[IndentedBuffer] = None
+    ) -> str:
         # TODO: not using type_ as the first step of refactoring. Will update this later.
         if isinstance(val, bool):
             return "1" if val else "0"
@@ -2350,7 +2352,7 @@ if (!custom_op_wrapper) {
         elif isinstance(
             val, (ir.Buffer, ir.ReinterpretView, ir.StorageBox, ir.TensorBox)
         ):
-            return val.codegen_reference()
+            return val.codegen_reference(code)
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
@@ -2371,7 +2373,10 @@ if (!custom_op_wrapper) {
         else:
             return repr(val)
 
-    def val_to_arg_str(self, val, type_=None) -> str:
+    def val_to_arg_str(
+        self, val, type_=None, code: Optional[IndentedBuffer] = None
+    ) -> str:
+        writeline = code.writeline if code else self.writeline
         if val is None:
             # None needs special care. It either represent nullopt or an empty tensor
             if type_ is None or isinstance(type_, torch.OptionalType):
@@ -2389,11 +2394,11 @@ if (!custom_op_wrapper) {
             if isinstance(type_, torch.TensorType):
                 # create an empty tensor, the equivalent of at::Tensor()
                 var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name}_handle;")
-                self.writeline(
+                writeline(f"AtenTensorHandle {var_name}_handle;")
+                writeline(
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
                 )
-                self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
+                writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
                 return var_name
 
             raise AssertionError("Can not map None to a known data type")
@@ -2458,7 +2463,7 @@ if (!custom_op_wrapper) {
             val_str = self.val_to_arg_str_for_prim_type(val, None)
             return self.codegen_scalar_to_tensor(val_str)
 
-        return self.val_to_arg_str_for_prim_type(val, type_)
+        return self.val_to_arg_str_for_prim_type(val, type_, code)
 
     def create_tmp_raii_handle_var_if_needed(
         self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
