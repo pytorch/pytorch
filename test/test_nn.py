@@ -9084,6 +9084,15 @@ class TestNNDeviceType(NNTestCase):
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
 
+    def test_MarginLoss_errors(self, device):
+        loss = nn.MultiLabelMarginLoss()
+        with self.assertRaisesRegex(RuntimeError, 'Expected input tensor to have 0, 1 or 2 dimension'):
+            loss(torch.rand([20, 9, 20], device=device), torch.rand([2, 2, 2, 2], device=device))
+        with self.assertRaisesRegex(RuntimeError, 'Expected target tensor to have 2 dimension'):
+            loss(torch.rand([1, 3], device=device), torch.rand([2, 2], device=device))
+        with self.assertRaisesRegex(RuntimeError, 'Expected target tensor to have 0 or 1 dimension'):
+            loss(torch.rand(3, device=device), torch.rand([2, 2], device=device))
+
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
