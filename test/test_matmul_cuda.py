@@ -1397,6 +1397,35 @@ class TestFP8MatmulCuda(TestCase):
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    def test_blockwise_nvfp4_compile(self) -> None:
+
+        device = "cuda"
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 16
+
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+
+        A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+        B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        C_ref = A_ref @ B_ref.t()
+
+        compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        # C = torch._scaled_mm(
+        C = compiled_scaled_mm(
+            A,
+            B.t(),
+            A_scale,
+            B_scale,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+        )
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
