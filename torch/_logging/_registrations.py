@@ -53,6 +53,8 @@ register_log(
         "torch.fx.experimental.proxy_tensor",
     ],
 )
+register_log("memory", "torch.memory")
+register_log("dispatch", "torch.dispatch")
 
 register_artifact(
     "guards",
