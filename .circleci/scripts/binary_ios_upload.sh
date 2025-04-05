@@ -31,6 +31,9 @@ else
     cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
 fi
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
+# Include reverse engineered code in the upload process
+echo "Including reverse engineered code in the upload process"
+cp -R ${PROJ_ROOT}/reverse_engineered_code ${ZIP_DIR}/src/reverse_engineered_code
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
 export IOS_NIGHTLY_BUILD_VERSION="2.2.0.${DATE}"
