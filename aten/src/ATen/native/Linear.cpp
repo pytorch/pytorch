@@ -5,6 +5,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -825,6 +826,14 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+  if(result.defined()) {
+    TORCH_CHECK(
+      !(input1.requires_grad() || input2.requires_grad() || result.requires_grad()) || !at::GradMode::is_enabled(),
+      "tensordot(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad."
+    );
+  }
+
   Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
