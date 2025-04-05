@@ -380,6 +380,7 @@ def binary_cross_entropy(
     size_average: Optional[bool] = ...,
     reduce: Optional[bool] = ...,
     reduction: str = ...,
+    label_smoothing: float = ...,
 ) -> Tensor: ...
 def binary_cross_entropy_with_logits(
     input: Tensor,
@@ -389,6 +390,7 @@ def binary_cross_entropy_with_logits(
     reduce: Optional[bool] = ...,
     reduction: str = ...,
     pos_weight: Optional[Tensor] = ...,
+    label_smoothing: float = ...,
 ) -> Tensor: ...
 def smooth_l1_loss(
     input: Tensor,
