@@ -7,6 +7,7 @@ import itertools
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from enum import IntEnum
+from typing_extensions import assert_never
 
 from torchgen.model import (
     BackendIndex,
@@ -16,7 +17,6 @@ from torchgen.model import (
     NativeFunctionsGroup,
     OperatorName,
 )
-from torchgen.utils import assert_never
 
 
 KERNEL_KEY_VERSION = 1
