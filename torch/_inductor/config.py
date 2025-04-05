@@ -1269,6 +1269,8 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = False
 
+    embed_cubin: bool = True
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.

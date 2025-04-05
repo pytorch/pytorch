@@ -160,12 +160,20 @@ class DeferredTritonCallWrapper:
     def generate_load_kernel(self, prefix, kernel_var_name, params):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
-            load_kernel_args = [
-                cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
-                cpp_string_literal(params["mangled_name"]),
-                str(params["shared_mem"]),
-                "cubin_dir_",
-            ]
+            load_kernel_args = (
+                [
+                    f"__{params['mangled_name']}_start",
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                ]
+                if config.aot_inductor.embed_cubin
+                else [
+                    cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                    "cubin_dir_",
+                ]
+            )
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
