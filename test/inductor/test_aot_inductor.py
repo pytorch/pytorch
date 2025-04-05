@@ -2481,7 +2481,7 @@ class AOTInductorTestsTemplate:
         dims = [10] * num_dims
         x = torch.randn(*dims, device=self.device)
         y = torch.randn(*dims, device=self.device)
-        dynamic_shapes = []
+        dynamic_shapes = None
         if dynamic:
             dim0_x = Dim("dim0_x", min=1, max=10)
             dim0_y = Dim("dim0_y", min=1, max=10)

@@ -623,19 +623,32 @@ def _tree_map_with_path(
         raise
 
 
+def _signature(f):
+    if isinstance(f, ExportedProgram):
+        f = f.module()
+    return (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+
+
 def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
-    if isinstance(f, ExportedProgram):
-        f = f.module()
     if not _is_torch_jit_trace:
-        signature = (
-            inspect.signature(f.forward)
-            if isinstance(f, torch.nn.Module)
-            else inspect.signature(f)
+        sig = _signature(f)
+        variadic = any(
+            param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+            for param in sig.parameters.values()
         )
-        kwargs = kwargs if kwargs is not None else {}
-        return signature.bind(*args, **kwargs).arguments
+        kwargs = kwargs or {}
+        if variadic:
+            named_args = dict(enumerate(args))
+            return {**named_args, **kwargs}  # type: ignore[dict-item]
+        else:
+            return sig.bind(*args, **kwargs).arguments
+
     return args
 
 
@@ -876,7 +889,7 @@ def _check_dynamic_shapes(
     if isinstance(dynamic_shapes, dict):
         got_keys = list(dynamic_shapes.keys())
         expected_arg_names = list(combined_args.keys())
-        if sorted(got_keys) != sorted(expected_arg_names):
+        if sorted(got_keys, key=str) != sorted(expected_arg_names, key=str):
             msg = (
                 f"When `dynamic_shapes` is specified as a dict, its top-level keys "
                 f"must be the arg names {expected_arg_names} of `inputs`, but "

@@ -358,7 +358,6 @@ def draft_export(
     pre_dispatch: bool = False,
 ) -> ExportedProgram:
     kwargs = kwargs or {}
-    dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace()
 
@@ -379,7 +378,7 @@ def draft_export(
             )
         except torch._dynamo.exc.UserError as exc:
             new_shapes = refine_dynamic_shapes_from_suggested_fixes(
-                exc.msg, dynamic_shapes
+                exc.msg, dynamic_shapes  # type: ignore[arg-type]
             )
             ep = _export(
                 mod,

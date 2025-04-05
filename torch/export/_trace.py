@@ -1156,13 +1156,59 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     kwargs = kwargs if kwargs is not None else {}
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
+    verify_additional_inputs = lambda ep: None  # noqa: E731
+    if dynamic_shapes is None:
+        return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
+
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
         verify_additional_inputs = dynamic_shapes.verify
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
-    else:
-        verify_additional_inputs = lambda ep: None  # noqa: E731
-        if isinstance(dynamic_shapes, torch.export.ShapesCollection):
-            dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    elif isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+
+    n_args, n_kwargs = len(args), len(kwargs)
+    n = n_args + n_kwargs
+    if n != len(dynamic_shapes):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expected `dynamic_shapes` to have {n} items ({n_args} `args`, {n_kwargs} `kwargs`)"
+            f", but got {len(dynamic_shapes)} items.",
+        )
+    if isinstance(dynamic_shapes, dict):
+        kwargs_dynamic_shapes = {}
+        for k in kwargs:
+            if k in dynamic_shapes:
+                kwargs_dynamic_shapes[k] = dynamic_shapes[k]
+            else:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected `dynamic_shapes` to have key '{k}' (found in `kwargs`)"
+                    f", but got keys: {list(dynamic_shapes.keys())}.",
+                )
+        non_kwargs_dynamic_shapes = {
+            k: v for k, v in dynamic_shapes.items() if k not in kwargs
+        }
+        parameters = torch.export.dynamic_shapes._signature(mod).parameters
+        variadic = any(
+            param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+            for param in parameters.values()
+        )
+        if not variadic:
+            for k in non_kwargs_dynamic_shapes:
+                if isinstance(k, str) and k not in parameters:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"Expected key '{k}' in `dynamic_shapes` to be one of "
+                        f"input names: {list(parameters.keys())}.",
+                    )
+        args_dynamic_shapes = tuple(non_kwargs_dynamic_shapes.values())
+        dynamic_shapes = _combine_args(mod, args_dynamic_shapes, kwargs_dynamic_shapes)
+    elif isinstance(dynamic_shapes, (tuple, list)):
+        args_dynamic_shapes = dynamic_shapes[:n_args]  # type: ignore[assignment]
+        kwargs_dynamic_shapes = {
+            k: dynamic_shapes[n_args + i] for i, k in enumerate(kwargs)
+        }
+        dynamic_shapes = _combine_args(mod, args_dynamic_shapes, kwargs_dynamic_shapes)
 
     return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
