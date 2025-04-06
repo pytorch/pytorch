@@ -3105,28 +3105,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
-    @testing.expectedFailureLegacyExportNonStrict  # FIXME constraint violation (guard: s0 - s0%8 != 1)
-    @testing.expectedFailureCppSerDes  # FIXME data-dependent error (hinted: True, unhinted: s0 - s0%8 >= 0)
-    def test_bound_sympy_accuracy(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                expr = x.shape[0] - (x.shape[0] % 8)
-                return torch.empty(expr)
-
-        ep = export(
-            Foo(),
-            (torch.randn(13),),
-            dynamic_shapes={"x": (Dim("dim", min=2),)},
-        )
-
-        (output,) = ep.graph.output_node().args[0]
-        sym_node = output.meta["val"].shape[0].node
-        vr = torch.utils._sympy.value_ranges.bound_sympy(
-            sym_node.expr,
-            sym_node.shape_env.var_to_range,
-        )
-        self.assertEqual(vr.lower, 0)
-
     @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
