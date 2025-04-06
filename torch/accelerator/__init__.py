@@ -92,6 +92,9 @@ def current_accelerator(check_available: bool = False) -> Optional[torch.device]
     Returns:
         torch.device: return the current accelerator as :class:`torch.device`.
 
+    .. note:: The index of the returned :class:`torch.device` will be ``None``, please use
+        :func:`torch.accelerator.current_device_index` to know the current index being used.
+
     Example::
 
         >>> # xdoctest:
@@ -127,6 +130,8 @@ def set_device_index(device: _device_t, /) -> None:
     Args:
         device (:class:`torch.device`, str, int): a given device that must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    .. note:: This function is a no-op if this device index is negative.
     """
     device_index = _get_device_index(device)
     torch._C._accelerator_setDeviceIndex(device_index)
@@ -158,6 +163,8 @@ def set_stream(stream: torch.Stream) -> None:
 
     Args:
         stream (torch.Stream): a given stream that must match the current :ref:`accelerator<accelerators>` device type.
+
+    .. note:: This function will set the current device index to the device index of the given stream.
     """
     torch._C._accelerator_setStream(stream)
 
@@ -169,6 +176,8 @@ def synchronize(device: _device_t = None, /) -> None:
         device (:class:`torch.device`, str, int, optional): device for which to synchronize. It must match
             the current :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
+
+    .. note:: This function is a no-op if the current :ref:`accelerator<accelerators>` is not initialized.
 
     Example::
 
