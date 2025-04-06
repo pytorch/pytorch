@@ -5786,12 +5786,16 @@ class TestLinalg(TestCase):
     def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((2, 3), device=device, dtype=dtype, requires_grad=True)
         b = torch.empty((3, 4), device=device, dtype=dtype, requires_grad=True)
-        c = torch.empty((2, 4), device=device, dtype=dtype)
-
-        with self.assertRaisesRegex(RuntimeError, "functions with out=... arguments don't support automatic differentiation"):
+        c = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
+        d = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=False)
+        err_msg = "the 'out' tensor was specified and requires gradients"
+        with torch.set_grad_enabled(True), self.assertRaisesRegex(RuntimeError, err_msg):
             torch.tensordot(a, b, dims=([1], [0]), out=c)
 
-        with torch.no_grad():
+        with torch.set_grad_enabled(True):
+            torch.tensordot(a, b, dims=([1], [0]), out=d)
+
+        with torch.set_grad_enabled(False):
             torch.tensordot(a, b, dims=([1], [0]), out=c)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous

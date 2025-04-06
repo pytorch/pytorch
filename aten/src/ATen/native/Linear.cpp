@@ -828,9 +828,9 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
   if(result.defined()) {
     TORCH_CHECK(
-      !(input1.requires_grad() || input2.requires_grad() || result.requires_grad()) || !at::GradMode::is_enabled(),
-      "tensordot(): functions with out=... arguments don't support automatic differentiation, "
-      "but one of the arguments requires grad."
+      !(result.requires_grad() && at::GradMode::is_enabled()),
+      "tensordot(): the 'out' tensor was specified and requires gradients, but functions with 'out=...' arguments do not support automatic differentiation. "
+      "Either remove the 'out' argument or ensure the 'out' tensor does not require gradients."
     );
   }
 
