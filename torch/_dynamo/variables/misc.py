@@ -57,6 +57,7 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -81,7 +82,7 @@ class SuperVariable(VariableTracker):
         # cls for a classmethod)
         self.objvar = objvar
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
@@ -331,7 +332,7 @@ class ExceptionVariable(VariableTracker):
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
@@ -460,7 +461,7 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError("comptime is special form")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
@@ -944,7 +945,7 @@ class GetAttrVariable(VariableTracker):
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
@@ -1161,7 +1162,7 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # We're just trying to load the type here. Reconstructing the type from
         # scratch is tricky - for a type like `typing.List[int]` we'd need to
         # deconstruct the origin and args.  The origin for `List[int]` is `list`
@@ -1336,7 +1337,7 @@ class NullVariable(VariableTracker):
     def __repr__(self) -> str:
         return "NullVariable"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         codegen.append_output(create_instruction("PUSH_NULL"))
@@ -1377,7 +1378,7 @@ class StringFormatVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1426,7 +1427,7 @@ class DebuggingVariable(VariableTracker):
 
         tx.debug_locals.append((self, list(args)))
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         return self.source.reconstruct(codegen)
 
     @staticmethod
@@ -1721,7 +1722,7 @@ class RandomVariable(VariableTracker):
             return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1762,7 +1763,7 @@ class WeakRefVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.referent_vt
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
         codegen(self.referent_vt)
         codegen.extend_output(create_call_function(1, False))

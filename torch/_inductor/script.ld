@@ -5,9 +5,4 @@ SECTIONS {
    * after other the sections that are referenced from .text using relative
    * relocations. This is the default behavior in GNU ld. */
   .lrodata : { *(.lrodata) }
-} INSERT AFTER .bss;
-SECTIONS {
-  .embedded_cubin : {
-    *(.embedded_cubin)
-  }
-} INSERT AFTER .bss;
+ } INSERT AFTER .bss;

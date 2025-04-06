@@ -1269,6 +1269,7 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = False
 
+    # Embed generated .cubin files into the .so
     embed_cubin: bool = True
 
 

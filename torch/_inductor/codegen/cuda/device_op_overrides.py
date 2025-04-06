@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
-from torch._inductor import config
 
 from ...utils import triton_version_uses_attrs_dict
 from ..common import DeviceOpOverrides, register_device_op_overrides
@@ -46,25 +45,24 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         return source_codes
 
     def kernel_driver(self) -> str:
-        if config.aot_inductor.embed_cubin:
-            load_kernel = """
-            CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
-                CUmodule mod;
-                CUfunction func;
-                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
-                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
-                return func;
-            }
-            """
-        else:
-            load_kernel = """
+        source_codes = """
+            #define CUDA_DRIVER_CHECK(EXPR)                    \\
+            do {                                               \\
+                CUresult code = EXPR;                          \\
+                const char *msg;                               \\
+                CUresult code_get_error = cuGetErrorString(code, &msg); \\
+                if (code_get_error != CUDA_SUCCESS) {          \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string("invalid error code!"));   \\
+                }                                              \\
+                if (code != CUDA_SUCCESS) {                    \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string(msg));                     \\
+                }                                              \\
+            } while (0);
+
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -89,29 +87,22 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }
                 return func;
             }
-            """
 
-        source_codes = (
-            """
-            #define CUDA_DRIVER_CHECK(EXPR)                    \\
-            do {                                               \\
-                CUresult code = EXPR;                          \\
-                const char *msg;                               \\
-                CUresult code_get_error = cuGetErrorString(code, &msg); \\
-                if (code_get_error != CUDA_SUCCESS) {          \\
-                    throw std::runtime_error(                  \\
-                        std::string("CUDA driver error: ") +   \\
-                        std::string("invalid error code!"));   \\
-                }                                              \\
-                if (code != CUDA_SUCCESS) {                    \\
-                    throw std::runtime_error(                  \\
-                        std::string("CUDA driver error: ") +   \\
-                        std::string(msg));                     \\
-                }                                              \\
-            } while (0);
-            """
-            + load_kernel
-            + """
+            static inline CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+                CUmodule mod;
+                CUfunction func;
+                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
             static inline void launchKernel(
                     CUfunction func,
                     uint32_t gridX,
@@ -126,7 +117,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 ));
             }
         """
-        )
         if torch.version.hip is not None:
             # Adjusting the warp size to GPU supported wavefront size on AMD GPU
             prop = torch.cuda.get_device_properties(torch.cuda.current_device())

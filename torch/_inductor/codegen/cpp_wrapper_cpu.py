@@ -635,12 +635,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if config.aot_inductor.embed_cubin:
             self.prefix.writeline('extern "C" {')
-            for kernel in sorted(declare_kernel):
+            for name in sorted(declare_kernel):
                 self.prefix.writeline(
-                    f"    extern const unsigned char __{kernel}_start[];"
-                )
-                self.prefix.writeline(
-                    f"    extern const unsigned char __{kernel}_end[];"
+                    f"    extern const unsigned char __{name}_start[];"
                 )
             self.prefix.writeline("}")
 

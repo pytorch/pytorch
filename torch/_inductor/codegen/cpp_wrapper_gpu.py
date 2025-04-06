@@ -162,11 +162,11 @@ class DeferredTritonCallWrapper:
         with prefix.indent():
             load_kernel_args = (
                 [
-                    f"__{params['mangled_name']}_start",
+                    f"__{params['inductor_meta']['kernel_name']}_start",
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
-                if config.aot_inductor.embed_cubin
+                if V.graph.aot_mode and config.aot_inductor.embed_cubin
                 else [
                     cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
                     cpp_string_literal(params["mangled_name"]),

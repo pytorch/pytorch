@@ -1816,32 +1816,35 @@ class AotCodeCompiler:
             cubins_o = []
             if config.aot_inductor.embed_cubin:
                 # Embed cubin files into .so using objcopy
-                assert shutil.which("objcopy") is not None
+                if config.is_fbcode():
+                    ld = build_paths.ld()
+                    objcopy = (
+                        build_paths.objcopy_fallback()
+                        if use_relative_path
+                        else build_paths.objcopy()
+                    )
+                else:
+                    ld = "ld"
+                    objcopy = "objcopy"
+
                 for kernel_name, value in CudaKernelParamCache.cache.items():
                     cubin_file = value[get_cpp_wrapper_cubin_path_name()]
                     obj_file = cubin_file + ".o"
                     cubins_o.append(obj_file)
                     # Convert .cubin to .o
-                    cmd = [
-                        "ld",
-                        "-r",
-                        "-b",
-                        "binary",
-                        "-o",
-                        obj_file,
-                        cubin_file,
-                    ]
-                    subprocess.run(cmd, capture_output=True, text=True)
+                    cmd = f"{ld} -r -b binary -o {obj_file} {cubin_file}"
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
                     # By default objcopy will create *_start, *_size, *_end symbols using the full path
+                    # Rename to use the unique kernel name
                     file_name = re.sub(r"[\W]", "_", cubin_file)
-                    for symbol in ["start", "size", "end"]:
-                        cmd = [
-                            "objcopy",
-                            "--redefine-sym",
-                            f"_binary_{file_name}_{symbol}=__{kernel_name}_{symbol}",
-                            obj_file,
-                        ]
-                        subprocess.run(cmd, capture_output=True, text=True)
+                    cmd = (
+                        f"{objcopy} "
+                        + f"--redefine-sym _binary_{file_name}_start=__{kernel_name}_start "
+                        + f"--redefine-sym _binary_{file_name}_size=__{kernel_name}_size "
+                        + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
+                        + obj_file
+                    )
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
