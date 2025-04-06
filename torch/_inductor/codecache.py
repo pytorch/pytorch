@@ -1832,7 +1832,10 @@ class AotCodeCompiler:
                     obj_file = cubin_file + ".o"
                     cubins_o.append(obj_file)
                     # Convert .cubin to .o
-                    cmd = f"{ld} -r -b binary -o {obj_file} {cubin_file}"
+                    cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
+                    # Rename .data to .rodata
+                    cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
                     subprocess.run(cmd.split(), capture_output=True, text=True)
                     # By default objcopy will create *_start, *_size, *_end symbols using the full path
                     # Rename to use the unique kernel name
