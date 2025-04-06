@@ -61,8 +61,8 @@ kernel void ampNonFiniteCheckAndUnscaleSingle(
 
 template <typename T>
 kernel void ampUpdateScale(
-    device T* scale [[buffer(0)]],
-    device int* growth_tracker [[buffer(1)]],
+    device T& scale [[buffer(0)]],
+    device int& growth_tracker [[buffer(1)]],
     device float& foundInf [[buffer(2)]],
     constant T& scaleGrowthFactor [[buffer(3)]],
     constant T& scaleBackoffFactor [[buffer(4)]],
@@ -70,16 +70,15 @@ kernel void ampUpdateScale(
     uint tid [[thread_position_in_grid]]) {
 
   if (foundInf != 0.0f) {
-    *scale = *scale * scaleBackoffFactor;
-    *growth_tracker = 0;
+    scale *= scaleBackoffFactor;
+    growth_tracker = 0;
   } else {
-    int g = *growth_tracker;
-    g += 1;
+    int g = growth_tracker + 1;
     if (g >= growthInterval) {
-      *scale = *scale * scaleGrowthFactor;
+      scale *= scaleGrowthFactor;
       g = 0;
     }
-    *growth_tracker = g;
+    growth_tracker = g;
   }
 }
 
@@ -107,8 +106,8 @@ kernel void ampUpdateScale(
 #define INSTANTIATE_AMP_UPDATE_SCALE(DTYPE)                    \
   template [[host_name("ampUpdateScale_" #DTYPE)]] kernel void \
   ampUpdateScale<DTYPE>(                                       \
-      device DTYPE * scale [[buffer(0)]],                      \
-      device int* growth_tracker [[buffer(1)]],                \
+      device DTYPE & scale [[buffer(0)]],                      \
+      device int& growth_tracker [[buffer(1)]],                \
       device float& foundInf [[buffer(2)]],                    \
       constant DTYPE& scaleGrowthFactor [[buffer(3)]],         \
       constant DTYPE& scaleBackoffFactor [[buffer(4)]],        \

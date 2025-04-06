@@ -259,8 +259,9 @@ void multi_tensor_apply(const std::string& kernel_name,
                         std::vector<std::vector<at::Tensor>>& tensor_lists,
                         ArgTypes... args) {
   const auto num_tensors = tensor_lists[0].size();
-  if (num_tensors == 0)
+  if (num_tensors == 0) {
     return;
+  }
 
   TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists must match depth.");
 
