@@ -1395,6 +1395,8 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
+                # This will cause memory stats to be overshadowed by this eager run.
+                # To fix that, memory stats will be reset later.
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
             if pytree.is_namedtuple_instance(example_outputs):
@@ -1411,6 +1413,14 @@ class AOTInductorModelCache:
                 _produce_dynamic_shapes_for_export, combined_args
             )
 
+            # delete example_outputs and reset memory stats here
+            del example_outputs
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                empty_gpu_cache(current_device)
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
+
             ep = torch.export.export(
                 model,
                 example_args,
@@ -1421,13 +1431,6 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
 
-            # For AOTI, we only measure the memory compression ratio at the run time
-            # instead of the compile time, so explicitly reset memory stats here.
-            if current_device == "cuda":
-                torch.cuda.reset_peak_memory_stats()
-                empty_gpu_cache(current_device)
-            elif current_device == "hpu":
-                torch.hpu.reset_peak_memory_stats()
             cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
         return cls.cache[key]
