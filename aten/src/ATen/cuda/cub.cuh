@@ -37,11 +37,10 @@
 // handle the temporary storage and 'twice' calls for cub API
 #define CUB_WRAPPER(func, ...) do {                                       \
   size_t temp_storage_bytes = 0;                                          \
-  func(nullptr, temp_storage_bytes, __VA_ARGS__);                         \
+  AT_CUDA_CHECK(func(nullptr, temp_storage_bytes, __VA_ARGS__));          \
   auto& caching_allocator = *::c10::cuda::CUDACachingAllocator::get();    \
   auto temp_storage = caching_allocator.allocate(temp_storage_bytes);     \
-  func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);              \
-  AT_CUDA_CHECK(cudaGetLastError());                                      \
+  AT_CUDA_CHECK(func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__));\
 } while (false)
 
 #ifdef USE_ROCM
