@@ -1381,6 +1381,7 @@ class TestPrologueFusion(TestCase):
             ).run(code_str)
 
     @parametrize("prologue", (False, True))
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM Different layout decisions")
     def test_conv1x1_cast(self, prologue):
         with torch._inductor.config.patch(
             prologue_fusion=prologue, force_layout_optimization=True
