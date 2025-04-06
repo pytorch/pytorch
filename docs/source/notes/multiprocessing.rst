@@ -28,16 +28,11 @@ Poison fork in multiprocessing
 ------------------------------
 
 When using multiprocessing with :ref:`accelerators<accelerators>`, a known issue called "poison fork" may occur.
-This happens when the accelerator's runtime is initialized before a process forks, leading to runtime errors in child processes.
-
-.. note::
-    If an accelerator's runtime is initialized in a parent process before forking, child processes that attempt to
-    access the accelerator's runtime APIs may encounter initialization errors.
-    This occurs because the accelerator's runtime resources are not safely inherited or shared across processes
-    when a process is forked. This leads to conflicts when multiple processes attempt to access the same resources.
+This happens when the accelerator's runtime is not fork safe and is initialized before a process forks, leading to
+runtime errors in child processes.
 
 To prevent such errors:
-    - Initialize the accelerator runtime explicitly within each worker process to avoid inheriting any already-initialized runtime resources from the parent process.
+    - Avoid initializing the accelerator in the main process beofre forking child processes.
     - Use an alternative process start methods, such as ``spawn`` or ``forkserver``, which ensures a clean initialization of each process.
 
 .. _multiprocessing-cuda-note:
@@ -45,7 +40,7 @@ To prevent such errors:
 CUDA in multiprocessing
 -----------------------
 
-The CUDA runtime has the limatation described in :ref:`multiprocessing-poison-fork-note` when using the ``fork`` start method;
+The CUDA runtime has the limitation described in :ref:`multiprocessing-poison-fork-note` when using the ``fork`` start method;
 either the ``spawn`` or ``forkserver`` start method are required to use CUDA in subprocesses.
 
 .. note::
