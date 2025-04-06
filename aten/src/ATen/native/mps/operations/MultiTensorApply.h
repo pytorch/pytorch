@@ -275,7 +275,7 @@ void multi_tensor_apply(const std::string& kernel_name,
       [computeEncoder setComputePipelineState:pipeline];
 
       id<MTLArgumentEncoder> argumentEncoder = [function newArgumentEncoderWithBufferIndex:0];
-      id<MTLBuffer> tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
+      auto tensorArgumentBuffer = [[device newBufferWithLength:argumentEncoder.encodedLength options:0] autorelease];
       [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
 
       int tensor_loc = 0;
@@ -326,7 +326,7 @@ void multi_tensor_apply(const std::string& kernel_name,
 
             // prepare for the next batch: reset threadgroup count and create a new buffer
             threadgroup_loc = 0;
-            tensorArgumentBuffer = [device newBufferWithLength:argumentEncoder.encodedLength options:0];
+            tensorArgumentBuffer = [ [device newBufferWithLength:argumentEncoder.encodedLength options:0] autorelease];
             [argumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
 
             if (partial) {

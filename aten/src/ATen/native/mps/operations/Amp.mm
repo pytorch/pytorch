@@ -28,6 +28,7 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
     return;
   }
   TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
+  TORCH_CHECK(scaled_grad.numel() <= std::numeric_limits<uint32_t>::max(), "scaled_grad is too large");
   float inv_scale_val = inv_scale.item<float>();
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
