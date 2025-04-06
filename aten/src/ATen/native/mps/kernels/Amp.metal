@@ -68,7 +68,6 @@ kernel void ampUpdateScale(
     constant T& scaleBackoffFactor [[buffer(4)]],
     constant int& growthInterval [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
-
   if (foundInf != 0.0f) {
     scale *= scaleBackoffFactor;
     growth_tracker = 0;

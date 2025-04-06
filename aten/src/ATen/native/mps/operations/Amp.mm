@@ -62,7 +62,7 @@ static void _amp_update_scale_mps_impl(Tensor& self,
     [computeEncoder setComputePipelineState:ampUpdatePipelineState];
 
     mtl_setArgs(
-                computeEncoder, self, growth_tracker, found_inf, scale_growth_factor, scale_backoff_factor, growth_interval);
+        computeEncoder, self, growth_tracker, found_inf, scale_growth_factor, scale_backoff_factor, growth_interval);
     mtl_dispatch1DJob(computeEncoder, ampUpdatePipelineState, 1);
   });
 }
