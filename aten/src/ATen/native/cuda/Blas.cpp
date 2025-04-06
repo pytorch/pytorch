@@ -265,24 +265,16 @@ static bool getDisableAddmmCudaLt() {
 
 #ifdef USE_ROCM
 static bool isSupportedHipLtROCmArch(int index) {
-    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
-    std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs, index);
 }
 #endif
 
@@ -326,7 +318,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   }
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -352,6 +344,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
+  // if lt path fails, we recurse back into this function here and force the lt path to off
+  disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -446,6 +440,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   if (useLtInterface) {
 #if defined(USE_ROCM)
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -461,7 +456,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation));
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -480,6 +475,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation)
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -491,6 +490,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       activation_epilogue = cuda::blas::GEMMAndBiasActivationEpilogue::None;
 #endif
 
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -506,7 +506,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue);
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -523,6 +523,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #endif
   } else
   {
@@ -939,42 +943,26 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
 }
 
 static bool _scaled_mm_allowed_device() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
 #ifdef USE_ROCM
-    std::string device_arch = dprops->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1200", "gfx1201"
+        "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
+    auto dprops = at::cuda::getCurrentDeviceProperties();
     return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
 #endif
 }
 
 #ifdef USE_ROCM
 static bool _scaled_mm_is_fnuz() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx942"};
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
 
