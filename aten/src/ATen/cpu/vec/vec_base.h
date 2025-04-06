@@ -740,6 +740,11 @@ struct Vectorized {
   }
 };
 
+template <class T>
+Vectorized<T> inline operator-(const Vectorized<T>& a) {
+  return a.neg();
+}
+
 // There is an implicit conversion that would make this work if
 // these operators weren't template functions, but they are template
 // functions (and can't be moved to be non-member friends defined in
