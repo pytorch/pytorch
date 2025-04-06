@@ -10394,6 +10394,7 @@
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
     CPU: _amp_foreach_non_finite_check_and_unscale_cpu_
+    MPS: _amp_foreach_non_finite_check_and_unscale_mps_
   autogen: _amp_foreach_non_finite_check_and_unscale, _amp_foreach_non_finite_check_and_unscale.out
 
 - func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
@@ -10401,6 +10402,7 @@
   dispatch:
     CUDA: _amp_update_scale_cuda_
     CPU: _amp_update_scale_cpu_
+    MPS: _amp_update_scale_mps_
   autogen: _amp_update_scale, _amp_update_scale.out
 
     #- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
