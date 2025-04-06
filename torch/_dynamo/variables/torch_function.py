@@ -67,6 +67,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -382,7 +383,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.cm_obj = value  # needed for BC with calling enter from CM code
         self.source = source
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # This shouldn't be called unless we have a source
         assert self.source
         self.source.reconstruct(codegen)
@@ -426,7 +427,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
         return ConstantVariable.create(None)
 
-    def reconstruct_type(self, codegen):
+    def reconstruct_type(self, codegen: "PyCodegen"):
         ty = NoEnterTorchFunctionMode
         codegen(
             AttrSource(
