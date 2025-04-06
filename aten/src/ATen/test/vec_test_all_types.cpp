@@ -192,6 +192,11 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+        test_unary<vec>(
+            NAME_INFO(negate), std::negate<ValueType<vec>>(),
+            [](vec v) { return -v; },
+            createDefaultUnaryTestCase<vec>(TestSeed()),
+            RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
       typedef enum  {
