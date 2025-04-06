@@ -866,8 +866,18 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
             # this is a inplace fill, so the other side's device doesn't matter.
             aten.fill_.Tensor,
+            aten.fill.Tensor,
+            aten.masked_fill.Tensor,
+            aten.masked_fill.Scalar,
             # where's data source might have different device types.
             aten.where.self,
+            # a zero dim cpu tensor is often used to time another tensor like a scalar.
+            aten.mul.Tensor,
+            # a zero dim cpu tensor is often used as a denominator like a scalar.
+            aten.div.Tensor,
+            # zero dim cpu tensor is passed as some parameter in these backward methods.
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._efficient_attention_backward.default,
         )
 
         def check_cpu_device(device: torch.device) -> bool:

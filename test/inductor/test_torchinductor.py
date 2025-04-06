@@ -7920,7 +7920,9 @@ class CommonTemplate:
         def fn(a):
             b = a.clone()
             # aten.bernoulli_() uses aten.bernoulli.p() behind the scene, so it will be decomposed.
-            return aten.bernoulli_(b).sum() / torch.prod(torch.tensor(a.size()))
+            return aten.bernoulli_(b).sum() / torch.prod(
+                torch.tensor(a.size(), device=a.device)
+            )
 
         p = 0.3
         self.common(
@@ -7935,7 +7937,9 @@ class CommonTemplate:
     @skip_if_triton_cpu
     def test_bernoulli2(self):
         def fn(a):
-            return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
+            return aten.bernoulli(a).sum() / torch.prod(
+                torch.tensor(a.size(), device=a.device)
+            )
 
         p = 0.3
         self.common(
