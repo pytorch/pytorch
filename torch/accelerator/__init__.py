@@ -51,16 +51,10 @@ def is_available() -> bool:
     .. note:: This API delegates to the device-specific version of `is_available`.
         For example, if the current accelerator is CUDA, it will call
         :func:`~torch.cuda.is_available`, which avoids poisoning when the environment
-<<<<<<< HEAD
         variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. This design ensures that
         fork can safely be used after invoking this API, which is important for
         multiprocessing-based components such as DataLoader and DistributedDataParallel (DDP).
         See :ref:`multiprocessing-poison-fork-note` for more details.
-=======
-        variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set.
-        Some features, such as multiprocessing-based components (e.g., DataLoader, DDP),
-        rely on this behavior. See :ref:`multiprocessing-poison-fork-note` for more details.
->>>>>>> e24afb4d5a7 (Align torch.accelerator.device_count to torch.xxx.device_count)
 
     Example::
 
