@@ -1,6 +1,6 @@
 ARG UBUNTU_VERSION
 
-FROM ubuntu:${UBUNTU_VERSION}
+FROM ubuntu:${UBUNTU_VERSION} as base
 
 ARG UBUNTU_VERSION
 
@@ -52,9 +52,16 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 # Install cuda and cudnn
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu*
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+# No effect if cuda not installed
+ENV USE_SYSTEM_NCCL=1
+ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
+
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -80,18 +87,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install Vulkan SDK
-ARG VULKAN_SDK_VERSION
-COPY ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
-RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
-RUN rm install_vulkan_sdk.sh
-
-# (optional) Install swiftshader
-ARG SWIFTSHADER
-COPY ./common/install_swiftshader.sh install_swiftshader.sh
-RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
-RUN rm install_swiftshader.sh
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
@@ -120,20 +115,21 @@ RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_d
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
 ARG TRITON
-# Install triton, this needs to be done before sccache because the latter will
-# try to reach out to S3, which docker build runners don't have access
+ARG TRITON_CPU
+
+# Create a separate stage for building Triton and Triton-CPU.  install_triton
+# will check for the presence of env vars
+FROM base as triton-builder
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
-
-ARG TRITON_CPU
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
-RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton-cpu.txt
+RUN bash ./install_triton.sh
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
 # Build and install executorch
