@@ -20,7 +20,7 @@ template <typename T>
 kernel void ampNonFiniteCheckAndUnscale(
     constant AmpNonFiniteCheckAndUnscaleArgs<T>& pointerArgs [[buffer(0)]],
     constant MetadataArguments& metadata [[buffer(1)]],
-    device float* foundInf [[buffer(2)]],
+    device float& foundInf [[buffer(2)]],
     constant T& invScale [[buffer(3)]],
     uint local_tid [[thread_position_in_threadgroup]],
     uint tgSize [[threads_per_threadgroup]],
@@ -40,7 +40,7 @@ kernel void ampNonFiniteCheckAndUnscale(
     uint index = offset + i;
     T val = data[index];
     if (!isfinite(val)) {
-      foundInf[0] = 1.0f;
+      foundInf = 1.0f;
     }
     data[index] = (invScale == static_cast<T>(1.0) ? val : val * invScale);
   }
@@ -49,12 +49,12 @@ kernel void ampNonFiniteCheckAndUnscale(
 template <typename T>
 kernel void ampNonFiniteCheckAndUnscaleSingle(
     device T* data [[buffer(0)]],
-    device float* foundInf [[buffer(1)]],
+    device float& foundInf [[buffer(1)]],
     constant T& invScale [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   T val = data[tid];
   if (!isfinite(val)) {
-    foundInf[0] = 1.0f;
+    foundInf = 1.0f;
   }
   data[tid] = (invScale == T(1.0) ? val : val * invScale);
 }
@@ -63,22 +63,19 @@ template <typename T>
 kernel void ampUpdateScale(
     device T* scale [[buffer(0)]],
     device int* growth_tracker [[buffer(1)]],
-    device float* foundInf [[buffer(2)]],
+    device float& foundInf [[buffer(2)]],
     constant T& scaleGrowthFactor [[buffer(3)]],
     constant T& scaleBackoffFactor [[buffer(4)]],
-    constant uint& growthInterval [[buffer(5)]],
+    constant int& growthInterval [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid != 0) {
-    return;
-  }
 
-  if (foundInf[0] != 0.0f) {
+  if (foundInf != 0.0f) {
     *scale = *scale * scaleBackoffFactor;
     *growth_tracker = 0;
   } else {
     int g = *growth_tracker;
     g += 1;
-    if (static_cast<uint>(g) >= growthInterval) {
+    if (g >= growthInterval) {
       *scale = *scale * scaleGrowthFactor;
       g = 0;
     }
@@ -92,7 +89,7 @@ kernel void ampUpdateScale(
       constant AmpNonFiniteCheckAndUnscaleArgs<DTYPE> &                     \
           pointerArgs [[buffer(0)]],                                        \
       constant MetadataArguments & metadata [[buffer(1)]],                  \
-      device float* foundInf [[buffer(2)]],                                 \
+      device float& foundInf [[buffer(2)]],                                 \
       constant DTYPE& invScale [[buffer(3)]],                               \
       uint local_tid [[thread_position_in_threadgroup]],                    \
       uint tgSize [[threads_per_threadgroup]],                              \
@@ -103,7 +100,7 @@ kernel void ampUpdateScale(
       [[host_name("ampNonFiniteCheckAndUnscaleSingle_" #DTYPE)]] kernel void \
       ampNonFiniteCheckAndUnscaleSingle<DTYPE>(                              \
           device DTYPE * data [[buffer(0)]],                                 \
-          device float* foundInf [[buffer(1)]],                              \
+          device float& foundInf [[buffer(1)]],                              \
           constant DTYPE& invScale [[buffer(2)]],                            \
           uint tid [[thread_position_in_grid]])
 
@@ -112,10 +109,10 @@ kernel void ampUpdateScale(
   ampUpdateScale<DTYPE>(                                       \
       device DTYPE * scale [[buffer(0)]],                      \
       device int* growth_tracker [[buffer(1)]],                \
-      device float* foundInf [[buffer(2)]],                    \
+      device float& foundInf [[buffer(2)]],                    \
       constant DTYPE& scaleGrowthFactor [[buffer(3)]],         \
       constant DTYPE& scaleBackoffFactor [[buffer(4)]],        \
-      constant uint& growthInterval [[buffer(5)]],             \
+      constant int& growthInterval [[buffer(5)]],              \
       uint tid [[thread_position_in_grid]])
 
 INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE(float);

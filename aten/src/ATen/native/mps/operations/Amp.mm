@@ -52,33 +52,22 @@ static void _amp_update_scale_mps_impl(Tensor& self,
                                        const Tensor& found_inf,
                                        float scale_growth_factor,
                                        float scale_backoff_factor,
-                                       int64_t growth_interval) {
+                                       int32_t growth_interval) {
   auto stream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
   auto ampUpdatePipelineState = lib.getPipelineStateForFunc("ampUpdateScale_" + mps::scalarToMetalTypeString(self));
-
-  MTLSize threadGroupSize = MTLSizeMake(1, 1, 1);
-  MTLSize gridSize = threadGroupSize;
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     auto computeEncoder = stream->commandEncoder();
     [computeEncoder setComputePipelineState:ampUpdatePipelineState];
 
-    id<MTLBuffer> scaleBuffer = getMTLBufferStorage(self);
-    id<MTLBuffer> growthTrackerBuffer = getMTLBufferStorage(growth_tracker);
-    id<MTLBuffer> foundInfBuffer = getMTLBufferStorage(found_inf);
-    float scaleGrowthFactorVal = static_cast<float>(scale_growth_factor);
-    float scaleBackoffFactorVal = static_cast<float>(scale_backoff_factor);
-    uint32_t growthIntervalVal = static_cast<uint32_t>(growth_interval);
-
     mtl_setArgs(computeEncoder,
-                scaleBuffer,
-                growthTrackerBuffer,
-                foundInfBuffer,
-                scaleGrowthFactorVal,
-                scaleBackoffFactorVal,
-                growthIntervalVal);
-    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+                self,
+                growth_tracker,
+                found_inf,
+                scale_growth_factor,
+                scale_backoff_factor,
+                growth_interval);
+    mtl_dispatch1DJob(computeEncoder,  ampUpdatePipelineState, 1);
   });
 }
 
