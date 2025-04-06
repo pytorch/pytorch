@@ -1817,11 +1817,11 @@ class AotCodeCompiler:
             if config.aot_inductor.embed_cubin:
                 # Embed cubin files into .so using objcopy
                 if config.is_fbcode():
-                    ld = build_paths.ld()
+                    ld = build_paths.ld
                     objcopy = (
-                        build_paths.objcopy_fallback()
+                        build_paths.objcopy_fallback
                         if use_relative_path
-                        else build_paths.objcopy()
+                        else build_paths.objcopy
                     )
                 else:
                     ld = "ld"
@@ -1905,12 +1905,10 @@ class AotCodeCompiler:
 
                     generated_files.append(weight_file)
 
-                generated_files.append(consts_o)
-                generated_files.append(" ".join(gpu_kernels_o))
-
-                so_builder.save_src_to_cmake(cmake_path, consts_o)
-                for gpu_o in gpu_kernels_o:
-                    so_builder.save_src_to_cmake(cmake_path, gpu_o)
+                obj_srcs = [consts_o, *gpu_kernels_o, *cubins_o]
+                generated_files.extend(obj_srcs)
+                for obj in obj_srcs:
+                    so_builder.save_src_to_cmake(cmake_path, obj)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
