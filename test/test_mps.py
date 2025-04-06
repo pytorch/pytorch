@@ -7815,18 +7815,19 @@ class TestMPS(TestCaseMPS):
 
     # Test inverse
     def test_inverse(self):
-        def helper(n):
+        def helper(n, atol=1e-5, rtol=1e-6):
             cpu_input = torch.randn(n, n, device='cpu')
             mps_input = cpu_input.to('mps')
 
             cpu_result = torch.linalg.inv(cpu_input)
             mps_result = torch.linalg.inv(mps_input)
-            self.assertEqual(cpu_result, mps_result)
+            self.assertEqual(cpu_result, mps_result, atol=atol, rtol=rtol)
 
         helper(2)
         helper(6)
         helper(3)
         helper(8)
+        helper(1025, atol=1e-4)
 
     # Test tril
     def test_tril(self):
