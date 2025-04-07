@@ -78,12 +78,13 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
+    alignment = node.get_name() not in V.graph.unaligned_buffers
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -91,6 +92,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # for s0 for s1, just because they happen to share the same
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
+        alignment,
     )
 
 
