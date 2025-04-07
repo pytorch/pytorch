@@ -90,12 +90,12 @@ from .utils import (
     ir_dataclass,
     is_dynamic,
     is_gpu,
-    is_tensor_aligned,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
+    tensor_is_aligned,
 )
 from .virtualized import ops, OpsValue, V
 
@@ -7002,7 +7002,9 @@ class FallbackKernel(ExternKernelAlloc):
                     packed,
                     indices,
                 )
-                if not is_tensor_aligned(output):
+                if config.assume_unaligned_fallback_output or not tensor_is_aligned(
+                    output
+                ):
                     V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
                 return buf
             elif isinstance(output, int):
@@ -8056,7 +8058,9 @@ class _CollectiveKernel(FallbackKernel):
                 for i, tensor in enumerate(example_output)
             ]
             for buf, tensor in zip(packed.outputs, example_output):
-                if not is_tensor_aligned(tensor):
+                if config.assume_unaligned_fallback_output or not tensor_is_aligned(
+                    tensor
+                ):
                     V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
             return packed.outputs
         else:
@@ -8067,7 +8071,9 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
-            if not is_tensor_aligned(example_output):
+            if config.assume_unaligned_fallback_output or not tensor_is_aligned(
+                example_output
+            ):
                 V.graph.unaligned_buffers.add(packed.name)  # type: ignore[arg-type]
             packed.outputs = [packed]
             return packed
