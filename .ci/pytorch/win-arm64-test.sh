@@ -5,7 +5,11 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
+cmd.exe /c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat"
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to bootstrap tests."
+    exit 1
+fi
 
 run_tests() {
 
@@ -14,14 +18,15 @@ run_tests() {
 
     echo Running test_autograd.oy, test_nn.py, test_torch.py...
     push %PYTORCH_ROOT%\test
-    set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
 
-    for /L %%i in (1,1,%1) do (
-        for %%t in (%CORE_TEST_LIST%) do (
-            echo Running test: %%t
-            python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
-        )
-    )
+    CORE_TEST_LIST=("test_autograd.py" "test_nn.py" "test_torch.py")
+
+    for ((i=1; i<=$1; i++)); do
+        for t in "${CORE_TEST_LIST[@]}"; do
+            echo "Running test: $t"
+            python "$t" --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
+        done
+    done
 }
 
 run_tests
