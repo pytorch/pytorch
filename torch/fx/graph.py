@@ -1817,7 +1817,7 @@ class Graph:
         def has_side_effect(node):
             if is_impure_node is not None:
                 return is_impure_node(node)
-            return node.is_impure(impure_random)
+            return node.is_impure()
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
