@@ -13,6 +13,8 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
 
+from torch.testing._internal.common_cuda import CDNA3OrLater
+
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
@@ -157,8 +159,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM \
-                    and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName \
+            if TEST_WITH_ROCM and CDNA3OrLater() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
