@@ -5,13 +5,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import socket
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Optional
 
 from torch.distributed import Store
-from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.distributed.elastic.utils.distributed import get_free_port, get_routable_ip
 
 
 __all__ = [
@@ -86,7 +85,7 @@ class RendezvousStoreInfo:
         """
         # TODO swap to collectives comms API
         if rank == 0:
-            addr = local_addr or socket.gethostbyname(socket.getfqdn())
+            addr = local_addr or get_routable_ip()
             # When TCPStore is not shared, we fallback to get_free_port.
             port = server_port or get_free_port()
             store.set(

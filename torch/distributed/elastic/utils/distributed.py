@@ -17,7 +17,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.elastic.utils.store import barrier
 
 
-__all__ = ["create_c10d_store", "get_free_port", "get_socket_with_port"]
+__all__ = ["create_c10d_store", "get_free_port", "get_socket_with_port", "get_routable_ip"]
 
 logger = get_logger(__name__)
 
@@ -182,3 +182,18 @@ def get_socket_with_port() -> socket.socket:
             s.close()
             logger.warning("Socket creation attempt failed.", exc_info=e)
     raise RuntimeError("Failed to create a socket")
+
+
+def get_routable_ip() -> str:
+    fqdn = socket.getfqdn()
+    addrinfos = socket.getaddrinfo(fqdn, None, proto=socket.IPPROTO_TCP)
+
+    # Try to find a non-loopback IPv4 or IPv6 address
+    for addrinfo in addrinfos:
+        family, _, _, _, sockaddr = addrinfo
+        ip = sockaddr[0]
+        if family == socket.AF_INET or family == socket.AF_INET6:
+            if not ip.startswith("127.") and not ip == "::1":
+                return ip
+
+    raise RuntimeError("No routable IP address found")

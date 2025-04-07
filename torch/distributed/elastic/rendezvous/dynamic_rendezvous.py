@@ -9,7 +9,6 @@ import inspect
 import logging
 import os
 import pickle
-import socket
 import threading
 import time
 import weakref
@@ -22,6 +21,7 @@ from typing import Any, Callable, Optional
 import torch.distributed as dist
 from torch.distributed import Store
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
+from torch.distributed.elastic.utils.distributed import get_routable_ip
 
 from .api import (
     RendezvousClosedError,
@@ -265,7 +265,7 @@ class _NodeDescGenerator:
 
             self._local_id += 1
 
-        addr = local_addr or socket.gethostbyname(socket.getfqdn())
+        addr = local_addr or get_routable_ip()
         return _NodeDesc(addr, os.getpid(), local_id)
 
 
