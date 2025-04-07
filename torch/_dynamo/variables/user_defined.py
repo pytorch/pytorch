@@ -82,6 +82,7 @@ from ..utils import (
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
+from .lists import SizeVariable
 
 
 try:
@@ -96,6 +97,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -600,6 +602,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 assert all(x is not None for x in items)
 
             return variables.NamedTupleVariable(items, self.value)
+        elif self.value is torch.Size:
+            # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
+            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
             items = list(args)
@@ -1523,7 +1529,7 @@ class RemovableHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
             codegen.add_push_null(
