@@ -403,10 +403,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslator"
+    ) -> list["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> list["VariableTracker"]:
+    def force_unpack_var_sequence(
+        self, tx: "InstructionTranslator"
+    ) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -415,7 +419,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # it should only be called once.
         return self.unpack_var_sequence(tx)
 
-    def has_unpack_var_sequence(self, tx) -> bool:
+    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
@@ -423,7 +427,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return False
 
     # NB: don't call force_unpack_var_sequence, especially if it mutates!
-    def has_force_unpack_var_sequence(self, tx) -> bool:
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return self.has_unpack_var_sequence(tx)
 
     # Forces unpacking the var sequence while also applying a function to each element.
@@ -473,7 +477,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -562,7 +566,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx):
+    def next_variable(self, tx: "InstructionTranslator"):
         unimplemented_v2(
             gb_type="Unsupported next() call",
             context=f"next({self})",
@@ -570,7 +574,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.USER_ERROR],
         )
 
-    def is_strict_mode(self, tx):
+    def is_strict_mode(self, tx: "InstructionTranslator"):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
     def is_mutable(self):

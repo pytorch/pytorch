@@ -10,6 +10,7 @@ maintaining type safety through the compilation process.
 
 import operator
 from typing import TYPE_CHECKING
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -82,15 +83,18 @@ its type to `common_constant_types`.
         else:
             self.value = value
 
+    @override
     def as_proxy(self):
         return self.value
 
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
+    @override
     def as_python_constant(self):
         return self.value
 
+    @override
     def is_python_constant(self):
         return True
 
@@ -117,12 +121,14 @@ its type to `common_constant_types`.
             return all(ConstantVariable.is_literal(x) for x in obj)
         return ConstantVariable.is_base_literal(obj)
 
+    @override
     def unpack_var_sequence(self, tx):
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
+    @override
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
             raise NotImplementedError
@@ -131,6 +137,7 @@ its type to `common_constant_types`.
             raise NotImplementedError
         return member
 
+    @override
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -208,6 +215,7 @@ its type to `common_constant_types`.
             return ConstantVariable.create(result)
         return super().call_method(tx, name, args, kwargs)
 
+    @override
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
@@ -241,6 +249,7 @@ class EnumVariable(VariableTracker):
             hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
+    @override
     def as_proxy(self):
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
@@ -249,9 +258,11 @@ class EnumVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
+    @override
     def as_python_constant(self):
         return self.value
 
+    @override
     def var_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
             raise NotImplementedError
