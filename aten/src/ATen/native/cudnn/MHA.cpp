@@ -937,7 +937,7 @@ auto build_graph_backward_nestedtensor(
                             .set_dim({b, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
-  auto scaled_dot_product_flash_attention_backward_options =
+  auto sdpa_backward_options =
       fe::graph::SDPA_backward_attributes()
           .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
           .set_causal_mask(is_causal)
@@ -979,6 +979,17 @@ auto build_graph_backward_nestedtensor(
                                        v_strides[strideidx0],
                                        v_strides[strideidx1],
                                        v_strides[strideidx2]}));
+  auto o_strides = o.strides();
+  auto O_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_uid(O)
+                                  .set_name("O")
+                                  .set_dim({b, h_q, s_q, d_v})
+                                  .set_stride(
+                                      {INT_MAX,
+                                       o_strides[strideidx0],
+                                       o_strides[strideidx1],
+                                       o_strides[strideidx2]}));
+
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     TORCH_CHECK(
@@ -990,7 +1001,7 @@ auto build_graph_backward_nestedtensor(
                               .set_name("bias")
                               .set_dim(attn_bias.value().sizes().vec())
                               .set_stride(attn_bias.value().strides().vec()));
-    scaled_dot_product_flash_attention_backward_options.set_bias(bias.value());
+    sdpa_backward_options.set_bias(bias.value());
   }
   auto RAG_Q_OFF_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -1037,6 +1048,48 @@ auto build_graph_backward_nestedtensor(
                                      .set_dim({b, h_q, s_q, 1})
                                      .set_stride({s_q * h_q, 1, h_q, 1})
                                      .set_data_type(fe::DataType_t::FLOAT));
+  STATS->set_ragged_offset(RAG_STATS_OFF_);
+  auto do_strides = dO.strides();
+  auto DO_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_uid(DO)
+                                 .set_name("DO")
+                                 .set_dim({b, h_q, s_q, d_v})
+                                 .set_stride(
+                                     {INT_MAX,
+                                      do_strides[strideidx0],
+                                      do_strides[strideidx1],
+                                      do_strides[strideidx2]}));
+  auto [Dq, Dk, Dv] = mha_graph->sdpa_backward(
+      Q_, K_, V_, O_, DO_, STATS, sdpa_backward_options);
+  Dq->set_output(true)
+    .set_dim({b, h_q, s_q, d_qk})
+    .set_stride(
+         {INT_MAX,
+          q_strides[strideidx0],
+          q_strides[strideidx1],
+          q_strides[strideidx2]});
+  Dk->set_output(true)
+    .set_dim({b, h_k, s_kv, d_qk})
+    .set_stride(
+        {INT_MAX,
+         k_strides[strideidx0],
+         k_strides[strideidx1],
+         k_strides[strideidx2]});
+  Dv->set_output(true)
+    .set_dim({b, h_v, s_kv, d_v})
+    .set_stride(
+        {INT_MAX,
+         v_strides[strideidx0],
+         v_strides[strideidx1],
+         v_strides[strideidx2]});
+
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+  AT_CUDNN_FRONTEND_CHECK(
+      mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
+  return std::move(mha_graph);
 }
 
 void run_cudnn_SDP_fprop(
