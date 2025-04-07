@@ -769,9 +769,8 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_add_batch_rule(
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim) {
-  auto self_ = self.clone(at::MemoryFormat::Preserve);
   return scatter_batch_rule(ATEN_FN(scatter_add),
-                            self_, self_bdim, dim, index, index_bdim, src, src_bdim);
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> scatter_add__batch_rule(
