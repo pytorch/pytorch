@@ -114,9 +114,9 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   // Convert the boolean parameter to the appropriate integer mode while we wait for 2-week FC window
   int split_k_mode;
   if (split_k_one_kernel) {
-    split_k_mode = CUSPARSE_LT_SPLIT_K_MODE_ONE_KERNEL; 
+    split_k_mode = 1; 
   } else {
-    split_k_mode = CUSPARSE_LT_SPLIT_K_MODE_TWO_KERNELS;
+    split_k_mode = -1;
   }
 
   int tensor_alpha_mode = 0;
