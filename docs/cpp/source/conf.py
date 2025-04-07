@@ -202,11 +202,12 @@ html_theme_options = {
             "icon": "fa-brands fa-python",
         },
     ],
+    "navbar_start": ["pytorch_version"],
+    "display_version": True,
 }
 
 html_context = {
     "theme_variables": theme_variables,
-    "display_github": True,
     "github_url": "https://github.com",
     "github_user": "pytorch",
     "github_repo": "pytorch",
