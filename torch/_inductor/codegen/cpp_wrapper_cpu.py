@@ -949,6 +949,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
 
     def generate_return(self, output_refs: list[str]):
+        # only test
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
