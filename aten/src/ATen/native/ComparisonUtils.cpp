@@ -18,10 +18,8 @@ void _assert_match(const O& original, const C& compared, const std::string& name
     bool equal = (original == compared.value());
     if (!equal) {
       std::stringstream msg;
-      msg << "Tensor " << name << " mismatch!";
-      if (!equal) {
-        throw std::runtime_error(msg.str());
-      }
+      msg << "Tensor " << name << " mismatch! Expected: " << compared.value() << ", Got: " << original;
+      throw std::runtime_error(msg.str());
     }
   }
 }
