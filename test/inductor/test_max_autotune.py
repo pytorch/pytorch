@@ -1381,8 +1381,11 @@ class TestPrologueFusion(TestCase):
             ).run(code_str)
 
     @parametrize("prologue", (False, True))
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM Different layout decisions")
     def test_conv1x1_cast(self, prologue):
-        with torch._inductor.config.patch(prologue_fusion=prologue):
+        with torch._inductor.config.patch(
+            prologue_fusion=prologue, force_layout_optimization=True
+        ):
             conv1x1 = (
                 torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
                 .to(memory_format=torch.channels_last)
