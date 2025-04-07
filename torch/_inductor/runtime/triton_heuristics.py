@@ -527,6 +527,7 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         cfg_kwargs = cfg.kwargs
+        cfg_kwargs.pop("triton_cache_hash", None)
         if self.device_props.type == "hip":
             cfg_kwargs = {**cfg_kwargs}
             for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
