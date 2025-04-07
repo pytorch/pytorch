@@ -28,11 +28,12 @@
 
 namespace at::meta {
 TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() <= 1),
+  TORCH_CHECK((mat.dim() == 2 && (vec.dim() == 1 || (vec.dim() == 2 && vec.size(0) == 1)) && self.dim() <= 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
 
-  TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
-    "size mismatch, got input (", self.size(0), "), mat (", mat.size(0), "x", mat.size(1), "), vec (", vec.size(0), ")");
+  auto vec_size = vec.dim() == 1 ? vec.size(0) : vec.size(1);
+  TORCH_CHECK(mat.size(1) == vec_size && (mat.size(0) == self.numel() || self.numel() == 1),
+    "size mismatch, got input (", self.size(0), "), mat (", mat.size(0), "x", mat.size(1), "), vec (", vec_size, ")");
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
@@ -79,12 +80,14 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
-
       NoNamesGuard guard;
-      if (use_mkldnn_matmul(mat, vec, /*result=*/Tensor())){
+
+#ifndef __aarch64__
+      if (use_mkldnn_matmul(mat, vec, /*result=*/Tensor())) {
         mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
         return;
       }
+#endif
 
       auto r_stride = result.stride(0);
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, mat.scalar_type(), "addmv_impl_cpu", [&] {
@@ -95,8 +98,9 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
               vec.const_data_ptr<scalar_t>(), vec.stride(0), beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else if (mat.stride(1) == 1 && lda_cond(mat.size(1), mat.size(0), mat.stride(0))) {
+          auto vec_stride = vec.dim() == 1 ? vec.stride(0) : vec.stride(1);
           gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(0),
-              vec.const_data_ptr<scalar_t>(), vec.stride(0), beta, result.mutable_data_ptr<scalar_t>(), r_stride);
+              vec.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else {
           Tensor cmat = mat.contiguous();
@@ -121,9 +125,9 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   return at::addmv_out(result, result, self, vec, 0, 1);
 }
 
-Tensor mv(const Tensor &self, const Tensor &vec) {
+Tensor mv(const Tensor& self, const Tensor& vec) {
   Tensor result = at::empty({self.size(0)}, vec.options());
-  //inplace version is more efficient if we can use it
+  // inplace version is more efficient if we can use it
   return at::addmv_(result, self, vec, 0, 1);
 }
 
