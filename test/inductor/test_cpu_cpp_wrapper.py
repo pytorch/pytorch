@@ -169,7 +169,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
-            test_mkldnn_pattern_matcher.TestQuantizedPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherCPU(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
@@ -179,7 +179,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
-            test_mkldnn_pattern_matcher.TestQuantizedPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherCPU(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
