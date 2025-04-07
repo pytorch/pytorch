@@ -67,12 +67,12 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build:
+  linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build:
     if: github.repository_owner == 'pytorch'
-    name: rocm6_3-py3_10-periodic-dynamo-benchmarks
+    name: rocm-py3_10-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm6_3-py3_10
+      build-environment: linux-focal-rocm-py3_10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -95,17 +95,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-test:
+  linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-test:
     permissions:
       id-token: write
       contents: read
-    name: rocm6_3-py3_10-periodic-dynamo-benchmarks
+    name: rocm-py3_10-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build
+    needs: linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-focal-rocm6_3-py3_10
-      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm-py3_10
+      docker-image: ${{ needs.linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp:
