@@ -535,8 +535,18 @@ class MetalKernel(SIMDKernel):
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         """Codegen a reduction operation"""
-        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
-        acc_buf_size = min(reduction_dim.numel, self.max_threadgroup_size)
+        # Establish reduction buffer size and index expression
+        reduction_idx = ""
+        acc_buf_size = 1
+        for rd in self.range_trees:
+            if not rd.is_reduction:
+                continue
+            if reduction_idx:
+                reduction_idx += " + "
+            reduction_idx += f"{rd.name} * {acc_buf_size}"
+            acc_buf_size *= rd.numel
+        acc_buf_size = min(acc_buf_size, self.max_threadgroup_size)
+
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
             self.indexing_code.writeline(f"{acc} = false;")
@@ -571,12 +581,12 @@ class MetalKernel(SIMDKernel):
                 self.compute.splice(f"{val} {reduction_op}= {value};")
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_dim.name}, {acc_buf_size})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmin", "argmax"]:
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
-            acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
+            acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             if not self.multistage_reduction:
                 self.compute.splice(
@@ -597,7 +607,7 @@ class MetalKernel(SIMDKernel):
                 )
                 idx_acc_buf = self._new_idxvar(torch.long, acc_buf_size)
                 cmp_op = ">" if reduction_type == "argmax" else "<"
-                idx_thread_var = f"{idx_acc_buf}[{reduction_dim.name}]"
+                idx_thread_var = f"{idx_acc_buf}[{reduction_idx}]"
                 self.indexing_code.splice(f"{idx_thread_var} = -1;")
                 self.compute.splice(f"""
                 if ({value} {cmp_op} {acc_thread_var}) {{
@@ -623,7 +633,7 @@ class MetalKernel(SIMDKernel):
                 f"Multistage reduction not yet supported for {reduction_type}"
             )
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
-            self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
             wf_res = self.cse.generate(
                 self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
