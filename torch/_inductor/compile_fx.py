@@ -2447,13 +2447,6 @@ class CompiledArtifact:
             return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
-def get_shape_env_from_example_inputs(example_inputs: Sequence[InputType]) -> ShapeEnv:
-    for e in example_inputs:
-        if isinstance(e, torch.SymInt):
-            return e.node.shape_env
-    return ShapeEnv()
-
-
 def standalone_compile(
     gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
 ) -> CompiledArtifact:
