@@ -100,7 +100,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     bool transpose_result,
     int alg_id,
     int split_k,
-    int split_k_mode,
+    bool split_k_one_kernel,
     bool search_alg_id) {
   if (!handle_initialized) {
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
@@ -110,6 +110,14 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
+  
+  // Convert the boolean parameter to the appropriate integer mode while we wait for 2-week FC window
+  int split_k_mode;
+  if (split_k_one_kernel) {
+    split_k_mode = CUSPARSE_LT_SPLIT_K_MODE_ONE_KERNEL; 
+  } else {
+    split_k_mode = CUSPARSE_LT_SPLIT_K_MODE_TWO_KERNELS;
+  }
 
   int tensor_alpha_mode = 0;
   float alpha = 1.0;
