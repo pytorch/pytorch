@@ -308,6 +308,8 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
