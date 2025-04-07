@@ -255,24 +255,25 @@ GEMM_TEMPLATE = r"""
         {%- set tile_qparam = None %}
     {%- endif %}
 {%- endif %}
-                        if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel,
-                                                       tile_X,
-                                                       tile_W,
-                                                       acc_slice,
-                                                       accum=False,
-                                                       qscale_and_zeros=tile_qparam,
-                                                       horizontal_transverse=True)|indent(28, false)
-                            }}
-                        } else {
-                            {{ micro_gemm.codegen_call(kernel,
-                                                       tile_X,
-                                                       tile_W,
-                                                       acc_slice,
-                                                       accum=True,
-                                                       qscale_and_zeros=tile_qparam,
-                                                       horizontal_transverse=True)|indent(28, false)
-                            }}
+                            if (kc == k_block_start) {
+                                {{ micro_gemm.codegen_call(kernel,
+                                                           tile_X,
+                                                           tile_W,
+                                                           acc_slice,
+                                                           accum=False,
+                                                           qscale_and_zeros=tile_qparam,
+                                                           horizontal_transverse=True)|indent(28, false)
+                                }}
+                            } else {
+                                {{ micro_gemm.codegen_call(kernel,
+                                                           tile_X,
+                                                           tile_W,
+                                                           acc_slice,
+                                                           accum=True,
+                                                           qscale_and_zeros=tile_qparam,
+                                                           horizontal_transverse=True)|indent(28, false)
+                                }}
+                            }
                         }
                     }
                 }
