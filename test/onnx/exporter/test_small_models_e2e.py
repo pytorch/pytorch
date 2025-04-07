@@ -450,7 +450,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         dynamic_shapes = (
-            {0: torch.export.Dim("dim_x", min=3)},  # _Dim
+            {0: torch.export.Dim("dim_x", min=3)},  # Dim
             [("custom_name_axis_ys_0",), (torch.export.Dim.AUTO,)],  # custom name
             {
                 "a": {0: torch.export.Dim.AUTO},
