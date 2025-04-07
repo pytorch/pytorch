@@ -1117,11 +1117,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
+            shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
+            if enable_kernel_profile:
+                shim_fn_codes = textwrap.dedent(
+                    f"""
+                    {{
+                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+                      {shim_fn_codes}
+                    }}
+                    """
+                )
+            self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
