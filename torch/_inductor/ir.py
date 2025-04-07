@@ -7795,7 +7795,7 @@ class Conditional(ExternKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.expr]:
+        def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
             if isinstance(s, int):
                 return s
             return s.node.expr
