@@ -126,7 +126,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @overload
-    def __getitem__(self, idx: int) -> T:  # type: ignore[type-var]
+    def __getitem__(self, idx: int) -> Module:
         ...
 
     @overload
