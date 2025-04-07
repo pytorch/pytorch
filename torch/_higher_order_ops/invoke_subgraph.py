@@ -81,56 +81,6 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         return super().__call__(subgraph, identifier, operands)
 
-    def gen_schema(self, *args, **kwargs):
-        import torch.utils._pytree as pytree
-        from torch._higher_order_ops.schema import (
-            CFunctionSchemaGen,
-            HopArgumentInfo,
-            HopArgumentInfoGen,
-        )
-        from torch._higher_order_ops.utils import (
-            check_input_alias_and_mutation_return_ouputs,
-        )
-
-        def _arg_extractor(subgraph, identifier, operands):
-            return subgraph, identifier, operands
-
-        subgraph, identifier, operands = _arg_extractor(*args, **kwargs)
-        mutated_idx, _, _, _, output = check_input_alias_and_mutation_return_ouputs(
-            subgraph, operands
-        )
-        # TODO: need to figure out how to pass the tree_spec to C++ side as a default value.
-        # Right now, the schema can be easily parsed with by operands_schema = arg_schema[2:-1]
-        subgraph_arg = HopArgumentInfoGen.from_example(
-            subgraph, name="subgraph", default_value=None
-        )
-        identifier_arg = HopArgumentInfoGen.from_example(
-            identifier, name="identifier", default_value=None
-        )
-        operand_args: list[HopArgumentInfo] = []
-        for i, arg in enumerate(operands):
-            operand_args.append(
-                HopArgumentInfoGen.from_example(
-                    arg,
-                    name=f"operands_{i}",
-                    default_value=None,
-                    is_mutated=i in mutated_idx,
-                )
-            )
-        tree_spec_arg = HopArgumentInfoGen.from_example(
-            pytree.tree_flatten(operands)[1],
-            name="operands_tree_spec",
-            default_value=None,
-        )
-        output_arg = HopArgumentInfoGen.from_example(
-            tuple(output), name="output", default_value=None
-        )
-        return CFunctionSchemaGen.from_hop_argument_info(
-            "invoke_subgraph",
-            [subgraph_arg, identifier_arg, *operand_args, tree_spec_arg],
-            output_arg,
-        )
-
 
 invoke_subgraph = InvokeSubgraphHOP()
 
