@@ -812,6 +812,12 @@ def maybe_inline_saved_tensors_hooks(
 
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
+    pack_hook, unpack_hook = hooks
+
+    if not hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks") or not hasattr(
+        pack_hook, "_dynamo_inlineable_saved_tensors_hooks"
+    ):
+        return None
 
     fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -1134,10 +1140,9 @@ def aot_dispatch_autograd(
             symint_outs_saved_for_bw = [
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
-            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(

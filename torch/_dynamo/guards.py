@@ -1595,6 +1595,13 @@ class GuardBuilder(GuardBuilderBase):
         def hooks_ids_fn(hooks):
             if hooks is None:
                 return None
+
+            pack_hook, unpack_hook = hooks
+            if not hasattr(
+                pack_hook, "_dynamo_inlineable_saved_tensors_hooks"
+            ) or not hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks"):
+                return None
+
             return tuple(map(id, hooks))
 
         hooks_ids = hooks_ids_fn(

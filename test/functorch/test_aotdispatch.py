@@ -40,6 +40,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._dynamo.decorators import _inlineable_saved_tensors_hook
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -6668,36 +6669,46 @@ metadata incorrectly.
             torch._dynamo.mark_dynamic(x, 1)
             return x
 
+        @_inlineable_saved_tensors_hook()
         def pack_dev_sym_cpu(x):
             return (x.device, x.size(0), 10 * x.cpu())
 
+        @_inlineable_saved_tensors_hook()
         def unpack_dev_sym_cpu(packed):
             device, dim0, tensor = packed
             ret = tensor.to(device=device) * dim0
             return ret
 
+        @_inlineable_saved_tensors_hook()
         def pack_tensor(x):
             return x.cpu()
 
+        @_inlineable_saved_tensors_hook()
         def unpack_tensor(packed):
             t_cpu = packed
             return t_cpu.to(device=device)
 
+        @_inlineable_saved_tensors_hook()
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
 
+        @_inlineable_saved_tensors_hook()
         def unpack_bf16(x):
             return x.to(dtype=torch.float)
 
+        @_inlineable_saved_tensors_hook()
         def pack_mul2(x):
             return x * 2
 
+        @_inlineable_saved_tensors_hook()
         def unpack_mul2(x):
             return x / 2
 
+        @_inlineable_saved_tensors_hook()
         def pack_float8(x):
             return (x.dtype, x.to(torch.float8_e4m3fn))
 
+        @_inlineable_saved_tensors_hook()
         def unpack_float8(packed):
             dtype, tensor = packed
             return tensor.to(dtype)
@@ -6712,6 +6723,7 @@ metadata incorrectly.
             res = res.to(torch.float32)
             return res
 
+        @_inlineable_saved_tensors_hook()
         def pack_fp8_with_scale(x):
             amax = torch.max(torch.abs(x))
             scale = amax_to_scale(amax, torch.float8_e4m3fn)
@@ -6719,20 +6731,25 @@ metadata incorrectly.
             x_fp8 = x_scaled.to(torch.float8_e4m3fn)
             return x.dtype, scale, x_fp8
 
+        @_inlineable_saved_tensors_hook()
         def unpack_fp8_with_scale(x):
             dtype, scale, x_fp8 = x
             y = x_fp8.to(dtype) / scale
             return y
 
+        @_inlineable_saved_tensors_hook()
         def pack_wrapper_sc(x):
             return WrapperSubclass(x)
 
+        @_inlineable_saved_tensors_hook()
         def unpack_wrapper_sc(x):
             return x.a
 
+        @_inlineable_saved_tensors_hook()
         def pack_wrapper_two_tensor(x):
             return TwoTensor(x, x)
 
+        @_inlineable_saved_tensors_hook()
         def unpack_wrapper_two_tensor(x):
             return x.a + x.b
 
@@ -6754,51 +6771,7 @@ metadata incorrectly.
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_recomp_saved_tensors_hooks(self):
-        class SAF(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
-
-        class AF(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                ctx.d1 = x.size(1)
-                return x
-
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                d1 = ctx.d1
-                return gx + saved_x * d1
-
-        def fn(x):
-            x = x.relu()
-            x = x + 1
-            x = 2 * x
-            x = AF.apply(x)
-            return x
-
-        def simple_fn(x):
-            x = x + 1
-            x = SAF.apply(x)
-            return x
-
-        device = torch.device("cuda:0")
-
-        def inp_fn():
-            x = torch.ones(2, 3, device=device, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            torch._dynamo.mark_dynamic(x, 1)
-            return x
-
+    def test_saved_tensors_hooks_recompile(self):
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
 
@@ -6811,23 +6784,93 @@ metadata incorrectly.
         def unpack_mul2(x):
             return x / 2
 
-        from torch._dynamo.testing import CompileCounter
+        @_inlineable_saved_tensors_hook()
+        def inlineable_pack_bf16(x):
+            return x.to(dtype=torch.bfloat16)
 
-        cnt = CompileCounter()
-        x = inp_fn()
-        y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
-        y.sum().backward()
+        @_inlineable_saved_tensors_hook()
+        def inlineable_unpack_bf16(x):
+            return x.to(dtype=torch.float)
 
-        with torch.autograd.graph.saved_tensors_hooks(pack_bf16, unpack_bf16):
+        @_inlineable_saved_tensors_hook()
+        def inlineable_pack_mul2(x):
+            return x * 2
+
+        @_inlineable_saved_tensors_hook()
+        def inlineable_unpack_mul2(x):
+            return x / 2
+
+        def _test(hooks, expected_compile_count):
+            class SAF(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    return gx + saved_x
+
+            class AF(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    ctx.d1 = x.size(1)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    d1 = ctx.d1
+                    return gx + saved_x * d1
+
+            def fn(x):
+                x = x.relu()
+                x = x + 1
+                x = 2 * x
+                x = AF.apply(x)
+                return x
+
+            def simple_fn(x):
+                x = x + 1
+                x = SAF.apply(x)
+                return x
+
+            device = torch.device("cuda:0")
+
+            def inp_fn():
+                x = torch.ones(2, 3, device=device, requires_grad=True)
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                return x
+
+            from torch._dynamo.testing import CompileCounter
+
+            cnt = CompileCounter()
             x = inp_fn()
             y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
             y.sum().backward()
 
-        with torch.autograd.graph.saved_tensors_hooks(pack_mul2, unpack_mul2):
-            x = inp_fn()
-            y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
-            y.sum().backward()
-        self.assertEqual(cnt.frame_count, 3)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks[0]):
+                x = inp_fn()
+                y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+                y.sum().backward()
+
+            with torch.autograd.graph.saved_tensors_hooks(*hooks[1]):
+                x = inp_fn()
+                y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+                y.sum().backward()
+            self.assertEqual(cnt.frame_count, expected_compile_count)
+
+        _test(((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)), 1)
+        _test(
+            (
+                (inlineable_pack_bf16, inlineable_unpack_bf16),
+                (inlineable_pack_mul2, inlineable_unpack_mul2),
+            ),
+            3,
+        )
 
 
 # entries in here don't work and need to be fixed.

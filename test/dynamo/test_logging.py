@@ -733,8 +733,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 | +- __SHAPE_GUARD__: torch._C._autograd._top_saved_tensors_default_hooks(True)     # #:# in #
-+- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) > 5)  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # @torch.compile(dynamic=True, backend="eager")  # #:# in # #:# in # and def f(x, y):  # #:# in # #:# in #""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
++- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
