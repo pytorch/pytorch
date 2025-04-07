@@ -1373,7 +1373,7 @@ class TestFxGraphCache(TestCase):
                 compiled_artifact.save(file)
 
             with fresh_inductor_cache():
-                loaded = torch._inductor.compile_fx.CompiledArtifact.load(file, args)
+                loaded = torch._inductor.compile_fx.CompiledArtifact.load(file)
                 compiled_out = loaded(*args)
                 self.assertEqual(eager_out, compiled_out)
 

@@ -82,6 +82,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
+from torch._subclasses import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import (
@@ -2407,7 +2408,7 @@ class CompiledArtifact:
                 file.write(writer.to_bytes())
 
     @staticmethod
-    def load(filename: str, *example_args: Any) -> CompiledArtifact:
+    def load(filename: str) -> CompiledArtifact:
         with dynamo_timed("CompiledArtifact.load"):
             with open(filename, "rb") as file:
                 artifacts = file.read()
@@ -2435,9 +2436,13 @@ class CompiledArtifact:
                 boxed_forward_device_index=BoxedDeviceIndex(0),
             )
 
-            with config.patch(unsafe_skip_cache_dynamic_shape_guards=True):
+            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            with (
+                torch._guards.tracing(context),
+                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+            ):
                 compiled_fn = entry.wrap_post_compile(
-                    list(example_args), entry.sanitized_aot_config, fx_config
+                    [], entry.sanitized_aot_config, fx_config
                 )
             return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
@@ -2452,24 +2457,22 @@ def get_shape_env_from_example_inputs(example_inputs: Sequence[InputType]) -> Sh
 def standalone_compile(
     gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
 ) -> CompiledArtifact:
-    from torch._subclasses import FakeTensorMode
-
-    shape_env = get_shape_env_from_example_inputs(example_inputs)
-    torch._guards._TLS.tracing_context = torch._guards.TracingContext(
-        FakeTensorMode(shape_env=shape_env)
-    )
-
     from torch.compiler._cache import CacheArtifactManager
 
-    with CacheArtifactManager.with_fresh_cache():
-        compiled_fn = compile_fx(gm, example_inputs, **kwargs)
-        assert callable(compiled_fn)
+    shape_env = shape_env_from_inputs(example_inputs, default=True)
+    assert shape_env is not None
 
-        artifacts = torch.compiler.save_cache_artifacts()
-        if artifacts is None:
-            log.warning(
-                "standalone_compile artifact generation failed, cannot save. "
-                "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
-            )
+    context = torch._guards.TracingContext(FakeTensorMode(shape_env=shape_env))
+    with torch._guards.tracing(context):
+        with CacheArtifactManager.with_fresh_cache():
+            compiled_fn = compile_fx(gm, example_inputs, **kwargs)
+            assert callable(compiled_fn)
+
+            artifacts = torch.compiler.save_cache_artifacts()
+            if artifacts is None:
+                log.warning(
+                    "standalone_compile artifact generation failed, cannot save. "
+                    "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
+                )
 
     return CompiledArtifact(compiled_fn, artifacts)
