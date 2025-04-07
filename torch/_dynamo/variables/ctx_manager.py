@@ -159,7 +159,6 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def fn_name(self):
         return type(self.cm_obj).__name__
 
-    @override
     def enter(self, tx: "InstructionTranslator"):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
@@ -168,7 +167,6 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             source=source,
         ).call_function(tx, [], {})
 
-    @override
     def exit(self, tx: "InstructionTranslator", *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
