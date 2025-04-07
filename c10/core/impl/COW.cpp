@@ -242,8 +242,7 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
       // `data_ptr.get()` gives an address in MPS space even though the
       // `src_device` is CPU. So both the data_ptr and new_data_ptr will always
       // be in the address space of the dest device.
-      new_data_ptr =
-          dst_allocator->clone(data_ptr.get(), storage.nbytes(), /*sync=*/true);
+      new_data_ptr = dst_allocator->clone(data_ptr.get(), storage.nbytes());
     }
   }
 
