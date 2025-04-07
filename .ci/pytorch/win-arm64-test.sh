@@ -17,7 +17,7 @@ run_tests() {
     python ./.ci/pytorch/smoke_test/smoke_test.py --package torchonly
 
     echo Running test_autograd.oy, test_nn.py, test_torch.py...
-    push test
+    cd test
 
     CORE_TEST_LIST=("test_autograd.py" "test_nn.py" "test_torch.py")
 
