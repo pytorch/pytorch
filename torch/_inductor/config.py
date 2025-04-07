@@ -1270,7 +1270,7 @@ class aot_inductor:
     precompile_headers: bool = False
 
     # Embed generated .cubin files into the .so
-    embed_cubin: bool = True
+    embed_cubin: bool = False
 
 
 class cuda:
