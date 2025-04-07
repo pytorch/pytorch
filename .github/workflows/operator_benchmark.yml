@@ -11,6 +11,9 @@ on:
         type: string
         default: 'short'
         description: tag filter for operator benchmarks, options from long, short, all
+  schedule:
+    # Run at 07:00 UTC every Sunday
+    - cron: 0 7 * * 0
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

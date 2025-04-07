@@ -66,7 +66,7 @@ runs:
 
     - name: configure aws credentials
       if : ${{ inputs.aws-role-to-assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v3
+      uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ inputs.aws-role-to-assume }}
         role-session-name: gha-linux-test

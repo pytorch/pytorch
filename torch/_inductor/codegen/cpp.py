@@ -5457,20 +5457,21 @@ class LoopNest:
         start_depth = 0
         max_depth = 0
         is_reduction = self.loops[0].is_reduction
-        loop_sizes = sympy.Integer(1)
+        num_steps = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            loop_sizes = loop_sizes * loop.size
+            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
             max_depth += 1
 
-        # When the range of the first inner loop is much larger than the range of all outer loops,
-        # change `start_depth` to the first inner loop and recalculate `max_depth`.
+        # When the number of steps of the first inner loop is much larger than the number of steps of
+        # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
             max_depth < len(self.loops)
-            and isinstance(loop_sizes, sympy.Integer)
+            and isinstance(num_steps, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
-            and loop_sizes * 300 < self.loops[max_depth].size
+            and num_steps * 300
+            < FloorDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
         ):
             start_depth = max_depth
             max_depth = 0

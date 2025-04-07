@@ -2469,6 +2469,30 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_gqa(self, device):
+        batch = 4
+        seq_len_q = 512
+        seq_len_kv = 1024
+        D = 128
+        # Sample call to SDPA - GQ
+        query = torch.rand(batch, 32, seq_len_q, D, device='cuda', dtype=torch.bfloat16)
+        key = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        # cuDNN supports h_k != h_v
+        value = torch.rand(batch, 4, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        with sdpa_kernel([SDPBackend.MATH]):
+            output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+
+        with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+            with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
+                output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
+            output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+
+        self.assertEqual(output_math, output_cudnn)
+
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
@@ -2505,9 +2529,16 @@ class TestSDPACudaOnly(NNTestCase):
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
         v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
 
+        device_cap = torch.cuda.get_device_capability()
+        ISSM90 = device_cap == (9, 0)
+        ISSM100 = device_cap == (10, 0)
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+            # SM90/100 support d <= 256 as of cuDNN 9.5.1+
+            if (ISSM90 or ISSM100) and torch.backends.cudnn.version() >= 90501:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                    torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")

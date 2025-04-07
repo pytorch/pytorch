@@ -6,8 +6,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING, Union
 
-import numpy
-
 import onnx
 
 import torch
@@ -15,7 +13,7 @@ from torch._subclasses import fake_tensor
 
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
+    import onnx.defs  # noqa: TCH004
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested
@@ -69,27 +67,6 @@ def from_python_type_to_onnx_attribute_type(
     if is_sequence:
         return _SEQUENCE_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
     return _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
-
-
-def from_python_type_to_onnx_tensor_element_type(type: type):
-    """
-    Converts a Python type to the corresponding ONNX tensor element type.
-    For example, `from_python_type_to_onnx_tensor_element_type(float)` returns
-    `onnx.TensorProto.FLOAT`.
-
-    Args:
-      type (type): The Python type to convert.
-
-    Returns:
-      int: The corresponding ONNX tensor element type.
-
-    """
-    _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
-        float: onnx.TensorProto.FLOAT,  # type: ignore[attr-defined]
-        int: onnx.TensorProto.INT64,  # type: ignore[attr-defined]
-        bool: onnx.TensorProto.BOOL,  # type: ignore[attr-defined]
-    }
-    return _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE.get(type)
 
 
 def is_torch_symbolic_type(value: Any) -> bool:
@@ -183,37 +160,6 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.uint8: "u8",
 }
 
-_TORCH_DTYPE_TO_NUMPY_DTYPE = {
-    torch.float16: numpy.float16,
-    torch.float32: numpy.float32,
-    torch.float64: numpy.float64,
-    torch.uint8: numpy.uint8,
-    torch.int8: numpy.int8,
-    torch.int16: numpy.int16,
-    torch.int32: numpy.int32,
-    torch.int64: numpy.longlong,
-    torch.bool: numpy.bool_,
-}
-
-_ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE = {
-    onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E5M2: torch.float8_e5m2,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E5M2FNUZ: torch.float8_e5m2fnuz,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E4M3FN: torch.float8_e4m3fn,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E4M3FNUZ: torch.float8_e4m3fnuz,  # type: ignore[attr-defined]
-    onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
-    onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
-    onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
-}
-
-_TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
-    value: key for key, value in _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE.items()
-}
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
 META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]

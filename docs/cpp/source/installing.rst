@@ -162,10 +162,9 @@ meets the following requirements:
 
 1. **GLIBC Version**:
   - GLIBC 2.29 or newer for cxx11 ABI version
-  - GLIBC 2.17 or newer for pre-cxx11 ABI version
 
 2. **GCC Version**:
-  - GCC 9 or newer for cxx11 and pre-cxx11 ABI versions
+  - GCC 9 or newer for cxx11
 
 Visual Studio Extension
 -----------------------

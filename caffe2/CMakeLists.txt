@@ -568,6 +568,7 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
@@ -1315,10 +1316,6 @@ if(BUILD_TEST)
       ${TORCH_ROOT}/test/cpp/aoti_inference
       ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  include(../cmake/CheckAbi.cmake)
 endif()
 
 # CMake config for external projects.

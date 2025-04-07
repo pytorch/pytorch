@@ -51,31 +51,8 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
-#ifndef WIN32
-#include <pthread.h>
-#endif
 
 using namespace torch;
-
-static bool in_bad_fork = false; // True for children forked after cuda init
-
-#ifndef WIN32
-// Called in the forked child if cuda has already been initialized
-static void forked_child() {
-  in_bad_fork = true;
-  torch::utils::set_requires_device_init(at::kCUDA, true);
-}
-#endif
-
-// Should be called before the first cuda call.
-// Note: This is distinct from initExtension because a stub cuda implementation
-// has some working functions (e.g. device_count) but cannot fully initialize.
-static void poison_fork() {
-#ifndef WIN32
-  static auto result [[maybe_unused]] =
-      pthread_atfork(nullptr, nullptr, forked_child);
-#endif
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
@@ -160,14 +137,17 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
+  // Note: This is distinct from initExtension because a stub cuda
+  // implementation has some working functions (e.g. device_count) but cannot
+  // fully initialize.
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
 #ifdef CUDA_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
   return THPUtils_packString(flags);
@@ -179,7 +159,7 @@ PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
 
 static PyObject* THCPModule_isInBadFork(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(in_bad_fork);
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kCUDA));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1513,8 +1493,8 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
       "please rebuild pytorch without asan if you need to use this module");
 #endif
   HANDLE_TH_ERRORS
-  TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
-  poison_fork();
+  TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kCUDA));
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));

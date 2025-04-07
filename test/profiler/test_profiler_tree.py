@@ -690,6 +690,7 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
+    @skipIfTorchDynamo("segfaults in 3.13+")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )

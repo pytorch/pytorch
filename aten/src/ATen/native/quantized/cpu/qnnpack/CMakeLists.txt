@@ -391,6 +391,12 @@ elseif(NOT TARGET fxdiv AND USE_SYSTEM_FXDIV)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fxdiv)
 
+# -- [ CMake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0" AND NOT (USE_SYSTEM_PSIMD OR USE_SYSTEM_FP16))
+  message(WARNING "Ancient psimd/FP16 forces CMake compatibility")
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
 # ---[ Configure psimd
 if(NOT TARGET psimd AND NOT USE_SYSTEM_PSIMD)
   add_subdirectory(
@@ -422,6 +428,11 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fp16)
+
+# -- [ Undo cmake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
+endif()
 
 install(TARGETS pytorch_qnnpack
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

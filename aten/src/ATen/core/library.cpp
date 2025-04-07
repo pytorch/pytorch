@@ -58,6 +58,18 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+namespace detail {
+  std::vector<TorchLibraryInit*> torch_library_initializers;
+} // namespace detail
+void initialize_torch_libraries() {
+  for (auto* initializer : detail::torch_library_initializers) {
+    initializer->initialize();
+  }
+  detail::torch_library_initializers.clear();
+}
+#endif
+
 Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? std::nullopt : std::make_optional(std::move(ns)))

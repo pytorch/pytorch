@@ -251,14 +251,75 @@ class Match:
             else contextlib.nullcontext()
         )
 
+        def should_propagate_eager_input_vals(nodes: list[torch.fx.Node]) -> bool:
+            if len(nodes) != 1:
+                return False
+            node = nodes[0]
+            if "eager_input_vals" not in node.meta:
+                return False
+            return node.target in OrderedSet(
+                [
+                    torch.ops.higher_order.triton_kernel_wrapper_functional,
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ]
+            )
+
         with context:
             if trace_fn is None:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-            replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-            )
+
+            if should_propagate_eager_input_vals(self.nodes):
+                # Our strategy is:
+                # 1) trace out the graph with eager_input_vals (which have accurate eager-mode metadata)
+                # 2) trace out the graph with vals (which have the accurate Inductor metadata)
+                # 3) Propagate the eager_input_vals from the first graph to the second.
+                # 4) Use the second graph as the replacement graph.
+
+                # Construct a map of node -> FakeTensor val in eager_input_vals
+                node_to_val = {}
+
+                fake_args, fake_kwargs = self.nodes[0].meta["eager_input_vals"]
+                fake_kwargs = {**fake_kwargs}
+                match_args, match_kwargs = tuple(self.args), self.kwargs
+
+                def record(node: torch.fx.Node, val: Any) -> None:
+                    if isinstance(node, torch.fx.Node):
+                        node_to_val[node] = val
+
+                torch.utils._pytree.tree_map(
+                    record, (match_args, match_kwargs), (fake_args, fake_kwargs)
+                )
+                # map args to their FakeTensor val in eager_input_vals
+                example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
+
+                # first graph
+                graph_with_eager_vals = trace_fn(replacement_fn, example_vals)
+
+                # second graph
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement = trace_fn(graph_with_eager_vals, example_vals)
+
+                # propagate metadata from first graph to second
+                # NB: This assertion might not be true in general, but it is true for
+                # the two use cases we have
+                # (triton_kernel_wrapper_functional, auto_functionalized)
+                assert len(graph_with_eager_vals.graph.nodes) == len(
+                    replacement.graph.nodes
+                )
+                for old_node, new_node in zip(
+                    graph_with_eager_vals.graph.nodes, replacement.graph.nodes
+                ):
+                    if "eager_input_vals" in old_node.meta:
+                        new_node.meta["eager_input_vals"] = old_node.meta[
+                            "eager_input_vals"
+                        ]
+
+            else:
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -1083,6 +1144,11 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name="Interpreter_Replacer",
                     )
+                    # This function copy-pastes the replacement graph into
+                    # the graph. If the replacement graph had any eager_input_vals,
+                    # or val/tensor_meta, we propagate those over.
+                    if "eager_input_vals" in node.meta:
+                        result.meta["eager_input_vals"] = node.meta["eager_input_vals"]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):

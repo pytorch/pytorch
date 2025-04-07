@@ -111,7 +111,7 @@ class L1Loss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
           :math:`(*)`, same shape as the input.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.L1Loss()
         >>> input = torch.randn(3, 5, requires_grad=True)
@@ -154,8 +154,8 @@ class NLLLoss(_WeightedLoss):
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_{y_n} x_{n,y_n}, \quad
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \\
+        l_n = - w_{y_n} x_{n,y_n}, \\
         w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
     where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
@@ -207,7 +207,7 @@ class NLLLoss(_WeightedLoss):
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
           Otherwise, scalar.
 
-    Examples::
+    Examples:
 
         >>> log_softmax = nn.LogSoftmax(dim=1)
         >>> loss_fn = nn.NLLLoss()
@@ -317,7 +317,7 @@ class PoissonNLLLoss(_Loss):
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
-    Examples::
+    Examples:
 
         >>> loss = nn.PoissonNLLLoss()
         >>> log_input = torch.randn(5, 2, requires_grad=True)
@@ -402,7 +402,7 @@ class GaussianNLLLoss(_Loss):
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
           shape as the input
 
-    Examples::
+    Examples:
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
@@ -515,14 +515,14 @@ class KLDivLoss(_Loss):
         - Output: scalar by default. If :attr:`reduction` is `'none'`, then :math:`(*)`,
           same shape as the input.
 
-    Examples::
+    Examples:
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
         >>> # Sample a batch of distributions. Usually this would come from the dataset
         >>> target = F.softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, target)
-
+        >>>
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
         >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
@@ -593,7 +593,7 @@ class MSELoss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MSELoss()
         >>> input = torch.randn(3, 5, requires_grad=True)
@@ -675,7 +675,7 @@ class BCELoss(_WeightedLoss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
-    Examples::
+    Examples:
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
@@ -746,7 +746,7 @@ class BCEWithLogitsLoss(_Loss):
     then ``pos_weight`` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
 
-    Examples::
+    Examples:
 
         >>> target = torch.ones([10, 64], dtype=torch.float32)  # 64 classes, batch size = 10
         >>> output = torch.full([10, 64], 1.5)  # A prediction (logit)
@@ -794,7 +794,7 @@ class BCEWithLogitsLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
-     Examples::
+    Examples:
 
         >>> loss = nn.BCEWithLogitsLoss()
         >>> input = torch.randn(3, requires_grad=True)
@@ -939,7 +939,7 @@ class MultiLabelMarginLoss(_Loss):
         - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MultiLabelMarginLoss()
         >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
@@ -1261,7 +1261,7 @@ class CrossEntropyLoss(_WeightedLoss):
                 N ={} & \text{batch size} \\
             \end{aligned}
 
-    Examples::
+    Examples:
 
         >>> # Example of target with class indices
         >>> loss = nn.CrossEntropyLoss()
@@ -1401,7 +1401,7 @@ class CosineEmbeddingLoss(_Loss):
         - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.CosineEmbeddingLoss()
         >>> input1 = torch.randn(3, 5, requires_grad=True)
@@ -1466,7 +1466,7 @@ class MarginRankingLoss(_Loss):
         - Target: :math:`(N)` or :math:`()`, same shape as the inputs.
         - Output: scalar. If :attr:`reduction` is ``'none'`` and Input size is not :math:`()`, then :math:`(N)`.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MarginRankingLoss()
         >>> input1 = torch.randn(3, requires_grad=True)
@@ -1545,7 +1545,7 @@ class MultiMarginLoss(_WeightedLoss):
         - Target: :math:`(N)` or :math:`()`, where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the target.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MultiMarginLoss()
         >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
@@ -1645,7 +1645,7 @@ class TripletMarginLoss(_Loss):
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
           input shape is :math:`(N, D)`; a scalar otherwise.
 
-    Examples::
+    Examples:
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
@@ -1756,7 +1756,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
           otherwise.
 
-    Examples::
+    Examples:
 
     >>> # Initialize embeddings
     >>> embedding = nn.Embedding(1000, 128)
@@ -1886,7 +1886,7 @@ class CTCLoss(_Loss):
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)` if input is batched or
           :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
-    Examples::
+    Examples:
 
         >>> # Target are to be padded
         >>> T = 50      # Input sequence length

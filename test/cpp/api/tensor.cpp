@@ -76,6 +76,14 @@ TEST(TensorTest, ToTensorAndTensorAttributes) {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
 }
 
+TEST(TensorTest, TensorAttributes) {
+  std::vector<float> v = {1.0, 2.0, 3.0};
+  auto options = c10::requires_grad(true);
+  auto tensor = at::from_blob(v.data(), {3}, options);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+  ASSERT_TRUE(tensor.requires_grad());
+}
+
 // Not currently supported.
 // TEST(TensorTest, ToLayout) {
 //   auto tensor = at::empty({3, 4});

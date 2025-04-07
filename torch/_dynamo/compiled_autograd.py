@@ -83,6 +83,91 @@ def maybe_clone(x):
     return x
 
 
+# Note: [Anomaly Mode Semantics in Compiled Autograd]
+# In the eager autograd engine, anomaly mode is able to detect NaNs
+# after each node. This is useful, because the executed code with
+# and without anomaly mode are the same. So assuming determinism,
+# a NaN in regular mode should also happen in anomaly mode.
+#
+# With torch.compile, following eager semantics would require inserting
+# runtime asserts to check for NaNs, which could prevent some fusions.
+# This results in different code being run with and without anomaly mode.
+# So different semantics are needed, this implementation below will check
+# for NaNs at the end of the autograd call, instead of after each node
+class NaNChecker:
+    def __init__(self, accumulate_grad: bool):
+        self.accumulate_grad = accumulate_grad
+        self.params_indices: list[int] = []
+        self.params_to_check: dict[str, torch.Tensor] = {}
+        self.output_names: list[str] = []
+
+    def prep_with_graph(self, graph: torch.fx.Graph):
+        inputs_node = next(iter(graph.nodes))
+        acc_grad_nodes = graph.find_nodes(
+            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+        )
+        output_nodes = graph.find_nodes(op="output")[0].args[0]
+        assert self.accumulate_grad == bool(
+            acc_grad_nodes
+        ) and self.accumulate_grad == (not output_nodes)
+
+        for node in acc_grad_nodes:
+            param_node = node.args[0]
+            # AccumulateGrad always saves a reference to the param
+            # so Compiled Autograd will always lift the param and
+            # this should always be true
+            assert (
+                param_node.target == operator.getitem
+                and param_node.args[0] is inputs_node  # type: ignore[possibly-undefined]
+                and isinstance(param_node.args[1], int)
+            )
+            self.params_indices.append(param_node.args[1])
+
+        self.output_names = [node.name for node in output_nodes]
+
+    def prep_with_inputs(self, inputs: tuple[torch.Tensor]):
+        if not self.accumulate_grad:
+            # Using .grad, nothing to prep
+            return
+
+        # Using .backward, we must check existing grads on params if any
+        for idx in self.params_indices:
+            grad = inputs[idx].grad
+            if grad is not None:
+                assert not torch.isnan(grad).any(), (
+                    f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
+                    "having NaN gradient. This is not supported."
+                )
+
+            self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
+
+    def check(self, out: tuple[torch.Tensor]):
+        if self.accumulate_grad:
+            # Using .backward, graph outputs are empty
+            assert not out
+            nan_params: list[str] = []
+            for inputs_str, param in self.params_to_check.items():
+                assert param.grad is not None  # not true for autograd.grad
+                if torch.isnan(param.grad).any():
+                    nan_params.append(inputs_str)
+
+            if nan_params:
+                raise RuntimeError(
+                    f"Compiled Autograd returned NaN gradients for parameters: {','.join(nan_params)}."
+                )
+        else:
+            # Using .grad, graph outputs are grads
+            nan_grads: list[str] = []
+            for i, grad in enumerate(out):
+                if torch.isnan(grad).any():
+                    nan_grads.append(self.output_names[i])
+
+            if nan_grads:
+                raise RuntimeError(
+                    f"Compiled Autograd returned NaN gradients for output nodes: {','.join(nan_grads)}."
+                )
+
+
 # We lazily bind "functional backward" variants for PyTorch built-in autograd
 # nodes to this class. Example: torch._dynamo.compiled_autograd.ops.MulBackward0
 # Each "functional backward" is bound the first time the node's apply_with_saved
@@ -188,12 +273,15 @@ class AutogradCompilerInstance:
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
+        accumulate_grad: bool,
+        check_nans: bool,
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
+        self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         get_chromium_event_logger().log_event_start(
             "compiled_autograd",
@@ -646,6 +734,18 @@ class AutogradCompilerInstance:
             self.bind_objects_to_proxies([inputs[i]], [proxy])
         return inputs
 
+    def cpp_tensor_pre_hook(self, inputs: list[torch.Tensor], hook_id: int, i: int):
+        proxy = self.fx_tracer.create_proxy(
+            "call_function",
+            torch._C._dynamo.compiled_autograd.call_cpp_tensor_pre_hooks,
+            (hook_id, self.to_proxy(inputs[i])),
+            {},
+        )
+        with disable_proxy_modes_tracing():
+            inputs[i] = maybe_clone(inputs[i])
+            self.bind_objects_to_proxies([inputs[i]], [proxy])
+        return inputs
+
     def pre_hook(self, inputs, hook_id):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
@@ -830,6 +930,8 @@ class AutogradCompilerInstance:
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
         self.dce()
+        if self.nan_checker:
+            self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
@@ -851,11 +953,17 @@ class AutogradCompilerInstance:
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
+                if self.nan_checker:
+                    self.nan_checker.prep_with_inputs(inputs)
+
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
+                    out = compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
+                    if self.nan_checker:
+                        self.nan_checker.check(out)
+                    return out
             finally:
                 in_compiled_autograd_region = False
 
@@ -1187,7 +1295,27 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def _enable(compiler_fn, dynamic=True):
+def _enable(compiler_fn, dynamic: bool = True):
+    # The entrypoint to enable CA.
+    # It is recommended to enable via `torch._dynamo.config.compiled_autograd = True` rather
+    # than using this context manager directly. If you are torch.compiling the corresponding
+    # forward pass, make sure they are wrapped under this context as well.
+    #
+    # Example:
+    #   def train(model, inputs, target):
+    #     compiled_model = torch.compile(model)
+    #     pred = compiled_model(data)
+    #     loss = compute_loss(pred, target)
+    #     loss.backward()
+    #
+    #   with _enable(compiler_fn):
+    #      train(model, inputs, target)
+    #
+    # Inputs:
+    # - compiler_fn: The wrapper that will consume the compiled autograd graph, e.g. `torch.compile`
+    # - dynamic: Whether compiled autograd will treat tensors in the autograd graph (params, activations) as dynamic.
+    #   This doesn't affect the dynamic configuration of the compilation wrapper.
+
     if dynamic:
         assert type(dynamic) is bool
 

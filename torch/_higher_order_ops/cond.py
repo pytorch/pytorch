@@ -204,7 +204,7 @@ def materialize_as_graph(
     exclude_key_set: torch._C.DispatchKeySet,
     force_enable_grad=False,
 ) -> torch.fx.GraphModule:
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():

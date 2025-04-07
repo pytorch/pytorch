@@ -1330,9 +1330,6 @@ auto Engine::execute(
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
-    TORCH_CHECK(
-        !AnomalyMode::is_enabled(),
-        "compiled_autograd does not support AnomalyMode")
     GraphTaskGuard guard(graph_task);
     CheckpointValidGuard cpvguard(graph_task);
     return (*compiled_autograd)(

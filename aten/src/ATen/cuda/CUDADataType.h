@@ -90,6 +90,10 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
     case c10::ScalarType::Float8_e5m2fnuz:
       return HIP_R_8F_E5M2_FNUZ;
 #endif
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
+    case c10::ScalarType::Float4_e2m1fn_x2:
+      return CUDA_R_4F_E2M1;
+#endif
     default:
       TORCH_INTERNAL_ASSERT(false, "Cannot convert ScalarType ", scalar_type, " to cudaDataType.")
   }

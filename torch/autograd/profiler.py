@@ -629,7 +629,7 @@ class profile:
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
-                if self.use_device == "privateuseone":
+                if self.use_device == _get_privateuse1_backend_name():
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
                     if privateuse1_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, privateuse1_time)

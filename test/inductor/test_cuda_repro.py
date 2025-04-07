@@ -37,10 +37,15 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
-    skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+
+
+if TEST_WITH_ROCM:
+    config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -187,7 +192,6 @@ class CudaReproTests(TestCase):
 
             self.assertEqual(out, f(*inputs))
 
-    @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -1403,7 +1407,6 @@ class CudaReproTests(TestCase):
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
 
-    @skipIfRocm
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -1450,7 +1453,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
-    @skipIfRocm
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 

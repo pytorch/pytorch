@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.15)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/mobile/lightweight_dispatch)

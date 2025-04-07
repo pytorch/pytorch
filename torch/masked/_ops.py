@@ -14,11 +14,11 @@ from torch.masked.maskedtensor.creation import as_masked_tensor
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, tuple[int], list[int]]]
+    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[tuple[int]]
+    DimOrDims = Optional[tuple[int, ...]]
 
 
 __all__: list[str] = []

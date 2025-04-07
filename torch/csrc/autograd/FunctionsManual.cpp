@@ -1450,6 +1450,62 @@ Tensor mm_mat2_backward(
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
+Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
+          mat1_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  auto mat1_dim = mat1_sizes.size();
+  if (mat1_strides[mat1_dim - 2] == 1 &&
+      mat1_strides[mat1_dim - 1] == mat1_sizes[mat1_dim - 2]) {
+    auto grad_inp =
+        (at::_grouped_mm(mat2, grad.transpose(-2, -1), offs)).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = (at::_grouped_mm(grad, mat2.transpose(-2, -1), offs));
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
+}
+
+Tensor _grouped_mm_mat2_backward(
+    const Tensor& grad,
+    const Tensor& mat1,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
+    c10::Layout mat2_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
+          mat2_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  auto mat2_dim = mat2_sizes.size();
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  if (mat2_strides[mat2_dim - 2] == 1 &&
+      mat2_strides[mat2_dim - 1] == mat2_sizes[mat2_dim - 2]) {
+    auto grad_inp =
+        at::_grouped_mm(grad.transpose(-2, -1), mat1, offs).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = at::_grouped_mm(mat1.transpose(-2, -1), grad, offs);
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
+}
+
 Tensor mm_mat1_sparse_backward(
     const Tensor& grad,
     const Tensor& mat1,

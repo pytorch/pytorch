@@ -2813,7 +2813,10 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
-            return super()._to_number(number_like, id=id)
+            number = super()._to_number(number_like, id=id)
+            if type(number) not in self._TYPE_TO_DTYPE.keys():
+                self._inputs_not_supported()
+            return number
 
 
 class TensorOrArrayPair(TensorLikePair):

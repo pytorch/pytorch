@@ -508,4 +508,14 @@ __host__ __device__
 
 #endif
 
+// This macro is used to find older C++ compilers
+// that don't support move optimization for return values.
+
+#if (defined(__GNUC__) && __GNUC__ < 13) || \
+    (defined(__clang_major__) && __clang_major__ < 13)
+#define C10_RETURN_MOVE_IF_OLD_COMPILER 1
+#else
+#define C10_RETURN_MOVE_IF_OLD_COMPILER 0
+#endif
+
 #endif // C10_MACROS_MACROS_H_

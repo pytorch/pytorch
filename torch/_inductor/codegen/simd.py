@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -1653,6 +1654,11 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            # dump provenance node info for ComboKernelNode/ForeachKernel type
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(
+                    combo_kernel_node.snodes, kernel_name
+                )
             self.codegen_comment([combo_kernel_node])
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
@@ -1759,7 +1765,11 @@ class SIMDScheduling(BaseScheduling):
             return tilings
 
         pointwise_ranges, reduction_ranges = node.get_ranges()
-        if len(pointwise_ranges) <= 1 and len(reduction_ranges) <= 1:
+        if (
+            len(pointwise_ranges) <= 1
+            and len(reduction_ranges) <= 1
+            or free_unbacked_symbols(pointwise_ranges + reduction_ranges)
+        ):
             return []
 
         # Tile either pointwise or reduction dims.
@@ -2008,7 +2018,11 @@ class SIMDScheduling(BaseScheduling):
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+
+                if (
+                    free_unbacked_symbols([a1, b1])
+                    or V.graph.sizevars.size_hint(a1 - b1) == 0
+                ):
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger

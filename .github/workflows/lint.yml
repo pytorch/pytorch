@@ -207,7 +207,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python 3.9
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           architecture: x64
@@ -233,10 +233,8 @@ jobs:
             runner: linux.24_04.4x
           - test_type: without_torch
             runner: linux.24_04.4x
-          # NOTE: The oldest supported version of python for 24.04 is 3.8
-          #       so this cannot be updated if we want to keep this test at 3.6
           - test_type: older_python_version
-            runner: linux.20_04.4x
+            runner: linux.24_04.4x
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
@@ -254,9 +252,9 @@ jobs:
           echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
       - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.6
+          python-version: 3.8
           architecture: x64
           check-latest: false
           cache: pip
@@ -264,7 +262,7 @@ jobs:
             **/requirements.txt
       - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64

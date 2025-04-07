@@ -68,6 +68,7 @@ if triton is not None:
         def _log2(x: Any) -> Any:
             raise NotImplementedError
 
+    HAS_WARP_SPEC = hasattr(tl, "async_task")
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -100,6 +101,8 @@ else:
 
         tensor = Any
         dtype = Any
+
+    HAS_WARP_SPEC = False
 
 
 def cc_warp_size(cc: Union[str, int]) -> int:
