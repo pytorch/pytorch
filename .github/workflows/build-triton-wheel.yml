@@ -12,6 +12,8 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .github/scripts/windows/install_vs2022.ps1
+      - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   workflow_dispatch:
@@ -20,6 +22,8 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .github/scripts/windows/install_vs2022.ps1
+      - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
@@ -244,7 +248,6 @@ jobs:
           .github/scripts/windows/build_triton.bat
           mkdir -p "${RUNNER_TEMP}/artifacts/"
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
-
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
