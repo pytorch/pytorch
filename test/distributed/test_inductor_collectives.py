@@ -9,7 +9,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
-import torch.distributed as dist
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 import torch.distributed._functional_collectives as _functional_collectives
@@ -135,6 +134,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         """
         Tests whether cudagraph trees support all_reduce from nccl
         """
+        import torch.distributed as dist
 
         # dist.all_reduce is an inplace op in eager mode but a functionanlized op in compiled mode.
         # so we define eager_func and func separately for the same semantic.
@@ -1417,56 +1417,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(force_disable_caches=True)
-    def test_inductor_default_comms_ordering(self):
-        pg_info = self.get_world_trs()
-        tag = pg_info["tag"]
-        ranks = pg_info["ranks"]
-        group_size = pg_info["group_size"]
-
-        g1 = torch.ones(10, 10, device="cuda")
-        g2 = torch.ones(11, 11, device="cuda")
-        g3 = torch.ones(12, 12, device="cuda")
-
-        def assert_pass(graph):
-            # all_reduces need to remain in order!
-            self.assertExpectedInline(
-                graph,
-                """\
-graph():
-    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%arg0_1, 1), kwargs = {})
-    %all_reduce : [num_users=1] = call_function[target=torch.ops._c10d_functional.all_reduce.default](args = (%add, sum, 0), kwargs = {})
-    %full : [num_users=0] = call_function[target=torch.ops.aten.full.default](args = ([4, 4], 1), kwargs = {dtype: torch.float32, layout: torch.strided, device: cuda:0, pin_memory: False})
-    %wait_tensor : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce,), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 2), kwargs = {})
-    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([4, 4], 23.0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cuda:0, pin_memory: False})
-    return (wait_tensor, add_1, full_default)""",  # noqa: B950
-            )
-
-        torch._inductor.config.post_grad_custom_post_pass = assert_pass
-
-        @torch.compile
-        def fn(g1, g2, g3):
-            handle1 = torch.ops.c10d_functional.all_reduce(
-                g1, "avg", tag, ranks, group_size
-            )
-            handle2 = torch.ops.c10d_functional.all_reduce(
-                g2, "avg", tag, ranks, group_size
-            )
-            handle3 = torch.ops.c10d_functional.all_reduce(
-                g3, "avg", tag, ranks, group_size
-            )
-
-            # wait on them in a different order
-            grad3 = torch.ops._c10d_functional.wait_tensor.default(handle3)
-            grad2 = torch.ops._c10d_functional.wait_tensor.default(handle2)
-            grad1 = torch.ops._c10d_functional.wait_tensor.default(handle1)
-            return grad3, grad2, grad1
-
-        fn(g1, g2, g3)
 
 
 if __name__ == "__main__":
