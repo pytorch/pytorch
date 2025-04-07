@@ -1125,8 +1125,8 @@ def lint_test_case_extension(suite):
             test_case = first_test
 
         if test_case is not None:
-            test_class = test_case.id().split('.', 1)[1].split('.')[0]
             if not isinstance(test_case, TestCase):
+                test_class = test_case.id().split('.', 1)[1].split('.')[0]
                 err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
                 print(f"{test_class} - failed. {err}")
                 succeed = False
@@ -1716,6 +1716,16 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
     return decorator
+
+
+def make_dynamo_test_class(cls):
+    """Decorator to apply make_dynamo_test to all test methods in a class."""
+    for attr_name in dir(cls):
+        if attr_name.startswith('test'):
+            attr = getattr(cls, attr_name)
+            if callable(attr):
+                setattr(cls, attr_name, make_dynamo_test(attr))
+    return cls
 
 
 def make_dynamo_test(
@@ -3159,6 +3169,9 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
+    def _dynamo_test_key(self):
+        return f"{self.__class__.__name__}.{self._testMethodName}"
+
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
 
@@ -3233,17 +3246,21 @@ class TestCase(expecttest.TestCase):
         )
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
+            method = getattr(self, self._testMethodName)
             if TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+                method = torch._dynamo.optimize("aot_eager_decomp_partition")(method)
+                setattr(self, self._testMethodName, method)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                    method = torch._dynamo.optimize("inductor")(method)
+                    setattr(self, self._testMethodName, method)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+                    method = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(method)
+                    setattr(self, self._testMethodName, method)
 
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
+                key = self._dynamo_test_key()
 
                 def expect_failure(f, file_name):
                     @wraps(f)

@@ -18,6 +18,8 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    # CPython tests
+    'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -398,6 +400,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'test/dynamo/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -936,6 +939,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
+    'test/dynamo/cpython/3.13/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1131,6 +1135,7 @@ exclude_patterns = [
     'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
+    'test/dynamo/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1547,6 +1552,7 @@ exclude_patterns = [
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'test/dynamo/cpython/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
