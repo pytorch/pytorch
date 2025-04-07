@@ -1,5 +1,25 @@
 # mypy: ignore-errors
 
+"""
+Dictionary-related variable tracking classes for PyTorch Dynamo.
+
+This module implements variable tracking for different types of dictionary-like objects:
+- Regular Python dictionaries (dict)
+- Ordered dictionaries (collections.OrderedDict)
+- Default dictionaries (collections.defaultdict)
+- Dictionary views (keys and values)
+- Sets and frozensets (implemented internally using dictionaries)
+
+These classes are responsible for tracking dictionary operations during graph compilation,
+maintaining proper guards for dictionary mutations and key existence checks. They handle
+dictionary creation, modification, key/value access, and view operations while ensuring
+correct behavior in the compiled code through appropriate guard installation.
+
+The implementation uses a special _HashableTracker wrapper to handle dictionary keys
+while preserving proper aliasing semantics. Sets are implemented as dictionaries with
+None values for efficiency and code reuse.
+"""
+
 import collections
 import functools
 import types
@@ -12,12 +32,19 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
+from ..utils import (
+    cmp_name_to_op_mapping,
+    dict_items,
+    dict_keys,
+    dict_values,
+    specialize_symnode,
+)
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -137,9 +164,9 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
-                other
-            ), type(other)
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
+                type(other)
+            )
             if isinstance(other, Hashable):
                 return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
@@ -237,7 +264,7 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -356,7 +383,7 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import BuiltinVariable, ConstantVariable, TupleVariable
+        from . import BuiltinVariable, ConstantVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -378,9 +405,7 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-            return TupleVariable(
-                [TupleVariable([k.vt, v]) for k, v in self.items.items()]
-            )
+            return DictItemsVariable(self)
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
@@ -522,8 +547,13 @@ class MappingProxyVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # load types.MappingProxyType
+        if self.source:
+            unimplemented(
+                "Can't reconstruct an existing mapping variable because"
+                " the connection to the original dict will be lost"
+            )
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -542,6 +572,16 @@ class MappingProxyVariable(VariableTracker):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
+        if self.source and tx.output.side_effects.has_existing_dict_mutation():
+            unimplemented(
+                "A dict has been modified while we have an existing mappingproxy object. "
+                "A mapping proxy object, as the name suggest, proxies a mapping "
+                "object (usually a dict). If the original dict object mutates, it "
+                "is reflected in the proxy object as well. For an existing proxy "
+                "object, we do not know the original dict it points to. Therefore, "
+                "for correctness we graph break when there is dict mutation and we "
+                "are trying to access a proxy object."
+            )
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
 
@@ -642,7 +682,7 @@ class SetVariable(ConstDictVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
@@ -747,7 +787,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -823,7 +863,7 @@ class DictViewVariable(VariableTracker):
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert self.kv in ("keys", "values")
+        assert self.kv in ("keys", "values", "items")
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
 
@@ -838,12 +878,9 @@ class DictViewVariable(VariableTracker):
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
-        def unwrap(x):
-            return x.vt if self.kv == "keys" else x
+        return self.view_items_vt
 
-        return [unwrap(x) for x in self.view_items]
-
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
@@ -903,3 +940,15 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
+
+
+class DictItemsVariable(DictViewVariable):
+    kv = "items"
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        return [variables.TupleVariable([k.vt, v]) for k, v in self.view_items]
+
+    def python_type(self):
+        return dict_items

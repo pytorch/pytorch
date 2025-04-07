@@ -1,4 +1,22 @@
 # mypy: ignore-errors
+
+"""
+This module contains miscellaneous variable tracker implementations for various Python types
+and features used in Dynamo's symbolic execution. These classes help track and propagate
+information about different kinds of variables during graph capture.
+
+Key classes include:
+- SuperVariable: Handles super() calls and method resolution
+- ExceptionVariable: Tracks exception objects
+- RandomVariable: Manages random number generators
+- GetAttrVariable: Tracks attribute access
+- MethodWrapperVariable: Handles method wrappers
+- PythonModuleVariable: Tracks Python modules
+- NumpyVariable: Handles numpy functions and types
+- StringFormatVariable: Manages string formatting
+- DebuggingVariable: Handles print and logging
+"""
+
 import dataclasses
 import functools
 import inspect
@@ -14,10 +32,10 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, variables
+from .. import config, trace_rules, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
@@ -26,16 +44,20 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    istype,
+    list_methods,
     proxy_args_kwargs,
     set_example_value,
     tuple_methods,
 )
 from .base import VariableTracker
+from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -60,7 +82,7 @@ class SuperVariable(VariableTracker):
         # cls for a classmethod)
         self.objvar = objvar
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
@@ -140,6 +162,14 @@ class SuperVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
+        # This essentially simulates CPython's `super_getattro`:
+        # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
+        # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
+        #
+        # However, `res`'s type needs to be checked for `tp_descr_get`, and
+        # applied if it has one. We currently don't have polyfills for all the
+        # relevant `tp_descr_get`, so we explicitly handle the cases we care
+        # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
@@ -219,6 +249,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in tuple_methods
         ):
             return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedListVariable)
+            and inner_fn in list_methods
+        ):
+            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -240,6 +275,37 @@ class SuperVariable(VariableTracker):
 
             source = self.source and AttrSource(self.source, attr_name)
             return VariableTracker.build(tx, attr_value, source)
+        elif inner_fn is torch._C._disabled_torch_function_impl:
+            # See `THPModule_disable_torch_function` for the C impl.
+            # The signature of _disabled_torch_function_impl is similar to
+            # `__torch_function__`, just without the first `cls` argument:
+            #  * (func, types, args, kwargs)
+            func = args[0]
+            tf_kwargs = {}
+            tf_args = args[2].items
+            for hash_key_vt, value_vt in args[3].items.items():
+                key_str = hash_key_vt.vt.as_python_constant()
+                tf_kwargs[key_str] = value_vt
+
+            output_old = tx.output.torch_function_enabled
+            tx_old = tx.symbolic_torch_function_state.torch_function_subclass_enabled
+            tx.output.torch_function_enabled = False
+            tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
+            try:
+                return func.call_function(tx, tf_args, tf_kwargs)
+            finally:
+                tx.output.torch_function_enabled = output_old
+                tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
+                    tx_old
+                )
+        elif (
+            isinstance(inner_fn, types.MethodDescriptorType)
+            and inner_fn in trace_rules.get_tensor_method()
+        ):
+            # FunctionType but implementation is in C, we support some of these,
+            # e.g., tensor ops like `torch.Tensor.to`.
+            fn_var = VariableTracker.build(tx, inner_fn, source)
+            return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -250,19 +316,113 @@ class ExceptionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.exc_type = exc_type
         self.args = args
+        # When raising a new exception while another exception is already being
+        # handled, the new exception's __context__ attribute is automatically
+        # set to the handled exception.
+        self.__context__ = ConstantVariable(None)
+        # Set when user raised an exception from another:
+        # raise ... from ...
+        self.__cause__ = ConstantVariable(None)
+        # Boolean flag that controls whether the __context__ attribute is set
+        self.__suppress_context__ = ConstantVariable(False)
+        # Contains the call stack where the exception was raised. Dynamo does
+        # not track traceback. So, this variable is always set to None
+        self.__traceback__ = ConstantVariable(None)
 
-    def reconstruct(self, codegen):
+    def set_context(self, context: "ExceptionVariable"):
+        self.__context__ = context
+
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
 
-    def __str__(self):
-        return f"ExceptionVariable({self.exc_type})"
+        def codegen_attr(name: str) -> None:
+            attr = getattr(self, name)
+            if istype(attr, ConstantVariable):
+                assert attr.value in (True, False, None), attr
+            else:
+                codegen.dup_top()
+                codegen(attr)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
 
-    def __repr__(self):
-        return f"ExceptionVariable({self.exc_type})"
+        codegen_attr("__context__")
+        codegen_attr("__cause__")
+        codegen_attr("__suppress_context__")
+
+    def python_type(self):
+        return self.exc_type
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        def raise_error(msg):
+            raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+
+        name = name_var.as_python_constant()
+        if name == "__context__":
+            self.set_context(val)
+        elif name == "__cause__":
+            if (isinstance(val, ConstantVariable) and val.value is None) or isinstance(
+                val,
+                (
+                    variables.BuiltinVariable,
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            ):
+                self.__cause__ = val
+                self.__suppress_context__ = variables.ConstantVariable(True)
+            else:
+                raise_error("exception cause must be None or derive from BaseException")
+        elif name == "__suppress_context__":
+            if isinstance(val, ConstantVariable) and val.value in (True, False):
+                self.__suppress_context__ = val
+            else:
+                raise_error("exception cause must be None or derive from BaseException")
+        elif name == "__traceback__":
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.__traceback__ = val
+            else:
+                unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+        else:
+            unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+        return variables.ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        elif name == "with_traceback":
+            [tb] = args
+            self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
+            return self
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__context__":
+            return self.__context__
+        elif name == "__cause__":
+            return self.__cause__
+        elif name == "__suppress_context__":
+            return self.__suppress_context__
+        elif name == "__traceback__":
+            return variables.ConstantVariable(None)
+        elif name == "args":
+            return variables.ListVariable(self.args, source=self.source)
+        return super().var_getattr(tx, name)
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.exc_type})"
+
+    __repr__ = __str__
 
 
 class UnknownVariable(VariableTracker):
@@ -276,6 +436,24 @@ class DelayGraphBreakVariable(UnknownVariable):
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
 
+    def __init__(self, msg=None, **kwargs):
+        super().__init__(**kwargs)
+        self.msg = msg
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented_v2(
+            gb_type="Unsupported function call (delayed)",
+            context=f"source: {self.source}",
+            explanation="Dynamo determined that a graph break should occur "
+            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            hints=[],
+        )
+
 
 class ComptimeVariable(VariableTracker):
     """
@@ -283,7 +461,7 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError("comptime is special form")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
@@ -500,11 +678,10 @@ class AutogradFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ):
-        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if is_callable_allowed(self.fn_cls):
+            if trace_rules.is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -522,8 +699,6 @@ class AutogradFunctionVariable(VariableTracker):
         elif name == "backward":
             return self.call_backward(tx, args, kwargs)
         else:
-            from .. import trace_rules
-
             source = AttrSource(self.source, name) if self.source is not None else None
             try:
                 obj = inspect.getattr_static(self.fn_cls, name)
@@ -688,9 +863,9 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert (
-                    tx.one_graph
-                ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                assert tx.one_graph, (
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                )
                 return variables.UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                     source=self.source,
@@ -770,7 +945,7 @@ class GetAttrVariable(VariableTracker):
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
@@ -987,7 +1162,7 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # We're just trying to load the type here. Reconstructing the type from
         # scratch is tricky - for a type like `typing.List[int]` we'd need to
         # deconstruct the origin and args.  The origin for `List[int]` is `list`
@@ -1162,7 +1337,7 @@ class NullVariable(VariableTracker):
     def __repr__(self) -> str:
         return "NullVariable"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         codegen.append_output(create_instruction("PUSH_NULL"))
@@ -1203,7 +1378,7 @@ class StringFormatVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1252,7 +1427,7 @@ class DebuggingVariable(VariableTracker):
 
         tx.debug_locals.append((self, list(args)))
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         return self.source.reconstruct(codegen)
 
     @staticmethod
@@ -1547,7 +1722,7 @@ class RandomVariable(VariableTracker):
             return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1587,3 +1762,8 @@ class WeakRefVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.referent_vt
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
+        codegen(self.referent_vt)
+        codegen.extend_output(create_call_function(1, False))

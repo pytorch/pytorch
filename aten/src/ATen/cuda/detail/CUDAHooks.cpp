@@ -329,7 +329,7 @@ std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
   int runtimeVersion = 0;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  AT_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
   auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM
@@ -448,8 +448,14 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
 }
 
 #ifdef USE_ROCM
-bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index) const {
+  hipDeviceProp_t* prop;
+  if (device_index == -1){
+      prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+      prop = at::cuda::getDeviceProperties(device_index);
+  }
+
   std::string device_arch = prop->gcnArchName;
   for (std::string arch : archs) {
       size_t substring = device_arch.find(arch);

@@ -16,7 +16,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
 )
 
 
@@ -659,7 +658,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
@@ -2670,12 +2669,32 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(y, t.sin())
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    def test_WITH_EXCEPT_START(self):
+        @contextmanager
+        def ctx():
+            try:
+                yield
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                with ctx():
+                    raise ValueError
+            except ValueError:
+                return t.sin()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+
 
 class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 
-    @unittest.expectedFailure
     def test_contextmanager_plain(self):
         state = []
 
@@ -2879,7 +2898,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2))
 
-    @unittest.expectedFailure
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_contextmanager_except(self):
         state = []
 
@@ -2956,7 +2975,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             with woohoo():
                 raise StopIteration
 
-    @unittest.expectedFailure
     def test_keywords(self):
         # Ensure no keyword arguments are inhibited
         @contextmanager
@@ -2970,7 +2988,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(2, 3))
 
-    @unittest.expectedFailure
     def test_recursive(self):
         depth = 0
         ncols = 0
