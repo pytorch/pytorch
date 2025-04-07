@@ -198,6 +198,7 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(a_clone, b_clone)
         self.assertTrue((a == orig_tensor.to(a.device)).all())
         self.assertTrue((b == orig_tensor.to(b.device)).all())
+        self.assertEqual(a.cpu(), b.cpu())
         self.assertEqual(a, b)
 
         self.assertEqual(a.device, src_device_check)
