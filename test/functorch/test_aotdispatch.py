@@ -6753,6 +6753,12 @@ metadata incorrectly.
         def unpack_wrapper_two_tensor(x):
             return x.a + x.b
 
+        def pack_mul2_eager(x):
+            return x * 2
+
+        def unpack_mul2_eager(x):
+            return x / 2
+
         for test_fn in [simple_fn, fn]:
             _test_pack_hooks(test_fn, inp_fn, [(pack_bf16, unpack_bf16)])
             _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2)])
@@ -6769,6 +6775,7 @@ metadata incorrectly.
             _test_pack_hooks(
                 test_fn, inp_fn, [(pack_fp8_with_scale, unpack_fp8_with_scale)]
             )
+            _test_pack_hooks(test_fn, inp_fn, [(pack_mul2_eager, unpack_mul2_eager)])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks_recompile(self):

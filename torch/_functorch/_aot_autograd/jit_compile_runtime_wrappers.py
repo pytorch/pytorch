@@ -81,6 +81,7 @@ from .utils import (
     get_cuda_generator_meta_val,
     make_boxed_func,
     strict_zip,
+    top_saved_tensors_hooks_are_inlineable,
     unlift_tokens,
 )
 
@@ -805,19 +806,14 @@ def maybe_log_graph(gm, graph_name, structured_log_tag, aot_config):
 def maybe_inline_saved_tensors_hooks(
     fw_module, bw_module, num_inner_fwd_outputs, aot_config
 ):
-    hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-
-    if not hooks:
-        return
-
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
-    pack_hook, unpack_hook = hooks
 
-    if not hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks") or not hasattr(
-        pack_hook, "_dynamo_inlineable_saved_tensors_hooks"
-    ):
-        return None
+    hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+    if not top_saved_tensors_hooks_are_inlineable(hooks):
+        return
+
+    pack_hook, unpack_hook = hooks
 
     fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]

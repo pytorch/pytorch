@@ -10,7 +10,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import get_func_call, HAS_CPU, HAS_CUDA
 
 
 # Make the helper files in test/ importable
@@ -24,6 +24,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     check_model_cuda,
     copy_tests,
+    skip_if_cpp_wrapper,
 )
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
@@ -126,7 +127,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
-    @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("CUDA only")
@@ -196,6 +197,7 @@ if HAS_CUDA:
         @unittest.skipIf(
             torch.cuda.device_count() < 2, "The test need at least 2 devices"
         )
+        @skip_if_cpp_wrapper("This tests triton scheduling directly")
         def test_benchmark_on_non_zero_device(self):
             hit_count = 0
             with torch.cuda.device("cuda:0"):
@@ -265,9 +267,7 @@ if HAS_CUDA:
                 res, code = run_and_get_code(foo_c, m, inp)
 
             torch._dynamo.reset()
-            with unittest.mock.patch.object(
-                torch._inductor.config, "benchmark_epilogue_fusion", False
-            ):
+            with config.patch(benchmark_epilogue_fusion=False):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
                     res2, code2 = run_and_get_code(foo_c, m, inp)
@@ -276,32 +276,34 @@ if HAS_CUDA:
             return code, code2
 
         @fresh_inductor_cache()
-        @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+        @config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
             for out_code in [code, code2]:
-                FileCheck().check("def call").check_count(
-                    "empty_strided_cuda", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_0.run").check_count(
-                    "del", 3, exactly=True
+                FileCheck().check(get_func_call()).check_count(
+                    "empty_strided", 1, exactly=True
+                ).check("triton_tem_fused_addmm_relu_0").check_count(
+                    ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
                 ).check(
-                    "return"
+                    "" if config.cpp_wrapper else "return"
                 ).run(
                     out_code[0]
                 )
 
         @fresh_inductor_cache()
-        @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+        @config.patch(max_autotune_gemm_backends="ATEN")
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
 
             code, code2 = self._equivalent_output_code_impl(512, 1, False)
 
             for out_code in [code, code2]:
-                FileCheck().check("def call").check_count(
-                    "empty_strided_cuda", 1, exactly=True
-                ).check("extern_kernels.").check_count("del", 3, exactly=True).check(
-                    "return"
+                FileCheck().check(get_func_call()).check_count(
+                    "empty_strided", 1, exactly=True
+                ).check("" if config.cpp_wrapper else "extern_kernels.").check_count(
+                    ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
+                ).check(
+                    "" if config.cpp_wrapper else "return"
                 ).run(
                     out_code[0]
                 )

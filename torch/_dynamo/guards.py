@@ -1593,15 +1593,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard):
         def hooks_ids_fn(hooks):
-            if hooks is None:
+            if not torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable(
+                hooks
+            ):
                 return None
 
             pack_hook, unpack_hook = hooks
-            if not hasattr(
-                pack_hook, "_dynamo_inlineable_saved_tensors_hooks"
-            ) or not hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks"):
-                return None
-
             return tuple(map(id, hooks))
 
         hooks_ids = hooks_ids_fn(

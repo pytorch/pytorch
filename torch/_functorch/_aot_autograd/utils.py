@@ -500,3 +500,13 @@ def get_cuda_generator_meta_val(device_idx: int):
     it is fine to use in the meta.
     """
     return torch.cuda.default_generators[device_idx].clone_state()
+
+
+def top_saved_tensors_hooks_are_inlineable(hooks) -> bool:
+    if not hooks:
+        return False
+
+    pack_hook, unpack_hook = hooks
+    return hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks") and hasattr(
+        unpack_hook, "_dynamo_inlineable_saved_tensors_hooks"
+    )
