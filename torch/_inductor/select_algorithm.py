@@ -10,7 +10,6 @@ import logging
 import math
 import operator
 import os
-import pickle
 import re
 import sys
 import textwrap
@@ -385,8 +384,8 @@ class TritonTemplateKernel(TritonKernel):
 
         self.cached_replay_events: RecordedEventsType = []
 
-    def input_dependent_preserved_state(self) -> bytes:
-        return pickle.dumps([self.args, self.prologue_supported_inputs])
+    def input_dependent_preserved_state(self) -> str:
+        return repr([self.args, self.prologue_supported_inputs])
 
     def record_input_dependent_tracked_event(self) -> Callable[..., Any]:
         def decorator(fn) -> Callable[..., Any]:
@@ -1137,7 +1136,7 @@ class GeneratedCodeCache:
         num_consumer_groups: int,
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
-    ) -> Optional[bytes]:
+    ) -> Optional[str]:
         symbol_mapping = {}
         next_symbol_index = 1
 
@@ -1170,25 +1169,25 @@ class GeneratedCodeCache:
             )
 
         if subgraphs is None and workspace_arg is None:
-            cache_key = {
-                "input_nodes": [layout_key(input.layout) for input in input_nodes],
-                "num_stages": num_stages,
-                "num_warps": num_warps,
-                "prefix_args": prefix_args,
-                "suffix_args": suffix_args,
-                "call_sizes": normalize_list(call_sizes),
-                "layout": layout_key(layout),
-                "num_consumer_groups": num_consumer_groups,
-                "num_buffers_warp_spec": num_buffers_warp_spec,
-                "kwargs": kwargs,
-                "epilogue_fn": id(epilogue_fn),
-            }
-            return pickle.dumps(cache_key)
+            return repr(
+                {
+                    "input_nodes": [layout_key(input.layout) for input in input_nodes],
+                    "num_stages": num_stages,
+                    "num_warps": num_warps,
+                    "prefix_args": prefix_args,
+                    "suffix_args": suffix_args,
+                    "call_sizes": normalize_list(call_sizes),
+                    "layout": layout_key(layout),
+                    "num_consumer_groups": num_consumer_groups,
+                    "num_buffers_warp_spec": num_buffers_warp_spec,
+                    "kwargs": kwargs,
+                    "epilogue_fn": id(epilogue_fn),
+                }
+            )
+
         return None
 
-    def get_entry(
-        self, cache_key: Optional[bytes]
-    ) -> Optional[GeneratedCodeCacheEntry]:
+    def get_entry(self, cache_key: Optional[str]) -> Optional[GeneratedCodeCacheEntry]:
         if cache_key is None:
             return None
 
@@ -1197,7 +1196,7 @@ class GeneratedCodeCache:
 
     def put_entry(
         self,
-        cache_key: Optional[bytes],
+        cache_key: Optional[str],
         code: str,
         extra: str,
         events: list[Any],
@@ -1228,13 +1227,13 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
-        self._generated_module_cache: GeneratedCodeCache = GeneratedCodeCache()
-        clear_on_fresh_inductor_cache(self._generated_module_cache)
+        self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
+        clear_on_fresh_inductor_cache(self._generated_code_cache)
 
-    # Those class fields are used for testing _generated_module_cache.
+    # Those class fields are used for testing _generated_code_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
-    test_cache = True
+    test_cache = False
     generated_module_cache_hit = 0
     generated_module_cache_miss = 0
 
@@ -1257,7 +1256,7 @@ class TritonTemplate(KernelTemplate):
         tuple[ModuleType, str, tuple[str, ...], OrderedSet[str], Any, dict[str, Any]]
     ]:
         """Generate the python code and load it into the current process"""
-        cache_key = self._generated_module_cache.make_key(
+        cache_key = self._generated_code_cache.make_key(
             input_nodes,
             num_stages,
             num_warps,
@@ -1272,10 +1271,6 @@ class TritonTemplate(KernelTemplate):
             num_buffers_warp_spec,
             kwargs,
         )
-
-        # print(f"input ndoes are {input_nodes}")
-        # print(f"cache key is{cache_key}")
-        # print(f"choice is {kwargs}, {num_stages}, {num_warps}")
 
         assert self.template, "requires jinja2"
         defines = StringIO()
@@ -1363,35 +1358,26 @@ class TritonTemplate(KernelTemplate):
         code: Optional[str] = None
         extra: Optional[str] = None
         cache_hit = False
-        # used for testing when self.test_cache is on
-        input_dependent_preserved_states: Optional[str] = None
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
             make_kernel() as kernel,
         ):
-            cache_entry = self._generated_module_cache.get_entry(cache_key)
+            cache_entry = self._generated_code_cache.get_entry(cache_key)
 
             if cache_entry is not None:
                 TritonTemplate.generated_module_cache_hit += 1
-                print(f"total hit is {TritonTemplate.generated_module_cache_hit}")
-
                 code, extra, events = cache_entry
                 kernel.replay_cached_events(events)
-                input_dependent_preserved_states = (
-                    kernel.input_dependent_preserved_state()
-                )
                 cache_hit = True
 
             else:
                 TritonTemplate.generated_module_cache_miss += 1
-                print(f"total miss is {TritonTemplate.generated_module_cache_miss}")
                 result = generate_code(kernel)
-                if not result:
+                if not result:  # happens at ZeroDivisionError:
                     return None
-
                 code, extra = result
-                self._generated_module_cache.put_entry(
+                self._generated_code_cache.put_entry(
                     cache_key, code, extra, kernel.cached_replay_events
                 )
 
@@ -1406,16 +1392,14 @@ class TritonTemplate(KernelTemplate):
                 result2 = generate_code(kernel_test)
                 assert result2 is not None
                 code_test, extra_test = result2
-                if str(kernel_test.input_dependent_preserved_state()) != str(
-                    input_dependent_preserved_states
-                ):
-                    print("what")
                 assert (
                     code == code_test
                     and extra == extra_test
-                    and str(kernel_test.input_dependent_preserved_state())
-                    == str(input_dependent_preserved_states)
-                )
+                    and kernel.args.input_buffers == kernel_test.args.input_buffers
+                    and kernel.prologue_supported_inputs
+                    == kernel_test.prologue_supported_inputs
+                    and kernel.args.sizevars == kernel_test.args.sizevars
+                ), "Generated code cache results in wrong output"
 
         mod = PyCodeCache.load(code, extra)
 

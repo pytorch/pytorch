@@ -26,7 +26,9 @@ from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
+    TritonTemplate,
     TritonTemplateCaller,
+    TritonTemplateKernel,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -1128,6 +1130,104 @@ class TestMaxAutotune(TestCase):
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+
+    @config.patch(max_autotune=True)
+    def test_triton_template_generated_code_cache(self):
+        TritonTemplate.test_cache = True
+
+        def reset_counters():
+            TritonTemplate.generated_module_cache_hit = 0
+            TritonTemplate.generated_module_cache_miss = 0
+
+        def func_test1(x, y, z, m):
+            a = torch.matmul(x, y)
+            b = torch.matmul(z, m)
+            return a, b
+
+        a = torch.rand(10, 22, device="cuda")
+        b = torch.rand(22, 30, device="cuda")
+
+        c = torch.rand(9, 21, device="cuda")
+        d = torch.rand(21, 30, device="cuda")
+
+        # Test that the testing strategy works by overriding input_dependent_preserved_state.
+        original = TritonTemplateKernel.input_dependent_preserved_state
+        try:
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                ".*Generated code cache results in wrong output.*",
+            ):
+                TritonTemplateKernel.input_dependent_preserved_state = (
+                    lambda self: "same always"
+                )
+                TritonTemplate.test_cache = True
+
+                with fresh_inductor_cache():
+                    torch.compile(func_test1, dynamic=True)(a, b, c, d)
+        finally:
+            TritonTemplateKernel.input_dependent_preserved_state = original
+
+        # Test symbolic shapes.
+
+        with fresh_inductor_cache():
+            reset_counters()
+            torch.compile(func_test1, dynamic=True)(a, b, c, d)
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 6)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 6)
+
+        # Test no symbolic shapes.
+        with fresh_inductor_cache():
+            a = torch.rand(10, 22, device="cuda")
+            b = torch.rand(22, 30, device="cuda")
+            reset_counters()
+            torch.compile(func_test1, dynamic=False)(a, b, a, b)
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 6)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 6)
+
+        # Test duck typing.
+        with fresh_inductor_cache():
+            reset_counters()
+            torch.compile(func_test1, dynamic=True)(a, b, a, b)
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 6)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 6)
+
+        # Test loop.
+        def test_func2(x):
+            for i in range(0, 10):
+                x = torch.matmul(x, x)
+            return x
+
+        with fresh_inductor_cache():
+            reset_counters()
+            torch.compile(test_func2, dynamic=False)(torch.ones(10, 10, device="cuda"))
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 45)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 5)
+
+        with fresh_inductor_cache():
+            reset_counters()
+            torch.compile(test_func2, dynamic=True)(torch.ones(10, 10, device="cuda"))
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 45)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 5)
+
+        # No cache hit due to expressions passed i.e mm(s0 + s1, 2) vs mm(s3, 2).
+        reset_counters()
+
+        @torch.compile(dynamic=True)
+        def test_func3(x, y, z, m, l):
+            a = torch.matmul(x, y)
+            b = torch.matmul(torch.cat([x, z], 1), torch.cat([y, m, l], 0))
+            return a, b
+
+        with fresh_inductor_cache():
+            a = torch.rand(10, 22, device="cuda")
+            b = torch.rand(22, 30, device="cuda")
+            c = torch.rand(10, 11, device="cuda")
+            d = torch.rand(8, 30, device="cuda")
+            e = torch.rand(3, 30, device="cuda")
+
+            test_func3(a, b, c, d, e)
+            self.assertEqual(TritonTemplate.generated_module_cache_hit, 0)
+            self.assertEqual(TritonTemplate.generated_module_cache_miss, 16)
 
 
 @instantiate_parametrized_tests
