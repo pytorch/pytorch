@@ -301,6 +301,11 @@ else
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
+    if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+      echo "Checking that xpu is compiled"
+      python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'
+    fi
+
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 
