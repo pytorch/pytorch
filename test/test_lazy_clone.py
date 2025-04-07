@@ -163,7 +163,10 @@ class TestLazyCloneDeviceType(TestCase):
         dest_device_check = torch.empty(0, device=dest_device).device
         pin_memory = src_device_check.type == "cpu" and dest_device_check.type == "mps"
 
-        a = torch.randn(10, device=src_device, pin_memory=pin_memory)
+        orig_tensor = torch.randn(10, device=src_device)
+        a = torch.empty(10, device=src_device, pin_memory=pin_memory)
+        a.copy_(orig_tensor)
+
         orig_data_ptr = torch._C._data_address_resolve_unified(a)
         b = a._lazy_clone(device=dest_device)
 
@@ -193,7 +196,8 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
 
         self.assertEqual(a_clone, b_clone)
-        self.assertTrue((a == b).all())
+        self.assertTrue((a == orig_tensor.to(a.device)).all())
+        self.assertTrue((b == orig_tensor.to(b.device)).all())
         self.assertEqual(a, b)
 
         self.assertEqual(a.device, src_device_check)
