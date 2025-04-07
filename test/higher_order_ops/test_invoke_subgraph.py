@@ -115,7 +115,58 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        ref = gn(x, y)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    def test_list(self):
+        @mark_compile_region
+        def gn(x, y):
+            return [torch.mul(x, y), torch.add(x, y)]
+
+        def fn(x, y):
+            lst = gn(x, y)
+            lst.append(torch.sin(x))
+            return lst[0] + lst[1] + lst[2]
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    def test_tuple_of_tuple(self):
+        @mark_compile_region
+        def gn(x, y):
+            return ((torch.mul(x, y),), torch.add(x, y))
+
+        def fn(x, y):
+            tup = gn(x, y)
+            return tup[0][0] + tup[1]
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
 
         x_clone = x.detach().clone().requires_grad_(True)
         y_clone = y.detach().clone().requires_grad_(True)
@@ -477,7 +528,29 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing for HOP - invoke_subgraph",
+        ):
+            opt_fn(x, y)
+
+    def test_input_mutation_inference_mode(self):
+        @mark_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            z = torch.cos(x)
+            with torch.inference_mode():
+                return gn(torch.cos(z), y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
         ):
             opt_fn(x, y)
 
@@ -486,22 +559,26 @@ class GraphModule(torch.nn.Module):
 
         @mark_compile_region
         def gn(x):
-            return mod(x)
+            return torch.cos(x), mod(x)
 
         def fn(x):
-            return gn(x)
+            out = gn(x)
+            return out[0] + out[1]
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         # requires_grad is False deliberately to force None the joint_graph
         # outputs
         x = torch.randn(8, 8, requires_grad=False)
+        x_clone = x.detach().clone().requires_grad_(False)
 
-        ref = mod(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        ref = fn(x)
+        res = opt_fn(x_clone)
 
         ref.sum().backward()
         res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
@@ -520,7 +597,7 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x)
 
-    def test_input_aliasing(self):
+    def test_input_output_aliasing(self):
         @mark_compile_region
         def gn(x, y):
             return (x, torch.mul(x, y))
@@ -534,7 +611,73 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
+            opt_fn(x, y)
+
+    def test_input_input_aliasing(self):
+        @mark_compile_region
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x):
+            return gn(x, x.view(1, 8))
+
+        x = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
+            opt_fn(x)
+
+    def test_output_output_aliasing(self):
+        @mark_compile_region
+        def gn(x):
+            z = torch.cos(x)
+            return z, z.view(1, 8)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
+            opt_fn(x)
+
+    def test_mod_attr_aliasing(self):
+        class MutateParam(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(8)
+
+            def forward(self, x):
+                self.a.add_(1)
+                return torch.mul(x, self.a)
+
+        @mark_compile_region
+        def gn(x):
+            return mod(x)
+
+        def fn(x, y):
+            return gn(x) * y
+
+        mod = MutateParam()
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
         ):
             opt_fn(x, y)
 
@@ -680,6 +823,109 @@ class GraphModule(torch.nn.Module):
         r1.sum().backward()
         weight.grad.clone()
 
+    def test_return_none_from_fwd(self):
+        @mark_compile_region
+        def gn(x):
+            return x * 2, None, x * 3
+
+        def fn(x):
+            ys = gn(x)
+            return ys[0] + ys[2]
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x)
+        res = opt_fn(x_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        res = opt_fn(x_clone)
+        res.sum().backward()
+
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.count_unique_get_attr_nodes(backend.graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 1)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8, 8]"):
+        l_x_ = L_x_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_0 = l_x_ = None
+        getitem: "f32[8, 8]" = invoke_subgraph[0]
+        getitem_1: "f32[8, 8]" = invoke_subgraph[2];  invoke_subgraph = None
+
+        add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        return (add,)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8, 8]"):
+            child: "f32[8, 8]" = l_x_ * 2
+            child_1: "f32[8, 8]" = l_x_ * 3;  l_x_ = None
+            return (child, None, child_1)
+""",
+            )
+
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8, 8]"):
+        ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1,));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
+        getitem: "f32[8, 8]" = invoke_subgraph_2[0]
+        getitem_2: "f32[8, 8]" = invoke_subgraph_2[2];  invoke_subgraph_2 = None
+
+        add: "f32[8, 8]" = torch.ops.aten.add.Tensor(getitem, getitem_2);  getitem = getitem_2 = None
+        return (add,)
+
+    class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]"):
+            mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 2)
+            mul_1: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 3);  primals_0 = None
+            return (mul, None, mul_1)
+""",
+            )
+
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[8, 8]"):
+        ___backward_invoke_subgraph_0_post_graph = self.___backward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (tangents_1, tangents_1));  ___backward_invoke_subgraph_0_post_graph = tangents_1 = None
+        getitem_3: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
+        return (getitem_3,)
+
+    class ___backward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+            mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3)
+            mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+            add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+            return (add,)
+""",
+            )
+
     def test_dynamic(self):
         @mark_compile_region
         def gn(x):
@@ -712,6 +958,27 @@ class GraphModule(torch.nn.Module):
             fn, backend="eager", fullgraph=True
         )  # Inductor fails with cpp compilation error
         res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked(self):
+        @mark_compile_region
+        def gn(x, y):
+            b = x.item()
+            torch._check_is_size(b)
+            torch._check(b < y.shape[0])
+            return y[:b].clone()
+
+        def fn(x, y):
+            return gn(x, y)
+
+        x = torch.tensor(4)
+        y = torch.randn(8)
+        ref = fn(x, y)
+        opt_fn = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )  # Inductor fails with assertion error when lowering aten.sym_constrain_range_for_size.default
+        res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
     def test_bwd_partitioning(self):
@@ -794,6 +1061,22 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_const_tensor(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.tensor(64, dtype=torch.float32) * x
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(64, requires_grad=True)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 @parameterized_class(
     [
@@ -842,7 +1125,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_unbacked(self):
         @mark_compile_region
         def gn(x, y):
