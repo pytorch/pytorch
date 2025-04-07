@@ -7,7 +7,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <atomic>
-#include <optional>
 
 namespace torch::distributed::rpc {
 
@@ -75,7 +74,7 @@ class TORCH_API RRefContext {
   // This RRef could have already existed before, or could be created in this
   // method, we pass type here to validate or help the rref creation.
   c10::intrusive_ptr<RRef> getOrCreateRRef(
-      const RRefForkData& rfd,
+      const RRefForkData& rrefForkData,
       const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
