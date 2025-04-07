@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Union, Type
+from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config
@@ -175,7 +175,7 @@ class VecSVE256(VecISA):
         "CPU_CAPABILITY_SVE",
         "CPU_CAPABILITY_SVE256",
         "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-        "__ARM_FEATURE_BF16"
+        "__ARM_FEATURE_BF16",
     ]
     _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
 
