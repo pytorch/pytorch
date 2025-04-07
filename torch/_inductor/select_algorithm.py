@@ -14,7 +14,6 @@ import re
 import sys
 import textwrap
 import time
-import copy
 from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
@@ -374,38 +373,42 @@ class TritonTemplateKernel(TritonKernel):
         # we call input depenndent preserved_state. Namely,
         # 1) kernel.args
         # 2) kernel.prologue_supported_inputs
-        # those are indentified by input_dependent_preserved_state. 
+        # those are indentified by input_dependent_preserved_state.
         # During template expansions we record all function calls that effect change input_dependent_preserved_state
         # and replay them on a cache hit to regenerate them.
         self.input_dependent_tracked_events: list[
-            tuple[Callable, list[Any], dict[str, Any]]
-        ]= []
+            tuple[Callable[..., Any], list[Any], dict[str, Any]]
+        ] = []
 
     def input_dependent_preserved_state(self):
         return repr((self.args, self.prologue_supported_inputs))
-        
-    def record_input_dependent_tracked_event(self) -> Callable:
-        def decorator(fn) -> Callable:
+
+    def record_input_dependent_tracked_event(self) -> Callable[..., Any]:
+        def decorator(fn) -> Callable[..., Any]:
             def wrapper(*args, **kwargs) -> Any:
                 pre_state = self.input_dependent_preserved_state()
-                result= fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
-                    print(f"detected a state chaging call to {fn.__name__}")
-                    print("beofre")
-                    print(pre_state)
-                    self.input_dependent_tracked_events.append((fn.__name__, [*args], {**kwargs}))
-                    print("after")
-                    print(post_state)
+                    # print(f"detected a state chaging call to {fn.__name__}")
+                    # print("beofre")
+                    # print(pre_state)
+                    self.input_dependent_tracked_events.append(
+                        (fn.__name__, [*args], {**kwargs})
+                    )
+                    # print("after")
+                    # print(post_state)
                 return result
+
             return wrapper
+
         return decorator
 
     def replay_input_dependent_tracked_events(self, events):
         for item in events:
             f = item[0]
             print(f"replay {f}")
-            getattr(self,f)(*item[1], **item[2])
+            getattr(self, f)(*item[1], **item[2])
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -1114,6 +1117,7 @@ class GeneratedModulesCacheEntry(NamedTuple):
     extra: str
     events: list[Any]
 
+
 class GeneratedModulesCache:
     def __init__(self, *args, **kwargs):
         self._cache: dict[str, GeneratedModulesCacheEntry] = {}
@@ -1126,36 +1130,59 @@ class GeneratedModulesCache:
         input_nodes: tuple[ir.StorageBox],
         num_stages: int,
         num_warps: int,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]],
+        call_sizes: list[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],  # has to be identity to cache
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
-        num_consumer_groups:int,
-        num_buffers_warp_spec:int,
+        num_consumer_groups: int,
+        num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
     ) -> Optional[str]:
+        symbol_mapping = {}
+        next_symbol_index = 1
+
+        def normalize_symbols(x: sympy.core.Expr) -> str:
+            symbols = x.free_symbols  #
+            nonlocal next_symbol_index
+            original_string = str(x)
+            for s in symbols:
+                if str(s) not in symbol_mapping:
+                    symbol_mapping[str(s)] = f"_normalized_symbol{next_symbol_index}"
+                    next_symbol_index += 1
+                original_string = original_string.replace(
+                    str(s), symbol_mapping[str(s)]
+                )
+
+            return original_string
+
+        def normalize_list(ls: Sequence[sympy.core.Expr]) -> list[str]:
+            return [normalize_symbols(x) for x in ls]
+
+        def layout_key(layout) -> str:
+            return repr(
+                [
+                    normalize_list(layout.size),
+                    normalize_list(layout.stride),
+                    layout.dtype,
+                    layout.device,
+                    normalize_symbols(layout.offset),
+                ]
+            )
+
         if epilogue_fn == identity and subgraphs is None and workspace_arg is None:
             cache_key = repr(
                 {
-                    "input_nodes": [
-                        [
-                            input.get_size(),
-                            input.get_stride(),
-                            input.get_dtype(),
-                            input.get_device(),
-                        ]
-                        for input in input_nodes
-                    ],
+                    "input_nodes": [layout_key(input.layout) for input in input_nodes],
                     "num_stages": num_stages,
                     "num_warps": num_warps,
                     "prefix_args": prefix_args,
                     "suffix_args": suffix_args,
-                    "call_sizes": call_sizes,
-                    "layout": layout,
-                    "num_consumer_groups" :num_consumer_groups,
+                    "call_sizes": normalize_list(call_sizes),
+                    "layout": layout_key(layout),
+                    "num_consumer_groups": num_consumer_groups,
                     "num_buffers_warp_spec": num_buffers_warp_spec,
                     "kwargs": kwargs,
                 }
@@ -1164,8 +1191,7 @@ class GeneratedModulesCache:
         return None
 
     def get_entry(
-        self, cache_key: Optional[str] 
-
+        self, cache_key: Optional[str]
     ) -> Optional[GeneratedModulesCacheEntry]:
         if cache_key is None:
             return None
@@ -1182,11 +1208,7 @@ class GeneratedModulesCache:
     ) -> None:
         if cache_key is None:
             return
-        entry = GeneratedModulesCacheEntry(
-            code,
-            extra,
-            events
-        )
+        entry = GeneratedModulesCacheEntry(code, extra, events)
 
         self._cache.update({cache_key: entry})
 
@@ -1224,14 +1246,14 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.StorageBox],
         num_stages: int,
         num_warps: int,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]],
+        call_sizes: list[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
         subgraphs,
         workspace_arg: Optional[WorkspaceArg],
-        num_consumer_groups:int,
-        num_buffers_warp_spec:int,
+        num_consumer_groups: int,
+        num_buffers_warp_spec: int,
         layout: ir.Layout,
         kwargs: dict[str, Any],
     ) -> Optional[
@@ -1253,6 +1275,10 @@ class TritonTemplate(KernelTemplate):
             num_buffers_warp_spec,
             kwargs,
         )
+
+        print(f"input ndoes are {input_nodes}")
+        print(f"cache key is{cache_key}")
+        # print(f"choice is {kwargs}, {num_stages}, {num_warps}")
 
         assert self.template, "requires jinja2"
         defines = StringIO()
@@ -1299,7 +1325,7 @@ class TritonTemplate(KernelTemplate):
                 workspace_arg=workspace_arg,
                 use_jit=False,
                 **kernel_options,
-            )  
+            )
 
         def make_extra():
             extra_parts = [
@@ -1322,11 +1348,12 @@ class TritonTemplate(KernelTemplate):
             extra = "-".join(extra_parts) + "-"
             return extra
 
-        def generate_code(kernel)-> Optional[tuple[str, str]]:
+        def generate_code(kernel) -> Optional[tuple[str, str]]:
             try:
                 template = kernel.render(self.template, kwargs)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                     code = template.finalize_all()
+                    print(f"code is {code}")
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
@@ -1334,68 +1361,76 @@ class TritonTemplate(KernelTemplate):
                 print("Generated Code:\n", code)
 
             extra = make_extra()
-            return code, extra           
+            return code, extra
 
         # Generate code, extra, and kernel state.
-        code:Optional[str] = None
-        extra:Optional[str] = None 
+        code: Optional[str] = None
+        extra: Optional[str] = None
         cache_hit = False
         # used for testing when self.test_cache is on
-        input_dependent_preserved_states :Optional[str] = None
+        input_dependent_preserved_states: Optional[str] = None
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
             make_kernel() as kernel,
-        ):        
-            cache_entry = self._generated_module_cache.get_entry(
-                cache_key
-            )
+        ):
+            cache_entry = self._generated_module_cache.get_entry(cache_key)
 
             if cache_entry is not None:
+                print("cache hit")
                 TritonTemplate.generated_module_cache_hit += 1
                 code, extra, events = cache_entry
                 # Replay replay_input_dependent_tracked_events to generate input_dependent_preserved_state.
                 kernel.replay_input_dependent_tracked_events(events)
-                input_dependent_preserved_states = kernel.input_dependent_preserved_state()
+                input_dependent_preserved_states = (
+                    kernel.input_dependent_preserved_state()
+                )
                 cache_hit = True
 
             else:
                 result = generate_code(kernel)
                 if not result:
                     return None
-            
+
                 code, extra = result
-                self._generated_module_cache.put_entry(cache_key, code, extra, kernel.input_dependent_tracked_events)
-                
+                self._generated_module_cache.put_entry(
+                    cache_key, code, extra, kernel.input_dependent_tracked_events
+                )
+
         assert code is not None and extra is not None
-        
+
         if cache_hit and self.test_cache:
-            kernel_test = make_kernel()
             with (
                 patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
                 V.graph.set_current_device(layout.device),
                 make_kernel() as kernel_test,
-            ):  
+            ):
                 result2 = generate_code(kernel_test)
-                assert(result2 is not None)
+                assert result2 is not None
                 code_test, extra_test = result2
-                assert code ==code_test and extra == extra_test and kernel_test.input_dependent_preserved_state() == input_dependent_preserved_states
+                assert (
+                    code == code_test
+                    and extra == extra_test
+                    and kernel_test.input_dependent_preserved_state()
+                    == input_dependent_preserved_states
+                )
 
         mod = PyCodeCache.load(code, extra)
 
-        # Note anything returned by this function that is input dependent and computed by kernel.rendershould be included 
+        # Note anything returned by this function that is input dependent and computed by kernel.rendershould be included
         # input_dependent_preserved_state. otheriwise it should be cached or trivially computed from the input fucti
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
-        return(mod, extra,
-                input_call_args,
-                prologue_supported_inputs,
-                kernel_args_sizevars_keys,
-                kernel_options
-            )
-         
+        return (
+            mod,
+            extra,
+            input_call_args,
+            prologue_supported_inputs,
+            kernel_args_sizevars_keys,
+            kernel_options,
+        )
 
     def generate(  # type: ignore[override]
         self,
