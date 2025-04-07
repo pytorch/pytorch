@@ -6989,7 +6989,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         # serialize_outputs
         def handle_single_output(
-            return_type: Union[torch.TensorType, torch.ListType, torch.JitType],
+            return_type: Union[torch.TensorType, torch.ListType, "torch.JitType"],
             output: Union[IRNode, Sequence[IRNode]],
         ) -> export_schema.Argument:
             if isinstance(return_type, torch.TensorType):

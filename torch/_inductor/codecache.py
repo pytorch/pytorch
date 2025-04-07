@@ -107,9 +107,7 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(
-        *args: Any, **kwargs: Any
-    ) -> None:
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
         pass
 
     def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
@@ -132,8 +130,8 @@ if TYPE_CHECKING:
     from .runtime.triton_heuristics import CachingAutotuner
     from .utils import InputType
 
-    T = TypeVar("T")
 
+T = TypeVar("T")
 
 _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
