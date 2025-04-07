@@ -309,10 +309,12 @@ def trace_joint_graph_as_bwd(
     dummy_aot_config = get_dummy_aot_autograd_config()
 
     if isinstance(subgraph, torch.fx.GraphModule):
+
         def graph_with_interpreter(*args):
             # Running graph with interpreter is needed for propagating the stack_trace
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(subgraph).run(*args)
+
         fn = graph_with_interpreter
     else:
         fn = subgraph
