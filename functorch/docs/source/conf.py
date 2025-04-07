@@ -169,6 +169,9 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
+
+switcher_version = "main" if not RELEASE else version
+
 html_theme_options = {
     "icon_links": [
         {
@@ -198,6 +201,11 @@ html_theme_options = {
     "navigation_with_keys": True,
     "analytics_id": "UA-117752657-2",
     "logo": {"text": "Home"},
+    "switcher": {
+        "json_url": "https://pytorch.org/functorch/functorch-versions.json",
+        "version_match": switcher_version,
+    },
+    "navbar_start": ["version-switcher"],
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
