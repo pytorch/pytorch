@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import copyreg
 import dataclasses
@@ -24,6 +22,8 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
+from collections.abc import Generator, KeysView, Sequence
+from concurrent.futures import Future
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -107,23 +107,22 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_errors(
+        *args: Any, **kwargs: Any
+    ) -> None:
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def use_global_cache() -> bool:  # type: ignore[misc]
+    def use_global_cache() -> bool:
         return False
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
-    from concurrent.futures import Future
-
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
     from .graph import GraphLowering
     from .ir import ChoiceCaller
@@ -262,11 +261,11 @@ class PersistentCache(CacheBase):
 
     def lookup(
         self,
-        choices: list[ChoiceCaller],
+        choices: list["ChoiceCaller"],
         op: str,
         inputs: str,
-        benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
-    ) -> dict[ChoiceCaller, float]:
+        benchmark: Optional[Callable[[Any], dict["ChoiceCaller", float]]],
+    ) -> dict["ChoiceCaller", float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
@@ -612,7 +611,7 @@ class FxGraphCachePickler(pickle.Pickler):
         serialized_data = self.dumps(obj)
         return sha256_hash(serialized_data)
 
-    def debug_lines(self, inp: FxGraphHashDetails) -> list[str]:
+    def debug_lines(self, inp: "FxGraphHashDetails") -> list[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
@@ -729,8 +728,8 @@ class FxGraphHashDetails:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
+        example_inputs: Sequence["InputType"],
+        fx_kwargs: "_CompileFxKwargs",
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
@@ -746,7 +745,8 @@ class FxGraphHashDetails:
                 if type(v) in (set, OrderedSet):  # noqa: set_linter
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
+                    assert isinstance(v, Sequence)
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
                 else:
                     self.fx_kwargs[k] = v
 
@@ -847,8 +847,8 @@ class FxGraphHashDetails:
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
-    example_inputs: Sequence[InputType],
-    fx_kwargs: _CompileFxKwargs,
+    example_inputs: Sequence["InputType"],
+    fx_kwargs: "_CompileFxKwargs",
     inputs_to_check: Sequence[int],
 ) -> tuple[str, list[str]]:
     """
@@ -940,7 +940,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: Sequence[InputType]) -> list[torch.SymInt]:
+    def _filter_backed_symints(inputs: Sequence["InputType"]) -> list[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
@@ -960,11 +960,11 @@ class FxGraphCache:
     @staticmethod
     def _lookup_graph(
         key: str,
-        example_inputs: Sequence[InputType],
+        example_inputs: Sequence["InputType"],
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
-        constants: CompiledFxGraphConstants,
-    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
+        constants: "CompiledFxGraphConstants",
+    ) -> tuple[Optional["CompiledFxGraph"], dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -976,7 +976,7 @@ class FxGraphCache:
         hints = [hint_int(s) for s in symints]
 
         def iterate_over_candidates() -> Generator[
-            tuple[CompiledFxGraph, bytes], None, None
+            tuple["CompiledFxGraph", bytes], None, None
         ]:
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
@@ -1113,10 +1113,10 @@ class FxGraphCache:
     @staticmethod
     def _save_graph(
         key: str,
-        compiled_graph: OutputCode,
-        example_inputs: Sequence[InputType],
+        compiled_graph: "OutputCode",
+        example_inputs: Sequence["InputType"],
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1229,8 +1229,8 @@ class FxGraphCache:
     @staticmethod
     def prepare_key(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
+        example_inputs: Sequence["InputType"],
+        fx_kwargs: "_CompileFxKwargs",
         inputs_to_check: Sequence[int],
         remote: bool,
     ) -> tuple[Optional[tuple[str, list[str]]], dict[str, Any]]:
@@ -1264,7 +1264,7 @@ class FxGraphCache:
         return (key, debug_lines), {}
 
     @staticmethod
-    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    def get_remote_cache() -> Optional["RemoteCache[JsonDataTy]"]:
         """
         Attempts to load the remote cache, returns None on error.
         """
@@ -1280,12 +1280,12 @@ class FxGraphCache:
     def load_with_key(
         key: str,
         debug_lines: list[str],
-        example_inputs: Sequence[InputType],
+        example_inputs: Sequence["InputType"],
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
         is_backward: bool,
-        constants: CompiledFxGraphConstants,
-    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
+        constants: "CompiledFxGraphConstants",
+    ) -> tuple[Optional["CompiledFxGraph"], dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
@@ -1392,7 +1392,7 @@ class AotCodeCompiler:
     @classmethod
     def compile(
         cls,
-        graph: GraphLowering,
+        graph: "GraphLowering",
         wrapper_code: str,
         kernel_code: str,
         serialized_extern_kernel_nodes: Optional[str],
@@ -1966,7 +1966,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         result = [torch.tensor([]) if r is None else r for r in result]
         for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)
     else:
         assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
@@ -2308,7 +2308,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
         return module
 
     @classmethod
@@ -2515,7 +2516,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     )
 
     @classmethod
-    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> list[str]:
+    def _codegen_buffer(
+        cls, name: str, arg: "HalideInputSpec", cuda: bool
+    ) -> list[str]:
         assert arg.shape is not None
         assert arg.stride is not None and len(arg.shape) == len(arg.stride)
         assert arg.offset is not None
@@ -2549,7 +2552,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         ]
 
     @classmethod
-    def _codegen_glue(cls, meta: HalideMeta, headerfile: object) -> str:
+    def _codegen_glue(cls, meta: "HalideMeta", headerfile: object) -> str:
         is_cuda = meta.is_cuda()
         assert is_cuda is ("user_context" in meta.target)
         assert "no_runtime" in meta.target
@@ -2657,7 +2660,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def generate_halide_async(
-        cls, meta: HalideMeta, source_code: str, submit_fn: Any = None
+        cls, meta: "HalideMeta", source_code: str, submit_fn: Any = None
     ) -> Callable[[], Any]:
         dirpath = Path(
             get_path(
@@ -2797,6 +2800,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                 job()
     except subprocess.SubprocessError as e:
         if os.environ.get("HALIDE_REPRO") == "1":
+            cmd: list[Any]
             python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
                 code = open(script).read()
@@ -2807,7 +2811,9 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                     def __repr__(self) -> str:
                         return "out"
 
-                cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
+                ci = cmd.index("-o")
+                assert isinstance(ci, int)
+                cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(
                         f"""\
@@ -2934,7 +2940,7 @@ class PyCodeCache:
 
 def _load_triton_kernel_from_source(
     kernel_name: str, source_code: str
-) -> CachingAutotuner:
+) -> "CachingAutotuner":
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
@@ -3349,7 +3355,7 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:  # type: ignore[override]
+    def result(self) -> Callable[..., Any]:
         return self.result_fn()
 
 
@@ -3358,7 +3364,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+    def __init__(self, static_autotuner: "CachingAutotuner") -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
         # This needs to be set in AsyncCompile.triton, in case
@@ -3367,10 +3373,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
 
-    def result(self) -> CachingAutotuner:
+    def result(self) -> "CachingAutotuner":
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
-            self.static_autotuner.precompile(  # type: ignore[union-attr]
+            self.static_autotuner.precompile(
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
