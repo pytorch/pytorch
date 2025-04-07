@@ -94,7 +94,7 @@ class PaddedTensor(torch.Tensor):
         kwargs["requires_grad"] = tensor.requires_grad
         kwargs["dtype"] = tensor.dtype
 
-        out = torch.Tensor._make_wrapper_subclass(cls, padded_shape, **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
         return out
 
     def __init__(

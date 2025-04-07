@@ -93,6 +93,35 @@ class PaddedTensorFunctionalTests(TestCase):
             self.assertEqual(y.shape, (16, 16))
             self.assertEqual(y.original_tensor.shape, (3, i))
 
+    def test_bucketize(self):
+        """
+        Test that we compile a new graph on a shape that is larger than the original bucket.
+        """
+
+        def f(a, b, c):
+            return a @ b + c
+
+        f = torch.compile(f, fullgraph=True)
+        multipliers = {0: 16, 1: 16}
+
+        for i in range(3, 22):
+            # Every multiple of 16, we allow recompilation.
+            if i % 16 == 0:
+                torch._dynamo.config.error_on_recompile = False
+            # It takes 2 iterations to trace graph with symbolic shapes. So after 2 iterations
+            # after multiples of 16, we disallow recompilation.
+            if i % 16 == 2:
+                torch._dynamo.config.error_on_recompile = True
+
+            a = PaddedTensor.from_tensor(torch.randn([3, 5]), multipliers)
+            b = PaddedTensor.from_tensor(torch.randn([5, i]), multipliers)
+            c = PaddedTensor.from_tensor(torch.randn([3, i]), multipliers)
+
+            y = f(a, b, c)
+
+            self.assertEqual(y.shape, (16, 16 if i <= 16 else 32))
+            self.assertEqual(y.original_tensor.shape, (3, i))
+
 
 class NNOpTests(TestCase):
     def setUp(self):
@@ -147,7 +176,7 @@ class ModelTests(TestCase):
             )
 
             for seqlen in range(3, 15):
-                print("seqlen = ", seqlen)
+                print("seqlen =", seqlen)
                 # Set error_on_recompile to True after 3rd iteration.
                 # TODO: We don't need this if we mark padded dimensions as dynamic.
                 if seqlen == 5:
