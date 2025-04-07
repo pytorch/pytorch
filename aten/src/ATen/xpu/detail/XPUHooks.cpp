@@ -3,7 +3,6 @@
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/detail/XPUHooks.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 

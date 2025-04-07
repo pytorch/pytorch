@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 import torch
+import torch._library.utils as library_utils
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -194,17 +195,17 @@ def write_view_information_to_args(
 
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             if arg is None:
                 kwargs[f"_{arg_name}_length"] = None
+            else:
+                kwargs[f"_{arg_name}_length"] = len(arg)
+                for i, elem in enumerate(arg):
+                    write_single_view(
+                        f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                    )
 
-            kwargs[f"_{arg_name}_length"] = len(arg)
-            for i, elem in enumerate(arg):
-                write_single_view(
-                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
-                )
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
@@ -257,7 +258,7 @@ def read_view_information_from_args(
 
     args_view_info: dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             length = get_arg(f"_{arg_name}_length")
             if length is None:
                 # The whole list is None.
@@ -267,7 +268,7 @@ def read_view_information_from_args(
                     read_single_view(f"_{arg_name}_{i}") for i in range(length)
                 ]
 
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             args_view_info[arg_name] = read_single_view(f"_{arg_name}")
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -382,20 +383,10 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
             continue
         if not arg.alias_info.is_write:
             continue
-        if type(arg.type) is torch.TensorType:
+        if torch._library.utils.is_tensor_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.OptionalType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
+        if torch._library.utils.is_tensorlist_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.ListType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
-            continue
-        # Not yet supported: other Tensor types. This includes things like
-        # Tensor?[], Tensor[]?.
         return False
 
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
@@ -432,6 +423,7 @@ def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
 
 
 def do_auto_functionalize(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -445,7 +437,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -521,13 +513,14 @@ def do_auto_functionalize(
 
 
 def do_auto_functionalize_v2(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.

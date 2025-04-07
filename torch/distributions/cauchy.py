@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional, Union
 
 import torch
 from torch import inf, nan, Tensor
@@ -29,11 +30,17 @@ class Cauchy(Distribution):
         loc (float or Tensor): mode or median of the distribution.
         scale (float or Tensor): half width at half maximum.
     """
+
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, loc, scale, validate_args=None):
+    def __init__(
+        self,
+        loc: Union[Tensor, float],
+        scale: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()

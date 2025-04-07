@@ -10,7 +10,7 @@ import operator
 import re
 from collections.abc import Iterable
 from contextlib import contextmanager
-from inspect import Parameter
+from inspect import ismethod, Parameter
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -58,6 +58,8 @@ placeholder_prefixes = {
     InputKind.TOKEN: "token",
 }
 
+_DISABLE_ATEN_TO_ASSERTION_PASS = False
+
 
 def _collect_and_set_constant_attrs(
     graph_signature, constants, mod
@@ -87,6 +89,52 @@ def _collect_and_set_constant_attrs(
         setattr(_mod, attr, value)
         constant_attrs.add(value, name)
     return constant_attrs
+
+
+def _register_constants_as_buffers(
+    mod: torch.fx.GraphModule, state_dict, non_persistent_buffers
+):
+    # TODO some annoying circular dependency issue
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    temp_registered_constants = set()
+
+    for node in mod.graph.nodes:
+        if node.op == "get_attr":
+            target = torch.fx.graph_module._get_attr(mod, node.target)
+            if isinstance(target, torch.Tensor):
+                # Make sure we also check if the original buffer is
+                # non persistent as well.
+                if (node.target not in state_dict) and (
+                    node.target not in non_persistent_buffers
+                ):
+                    torch.fx.graph_module._del_attr(mod, node.target)
+                    _assign_attr(target, mod, node.target, _AttrKind.BUFFER, False)
+                    temp_registered_constants.add(node.target)
+
+    mod.recompile()
+
+    return temp_registered_constants
+
+
+def _override_graph_signature_for_temp_registered_constants(
+    sig: "ExportGraphSignature", temp_registered_constants
+):
+    for spec in sig.input_specs:
+        if spec.target in temp_registered_constants:
+            spec.kind = InputKind.CONSTANT_TENSOR
+            spec.persistent = None
+
+    for spec in sig.output_specs:
+        if (
+            spec.kind == OutputKind.BUFFER_MUTATION
+            and spec.target in temp_registered_constants
+        ):
+            raise RuntimeError(
+                f"Constant {spec.target} is mutated in the forward method. Pls register it as buffer"
+            )
+
+    return sig
 
 
 def _overwrite_signature_for_non_persistent_buffers(
@@ -531,6 +579,59 @@ def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
+@contextmanager
+def _disable_aten_to_metadata_assertions():
+    global _DISABLE_ATEN_TO_ASSERTION_PASS
+    orig_val = _DISABLE_ATEN_TO_ASSERTION_PASS
+    _DISABLE_ATEN_TO_ASSERTION_PASS = True
+    try:
+        yield
+    finally:
+        _DISABLE_ATEN_TO_ASSERTION_PASS = orig_val
+
+
+def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    if _DISABLE_ATEN_TO_ASSERTION_PASS:
+        return
+
+    aten_to_variants = [
+        torch.ops.aten.to.device,
+        torch.ops.aten.to.dtype,
+        torch.ops.aten.to.dtype_layout,
+    ]
+    for node in gm.graph.nodes:
+        if node.target in aten_to_variants:
+            if (
+                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                and node.args[0] == node.prev.args[0]
+            ):
+                # skip if already guarded
+                continue
+
+            if (tensor_val := node.args[0].meta.get("val")) is not None:
+                with gm.graph.inserting_before(node), _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        stack_trace=node.meta.get("stack_trace"),
+                    ),
+                ):
+                    gm.graph.call_function(
+                        torch.ops.aten._assert_tensor_metadata.default,
+                        args=(node.args[0],),
+                        kwargs={
+                            "dtype": tensor_val.dtype,
+                            "device": tensor_val.device,
+                            "layout": tensor_val.layout,
+                        },
+                    )
+
+
 def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
@@ -554,6 +655,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
+
+        # insert runtime assertions for aten.to nodes
+        _insert_aten_to_metadata_assert_pass(gm)
+
     # update output specs
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)
@@ -798,6 +903,12 @@ def placeholder_naming_pass(
             These are named token, token_1, ...
     """
 
+    custom_meta: dict[str, Any] = {}
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if "custom" in node.meta:
+                custom_meta[node.name] = node.meta["custom"]
+
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
@@ -872,6 +983,8 @@ def placeholder_naming_pass(
         if node.op == "placeholder":
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
+            if node.name in custom_meta:
+                node.meta["custom"] = custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1065,16 +1178,16 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
 
 @functools.lru_cache(maxsize=1)
 def _collect_all_valid_cia_ops_for_aten_namespace() -> set["OperatorBase"]:
-    return _collect_all_valid_cia_ops_for_namespace("aten")
+    return _collect_all_valid_cia_ops_for_namespace(torch.ops.aten)
 
 
-def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_namespace(
+    op_namespace: torch._ops._OpNamespace,
+) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
 
     # Step 2: Query all ops from python dispatcher
-    assert hasattr(torch.ops, namespace)
-    op_namespace = getattr(torch.ops, namespace)
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
@@ -1104,7 +1217,10 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
         if op_namespace_name != "aten":
-            cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
+            assert hasattr(torch.ops, op_namespace_name)
+            op_namespace = getattr(torch.ops, op_namespace_name)
+            if isinstance(op_namespace, torch._ops._OpNamespace):
+                cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
         else:
             cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
     return cia_ops
@@ -1211,7 +1327,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     class PrototypeModule(weakref.ref):
         def __init__(self, m, *args, **kwargs):
-            super().__init__(m, *args, **kwargs)
+            super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
             assert isinstance(m, torch.nn.Module)
             assert not hasattr(self, "_proto_cls")
             self._proto_cls = cls
@@ -1304,3 +1420,52 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_node(cls)
     _deregister_pytree_flatten_spec(cls)
+
+
+def _sync_state(src, dst):
+    assert isinstance(
+        src,
+        torch.nn.Module,
+    ), f"Expected {src} to be a nn.Module"
+    assert isinstance(
+        dst,
+        torch.nn.Module,
+    ), f"Expected {dst} to be a nn.Module"
+    # Share state (params, buffers) between modules.
+    # This ensures that state mutations are visible across them.
+    # Since tensor constants are not mutable, copying (without sharing) is OK.
+    # Also, primitive constants are specialized, so copying (without sharing) is OK.
+    dst._parameters = src._parameters
+    dst._buffers = src._buffers
+
+
+def sync_state(*wrapped_method_modules):
+    """
+    Sync state between exported modules corresponding to wrapped methods.
+    This might be necessary after serializing/deserializing due to copying.
+    """
+    if wrapped_method_modules:
+        m, *other_ms = wrapped_method_modules
+        for other_m in other_ms:
+            _sync_state(m, other_m)
+
+
+class _WrappedMethod(torch.nn.Module):
+    def __init__(self, method):
+        super().__init__()
+        # share state of method's self module
+        _sync_state(method.__self__, self)
+        # redirect forward to method
+        self.forward = method
+
+
+def wrap_method(method):
+    """
+    Wrap a method as a module so that it can be exported.
+    The wrapped module's forward points to the method, and
+    the method's original module state is shared.
+    """
+    assert ismethod(
+        method,
+    ), f"Expected {method} to be a method"
+    return _WrappedMethod(method)

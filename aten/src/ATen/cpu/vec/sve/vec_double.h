@@ -47,6 +47,22 @@ public:
   operator svfloat64_t() const {
     return values;
   }
+  template <uint64_t mask>
+  static Vectorized<double> blend(const Vectorized<double>& a, const Vectorized<double>& b) {
+    // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
+    __at_align__ int64_t flag_arr[size()];
+    for (int i = 0; i < size(); i++) {
+      flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
+    }
+    // Load the flag array into an SVE int64 vector.
+    svint64_t int_mask = svld1_s64(svptrue_b64(), flag_arr);
+    // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
+    svbool_t blend_mask = svcmpne_n_s64(svptrue_b64(), int_mask, 0);
+
+    // Use svsel to select elements from b where the predicate is true, else from a.
+    svfloat64_t result = svsel(blend_mask, b.values, a.values);
+    return Vectorized<double>(result);
+  }
   static Vectorized<double> blendv(const Vectorized<double>& a, const Vectorized<double>& b,
                               const Vectorized<double>& mask_) {
     svbool_t mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_),
