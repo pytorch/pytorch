@@ -323,6 +323,22 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
+def is_slice(node: ir.IRNode):
+    if isinstance(node, ir.ReinterpretView):
+        old_layout = node.data.get_layout()
+        new_layout = node.layout
+        size_comparisons = [
+            V.graph.sizevars.shape_env.evaluate_expr(ol >= nl)
+            for ol, nl in zip(old_layout.size[-len(new_layout.size) :], new_layout.size)
+        ]
+        return (
+            isinstance(node.data, ir.StorageBox)
+            and V.graph.sizevars.shape_env.evaluate_expr(new_layout.offset > 0)
+            and all(size_comparisons)
+        )
+    return False
+
+
 _T = TypeVar("_T", ir.IRNode, torch.Tensor)
 
 
@@ -862,10 +878,13 @@ class CppGemmTemplate(CppTemplate):
             # It shouldn't happen as viewing an mkldnn tensor, we can extend the
             # implementation if it does.
             assert not isinstance(new_inputs[1], ir.BaseView)
+        # Save the original weight node for getting unwrapping layout once we know if blocking is used
+        original_weight_node = new_inputs[1]
         # Note that the layout of MKLDNN Tensor is with the wrong stride
         view_size = new_inputs[1].layout.size
         view_stride = new_inputs[1].layout.stride
         view_offset = new_inputs[1].layout.offset
+        should_unwrap_weight = True
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
@@ -875,13 +894,19 @@ class CppGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
+            nonlocal view_offset
             new_inputs = list(inputs)
-            if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
+            if (
+                not is_mkldnn_wgt
+                and should_unwrap_weight
+                and isinstance(new_inputs[1], torch.Tensor)
+            ):
                 if has_free_symbols(view_size):
                     # If batch size B is dynamic, we need to set the batch size and possibly stride
-                    assert not has_free_symbols(view_size[1:])
+                    assert not has_free_symbols(view_size[-2:])
                     view_size[:] = V.graph.sizevars.size_hints(view_size)
                     view_stride[:] = V.graph.sizevars.size_hints(view_stride)
+                    view_offset = V.graph.sizevars.size_hints((view_offset,))[0]
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
@@ -929,6 +954,13 @@ class CppGemmTemplate(CppTemplate):
         assert micro_gemm is not None
         pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
         micro_gemm.use_local_vnni_blocking(not pre_block_weights)
+
+        # If weight is a slice of a larger tensor, we need the entire tensor and shouldn't unwrap it
+        # because the GEMM template expects the whole tensor.
+        # We shouldn't unwrap the weight if we are using VNNI blocking because we do a reshape on the
+        # slice of the weights.
+        if not block_weights and is_slice(original_weight_node):
+            should_unwrap_weight = False
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
