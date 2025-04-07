@@ -5603,9 +5603,9 @@ class ExternKernel(InputsKernel):
                 )
         return args
 
-    def codegen_const_args(
+    def codegen_const_args(  # type: ignore[no-untyped-def]
         self, names: Optional[list[str]] = None, code: Optional[IndentedBuffer] = None
-    ):  # type: ignore[no-untyped-def]
+    ):
         if V.graph.cpp_wrapper:
             result = []
             # Aten ops follow the convention that tensor args are before non-tensor args,
