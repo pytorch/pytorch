@@ -922,7 +922,8 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {
@@ -1088,10 +1089,12 @@ DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
 }
 
 // MetalKernelFunction implementation
-MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_)
+    : cps([cps_ retain]), func([f_ retain]) {}
 
 MetalKernelFunction::~MetalKernelFunction() {
   [cps release];
+  [func release];
 }
 
 void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
@@ -1150,6 +1153,14 @@ uint64_t MetalKernelFunction::getThreadExecutionWidth() const {
 
 uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
   return [cps staticThreadgroupMemoryLength];
+}
+
+void MetalKernelFunction::setArgumentBuffer(unsigned idx, const std::vector<at::Tensor>& tv) {
+  auto arg_encoder = [func newArgumentEncoderWithBufferIndex:idx];
+  TORCH_CHECK(encoder, "Failed to create argument buffer encoder")
+  for (auto idx : c10::irange(tv.size())) {
+    mtl_setBuffer(arg_encoder, tv[idx], idx);
+  }
 }
 
 } // namespace at::native::mps
