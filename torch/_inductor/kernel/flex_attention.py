@@ -30,6 +30,7 @@ from ..ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
+    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -111,7 +112,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
