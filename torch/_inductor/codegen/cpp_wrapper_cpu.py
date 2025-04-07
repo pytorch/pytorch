@@ -2421,10 +2421,10 @@ if (!custom_op_wrapper) {
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(element_type, torch.DeviceObjType):
                 main_value, aux = arg_str.rsplit(", ", maxsplit=1)
-                self.writeline(f"auto {var_name} = {main_value};")
+                writeline(f"auto {var_name} = {main_value};")
                 return f"&{var_name}, {aux}"
 
-            self.writeline(
+            writeline(
                 f"{self.c_type_for_prim_type(val, element_type)} {var_name} = {arg_str};"
             )
             return f"&{var_name}"
