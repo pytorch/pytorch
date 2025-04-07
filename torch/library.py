@@ -184,7 +184,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _register_fake(self, op_name, fn, _stacklevel=1):
+    def _register_fake(self, op_name, fn, _stacklevel=1, *, _allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
         if torch._running_with_deploy():
             _library.utils.warn_deploy()
@@ -211,7 +211,9 @@ class Library:
         else:
             func_to_register = fn
 
-        handle = entry.fake_impl.register(func_to_register, source)
+        handle = entry.fake_impl.register(
+            func_to_register, source, _allow_override=_allow_override
+        )
         self._registration_handles.append(handle)
 
     def _register_torch_dispatch_rule(self, op_name, torch_dispatch_class, fn):
@@ -290,7 +292,9 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def impl(self, op_name, fn, dispatch_key="", *, with_keyset=False):
+    def impl(
+        self, op_name, fn, dispatch_key="", *, with_keyset=False, _allow_override=False
+    ):
         r"""Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -332,7 +336,7 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in _impls:
+        if (not _allow_override) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(
@@ -916,6 +920,7 @@ def register_fake(
     *,
     lib: Optional[Library] = None,
     _stacklevel: int = 1,
+    _allow_override: bool = False,
 ):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
@@ -1020,7 +1025,9 @@ def register_fake(
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib._register_fake(op_name, func, _stacklevel=stacklevel + 1)
+        use_lib._register_fake(
+            op_name, func, _stacklevel=stacklevel + 1, _allow_override=_allow_override
+        )
         return func
 
     if func is None:

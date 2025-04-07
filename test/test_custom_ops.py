@@ -2171,6 +2171,38 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
 
+    def test_duplicate_fake(self):
+        lib = self.lib()
+        op_name = f"{self.test_ns}::foo"
+        torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
+        op = self.ns().foo.default
+
+        def foo_impl1(x):
+            return x * 1
+
+        lib.impl("foo", foo_impl1, "CPU")
+        torch.library.register_fake(op_name, foo_impl1, lib=lib)
+
+        self.assertEqual(op(torch.ones(3)), torch.ones(3))
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [3])
+
+        def foo_impl2(x):
+            return torch.cat([x, x])
+
+        with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
+            lib.impl("foo", foo_impl2, "CPU")
+
+        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
+            torch.library.register_fake(op_name, foo_impl2, lib=lib)
+
+        torch.library.register_fake(op_name, foo_impl2, lib=lib, _allow_override=True)
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [6])
+
+        lib.impl(op_name, foo_impl2, "CPU", _allow_override=True)
+        self.assertEqual(op(torch.ones(3)), torch.ones(6))
+
     @scoped_load_inline
     def test_autograd_function_backed_op(self, load_inline):
         cpp_source = """
