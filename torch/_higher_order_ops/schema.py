@@ -52,7 +52,7 @@ class CTypeGen:
     def from_example(obj: Any) -> Any:
         import torch
 
-        if isinstance(obj, torch.fx.GraphModule):
+        if isinstance(obj, (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)):
             return torch._C.AnyType.get()
         return torch._C._jit_try_infer_type(obj).type()
 
@@ -152,3 +152,27 @@ class CFunctionSchemaGen:
             False,
             False,
         )
+
+
+def find_hop_schema(
+    gm: "torch.fx.GraphModule", target: Any
+) -> list[torch._C.FunctionSchema]:
+    import torch.utils._pytree as pytree
+
+    schemas = []
+    for node in gm.graph.find_nodes(op="call_function", target=target):
+
+        def _get_example_value(node: torch.fx.Node) -> Any:
+            if node.op == "get_attr":
+                return getattr(gm, node.target)  # type: ignore[arg-type]
+            else:
+                return node.meta["example_value"]
+
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node,
+            _get_example_value,
+            (node.args, node.kwargs),
+        )
+        schema = node.target.gen_schema(*fake_args, **fake_kwargs)
+        schemas.append(schema)
+    return schemas
