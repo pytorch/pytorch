@@ -395,7 +395,7 @@ class AOTInductorModelContainer {
         // If user managed, we pass in the pointer directly, and skip the copy.
         constants_map_to_update->insert_or_assign(
             constant_name,
-            ConstantAtenTensorHandle(tensor, /* user_managed = */ true));
+            MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
         continue;
       }
 
