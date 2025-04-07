@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoXPU,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfXpu,
     TEST_ACL,
     TEST_MKL,
     xfailIfACL,
@@ -250,7 +249,7 @@ class TestPatternMatcherBase(TestCase):
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
-class TestPatternMatcher(TestPatternMatcherBase):
+class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def _test_conv_unary_base(self, dim=4):
         assert dim == 4 or dim == 5
 
@@ -819,15 +818,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_conv2d_binary_broadcast_shapes(self, device):
-        self.device = device
+    def test_conv2d_binary_broadcast_shapes_cpu(self):
         self._test_conv_binary_broadcast_shapes_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_conv3d_binary_broadcast_shapes(self, device):
-        self.device = device
+    def test_conv3d_binary_broadcast_shapes_cpu(self):
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
     def test_linear_binary(self, device):
@@ -889,9 +886,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    def test_linear_binary_broadcast_shapes(self, device):
-        self.device = device
-
+    def test_linear_binary_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -958,9 +953,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
-    def test_conv2d_linear_add_broadcast_shapes(self, device):
-        self.device = device
-
+    def test_conv2d_linear_add_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1032,475 +1025,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
-    @skipIfXpu
-    def test_hardtanh_pattern_fallback(self, device):
-        self.device = device
 
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv_transpose = torch.nn.ConvTranspose2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, min_value, max_value):
-                conv_transpose_output = self.conv_transpose(x)
-                clamp_min_output = torch.clamp_min(conv_transpose_output, min_value)
-                clamp_max_output = torch.clamp_max(clamp_min_output, max_value)
-                return clamp_max_output
-
-        # check works for min_value > max_value.
-        min_values = [3, torch.randn(1, 32, 28, 28)]
-        max_values = [0, torch.randn(1, 32, 28, 28)]
-        v = torch.randn(1, 3, 28, 28)
-
-        def matcher_check_fn():
-            self.assertEqual(
-                counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 3,
-            )
-            self.assertEqual(
-                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
-            )
-
-        for min_value, max_value in zip(min_values, max_values):
-            mod = Model().eval()
-            self._test_common(mod, (v, min_value, max_value), matcher_check_fn)
-
-    def test_leaky_relu_pattern_fallback(self, device):
-        self.device = device
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, negative_slope):
-                conv_out = self.conv(x)
-                return torch.where(conv_out > 0, conv_out, conv_out * negative_slope)
-
-        negative_slopes = [0.1, torch.randn(1, 32, 28, 28)]
-
-        def matcher_check_fn():
-            self.assertEqual(
-                counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 4,
-            )
-            self.assertEqual(
-                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
-            )
-
-        with torch.no_grad():
-            v = torch.randn(1, 3, 28, 28)
-            for negative_slope in negative_slopes:
-                mod = Model().eval()
-                self._test_common(mod, (v, negative_slope), matcher_check_fn)
-
-    # https://github.com/pytorch/pytorch/issues/99838.
-    def test_conv2d_add_scalar(self, device):
-        self.device = device
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x):
-                out_conv = self.conv(x)
-                out = torch.add(out_conv, 1.0)
-                return out
-
-        def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["binary_folding"], 1)
-            self.assertEqual(
-                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
-            )
-
-        with torch.no_grad():
-            mod = Model().eval()
-            v = torch.randn(1, 3, 28, 28)
-            self._test_common(mod, (v,), matcher_check_fn)
-
-    @xfailIfACL
-    @skipIfXpu
-    def test_conv2d_binary_inplace_fusion_pass(
-        self, device, include_ops=None, exclude_ops=None
-    ):
-        self.device = device
-
-        class Model_v1(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, other):
-                conv_out = self.conv(x)
-                return torch.add(conv_out, other.relu())
-
-        class Model_v2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv2 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv3 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, _):
-                conv_out1 = self.conv(x)
-                pow_out = torch.pow(conv_out1, 2)
-                conv_out2 = self.conv2(pow_out)
-                conv_out3 = self.conv3(conv_out2)
-                res = torch.add(conv_out3, pow_out)
-                return res
-
-        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
-        others = [
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-        ]
-        mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
-        mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-
-        if include_ops is None:
-            include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        if exclude_ops is None:
-            exclude_ops = ["mkldnn._convolution_pointwise.binary"]
-
-        for other, mod in zip(others, [mod_v1, mod_v2]):
-            self._test_code_common(mod, (input, other), include_ops, exclude_ops)
-
-    @xfailIfACL
-    @skipIfXpu
-    def test_conv2d_binary_inplace_fusion_failed(
-        self, device, include_ops=None, exclude_ops=None
-    ):
-        self.device = device
-
-        # Written buffer is graph input, we can't fuse inplace.
-        class Model_v1(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, other):
-                conv_out = self.conv(x)
-                return torch.add(conv_out, other)
-
-        # Written buffer is an alias tensor, we can't fuse inplace.
-        class Model_v2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, other):
-                conv_out = self.conv(x)
-                return torch.add(conv_out, other[1:2, :, :, :]), other
-
-        class Model_v3(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv2 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, _):
-                pow_out = torch.pow(self.conv(x), 2)
-                other2 = F.relu(pow_out)
-                conv_out2 = self.conv2(pow_out)
-                res = torch.add(conv_out2, pow_out)
-                res = res + other2
-                return res
-
-        # Written buffer is an ReinterpretView, we can't fuse inplace.
-        class Model_v4(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 32, 3, padding=1, bias=True)
-                self.linear = torch.nn.Linear(32 * 28, 32 * 28)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x, y):
-                x = self.conv(self.relu(x))
-                y = self.linear(y)
-                y = torch.cat((y, y + 1), 1)
-                y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
-                return x + y
-
-        class Model_v5(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(32, 32, 3, padding=1, bias=True)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, _, x):
-                x1 = self.relu(x)
-                return self.conv(x1) + x1
-
-        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
-        others = [
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(2, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(1, 14, 32 * 28),
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-        ]
-        mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
-        mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-        mod_v3 = Model_v3().to(memory_format=torch.channels_last).eval()
-        mod_v4 = Model_v4().to(memory_format=torch.channels_last).eval()
-        mod_v5 = Model_v5().to(memory_format=torch.channels_last).eval()
-
-        if include_ops is None:
-            include_ops = ["mkldnn._convolution_pointwise.binary"]
-        if exclude_ops is None:
-            exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
-
-        for other, mod in zip(others, [mod_v1, mod_v2, mod_v3, mod_v4, mod_v5]):
-            self._test_code_common(mod, (input, other), include_ops, exclude_ops)
-
-    def test_conv2d_binary_fusion_failed(self, device):
-        self.device = device
-
-        # we don't support alpha !=1 case or other has different size with conv's output.
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, other, alpha):
-                conv_out = self.conv(x)
-                return torch.add(conv_out, other, alpha=alpha)
-
-        # https://github.com/pytorch/pytorch/issues/100802.
-        # we can't do the fusion when add's inputs are same tensor.
-        class Model2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x):
-                out = self.conv(x)
-                out = torch.add(out, out)
-                return out
-
-        # https://github.com/pytorch/pytorch/issues/101374.
-        # we can't do the fusion when add's inputs are mixed dtype.
-        class Model3(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x):
-                temp = self.conv(x)
-                other = torch.ones(temp.shape, dtype=torch.double)
-                out = torch.add(temp, other)
-                return out
-
-        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
-        others = [
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(32, 28, 28),
-        ]
-        include_ops = ["mkldnn._convolution_pointwise"]
-        exclude_ops = [
-            "mkldnn._convolution_pointwise.binary",
-            "mkldnn._convolution_pointwise_.binary",
-        ]
-
-        # case1
-        for other, alpha in zip(others, [0.1, 1.0]):
-            mod = Model().to(memory_format=torch.channels_last).eval()
-            self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
-        # case2:
-        mod = Model2().to(memory_format=torch.channels_last).eval()
-        self._test_code_common(mod, (input,), include_ops, exclude_ops)
-        # case3:
-        mod = Model3().to(memory_format=torch.channels_last).eval()
-        self._test_code_common(mod, (input,), include_ops, exclude_ops)
-
-    @xfailIfACL
-    def test_reproduce_99842_issue(self, device):
-        self.device = device
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
-
-            def forward(self, input_tensor):
-                x = self.conv(input_tensor)
-                x = F.relu(x + torch.ones(x.size()))
-                return x
-
-        input = torch.randn(1, 3, 14, 14)
-        mod = Model().eval()
-        include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        self._test_code_common(mod, (input,), include_ops, [])
-
-    def test_reproduce_113440_issue_1(self, device):
-        self.device = device
-
-        class Mod(torch.nn.Module):
-            def __init__(
-                self,
-                add_fn,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
-                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
-                self.add_fn = add_fn
-                self.relu = torch.nn.ReLU(inplace=True)
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.add_fn2 = add_fn
-                self.relu2 = torch.nn.ReLU(inplace=True)
-                self.use_relu = True
-
-            def forward(self, x):
-                x1 = self.conv1(x)
-                x2 = self.conv2(x)
-                tmp = self.add_fn(x1, x2)
-                if self.use_relu:
-                    tmp = self.relu(tmp)
-                tmp1 = self.conv3(tmp)
-                tmp2 = self.conv4(tmp)
-                res = self.add_fn2(tmp1, tmp2)
-                if self.use_relu:
-                    res = self.relu2(res)
-                return res
-
-        with torch.no_grad():
-            example_inputs = (
-                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
-                    1
-                ),
-            )
-            example_inputs[0].get_device()
-            m = Mod(
-                lambda x, y: x.add_(y),
-            ).eval()
-            om = torch.compile(m)
-            om(*example_inputs)
-            om(*example_inputs)
-
-    def test_reproduce_113440_issue_2(self):
-        class Mod(torch.nn.Module):
-            def __init__(
-                self,
-                add_fn,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
-                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
-                self.add_fn = add_fn
-                self.relu = torch.nn.ReLU(inplace=True)
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.add_fn2 = add_fn
-                self.relu2 = torch.nn.ReLU(inplace=True)
-
-                self.conv5 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv6 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv7 = torch.nn.Conv2d(6, 6, kernel_size=1, stride=1)
-                self.add_fn3 = add_fn
-                self.relu3 = torch.nn.ReLU(inplace=True)
-
-                self.use_relu = True
-
-            def forward(self, x):
-                x1 = self.conv1(x)
-                x2 = self.conv2(x)
-                tmp = self.add_fn(x1, x2)
-                if self.use_relu:
-                    tmp = self.relu(tmp)
-
-                tmp1 = self.conv3(tmp)
-                res = self.relu2(tmp1)
-
-                return res
-
-        with torch.no_grad():
-            example_inputs = (
-                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
-                    1
-                ),
-            )
-            m = Mod(
-                lambda x, y: x.add_(y),
-            ).eval()
-            om = torch.compile(m)
-            om(*example_inputs)
-            om(*example_inputs)
-
-    @xfailIfACL
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-    def test_reproduce_121253_issue_addmm_fusion_check(self, device):
-        self.device = device
-
-        class Mod(torch.nn.Module):
-            def __init__(self, weight, bias, beta, alpha):
-                super().__init__()
-                self.weight = weight
-                self.bias = bias
-                self.beta = beta
-                self.alpha = alpha
-
-            def forward(self, x):
-                return torch.addmm(
-                    self.bias, x, self.weight, beta=self.beta, alpha=self.alpha
-                )
-
-        dtypes = [torch.float32]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            dtypes.append(torch.bfloat16)
-        for dtype in dtypes:
-            linear_op = (
-                "mkl._mkl_linear"
-                if dtype == torch.float32
-                else "mkldnn._linear_pointwise"
-            )
-            for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
-                weight = torch.nn.Parameter(torch.randn(64, 64, dtype=dtype))
-                bias = torch.nn.Parameter(torch.randn(64, dtype=dtype))
-                mod = Mod(weight, bias, beta, alpha).to(dtype).eval()
-                with torch.no_grad():
-                    x = torch.randn(1, 64, dtype=dtype)
-                    include_ops = []
-                    exclude_ops = []
-                    if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
-                        exclude_ops = [linear_op]
-                    else:
-                        include_ops = [linear_op]
-                    self._test_code_common(mod, (x,), include_ops, exclude_ops)
-
-
-class TestQuantizedPatternMatcher(TestPatternMatcherBase):
+class TestPatternMatcher(TestPatternMatcherBase):
     def _qconv2d_test_helper(self, device="cpu", int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
@@ -3815,6 +3341,452 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
         )
 
     # https://github.com/pytorch/pytorch/issues/99841.
+    def test_hardtanh_pattern_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, min_value, max_value):
+                conv_transpose_output = self.conv_transpose(x)
+                clamp_min_output = torch.clamp_min(conv_transpose_output, min_value)
+                clamp_max_output = torch.clamp_max(clamp_min_output, max_value)
+                return clamp_max_output
+
+        # check works for min_value > max_value.
+        min_values = [3, torch.randn(1, 32, 28, 28)]
+        max_values = [0, torch.randn(1, 32, 28, 28)]
+        v = torch.randn(1, 3, 28, 28)
+
+        def matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
+                0 if TEST_ACL else 3,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+            )
+
+        for min_value, max_value in zip(min_values, max_values):
+            mod = Model().eval()
+            self._test_common(mod, (v, min_value, max_value), matcher_check_fn)
+
+    def test_leaky_relu_pattern_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, negative_slope):
+                conv_out = self.conv(x)
+                return torch.where(conv_out > 0, conv_out, conv_out * negative_slope)
+
+        negative_slopes = [0.1, torch.randn(1, 32, 28, 28)]
+
+        def matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
+                0 if TEST_ACL else 4,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+            )
+
+        with torch.no_grad():
+            v = torch.randn(1, 3, 28, 28)
+            for negative_slope in negative_slopes:
+                mod = Model().eval()
+                self._test_common(mod, (v, negative_slope), matcher_check_fn)
+
+    # https://github.com/pytorch/pytorch/issues/99838.
+    def test_conv2d_add_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                out_conv = self.conv(x)
+                out = torch.add(out_conv, 1.0)
+                return out
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["binary_folding"], 1)
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+            )
+
+        with torch.no_grad():
+            mod = Model().eval()
+            v = torch.randn(1, 3, 28, 28)
+            self._test_common(mod, (v,), matcher_check_fn)
+
+    @xfailIfACL
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
+        class Model_v1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, other):
+                conv_out = self.conv(x)
+                return torch.add(conv_out, other.relu())
+
+        class Model_v2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+                self.conv3 = torch.nn.Conv2d(
+                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, _):
+                conv_out1 = self.conv(x)
+                pow_out = torch.pow(conv_out1, 2)
+                conv_out2 = self.conv2(pow_out)
+                conv_out3 = self.conv3(conv_out2)
+                res = torch.add(conv_out3, pow_out)
+                return res
+
+        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
+        others = [
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+        ]
+        mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
+        mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise_.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
+        for other, mod in zip(others, [mod_v1, mod_v2]):
+            self._test_code_common(mod, (input, other), include_ops, exclude_ops)
+
+    @xfailIfACL
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
+        # Written buffer is graph input, we can't fuse inplace.
+        class Model_v1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, other):
+                conv_out = self.conv(x)
+                return torch.add(conv_out, other)
+
+        # Written buffer is an alias tensor, we can't fuse inplace.
+        class Model_v2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, other):
+                conv_out = self.conv(x)
+                return torch.add(conv_out, other[1:2, :, :, :]), other
+
+        class Model_v3(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, _):
+                pow_out = torch.pow(self.conv(x), 2)
+                other2 = F.relu(pow_out)
+                conv_out2 = self.conv2(pow_out)
+                res = torch.add(conv_out2, pow_out)
+                res = res + other2
+                return res
+
+        # Written buffer is an ReinterpretView, we can't fuse inplace.
+        class Model_v4(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, 3, padding=1, bias=True)
+                self.linear = torch.nn.Linear(32 * 28, 32 * 28)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x, y):
+                x = self.conv(self.relu(x))
+                y = self.linear(y)
+                y = torch.cat((y, y + 1), 1)
+                y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
+                return x + y
+
+        class Model_v5(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, _, x):
+                x1 = self.relu(x)
+                return self.conv(x1) + x1
+
+        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
+        others = [
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+            torch.randn(2, 32, 28, 28).to(memory_format=torch.channels_last),
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+            torch.randn(1, 14, 32 * 28),
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+        ]
+        mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
+        mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
+        mod_v3 = Model_v3().to(memory_format=torch.channels_last).eval()
+        mod_v4 = Model_v4().to(memory_format=torch.channels_last).eval()
+        mod_v5 = Model_v5().to(memory_format=torch.channels_last).eval()
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
+        for other, mod in zip(others, [mod_v1, mod_v2, mod_v3, mod_v4, mod_v5]):
+            self._test_code_common(mod, (input, other), include_ops, exclude_ops)
+
+    def test_conv2d_binary_fusion_failed(self):
+        # we don't support alpha !=1 case or other has different size with conv's output.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, other, alpha):
+                conv_out = self.conv(x)
+                return torch.add(conv_out, other, alpha=alpha)
+
+        # https://github.com/pytorch/pytorch/issues/100802.
+        # we can't do the fusion when add's inputs are same tensor.
+        class Model2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                out = self.conv(x)
+                out = torch.add(out, out)
+                return out
+
+        # https://github.com/pytorch/pytorch/issues/101374.
+        # we can't do the fusion when add's inputs are mixed dtype.
+        class Model3(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                temp = self.conv(x)
+                other = torch.ones(temp.shape, dtype=torch.double)
+                out = torch.add(temp, other)
+                return out
+
+        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
+        others = [
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+            torch.randn(32, 28, 28),
+        ]
+        include_ops = ["mkldnn._convolution_pointwise"]
+        exclude_ops = [
+            "mkldnn._convolution_pointwise.binary",
+            "mkldnn._convolution_pointwise_.binary",
+        ]
+
+        # case1
+        for other, alpha in zip(others, [0.1, 1.0]):
+            mod = Model().to(memory_format=torch.channels_last).eval()
+            self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
+        # case2:
+        mod = Model2().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
+        # case3:
+        mod = Model3().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
+
+    @xfailIfACL
+    def test_reproduce_99842_issue(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
+
+            def forward(self, input_tensor):
+                x = self.conv(input_tensor)
+                x = F.relu(x + torch.ones(x.size()))
+                return x
+
+        input = torch.randn(1, 3, 14, 14)
+        mod = Model().eval()
+        include_ops = ["mkldnn._convolution_pointwise_.binary"]
+        self._test_code_common(mod, (input,), include_ops, [])
+
+    def test_reproduce_113440_issue_1(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                res = self.add_fn2(tmp1, tmp2)
+                if self.use_relu:
+                    res = self.relu2(res)
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            example_inputs[0].get_device()
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
+
+    def test_reproduce_113440_issue_2(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+
+                self.conv5 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv6 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv7 = torch.nn.Conv2d(6, 6, kernel_size=1, stride=1)
+                self.add_fn3 = add_fn
+                self.relu3 = torch.nn.ReLU(inplace=True)
+
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+
+                tmp1 = self.conv3(tmp)
+                res = self.relu2(tmp1)
+
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
+
+    @xfailIfACL
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_reproduce_121253_issue_addmm_fusion_check(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, weight, bias, beta, alpha):
+                super().__init__()
+                self.weight = weight
+                self.bias = bias
+                self.beta = beta
+                self.alpha = alpha
+
+            def forward(self, x):
+                return torch.addmm(
+                    self.bias, x, self.weight, beta=self.beta, alpha=self.alpha
+                )
+
+        dtypes = [torch.float32]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        for dtype in dtypes:
+            linear_op = (
+                "mkl._mkl_linear"
+                if dtype == torch.float32
+                else "mkldnn._linear_pointwise"
+            )
+            for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
+                weight = torch.nn.Parameter(torch.randn(64, 64, dtype=dtype))
+                bias = torch.nn.Parameter(torch.randn(64, dtype=dtype))
+                mod = Mod(weight, bias, beta, alpha).to(dtype).eval()
+                with torch.no_grad():
+                    x = torch.randn(1, 64, dtype=dtype)
+                    include_ops = []
+                    exclude_ops = []
+                    if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
+                        exclude_ops = [linear_op]
+                    else:
+                        include_ops = [linear_op]
+                    self._test_code_common(mod, (x,), include_ops, exclude_ops)
+
     @skipIfNoDynamoSupport
     def test_woq_int8(self):
         class M(torch.nn.Module):
@@ -4195,7 +4167,7 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
-class TestDynamicPatternMatcher(TestPatternMatcherBase):
+class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
     def setUp(self):
         TestCase.setUp(self)
         self.ctx_stack = contextlib.ExitStack()
@@ -4217,15 +4189,15 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
         TestCase.tearDown(self)
         self.ctx_stack.close()
 
-    _test_conv_unary_base = TestPatternMatcher._test_conv_unary_base
-    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary
-    test_conv3d_unary_dynamic_shapes = TestPatternMatcher.test_conv3d_unary
-    _test_conv_binary_base = TestPatternMatcher._test_conv_binary_base
-    test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
-    test_conv3d_binary_dynamic_shapes = TestPatternMatcher.test_conv3d_binary
-    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+    _test_conv_unary_base = TestPatternMatcherGeneric._test_conv_unary_base
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcherGeneric.test_conv2d_unary
+    test_conv3d_unary_dynamic_shapes = TestPatternMatcherGeneric.test_conv3d_unary
+    _test_conv_binary_base = TestPatternMatcherGeneric._test_conv_binary_base
+    test_conv2d_binary_dynamic_shapes = TestPatternMatcherGeneric.test_conv2d_binary
+    test_conv3d_binary_dynamic_shapes = TestPatternMatcherGeneric.test_conv3d_binary
+    test_linear_unary_dynamic_shapes = TestPatternMatcherGeneric.test_linear_unary
     test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
-        TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
+        TestPatternMatcherGeneric.test_linear_input_non_contiguous_3D_wo_bias
     )
 
     def test_conv_transpose2d_dynamic_shapes(self, device):
@@ -4307,7 +4279,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
         "specialize_float": True,
     }
 )
-class TestDynamicQuantizedPatternMatcher(TestPatternMatcherBase):
+class TestDynamicPatternMatcher(TestPatternMatcherBase):
     @xfailIfACL
     def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
         r"""
@@ -4470,12 +4442,12 @@ class TestDynamicQuantizedPatternMatcher(TestPatternMatcherBase):
 
 
 instantiate_device_type_tests(
-    TestPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_device_type_tests(
-    TestDynamicPatternMatcher, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestDynamicPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
-instantiate_parametrized_tests(TestQuantizedPatternMatcher)
+instantiate_parametrized_tests(TestPatternMatcher)
 if __name__ == "__main__":
     if IS_LINUX and (HAS_CPU) and torch.backends.mkldnn.is_available():
         run_tests()
