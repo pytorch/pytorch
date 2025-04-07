@@ -4,6 +4,7 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -14,6 +15,7 @@ from torch.distributed.distributed_c10d import (
     init_process_group,
     is_initialized,
     is_nccl_available,
+    new_group,
     ProcessGroup,
 )
 from torch.distributed.tensor._collective_utils import (
@@ -29,6 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._typing_utils import not_none
 
 
 def _get_device_type(world_size):
@@ -72,6 +75,7 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
+    @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -86,7 +90,7 @@ class DeviceMeshTest(DTensorTestBase):
     def test_assert_invalid_mesh_tensor(self):
         mesh = torch.arange(self.world_size).to(self.rank)
         with self.assertRaises(ValueError):
-            device_mesh = DeviceMesh(self.device_type, mesh)
+            DeviceMesh(self.device_type, mesh)
 
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
@@ -142,7 +146,7 @@ class DeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
         ):
-            local_rank = mesh_2d.get_local_rank()
+            mesh_2d.get_local_rank()
 
     @with_comms
     def test_get_local_rank(self):
@@ -240,23 +244,27 @@ class DeviceMeshTest(DTensorTestBase):
         invalid_mesh = [[0, 1], [2, 3]]  # 2D mesh when we need 1D
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
-            DeviceMesh.from_group(global_pg, "cuda", invalid_mesh)
+            DeviceMesh.from_group(
+                global_pg, "cuda", invalid_mesh, mesh_dim_names=("dim0", "dim1")
+            )
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
         groups = device_mesh.get_all_groups()
         invalid_mesh = (0, 1, 2, 3)  # 1D mesh when we need 2D
         regex = r"Expects mesh with ndim equal to number of ProcessGroups but got mesh \[0, 1, 2, 3\] and 2 ProcessGroups"
         with self.assertRaisesRegex(ValueError, regex):
-            DeviceMesh.from_group(groups, self.device_type, invalid_mesh)
+            DeviceMesh.from_group(
+                groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
+            )
 
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Device type with GPU index is not supported",
+            "Device type with index is not supported",
         ):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(
+            init_device_mesh(
                 "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
@@ -382,10 +390,9 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(ep_mesh, another_mesh)
 
     @with_comms
-    def test_from_group_with_mesh_shape(self):
-        """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
-        # Consider two different logical views of the same mesh:
-        # - (4, 2) ("dp", "tp") mesh
+    def test_from_group_with_mesh_shape_3d(self):
+        """Tests ``from_group`` when passing ``mesh_shape`` as 3D."""
+        # Consider the following 3D scenario and we need to create the 2D HSDP mesh from it.
         # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp_replicate", "dp_shard", "tp")
@@ -399,8 +406,8 @@ class DeviceMeshTestNDim(DTensorTestBase):
         dp_mesh = DeviceMesh.from_group(
             [dp_replicate_group, dp_shard_group],
             self.device_type,
-            mesh=ref_mesh.mesh[:, :, ref_mesh.get_local_rank(2)],
-            mesh_dim_names=mesh_dim_names[:2],
+            mesh=ref_mesh.mesh[:, :, ref_mesh.get_local_rank(mesh_dim="tp")],
+            mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
         ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
@@ -421,6 +428,58 @@ class DeviceMeshTestNDim(DTensorTestBase):
             dp_mesh["dp_shard"]._dim_group_infos, ref_mesh["dp_shard"]._dim_group_infos
         ):
             self.assertEqual(ref_ranks, ranks)
+
+    @with_comms()
+    def test_from_group_with_mesh_shape_2d(self):
+        """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
+        # Consider the following scenario where the process group has been created,
+        # but we need to create the 2D HSDP mesh from it later in the program.
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("dp_replicate", "dp_shard")
+        ref_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Create shard groups (e.g. (0, 1, 2, 3), (4, 5, 6, 7))
+        # and assign the correct shard group to each rank
+        shard_rank_lists = list(range(0, self.world_size // 2)), list(
+            range(self.world_size // 2, self.world_size)
+        )
+        shard_groups = (
+            new_group(shard_rank_lists[0]),
+            new_group(shard_rank_lists[1]),
+        )
+        current_shard_group = (
+            shard_groups[0] if self.rank in shard_rank_lists[0] else shard_groups[1]
+        )
+
+        # Create replicate groups (for example, (0, 4), (1, 5), (2, 6), (3, 7))
+        # and assign the correct replicate group to each rank
+        current_replicate_group = None
+        shard_factor = len(shard_rank_lists[0])
+        for i in range(self.world_size // 2):
+            replicate_group_ranks = list(range(i, self.world_size, shard_factor))
+            replicate_group = new_group(replicate_group_ranks)
+            if self.rank in replicate_group_ranks:
+                current_replicate_group = replicate_group
+
+        dp_mesh = DeviceMesh.from_group(
+            [not_none(current_replicate_group), current_shard_group],
+            self.device_type,
+            mesh=ref_mesh.mesh,
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+
+        ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
+        ):
+            self.assertEqual(ref_ranks, ranks)
+
+        # check both the 2d mesh and the submeshes are exactly the same.
+        self.assertEqual(dp_mesh, ref_mesh)
+        self.assertEqual(dp_mesh["dp_replicate"], ref_mesh["dp_replicate"])
+        self.assertEqual(dp_mesh["dp_shard"], ref_mesh["dp_shard"])
 
 
 class InitDeviceMeshTest(DTensorTestBase):
@@ -451,7 +510,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "Each mesh_dim_name must be unique.",
         ):
-            mesh = init_device_mesh(
+            init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=["dp", "dp"],
@@ -463,7 +522,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "mesh_shape and mesh_dim_names should have same length!",
         ):
-            mesh = init_device_mesh(
+            init_device_mesh(
                 self.device_type,
                 (8,),
                 mesh_dim_names=["dp", "tp"],
@@ -481,7 +540,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             RuntimeError, "Cannot slice a DeviceMesh without mesh_dim_names!"
         ):
             mesh = init_device_mesh(self.device_type, (2, 4))
-            child_mesh = mesh["DP"]
+            mesh["DP"]
 
     @with_comms
     def test_raises_invalid_mesh_dim_name(self):
@@ -491,7 +550,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh = init_device_mesh(
                 self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
             )
-            child_mesh = mesh[child_mesh_dim_name]
+            mesh[child_mesh_dim_name]
 
     @with_comms
     def test_get_item_2d(self):
@@ -512,7 +571,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         tp_group_idx = self.rank // 4
         self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
 
-        dp_mesh = mesh_2d["DP"]
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
@@ -562,17 +620,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
     def test_cache_and_reuse_submesh_slice_result(self):
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
 
-        dp_mesh = mesh["dp"]
         ref_pg_count = _world.group_count
 
         # When we call the "dp" slice second time, it should not create any new pg.
         # As we are just using the cached result so the pg count should be the same.
-        dp_mesh_2 = mesh["dp"]
         self.assertEqual(ref_pg_count, _world.group_count)
 
         # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
         # just reuse the parent mesh pg.
-        tp_mesh = mesh["tp"]
+        mesh["tp"]
         self.assertEqual(_world.group_count, ref_pg_count)
 
     @with_comms
@@ -601,7 +657,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             KeyError,
             "Invalid mesh_dim_names",
         ):
-            cp_dp_mesh = mesh_3d["cp", "dp"]
+            mesh_3d["cp", "dp"]
 
     @with_comms
     def test_flatten_mesh_3d(self):
@@ -755,6 +811,19 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
+
+    @with_comms
+    def test_mesh_slice_fake_tensor_mode(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        with FakeTensorMode():
+            mesh_2d["DP"]
+            mesh_2d["TP"]
+            mesh_2d["DP", "TP"]
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

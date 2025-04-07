@@ -11,8 +11,8 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -177,6 +177,9 @@ public:
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));
+  }
+  Vectorized<float> asinh() const {
+    return Vectorized<float>(Sleef_asinhf16_u10(values));
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf16_u10(values));
@@ -400,6 +403,12 @@ public:
   Vectorized<float> pow(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
   }
+  float reduce_add() const {
+    return _mm512_reduce_add_ps(values);
+  }
+  float reduce_max() const {
+    return _mm512_reduce_max_ps(values);
+  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
@@ -579,36 +588,17 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
   return _mm512_fmsub_ps(a, b, c);
 }
 
-// TODO(jgong5): rewrite with ATEN vectorized (need to add unpack and shuffle)
-// Used by Inductor CPP codegen
+// TODO: rewrite with ATEN vectorized (need to add unpack and shuffle)
+// Used by Inductor CPP codegen for micro gemm
 // Code referred to FBGEMM:
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
 // kernel for transposing mxn where m, n <= 16
-// M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
-inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
-  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
-  // load from src to registers
-  __m512 input[16];
-  int i;
-  if (N == 16) {
-    for (i = 0; i < M; ++i) {
-      input[i] = _mm512_loadu_ps(&src[i * ld_src]);
-    }
-  } else {
-    __mmask16 src_mask = (1 << N) - 1;
-    for (i = 0; i < M; ++i) {
-      input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
-    }
-  }
-  for (; i < 16; ++i) {
-    // Not really needed but to avoid uninitialized variable warning.
-    // Shouldn't be much overhead because xor can be executed in parallel with
-    // other instructions.
-    input[i] = _mm512_setzero_ps();
-  }
-
+// (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + N instructions
+inline void transpose_block(at::vec::VectorizedN<float, 16> &input, int M=16, int N=16) {
+  TORCH_CHECK(M <= 16 && N <= 16, "transpose_block expects M, N <= 16.");
   // unpacking and interleaving 32-bit elements
   __m512 temp[16];
+  int i;
   for (i = 0; i < (M + 1) / 2; ++i) {
     temp[2 * i] = _mm512_unpacklo_ps(input[2 * i], input[2 * i + 1]);
     temp[2 * i + 1] = _mm512_unpackhi_ps(input[2 * i], input[2 * i + 1]);
@@ -655,6 +645,37 @@ inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, in
       input[i] = _mm512_shuffle_f32x4(temp[i - 8], temp[i], 0xdd);
     }
   }
+}
+
+// TODO(jgong5): rewrite with ATEN vectorized (need to add unpack and shuffle)
+// Used by Inductor CPP codegen
+// Code referred to FBGEMM:
+// https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
+// kernel for transposing mxn where m, n <= 16
+// M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
+inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
+  // load from src to registers
+  at::vec::VectorizedN<float, 16> input;
+  int i;
+  if (N == 16) {
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_loadu_ps(&src[i * ld_src]);
+    }
+  } else {
+    __mmask16 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+    }
+  }
+  for (; i < 16; ++i) {
+    // Not really needed but to avoid uninitialized variable warning.
+    // Shouldn't be much overhead because xor can be executed in parallel with
+    // other instructions.
+    input[i] = _mm512_setzero_ps();
+  }
+
+  transpose_block(input, M, N);
 
   // store from registers to dst
   if (M == 16) {
@@ -708,4 +729,4 @@ inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t 
 
 #endif
 
-}}}
+}}

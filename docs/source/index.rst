@@ -71,6 +71,7 @@ Features described in this documentation are classified by release status:
    mps
    xpu
    mtia
+   mtia.memory
    meta
    torch.backends <backends>
    torch.export <export>
@@ -147,6 +148,7 @@ Features described in this documentation are classified by release status:
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
    PyTorch on XLA Devices <https://pytorch.org/xla/>
+   torchao <https://pytorch.org/ao>
 
 Indices and tables
 ==================

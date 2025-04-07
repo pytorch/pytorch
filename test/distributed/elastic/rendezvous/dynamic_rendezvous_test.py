@@ -15,7 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
-from typing import Callable, cast, Optional, Tuple
+from typing import Callable, cast, Optional
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
@@ -99,7 +99,7 @@ class RendezvousTimeoutTest(TestCase):
                     ValueError,
                     rf"^The join timeout \({join_timeout}\) must be positive.$",
                 ):
-                    timeout = RendezvousTimeout(join_timeout)
+                    RendezvousTimeout(join_timeout)
 
 
 class NodeDescTest(TestCase):
@@ -186,7 +186,7 @@ class FakeRendezvousBackend(RendezvousBackend):
     def name(self) -> str:
         return "fake_backend"
 
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> Optional[tuple[bytes, Token]]:
         if self._token == 0:
             return None
 
@@ -194,7 +194,7 @@ class FakeRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+    ) -> Optional[tuple[bytes, Token, bool]]:
         if token is None:
             token = 0
 
@@ -1637,7 +1637,7 @@ class CreateHandlerTest(TestCase):
 def _ignore_exception(exception_type: Exception, fn: Callable):
     try:
         fn()
-    except exception_type as e:
+    except exception_type:
         pass
 
 

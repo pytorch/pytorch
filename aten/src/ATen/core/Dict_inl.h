@@ -41,7 +41,7 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   if (ivalue.isInt()) {
     return std::hash<int64_t>()(ivalue.toInt());
   } else if (ivalue.isString()) {
-    return std::hash<c10::string_view>()(ivalue.toStringView());
+    return std::hash<std::string_view>()(ivalue.toStringView());
   } else if (ivalue.isDouble()) {
     return std::hash<double>()(ivalue.toDouble());
   } else if (ivalue.isComplexDouble()) {

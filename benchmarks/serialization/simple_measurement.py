@@ -13,14 +13,14 @@ class Basic(Benchmark):
             torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=use_new)
 
         with Timer() as big2:
-            v = torch.load("big_tensor.zip")
+            torch.load("big_tensor.zip")
 
         x = [torch.ones(10, 10) for i in range(200)]
         with Timer() as small1:
             torch.save(x, "small_tensor.zip", _use_new_zipfile_serialization=use_new)
 
         with Timer() as small2:
-            v = torch.load("small_tensor.zip")
+            torch.load("small_tensor.zip")
 
         return {
             "Big Tensors Save": big1.ms_duration,

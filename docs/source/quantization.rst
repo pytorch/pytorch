@@ -508,7 +508,7 @@ API Example::
 
   import torch
   from torch.ao.quantization.quantize_pt2e import prepare_pt2e
-  from torch._export import capture_pre_autograd_graph
+  from torch.export import export_for_training
   from torch.ao.quantization.quantizer import (
       XNNPACKQuantizer,
       get_symmetric_quantization_config,
@@ -535,7 +535,7 @@ API Example::
   # Step 1. program capture
   # NOTE: this API will be updated to torch.export API in the future, but the captured
   # result should mostly stay the same
-  m = capture_pre_autograd_graph(m, *example_inputs)
+  m = export_for_training(m, *example_inputs).module()
   # we get a model with aten ops
 
   # Step 2. quantization
@@ -1341,6 +1341,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.pt2e.qat_utils
 .. py:module:: torch.ao.quantization.pt2e.representation.rewrite
 .. py:module:: torch.ao.quantization.pt2e.utils
+.. py:module:: torch.ao.quantization.pt2e.lowering
 .. py:module:: torch.ao.quantization.qconfig
 .. py:module:: torch.ao.quantization.qconfig_mapping
 .. py:module:: torch.ao.quantization.quant_type

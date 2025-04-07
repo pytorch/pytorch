@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import cast, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     Optimizer,
     ParamsT,
     TensorListList,
@@ -25,7 +26,7 @@ class Adafactor(Optimizer):
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-2,
         beta2_decay: float = -0.8,
-        eps: Tuple[Optional[float], float] = (None, 1e-3),
+        eps: tuple[Optional[float], float] = (None, 1e-3),
         d: float = 1.0,
         weight_decay: float = 0.0,
         *,
@@ -133,12 +134,12 @@ class Adafactor(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            row_vars: List[Optional[Tensor]] = []
-            col_vars: List[Optional[Tensor]] = []
-            variances: List[Optional[Tensor]] = []
-            state_steps: List[Tensor] = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            row_vars: list[Optional[Tensor]] = []
+            col_vars: list[Optional[Tensor]] = []
+            variances: list[Optional[Tensor]] = []
+            state_steps: list[Tensor] = []
             eps1, eps2 = group["eps"]
 
             has_complex = self._init_group(
@@ -324,16 +325,16 @@ Adafactor.__doc__ = (
 
 
 def _single_tensor_adafactor(
-    params: List[Tensor],
-    grads: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
     # If grad is 1-dimensional (aka a vector), there is no factorization necessary
     # so row_var and col_var will be None while variance will be filled.
     # Contrarily, for a grad with multiple dimensions, we will factor along the last
     # 2 dimensions, and so row_var and col_var will be filled and variance will be None.
-    row_vars: List[Optional[Tensor]],
-    col_vars: List[Optional[Tensor]],
-    variances: List[Optional[Tensor]],
-    state_steps: List[Tensor],
+    row_vars: list[Optional[Tensor]],
+    col_vars: list[Optional[Tensor]],
+    variances: list[Optional[Tensor]],
+    state_steps: list[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
@@ -355,6 +356,8 @@ def _single_tensor_adafactor(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
+    else:
+        lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -411,17 +414,17 @@ def _single_tensor_adafactor(
 
 def _group_tensors_by_device_dtype_and_is_multidim(
     tensorlists: TensorListList,
-) -> Dict[
-    Tuple[Optional[torch.device], Optional[torch.dtype], bool],
-    List[List[Optional[Tensor]]],
+) -> dict[
+    tuple[Optional[torch.device], Optional[torch.dtype], bool],
+    list[list[Optional[Tensor]]],
 ]:
     """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
     has multiple dims or just one dim (is a vector). This allows the foreach impl of
     Adafactor to assume that every group of params will either be factored or not."""
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(tensorlists)
-    ultra_grouped_tensors: Dict[
-        Tuple[Optional[torch.device], Optional[torch.dtype], bool],
-        List[List[Optional[Tensor]]],
+    ultra_grouped_tensors: dict[
+        tuple[Optional[torch.device], Optional[torch.dtype], bool],
+        list[list[Optional[Tensor]]],
     ] = {}
     for (device, dtype), (tensorlists, _) in grouped_tensors.items():
         matrix_key = (device, dtype, True)
@@ -444,16 +447,16 @@ def _group_tensors_by_device_dtype_and_is_multidim(
 
 
 def _multi_tensor_adafactor(
-    params: List[Tensor],
-    grads: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
     # If grad is 1-dimensional (aka a vector), there is no factorization necessary
     # so row_var and col_var will be None while variance will be filled.
     # Contrarily, for a grad with multiple dimensions, we will factor along the last
     # 2 dimensions, and so row_var and col_var will be filled and variance will be None.
-    row_vars: List[Optional[Tensor]],
-    col_vars: List[Optional[Tensor]],
-    variances: List[Optional[Tensor]],
-    state_steps: List[Tensor],
+    row_vars: list[Optional[Tensor]],
+    col_vars: list[Optional[Tensor]],
+    variances: list[Optional[Tensor]],
+    state_steps: list[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
@@ -473,6 +476,8 @@ def _multi_tensor_adafactor(
         grad_scale is None and found_inf is None
     ), "Grad scaling should occur outside of optimizer.step()"
 
+    lr = _to_scalar(lr)
+
     grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
         [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]
     )
@@ -486,9 +491,9 @@ def _multi_tensor_adafactor(
             device_state_steps_,
         )
     ) in grouped_tensors.items():
-        device_params = cast(List[Tensor], device_params_)
-        device_grads = cast(List[Tensor], device_grads_)
-        device_state_steps = cast(List[Tensor], device_state_steps_)
+        device_params = cast(list[Tensor], device_params_)
+        device_grads = cast(list[Tensor], device_grads_)
+        device_state_steps = cast(list[Tensor], device_state_steps_)
         if eps1 is None:
             assert (
                 dtype is not None
@@ -505,7 +510,7 @@ def _multi_tensor_adafactor(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -530,8 +535,8 @@ def _multi_tensor_adafactor(
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
         if is_multidim:
-            device_row_vars = cast(List[Tensor], device_row_vars_)
-            device_col_vars = cast(List[Tensor], device_col_vars_)
+            device_row_vars = cast(list[Tensor], device_row_vars_)
+            device_col_vars = cast(list[Tensor], device_col_vars_)
             assert (
                 device_row_vars[0] is not None and device_col_vars[0] is not None
             ), "row_var and col_var should be defined when grad is multidimensional"
@@ -564,7 +569,7 @@ def _multi_tensor_adafactor(
             torch._foreach_div_(var_estimates, row_var_means)
             del row_var_means
         else:
-            device_variances = cast(List[Tensor], device_variances_)
+            device_variances = cast(list[Tensor], device_variances_)
             assert (
                 device_variances[0] is not None
             ), "variance should be defined when grad is a vector"
@@ -592,12 +597,12 @@ def _multi_tensor_adafactor(
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adafactor)
 def adafactor(
-    params: List[Tensor],
-    grads: List[Tensor],
-    row_vars: List[Optional[Tensor]],
-    col_vars: List[Optional[Tensor]],
-    variances: List[Optional[Tensor]],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    row_vars: list[Optional[Tensor]],
+    col_vars: list[Optional[Tensor]],
+    variances: list[Optional[Tensor]],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
@@ -617,7 +622,7 @@ def adafactor(
 
     See :class:`~torch.optim.Adafactor` for details.
     """
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

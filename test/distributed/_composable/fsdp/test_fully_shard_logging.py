@@ -26,7 +26,7 @@ class LoggingTests(LoggingTestCase):
         env["WORLD_SIZE"] = "1"
         env["MASTER_PORT"] = "34715"
         env["MASTER_ADDR"] = "localhost"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import logging
 import torch

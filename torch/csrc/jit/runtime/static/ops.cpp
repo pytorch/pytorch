@@ -1344,7 +1344,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ToArgs {
   std::optional<at::ScalarType> dtype;
   c10::Layout layout;
@@ -1900,7 +1899,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     std::optional<std::string_view> rounding_mode = std::nullopt;
     if (p_node->num_inputs() > 2) {
-      rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
+      rounding_mode = p_node->Input(2).toOptional<std::string_view>();
     }
     const auto& in1_t = p_node->Input(1).isTensor()
         ? p_node->Input(1).toTensor()

@@ -2,24 +2,14 @@
 import functools
 import itertools
 import logging
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, cast, Optional, Union
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
@@ -41,8 +31,8 @@ log = logging.getLogger(__name__)
 def evaluate_expr(
     shape_env: ShapeEnv,
     expr: Union[sympy.Basic, bool],
-    axioms: Optional[Tuple[sympy.Expr]] = None,
-    var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
+    axioms: Optional[tuple[sympy.Expr]] = None,
+    var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
@@ -71,7 +61,7 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
         # f(s0), we may choose to precompute it on the host and then replace
@@ -82,8 +72,8 @@ class SizeVarAllocator:
         # which potentially could have already had a precomputed replacement
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
-        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = {}
-        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = {}
+        self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
+        self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -95,7 +85,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Expr] = {}
+        cache: dict[tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -109,6 +99,8 @@ class SizeVarAllocator:
             if result is None:
                 result = self._simplify_with_ranges(expr, var_ranges)
                 cache[key] = result
+                if result != expr:
+                    cache[(result, *var_ranges.items())] = result
             return result
 
         return simplify_with_ranges
@@ -117,7 +109,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Any] = {}
+        cache: dict[tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -158,7 +150,7 @@ class SizeVarAllocator:
                 var_to_range[var] = ValueRanges(0, IntInfinity())
 
         var_to_range_tuple = cast(
-            Tuple[Tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
+            tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
             tuple(var_to_range.items()),
         )
 
@@ -232,7 +224,7 @@ class SizeVarAllocator:
         return expr
 
     def _simplify_loops_impl(
-        self, index_vars: List[sympy.Symbol], sizes, index_formulas
+        self, index_vars: list[sympy.Symbol], sizes, index_formulas
     ):
         """
         Try to remove as many axis from loop iterations as possible, by:
@@ -348,7 +340,7 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     # See Note - [On Statically Known]
-    def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+    def statically_known_list_equals(self, left: list[Expr], right: list[Expr]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
@@ -465,9 +457,15 @@ class SizeVarAllocator:
     # as this will ensure that you actually have a sympy'ified expression,
     # and will prevent you from incorrectly writing evaluate_expr(a == b)
     # which does the wrong thing if a or b is a sympy expression
-    def evaluate_expr(self, left: Union[Expr, sympy.logic.boolalg.Boolean]) -> bool:
+    def evaluate_expr(
+        self,
+        left: Union[Expr, sympy.logic.boolalg.Boolean],
+        size_oblivious: bool = False,
+    ) -> bool:
         assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
-        return self.shape_env.evaluate_expr(sympy.sympify(left))
+        return self.shape_env.evaluate_expr(
+            sympy.sympify(left), size_oblivious=size_oblivious
+        )
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
@@ -512,7 +510,7 @@ class SizeVarAllocator:
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
-    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> List[int]:
+    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> list[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
@@ -565,7 +563,7 @@ class SizeVarAllocator:
         exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
@@ -593,7 +591,7 @@ class SizeVarAllocator:
             index: Expr,
             vars: Sequence[sympy.Symbol],
             support_vars: Optional[Sequence[sympy.Symbol]] = None,
-        ) -> List[Expr]:
+        ) -> list[Expr]:
             if not support_vars:
                 support_vars = vars
             return cache(index, tuple(vars), tuple(support_vars))
@@ -605,7 +603,7 @@ class SizeVarAllocator:
         index: Expr,
         vars: Sequence[sympy.Symbol],
         support_vars: Sequence[sympy.Symbol],
-    ) -> List[Expr]:
+    ) -> list[Expr]:
         """Convert an indexing expression back into strides
 
         NOTE: This is only valid if the index is a standard strided offset
@@ -658,7 +656,7 @@ class SizeVarAllocator:
         }
         return expr.subs(size_dict)
 
-    def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
+    def offset_var(self, index: Expr, vars: list[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
@@ -668,7 +666,7 @@ class SizeVarAllocator:
         index: Expr,
         vars: Sequence[sympy.Symbol],
         support_vars: Optional[Sequence[sympy.Symbol]] = None,
-    ) -> List[int]:
+    ) -> list[int]:
         for v in index.free_symbols:
             if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
@@ -680,7 +678,7 @@ class SizeVarAllocator:
                 result.append(0)
         return result
 
-    def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
+    def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
         strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
@@ -702,8 +700,8 @@ class SizeVarAllocator:
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
 
-    def free_symbols(self) -> Set[sympy.Symbol]:
-        return set(self.var_to_val.keys()) - set(self.replacements.keys())
+    def free_symbols(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """
@@ -757,7 +755,7 @@ class SizeVarAllocator:
 
     def expand_floor_div(
         self, index: sympy.Expr
-    ) -> Union[bool, Tuple[sympy.Expr, sympy.Expr]]:
+    ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
         be simplfied.
@@ -907,9 +905,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(self, inner, var_ranges: VarRanges) -> None:
         super().__init__(inner)
         self.name = "SimplifyIndexing"
-        self._simplify: Callable[
-            [Expr], Expr
-        ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
+        self._simplify: Callable[[Expr], Expr] = (
+            lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
+        )
 
     def load(self, name: str, index: sympy.Expr):
         return self._inner.load(name, self._simplify(index))

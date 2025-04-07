@@ -44,7 +44,7 @@ def get_public_overridable_apis(pytorch_root="/raid/rzou/pt/debug-cpu"):
             if line.startswith(".. autofunction::")
         ]
         lines = api_lines1 + api_lines2
-        lines = [line[7:] if line.startswith("Tensor.") else line for line in lines]
+        lines = [line.removeprefix("Tensor.") for line in lines]
         lines = [line for line in lines if hasattr(module, line)]
         for line in lines:
             api = getattr(module, line)
@@ -412,14 +412,6 @@ def get_statuses(for_subset=None, invert=False):
                 if decorator.test_name in tests and decorator.test_name in result:
                     result.remove(decorator.test_name)
         return result
-
-    def get_all_aliases(op):
-        opinfos = op_to_opinfo[op]
-        result = []
-        for opinfo in opinfos:
-            result.append(opinfo.name)
-            result.extend(opinfo.aliases)
-        return set(result)
 
     for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         successful_tests = get_covered_tests(op)

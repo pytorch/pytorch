@@ -3,9 +3,6 @@
 TunableOp
 =========
 
-.. note::
-    This is a prototype feature, which means it is at an early stage
-    for feedback and testing, and its components are subject to change.
 
 Overview
 --------
@@ -34,3 +31,5 @@ API Reference
 .. autofunction:: read_file
 .. autofunction:: tune_gemm_in_file
 .. autofunction:: mgpu_tune_gemm_in_file
+.. autofunction:: set_rotating_buffer_size
+.. autofunction:: get_rotating_buffer_size

@@ -7,7 +7,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -194,11 +193,23 @@ void index_put_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, c
   });
 }
 
-static void index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_cuda", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_kernel_impl<dtype>(iter, index_size, index_stride);
-  });
+static void index_kernel(
+    TensorIteratorBase& iter,
+    const IntArrayRef index_size,
+    const IntArrayRef index_stride) {
+  AT_DISPATCH_V2(
+      iter.dtype(),
+      "index_cuda",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        index_kernel_impl<dtype>(iter, index_size, index_stride);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
 }
 
 static void index_fill_kernel(

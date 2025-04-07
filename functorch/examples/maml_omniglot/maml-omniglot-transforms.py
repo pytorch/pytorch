@@ -145,8 +145,6 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
 
 
 def train(db, net, device, meta_opt, epoch, log):
-    params = dict(net.named_parameters())
-    buffers = dict(net.named_buffers())
     n_train_iter = db.x_train.shape[0] // db.batchsz
 
     for batch_idx in range(n_train_iter):
@@ -227,7 +225,7 @@ def test(db, net, device, epoch, log):
 
     qry_losses = torch.cat(qry_losses).mean().item()
     qry_accs = 100.0 * torch.cat(qry_accs).float().mean().item()
-    print(f"[Epoch {epoch+1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
+    print(f"[Epoch {epoch + 1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
     log.append(
         {
             "epoch": epoch + 1,

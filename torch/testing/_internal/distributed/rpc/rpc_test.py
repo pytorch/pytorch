@@ -852,7 +852,7 @@ class RpcTestCommon:
     def _wait_all_workers(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -874,7 +874,7 @@ class RpcTestCommon:
     def _wait_all_workers_twice(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1452,7 +1452,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         model = torch.nn.parallel.DistributedDataParallel(model)
 
         with self.assertRaisesRegex(RuntimeError, 'Current RPC agent is not set! Did you initialize the RPC framework'):
-            params = [RRef(param) for param in model.parameters()]
+            [RRef(param) for param in model.parameters()]
 
     def test_world_size_one(self):
         self._world_size_one(
@@ -1686,7 +1686,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_shutdown_followed_by_rpc(self):
         # Initialize RPC.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -2573,12 +2573,10 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             )
             futs.append(fut)
 
-        j = 0
-        for val in torch.futures.wait_all(futs):
+        for j, val in enumerate(torch.futures.wait_all(futs)):
             self.assertEqual(
                 val, my_tensor_function(torch.ones(j, j), torch.ones(j, j))
             )
-            j += 1
 
     @dist_init
     def test_py_tensors_in_container(self):
@@ -3279,7 +3277,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # test that we can start RPC and then immediately locally shutdown
         # without sending any messages.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3321,7 +3319,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3368,7 +3366,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_local_shutdown_with_rpc(self):
         # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3708,7 +3706,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init(setup_rpc=False)
     def test_use_rref_after_shutdown(self):
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,

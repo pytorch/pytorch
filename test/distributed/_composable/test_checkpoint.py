@@ -5,7 +5,6 @@ from collections import deque, OrderedDict
 from contextlib import ContextDecorator, contextmanager, nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -70,7 +69,7 @@ class MultiOutputModel(nn.Module):
         self.w1 = nn.Parameter(torch.randn((100, 100), device=device))
         self.w2 = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = x @ self.w1
         z = nn.functional.relu(z)
         z = z @ self.w2
@@ -82,7 +81,7 @@ class MultiInputModel(nn.Module):
         super().__init__()
         self.w = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, xs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def forward(self, xs: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
         assert len(xs) == 2, f"Expects 2 args but got {len(xs)}"
         x, y = xs
         z = x + y
@@ -119,7 +118,6 @@ class TestCheckpoint(TestCase):
         # no checkpoint
         with MemoryDelta(x.device) as mem1:
             loss1 = net1(x1).sum()
-        graph_size1 = self._get_graph_size(loss1)
         loss1.backward()
 
         # with checkpoint

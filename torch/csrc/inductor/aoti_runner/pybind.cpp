@@ -2,6 +2,9 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
+#endif
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -15,7 +18,11 @@ void initAOTIRunnerBindings(PyObject* module) {
 
   py::class_<AOTIModelContainerRunnerCpu>(m, "AOTIModelContainerRunnerCpu")
       .def(py::init<const std::string&, int>())
-      .def("run", &AOTIModelContainerRunnerCpu::run)
+      .def(
+          "run",
+          &AOTIModelContainerRunnerCpu::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -24,10 +31,19 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCpu::getConstantNamesToDtypes)
       .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerCpu::extract_constants_map)
+      .def(
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCpu::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
-              &AOTIModelContainerRunnerCpu::update_constant_buffer));
+              &AOTIModelContainerRunnerCpu::update_constant_buffer))
+      .def(
+          "swap_constant_buffer",
+          &AOTIModelContainerRunnerCpu::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer);
 
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
@@ -38,7 +54,11 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
-      .def("run", &AOTIModelContainerRunnerCuda::run)
+      .def(
+          "run",
+          &AOTIModelContainerRunnerCuda::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -47,10 +67,56 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCuda::getConstantNamesToDtypes)
       .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerCuda::extract_constants_map)
+      .def(
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCuda::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
-              &AOTIModelContainerRunnerCuda::update_constant_buffer));
+              &AOTIModelContainerRunnerCuda::update_constant_buffer))
+      .def(
+          "swap_constant_buffer",
+          &AOTIModelContainerRunnerCuda::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer);
+#endif
+#ifdef USE_XPU
+  py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
+      .def(py::init<const std::string&, int>())
+      .def(py::init<const std::string&, int, const std::string&>())
+      .def(py::init<
+           const std::string&,
+           int,
+           const std::string&,
+           const std::string&>())
+      .def(
+          "run",
+          &AOTIModelContainerRunnerXpu::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
+      .def("get_call_spec", &AOTIModelContainerRunnerXpu::get_call_spec)
+      .def(
+          "get_constant_names_to_original_fqns",
+          &AOTIModelContainerRunnerXpu::getConstantNamesToOriginalFQNs)
+      .def(
+          "get_constant_names_to_dtypes",
+          &AOTIModelContainerRunnerXpu::getConstantNamesToDtypes)
+      .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerXpu::extract_constants_map)
+      .def(
+          "update_constant_buffer",
+          static_cast<void (AOTIModelContainerRunnerXpu::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
+              &AOTIModelContainerRunnerXpu::update_constant_buffer))
+      .def(
+          "swap_constant_buffer",
+          &AOTIModelContainerRunnerXpu::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
+
 #endif
 
   m.def(

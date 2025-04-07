@@ -71,7 +71,7 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 
 namespace at::native {
 
-inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+inline static std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
   // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {
@@ -177,7 +177,9 @@ NestedTensorImpl::NestedTensorImpl(
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
-      "in the near future.");
+      "in the near future. We recommend specifying layout=torch.jagged when constructing "
+      "a nested tensor, as this layout receives active development, has better operator "
+      "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
       storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),

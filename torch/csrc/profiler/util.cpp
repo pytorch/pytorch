@@ -384,13 +384,15 @@ static inline std::string format_list(
   if (truncate && list.size() > kTruncatLength) {
     if (with_escaped_quotes == true) {
       auto x = fmt::format(
-          "\"[{}, ...]\"",
-          fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+          "\"[{}, ..., {}]\"",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
       return x;
     } else {
       auto x = fmt::format(
-          "[{}, ...]",
-          fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+          "[{}, ..., {}]",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
       return x;
     }
   }
@@ -541,7 +543,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       }
     }
     if (config.introspectOutputs) {
-      const auto outputs = fn.outputs();
+      const auto& outputs = fn.outputs();
       auto num_outputs = fn.num_outputs();
       if (checkFunctionOutputsForLogging(fn)) {
         // need to account for Stack mode where the outputs are at the end.

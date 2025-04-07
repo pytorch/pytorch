@@ -39,10 +39,10 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   // Cannot reassign to mask_temp and self_temp here! if they are
   // owning and expand_outplace returns a borrow, the returned borrow
   // would dangle.
-  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  auto [mask_expanded, self_expanded] = expand_outplace(*mask_temp, *self_temp);
   at::cuda::index_out(
-      result, *std::get<1>(mask_self_expanded),
-      c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+      result, *self_expanded,
+      c10::List<std::optional<at::Tensor>>({*std::move(mask_expanded)}));
 
   return result;
 }

@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import List
 
 import torch
 from torch import Tensor
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
@@ -33,7 +33,7 @@ def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
     return (a.device.type == b.device.type) and (b.device.type == device)
 
 
-def realize_inputs(inputs: List[torch.fx.Node]):
+def realize_inputs(inputs: list[torch.fx.Node]):
     for inp in inputs:
         if isinstance(inp, torch.fx.node.Node):
             inp.meta["inductor_realize_to_strides"] = True
@@ -72,14 +72,14 @@ def should_decompose_mm(mat1, mat2) -> bool:
         return False
     return (
         check_device(mat1, mat2, device="cuda")
-        and mat1.shape[0] >= min_first_dimension_decomposition
-        and mat2.shape[0] < max_other_dimention_decomposition
-        and mat2.shape[1] < max_other_dimention_decomposition
+        and statically_known_true(mat1.shape[0] >= min_first_dimension_decomposition)
+        and statically_known_true(mat2.shape[0] < max_other_dimention_decomposition)
+        and statically_known_true(mat2.shape[1] < max_other_dimention_decomposition)
     ) or (
         check_device(mat1, mat2, device="cpu")
-        and mat1.shape[0] == 1
-        and mat2.shape[0] <= 64
-        and mat2.shape[1] <= 16
+        and statically_known_true(mat1.shape[0] == 1)
+        and statically_known_true(mat2.shape[0] <= 64)
+        and statically_known_true(mat2.shape[1] <= 512)
     )
 
 
@@ -87,7 +87,7 @@ def is_node_meta_valid(node: torch.fx.Node):
     return "val" in node.meta
 
 
-def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
+def print_decompose_pattern(match: Match, inputs: list[torch.fx.Node]):
     node = match.nodes[-1]
     log.debug(
         "Decompose %s with input shape: %s",

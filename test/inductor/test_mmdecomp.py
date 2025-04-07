@@ -2,7 +2,7 @@
 
 import math
 import unittest
-from typing import List, Tuple, Union
+from typing import Union
 
 import torch
 from torch._inductor import config
@@ -26,7 +26,7 @@ default_rtol = {
 
 
 def rand_math_tensor(
-    shape: Tuple[Union[int, List[int]]],
+    shape: tuple[Union[int, list[int]]],
     device: str,
     dtype: torch.dtype,
     requires_grad: bool = False,

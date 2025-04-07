@@ -1,7 +1,7 @@
 /* styles needed for the Google Search button */
 
-.pytorch-left-menu-search input[type=text] {
-    background-image: none;
+.gsc-overflow-hidden {
+    overflow: visible !important;
 }
 
 .gsc-control-cse {
@@ -32,9 +32,7 @@
 }
 
 .survey-link {
-  padding-top: 10px;
   color: #262626;
-  text-align: center
 }
 
 .pytorch-left-menu-search .survey-link a {
@@ -44,3 +42,104 @@
 }
 
 /* End of classes needed for the survey banner*/
+
+
+/* search radio button*/
+input[type="radio"] {
+    accent-color: #ee4c2c;
+}
+.gsst_b {
+    display: none;
+}
+#gsc-i-id1 {
+    height: 1.5rem;
+    text-indent: 12px !important;
+    font-size: 1rem !important;
+    font-family: "FreightSansi";
+    background-image: url(../images/search-icon.svg) !important;
+    background-repeat: no-repeat !important;
+    background-size: 18px 18px !important;
+    background-position: 5px 0px !important;
+    padding-left: 20px !important;
+}
+#gsc-i-id1::placeholder {
+  font-family: 'FreightSans';
+  font-size: 1rem;
+  color: #262626;
+}
+.gsc-control-cse {
+   padding: 0 !important;
+   border-radius: 0px !important;
+   border: none !important;;
+   overflow: hidden;
+}
+#___gcse_0 {
+    height: 44px !important;
+    padding: 0 !important;
+}
+
+@media (max-width: 768px) {
+  #___gcse_0 {
+    height: 34px !important;
+  }
+}
+
+table.gsc-search-box td.gsc-input {
+    padding-right: 0 !important;
+}
+table.gsc-search-box td {
+    height: 44px;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+@media (max-width: 768px) {
+  table.gsc-search-box td {
+    height: 34px;
+  }
+}
+
+.gsc-search-button-v2 {
+    display: none;
+}
+.gs_id50 {
+    width: 308px;
+}
+
+.gsib_a {
+    padding: 0px 8px 4px 9px !important;
+}
+.gsc-input-box {
+    border-radius: 0px !important;
+    border: none !important;
+}
+
+@media (max-width: 768px) {
+  .gsc-input-box {
+     padding-top: 0px;
+     padding-bottom: 0px;
+  }
+}
+
+@media (max-width: 768px) {
+   .searchbox {
+     height: 34px;
+}
+
+
+form.gsc-search-box {
+    margin-bottom 0px;
+}
+
+.pytorch-left-menu-search input[type=text] {
+    background-image: url("../images/search-icon.svg");
+}
+
+.gsc-overflow-hidden {
+  overflow: visible !important;
+}
+
+.form#searchForm {
+  padding-bottom: 0;
+  margin-bottom: 0;
+}

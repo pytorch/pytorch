@@ -60,7 +60,7 @@ __global__ void fractional_max_pool3d_out_frame(
   int64_t poolSizeT, int64_t poolSizeH, int64_t poolSizeW) {
     using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
     // Output (t, h, w) point that this thread is responsible for
-    int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
+    int64_t ourOutputPoint = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
     int64_t plane = blockIdx.y;
     int64_t batch = blockIdx.z;
     // Each thread generates a specific output point
@@ -123,7 +123,7 @@ __global__ void fractional_max_pool3d_backward_out_frame(
   PackedTensorAccessor64<const scalar_t, 5> gradOutput,
   PackedTensorAccessor64<const int64_t, 5> indices) {
   // Output (h, w) point that this thread is responsible for
-  int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t ourOutputPoint = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
   int64_t plane = blockIdx.y;
   int64_t batch = blockIdx.z;
 

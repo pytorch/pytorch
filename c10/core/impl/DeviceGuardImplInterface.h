@@ -105,7 +105,7 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Get the current stream for a given device.
    */
-  virtual Stream getStream(Device) const noexcept = 0;
+  virtual Stream getStream(Device) const = 0;
 
   /**
    * Get the default stream for a given device.
@@ -138,7 +138,7 @@ struct C10_API DeviceGuardImplInterface {
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  virtual Stream exchangeStream(Stream) const noexcept = 0;
+  virtual Stream exchangeStream(Stream) const = 0;
 
   /**
    * Destroys the given event.

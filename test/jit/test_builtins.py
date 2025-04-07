@@ -287,9 +287,9 @@ class TestTensorBuiltins(JitTestCase):
         def test_func(func, x, tensor):
             try:
                 result = func(x, tensor)
-            except RuntimeError as e:
+            except RuntimeError:
                 result = True
-            except TypeError as e:
+            except TypeError:
                 result = True
             return result
 

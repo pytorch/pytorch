@@ -146,6 +146,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["freezing"]["cuda"]
 
     @property
+    def disable_cudagraph_models(self):
+        return self._config["disable_cudagraph"]
+
+    @property
     def skip_models_for_freezing_cpu(self):
         return self._skip["freezing"]["cpu"]
 
@@ -202,6 +206,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["control_flow"]
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return self._skip["export_not_supported"]
+
+    @property
     def guard_on_nn_module_models(self):
         return {
             "vision_maskrcnn",
@@ -236,7 +244,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
-        dynamic_shapes = self.args.dynamic_shapes
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",
@@ -414,6 +421,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
+            if self.args.freezing and (freezing := self._tolerance["freezing"]):
+                higher_fp16 = freezing.get("higher_fp16", None)
+                even_higher = freezing.get("even_higher", None)
+                if higher_fp16 and name in higher_fp16:
+                    return 1e-2, cosine
+                elif even_higher and name in even_higher:
+                    return 8 * 1e-2, cosine
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
             elif name in self._tolerance["even_higher"]:

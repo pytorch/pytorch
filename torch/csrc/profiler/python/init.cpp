@@ -37,7 +37,7 @@ static void THPCapturedTraceback_dealloc(PyObject* self_) {
   PyObject_GC_Del(self);
 }
 
-PyTypeObject THPCapturedTracebackType = {
+static PyTypeObject THPCapturedTracebackType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._profiler.CapturedTraceback", /* tp_name */
     sizeof(THPCapturedTraceback), /* tp_basicsize */
@@ -326,6 +326,7 @@ void initPythonBindings(PyObject* module) {
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA)
+      .value("HPU", ActivityType::HPU)
       .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
@@ -336,7 +337,10 @@ void initPythonBindings(PyObject* module) {
               bool /* verbose */,
               std::vector<std::string> /* performance_events  */,
               bool /* enable_cuda_sync_events */,
-              bool /* adjust_profiler_step */
+              bool /* adjust_profiler_step */,
+              bool /* disable_external_correlation*/,
+              bool /* profile_all_threads */,
+              bool /* capture_overload_names */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -352,12 +356,18 @@ void initPythonBindings(PyObject* module) {
           "       and currently disabled by default.\n"
           "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
           "       match the parent python event duration. This feature is new and currently disabled by default.\n",
+          "    disable_external_correlation (bool) : whether to disable external correlation\n",
+          "    profile_all_threads (bool) : whether to profile all threads\n",
+          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
           py::arg("performance_events") = std::vector<std::string>(),
           py::arg("enable_cuda_sync_events") = false,
-          py::arg("adjust_profiler_step") = false)
+          py::arg("adjust_profiler_step") = false,
+          py::arg("disable_external_correlation") = false,
+          py::arg("profile_all_threads") = false,
+          py::arg("capture_overload_names") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -377,6 +387,9 @@ void initPythonBindings(PyObject* module) {
                 p.verbose,
                 p.enable_cuda_sync_events,
                 p.adjust_profiler_step,
+                p.disable_external_correlation,
+                p.profile_all_threads,
+                p.capture_overload_names,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__
@@ -557,6 +570,7 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
       .def_property_readonly("name", &Result::name)
+      .def_property_readonly("overload_name", &Result::overload_name)
       .def_property_readonly("tag", &Result::tag)
       .def_readonly("extra_fields", &Result::extra_fields_)
       .def_property_readonly(

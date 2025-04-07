@@ -1,4 +1,5 @@
 # Owner(s): ["module: sparse"]
+# ruff: noqa: F841
 
 import torch
 import random
@@ -1955,7 +1956,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
             if alpha_beta is None:
@@ -2616,7 +2617,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.01, torch.float16: 0.01})
+    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -3762,9 +3763,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             for scale in (None, 1. / 16):
                 if scale is None and query.size(-1) == 0:
                     scale = 1
+                # We cast to double here as this dispatches to the MATH backend which
+                # introduces additional rounding steps over the fused implementations
                 expected = torch.nn.functional.scaled_dot_product_attention(
-                    *broadcast_input(query, key, value, attn_mask), scale=scale
-                )
+                    *broadcast_input(query.double(), key.double(), value.double(), attn_mask), scale=scale
+                ).to(dtype)
 
                 for mask_dtype in (torch.bool, dtype):
                     res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)

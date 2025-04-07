@@ -87,6 +87,7 @@ try:
     from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
     from quantization.pt2e.test_numeric_debugger import TestNumericDebugger  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EAffineQuantization  # noqa: F401
     from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
     from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
     from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
@@ -162,15 +163,15 @@ try:
 except ImportError as e:
     logging.warning(e)
 try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPU  # noqa: F401
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeCPU  # noqa: F401
 except ImportError as e:
     logging.warning(e)
 try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCUDA  # noqa: F401
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeCUDA  # noqa: F401
 except ImportError as e:
     logging.warning(e)
 try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
     logging.warning(e)
 

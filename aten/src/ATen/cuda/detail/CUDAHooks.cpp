@@ -106,6 +106,10 @@ const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const 
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
+Generator CUDAHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::CUDAGeneratorImpl>(device_index);
+}
+
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
@@ -325,7 +329,7 @@ std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
   int runtimeVersion = 0;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  AT_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
   auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM
@@ -444,8 +448,14 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
 }
 
 #ifdef USE_ROCM
-bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index) const {
+  hipDeviceProp_t* prop;
+  if (device_index == -1){
+      prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+      prop = at::cuda::getDeviceProperties(device_index);
+  }
+
   std::string device_arch = prop->gcnArchName;
   for (std::string arch : archs) {
       size_t substring = device_arch.find(arch);
@@ -466,6 +476,6 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
 
-REGISTER_CUDA_HOOKS(CUDAHooks);
+REGISTER_CUDA_HOOKS(CUDAHooks)
 
 } // namespace at::cuda::detail

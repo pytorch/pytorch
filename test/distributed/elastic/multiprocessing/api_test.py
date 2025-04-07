@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 from itertools import product
-from typing import Callable, Dict, List, Union
+from typing import Callable, Union
 from unittest import mock
 
 import torch
@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
-    NO_MULTIPROCESSING_SPAWN,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
@@ -141,7 +140,7 @@ def echo2(msg: str, fail: bool = False) -> str:
     return msg
 
 
-def echo_large(size: int) -> Dict[int, str]:
+def echo_large(size: int) -> dict[int, str]:
     """
     returns a large output ({0: test0", 1: "test1", ..., (size-1):f"test{size-1}"})
     """
@@ -167,13 +166,13 @@ def dummy_compute() -> torch.Tensor:
     return torch.rand(100, 100)
 
 
-def redirects_oss_test() -> List[Std]:
+def redirects_oss_test() -> list[Std]:
     return [
         Std.NONE,
     ]
 
 
-def redirects_all() -> List[Std]:
+def redirects_all() -> list[Std]:
     return [
         Std.NONE,
         Std.OUT,
@@ -240,14 +239,14 @@ class _StartProcessesTest(TestCase):
     def log_dir(self):
         return tempfile.mkdtemp(dir=self.test_dir)
 
-    def assert_in_file(self, expected: List[str], filename: str) -> None:
+    def assert_in_file(self, expected: list[str], filename: str) -> None:
         expected = [f"{line.rstrip()}\n" for line in expected]
         with open(filename) as fp:
             actual = fp.readlines()
             for line in expected:
                 self.assertIn(line, actual)
 
-    def assert_pids_noexist(self, pids: Dict[int, int]):
+    def assert_pids_noexist(self, pids: dict[int, int]):
         for local_rank, pid in pids.items():
             with self.assertRaises(
                 OSError, msg=f"local_rank: {local_rank} pid: {pid} should not exist"
@@ -259,7 +258,7 @@ class _StartProcessesTest(TestCase):
     ) -> None:
         mp_queue = mp.get_context("spawn").Queue()
         child_nproc = 2
-        ctx = mp.spawn(
+        mp.spawn(
             start_processes_zombie_test,
             nprocs=1,
             args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
@@ -509,11 +508,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 mpc._poll()
                 self.assertEqual(4, mock_join.call_count)
 
-        @skip_but_pass_in_sandcastle_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                        don't support multiprocessing with spawn start method",
-        )
         def test_multiprocessing_context_poll_raises_exception(self):
             mp_context = MultiprocessContext(
                 name="test_mp",

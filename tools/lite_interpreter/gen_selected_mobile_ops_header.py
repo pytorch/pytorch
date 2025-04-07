@@ -33,8 +33,8 @@ inline constexpr bool should_include_kernel_dtype(
   const char *kernel_tag_str,
   at::ScalarType scalar_type
 ) {
-  [[maybe_unused]] c10::string_view kernel_tag_sv =
-      c10::string_view(kernel_tag_str);
+  [[maybe_unused]] auto kernel_tag_sv =
+      std::string_view(kernel_tag_str);
   $body return false;
 }
 }
@@ -161,8 +161,7 @@ def main() -> None:
         "--output_file_path",
         type=str,
         required=True,
-        help="Path to destination"
-        "folder where selected_mobile_ops.h will be written.",
+        help="Path to destinationfolder where selected_mobile_ops.h will be written.",
     )
     parsed_args = parser.parse_args()
     model_file_name = parsed_args.yaml_file_path

@@ -1,4 +1,3 @@
-#include <c10/util/env.h>
 #include <torch/csrc/lazy/core/config.h>
 
 C10_DEFINE_bool(torch_lazy_ir_debug, false, "Enable lazy tensor IR debugging")
@@ -77,9 +76,9 @@ namespace torch::lazy {
 std::string& getLTCForceFallback() {
   static std::string config;
   static bool _ignore = [&]() {
-    auto env = c10::utils::get_env("LTC_FORCE_FALLBACK");
-    if (env) {
-      config = std::move(env.value());
+    char* envptr = std::getenv("LTC_FORCE_FALLBACK");
+    if (envptr) {
+      config = std::string(envptr);
     }
     return true;
   }();

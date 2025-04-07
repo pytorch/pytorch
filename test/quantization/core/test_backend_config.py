@@ -294,8 +294,6 @@ class TestBackendConfig(QuantizationTestCase):
         })
 
     def test_backend_config_from_dict(self):
-        op1 = self._get_backend_op_config1()
-        op2 = self._get_backend_op_config2()
         op_dict1 = self._get_backend_pattern_config_dict1()
         op_dict2 = self._get_backend_pattern_config_dict2()
         conf_dict = {

@@ -37,6 +37,10 @@ class DataLoaderBase {
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
+  DataLoaderBase(const DataLoaderBase&) = delete;
+  DataLoaderBase(DataLoaderBase&&) = delete;
+  DataLoaderBase& operator=(const DataLoaderBase&) = delete;
+  DataLoaderBase& operator=(DataLoaderBase&&) = delete;
   // NOLINTNEXTLINE(bugprone-exception-escape)
   virtual ~DataLoaderBase() {
     join();

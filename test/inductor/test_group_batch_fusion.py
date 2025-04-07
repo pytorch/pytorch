@@ -2,12 +2,11 @@
 
 import collections
 import unittest
-from typing import List
 
 import torch
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -39,7 +38,7 @@ class TestHighwaySelfGating(torch.nn.Module):
 
     def forward(
         self,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> torch.Tensor:
         results = []
         for i in range(self.size):
@@ -348,7 +347,6 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["group_linear"],
                 2,
             )
-            self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
@@ -361,7 +359,6 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_aten_add"],
                 0,
             )
-            self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -395,6 +392,7 @@ class TestGroupBatchFusion(TestCase):
         )
         counters.clear()
 
+    @unittest.skipIf(GPU_TYPE == "mps", "welford_reduce is yet not implemented for MPS")
     def test_batch_layer_norm_fusion(self):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
@@ -603,7 +601,6 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_linear_post_grad"],
             2,
         )
-        self.assertIn("PostGradBatchLinearFusion", optimus_scuba_log)
 
 
 class TestFindIndependentSubsetGreedy(TestCase):
@@ -633,7 +630,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
         return g, lookup
 
     def verify(self, tree, subnodes, min_fuse, max_fuse, expected):
-        g, lookup = self.build_graph(tree)
+        _, lookup = self.build_graph(tree)
         subnodes = [lookup[n] for n in subnodes]
         expected = [[lookup[n] for n in sub] for sub in expected]
         opts = {

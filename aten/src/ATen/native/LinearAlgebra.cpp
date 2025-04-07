@@ -33,6 +33,8 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_convert_weight_to_int4pack_for_cpu_native.h>
+#include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
+#include <ATen/ops/_dyn_quant_pack_4bit_weight_native.h>
 #include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
@@ -452,7 +454,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     const Tensor& input,
     const std::optional<Tensor>& atol_opt,
     const std::optional<Tensor>& rtol_opt,
-    const c10::string_view function_name) {
+    const std::string_view function_name) {
   auto options = input.options();
   if (input.device().type() == kMetal || input.device().type() == kMPS) {
     options = options.dtype(ScalarType::Float);
@@ -1364,8 +1366,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
       //it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 : 0;
     }();
-    const auto ptr = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return ptr.has_value() ? std::stoi(ptr.value()) : default_min_dim;
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
   return value;
 }
@@ -1378,8 +1380,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
       // it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
-    const auto ptr = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return ptr.has_value() ? std::stoi(ptr.value()) : default_min_size;
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
   return value;
 }
@@ -2950,7 +2952,7 @@ Tensor& linalg_matrix_norm_out(
 // fro / nuc
 Tensor linalg_matrix_norm(
     const Tensor& A,
-    c10::string_view ord,
+    std::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -2979,7 +2981,7 @@ Tensor linalg_matrix_norm(
 
 Tensor& linalg_matrix_norm_out(
     const Tensor& A,
-    c10::string_view ord,
+    std::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
@@ -3032,10 +3034,10 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
 }
 
 // Frobenius and nuclear norms
-Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   if (opt_dim.has_value()) {
     TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
-              "dim is specified, it mut be of length 1 or 2. Got ", *opt_dim);
+              "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
   } else {
     TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
                 "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");
@@ -3045,7 +3047,7 @@ Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef op
   return at::linalg_matrix_norm(X, ord, dim, keepdim, opt_dtype);
 }
 
-Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+Tensor& linalg_norm_out(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   checkSameDevice("linalg.norm", X, result);
   auto out = at::linalg_norm(X, ord, opt_dim, keepdim, opt_dtype);
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
@@ -3144,7 +3146,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, std::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -3167,14 +3169,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
   return at::zeros(result_shape, options);
 }
 
-static void _linalg_cond_check_ord(std::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
-    c10::string_view* ord = std::get_if<c10::string_view>(&ord_variant);
+    std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
@@ -3190,7 +3192,7 @@ Tensor linalg_cond(const Tensor& self, const std::optional<Scalar>& opt_ord) {
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
 
-  std::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, std::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3236,9 +3238,9 @@ Tensor& linalg_cond_out(const Tensor& self, const std::optional<Scalar>& opt_ord
 }
 
 // Frobenius or nuclear norms
-Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
+Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   squareCheckInputs(self, ("linalg.cond(ord=" + std::string(ord) + ")").c_str());
-  std::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, std::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3258,7 +3260,7 @@ Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_cond_out(const Tensor& self, c10::string_view ord, Tensor& result) {
+Tensor& linalg_cond_out(const Tensor& self, std::string_view ord, Tensor& result) {
   checkSameDevice("linalg.cond", result, self);
   ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
@@ -3429,6 +3431,8 @@ Tensor kron(const Tensor& self, const Tensor& other) {
 DEFINE_DISPATCH(weight_to_int4pack_stub);
 DEFINE_DISPATCH(int4pack_mm_stub);
 DEFINE_DISPATCH(int8pack_mm_stub);
+DEFINE_DISPATCH(dyn_quant_pack_4bit_weight_stub);
+DEFINE_DISPATCH(dyn_quant_matmul_4bit_stub);
 
 Tensor _convert_weight_to_int4pack_cpu(
     const Tensor& in,
@@ -3481,6 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(K % qGroupSize == 0,
+      __func__, ": expect K to be divisible by qGroupSize, got K:", K, ", qGroupSize:", qGroupSize);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
       && qScaleAndZeros.size(2) == 2,
@@ -3490,6 +3496,69 @@ Tensor _weight_int4pack_mm_cpu(
   int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
 
   return C;
+}
+
+Tensor _dyn_quant_pack_4bit_weight_cpu(
+    const Tensor& weights,
+    const Tensor& scales_zeros,
+    const std::optional<Tensor>& bias,
+    const int64_t block_size,
+    const int64_t in_features,
+    const int64_t out_features) {
+  TORCH_CHECK(
+      weights.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
+  TORCH_CHECK(
+      block_size == in_features ||
+          (!(block_size % 32) && !(in_features % block_size)),
+      __func__,
+      ": Group size should be multiple of 32, in_features [",
+      in_features,
+      "]. Provided ",
+      block_size);
+  Tensor packed_weights =
+      at::empty(weights.sizes(), weights.options().dtype(at::kByte));
+  dyn_quant_pack_4bit_weight_stub(
+      kCPU,
+      packed_weights,
+      weights,
+      scales_zeros,
+      bias,
+      out_features,
+      in_features,
+      block_size);
+  return packed_weights;
+}
+
+Tensor _dyn_quant_matmul_4bit_cpu(
+    const Tensor& inp,
+    const Tensor& packed_weights,
+    const int64_t block_size,
+    const int64_t in_features,
+    const int64_t out_features) {
+  auto M = inp.size(0);
+  TORCH_CHECK(
+      inp.dtype() == kFloat,
+      __func__,
+      " : expect input to be 32-bit float tensor.");
+  TORCH_CHECK(
+      block_size == in_features ||
+          (!(block_size % 32) && !(in_features % block_size)),
+      __func__,
+      ": Group size should be multiple of 32, in_features [",
+      in_features,
+      "]. Provided ",
+      block_size);
+  auto output = at::empty({M, out_features}, inp.options());
+  dyn_quant_matmul_4bit_stub(
+      kCPU,
+      output,
+      inp,
+      packed_weights,
+      M,
+      out_features,
+      in_features,
+      block_size);
+  return output;
 }
 
 Tensor _weight_int8pack_mm_cpu(
@@ -3503,11 +3572,10 @@ Tensor _weight_int8pack_mm_cpu(
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be contiguous on the last dimension.");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),
@@ -3526,7 +3594,7 @@ Tensor _weight_int8pack_mm_cpu(
 
 Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) {
 #ifndef STRIP_ERROR_MESSAGES
-  static constexpr c10::string_view func_name = "int_mm_out_cpu";
+  static constexpr std::string_view func_name = "int_mm_out_cpu";
 #endif
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());

@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import copy
 import logging
+import math
 import random
-from typing import List, Optional
+from collections import namedtuple
+from typing import Optional
 
 import sympy
 
@@ -13,6 +15,7 @@ from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
+from torch._inductor.runtime.runtime_utils import next_power_of_2
 
 from ...utils import IndentedBuffer, try_import_ck_lib
 
@@ -21,6 +24,30 @@ _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
 
 
 log = logging.getLogger(__name__)
+
+# lightweight collection of information about a single op
+InductorROCmOp = namedtuple("InductorROCmOp", ["op", "kBatch"])
+
+padding_lookup = {
+    "M": {
+        "GemmSpecialization::MPadding": True,
+        "GemmSpecialization::MNPadding": True,
+        "GemmSpecialization::MKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+    "N": {
+        "GemmSpecialization::NPadding": True,
+        "GemmSpecialization::MNPadding": True,
+        "GemmSpecialization::NKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+    "K": {
+        "GemmSpecialization::KPadding": True,
+        "GemmSpecialization::MKPadding": True,
+        "GemmSpecialization::NKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+}
 
 
 def is_static_int(number):
@@ -46,7 +73,29 @@ class CKGemmTemplate(CKTemplate):
     PT_EXPORT {{kernel_definition}} {
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
-
+        {% if is_batched %}
+        auto argument = gemm.MakeArgument(
+            reinterpret_cast<const {{a_element_dtype}}*>(X),
+            reinterpret_cast<const {{b_element_dtype}}*>(W),
+            std::array<const void*, {{ds_size}}>{ {{ds_names}} },
+            reinterpret_cast<{{c_element_dtype}}*>(Y),
+            M,
+            N,
+            K,
+            B,
+            LDA,
+            LDB,
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
+            LDC,
+            M * K, // batch_stride_A
+            N * K, // batch_stride_B
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_batch_strides}} },
+            M * N, // batch_stride_C
+            {{a_elementwise_op}},
+            {{b_elementwise_op}},
+            {{epilogue}} // c_elementwise_op
+        );
+        {% else %}
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
@@ -59,11 +108,12 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
-            1, // kBatch
+            kBatch, // kBatch
             {{a_elementwise_op}},
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
         );
+        {% endif %}
         if (!gemm.IsSupportedArgument(argument)) {
             // we do our best to statically avoid this case in `filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
@@ -108,6 +158,9 @@ class CKGemmTemplate(CKTemplate):
 
     extern "C" {
     int run_main(int argc, char** argv) {
+        {% if is_batched %}
+        const int32_t B = {{B}};
+        {% endif %}
         const int32_t M = {{M}};
         const int32_t N = {{N}};
         const int32_t K = {{K}};
@@ -115,6 +168,7 @@ class CKGemmTemplate(CKTemplate):
         const int32_t LDB = {{LDB}};
         const int32_t LDC = {{LDC}};
         const int32_t LDD = {{LDD}};
+        const int32_t kBatch = {{kBatch}};
 
         using AElementType = {{a_ck_dtype}};
         using BElementType = {{b_ck_dtype}};
@@ -145,19 +199,40 @@ class CKGemmTemplate(CKTemplate):
         using BiasLayout = {{bias_layout}};
         {% endif %}
 
+        {% if is_batched %}
+        using strides_t = std::array<int32_t, 3>;
+        auto get_strides = [](int32_t batch_stride, int32_t leading_dimension, auto layout) constexpr -> strides_t {
+            if constexpr (std::is_same_v<decltype(layout), Row>) {
+                return {batch_stride, leading_dimension, 1};
+            }
+            return {batch_stride, 1, leading_dimension};
+        };
+        auto a_size = strides_t{B, M, K};
+        auto a_stride = get_strides(M * K, LDA, ALayout{});
+        auto b_size = strides_t{B, N, K};
+        auto b_stride = get_strides(N * K, LDB, BLayout{});
+        auto c_size = strides_t{B, M, N};
+        auto c_stride = get_strides(M * N, LDC, CLayout{});
+        {% else %}
         using strides_t = std::array<int32_t, 2>;
-
         auto get_strides = [](int32_t leading_dimension, auto layout) constexpr -> strides_t {
             if constexpr (std::is_same_v<decltype(layout), Row>) {
                 return {leading_dimension, 1};
             }
             return {1, leading_dimension};
         };
+        auto a_size = strides_t{M, K};
+        auto a_stride = get_strides(LDA, ALayout{});
+        auto b_size = strides_t{N, K};
+        auto b_stride = get_strides(LDB, BLayout{});
+        auto c_size = strides_t{M, N};
+        auto c_stride = get_strides(LDC, CLayout{});
+        {% endif %}
 
-        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( strides_t{M, K}, get_strides(LDA, ALayout{}) ) );
-        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( strides_t{N, K}, get_strides(LDB, BLayout{}) ) );
+        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( a_size, a_stride ) );
+        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( b_size, b_stride ) );
         {% if has_bias %}
-        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, BiasLayout{}) ) );
+        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( c_size, get_strides(LDD, BiasLayout{}) ) );
         {% endif %}
         {% if has_scale %}
         // NB: these are hardcoded
@@ -165,8 +240,8 @@ class CKGemmTemplate(CKTemplate):
         Tensor<ScaleAElementType> s_b_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(0, Col{}) ));
         {% endif %}
 
-        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
-        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
+        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( c_size, c_stride ) );
+        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( c_size, c_stride ) );
 
         a_m_k.GenerateTensorValue(GeneratorTensor_2<AElementType>());
         b_k_n.GenerateTensorValue(GeneratorTensor_2<BElementType>());
@@ -209,6 +284,9 @@ class CKGemmTemplate(CKTemplate):
             static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
             {% endif %}
             static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
+            {% if is_batched %}
+            B,
+            {% endif %}
             M,
             N,
             K,
@@ -235,30 +313,42 @@ class CKGemmTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
+        is_batched = len(layout.size) == 3
+        name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
         super().__init__(
-            "ck_gemm_template",
+            name=name,
             input_nodes=input_nodes,
             layout=layout,
             input_reorder=input_reorder,
         )
         self.alpha = alpha
         self.beta = beta
+        self.is_batched = is_batched
 
     def header(self) -> IndentedBuffer:
         res = super().header()
-        res.splice(
-            """
-                // CK GEMM header(s)
+        if self.is_batched:
+            res.splice(
+                """
+                    // CK GEMM header(s)
 
-                #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
-            """
-        )
+                    #include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
+        else:
+            res.splice(
+                """
+                    // CK GEMM header(s)
+
+                    #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
         return res
 
     def globals(self) -> IndentedBuffer:
@@ -300,7 +390,14 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def filter_op(self, op: "CKGemmOperation"):
+    def _has_padding(self, dimension, gemm_specialization):
+        # Get the relevant padding map for the given dimension
+        dimension_padding = padding_lookup.get(dimension, {})
+
+        # Check if the specialization is in the dimension's padding map
+        return dimension_padding.get(gemm_specialization, False)
+
+    def filter_op(self, op_info: InductorROCmOp):
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -309,6 +406,7 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
+        op, kBatch = op_info.op, op_info.kBatch
         metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
         X_meta = metas[0]
         W_meta = metas[1]
@@ -335,25 +433,26 @@ class CKGemmTemplate(CKTemplate):
         N = W_meta.size[-1]
 
         if is_static_int(M):
-            if not any(
-                m_padding in op.gemm_specialization
-                for m_padding in ["MPadding", "MNPadding", "MKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("M", op.gemm_specialization):
                 if M % op.m_per_block != 0:
                     return None
         if is_static_int(N):
-            if not any(
-                n_padding in op.gemm_specialization
-                for n_padding in ["NPadding", "MNPadding", "NKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("N", op.gemm_specialization):
                 if N % op.n_per_block != 0:
                     return None
         if is_static_int(K):
-            if not any(
-                k_padding in op.gemm_specialization
-                for k_padding in ["KPadding", "MKPadding", "NKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("K", op.gemm_specialization):
                 if K % op.k_per_block != 0:
+                    return None
+                K_t = kBatch * op.k_per_block
+                if K % K_t != 0:
+                    return None
+            else:
+                # need another kBatch check here
+                lcm = abs(op.a_k1 * op.b_k1) // math.gcd(op.a_k1, op.b_k1)
+                K_t = kBatch * lcm
+                k_read_pad_splited = math.ceil(K / K_t) * lcm
+                if (k_read_pad_splited * (kBatch - 1)) >= K:
                     return None
 
         a_contig_size = (
@@ -375,25 +474,107 @@ class CKGemmTemplate(CKTemplate):
         c_contig_size = (
             N if op.c_layout == "Row" else M if op.c_layout == "Col" else None
         )
+        c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block[0]
+            if isinstance(
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+            )
+            else op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+        )
         if (
             is_static_int(c_contig_size)
-            and c_contig_size
-            % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+            and c_contig_size % c_shuffle_block_transfer_scalar_per_vector_n_per_block
             != 0
         ):
             return None
-
+        if not self._check_num_k_loops(op, kBatch):
+            return None
         # TBD disable instances with invalid number of pipeline prefetch stages
         # It will avoid compiling a small percentage of unrunnable instances which fail the gemm argument check
 
         return op
 
+    def _check_num_k_loops(self, op, kBatch):
+        # Additional splitK scenario check
+        metas = [T.get_layout() for T in [*self.input_nodes]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        K = X_meta.size[-1]
+        if kBatch > 1:
+            if op.block_gemm_pipeline_version != "BlockGemmPipelineVersion::v1":
+                try:
+                    prefetch_stages = self._prefetch_stages(
+                        op,
+                        torch.empty((), dtype=X_meta.dtype).element_size(),
+                        torch.empty((), dtype=W_meta.dtype).element_size(),
+                        torch.cuda.get_device_properties(X_meta.device).warp_size,
+                    )
+                except Exception as e:
+                    log.debug(
+                        "Failed to prefetch_stages for %s with exception %s", op.name, e
+                    )
+                    # be conservative here and disable the op
+                    return False
+
+                K_t = op.k_per_block * kBatch
+                ak0 = (K + K_t - 1) // K_t * (op.k_per_block // op.a_k1)
+                num_k_loop = ak0 // (op.k_per_block // op.a_k1)
+                if num_k_loop <= prefetch_stages:
+                    log.debug(
+                        "Op %s is not compatible due to invalid number of pipeline prefetch stages. "
+                        "Parameters: kBatch=%s, block_gemm_pipeline_version=%s, prefetch_stages=%s, num_k_loop=%s",
+                        op.name(),
+                        kBatch,
+                        op.block_gemm_pipeline_version,
+                        prefetch_stages,
+                        num_k_loop,
+                    )
+                    return False
+
+        return True
+
+    # small helper to figure out the prefetch stages on AMD
+    def _prefetch_stages(self, op, a_dtype_size, b_dtype_size, warp_size: int = 64):
+        version_str = op.block_gemm_pipeline_version.split("::")[-1]
+        try:
+            version = int(version_str[1:])  # Assuming the format is always 'vX'
+        except ValueError as e:
+            raise ValueError(f"Invalid version string: {version_str}") from e
+        if version not in [1, 2, 3, 4, 5]:
+            raise ValueError(
+                f"unknown prefetch stages for {op.block_gemm_pipeline_version}"
+            )
+        # Define the mapping of versions to stages
+        version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
+        # Get the stages for the given version
+        stages = version_to_stages.get(version, None)
+        if stages is None:
+            # This means we're at stage 2, and this requires computation
+            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
+            wgp_per_cu = max(4 * warp_size // op.block_size, 1)
+            full_mem_band_prefetch_stages = math.ceil(
+                32768
+                / wgp_per_cu
+                / (
+                    (op.m_per_block * a_dtype_size + op.n_per_block * b_dtype_size)
+                    * op.k_per_block
+                )
+            )
+            stages = min(max(full_mem_band_prefetch_stages, 2), 8)
+
+        return stages
+
     def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
+        struct_name = (
+            "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3"
+            if self.is_batched
+            else "DeviceGemmMultiD_Xdl_CShuffle_V3"
+        )
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
-        ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
+        ck::tensor_operation::device::{{struct_name}}<
             {{template_params}}>;
 
 """
@@ -413,12 +594,21 @@ class CKGemmTemplate(CKTemplate):
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
+        operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
-            operation_name=op.name(),
+            operation_name=operation_name,
             template_params=(",\n" + 12 * " ").join(template_params),
-        ), self._template_from_string(template_type).render(operation_name=op.name())
+            struct_name=struct_name,
+        ), self._template_from_string(template_type).render(
+            operation_name=operation_name
+        )
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGemmOperation",
+        **kwargs,
+    ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
         """
@@ -448,9 +638,12 @@ class CKGemmTemplate(CKTemplate):
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
         # The first tuple element corresponds to matmul result...
-        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
-            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
-        )
+        if not isinstance(
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+        ):
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+            )
 
         if has_scale:
             scale_x = self.input_nodes[2]
@@ -519,7 +712,7 @@ class CKGemmTemplate(CKTemplate):
 * Template instance {op}
 *
 * {torch.__version__=}
-* torch.version.git_version={getattr(torch.version, 'git_version', 'None')}
+* torch.version.git_version={getattr(torch.version, "git_version", "None")}
 */
 """
         epilogue = None
@@ -544,6 +737,10 @@ class CKGemmTemplate(CKTemplate):
 
         assert epilogue is not None, "CK GEMM epilogue is not set"
 
+        size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+        if self.is_batched:
+            size_arg_strs.insert(0, "B")
+
         res = self._template_from_string(self.gemm_template).render(
             inline_utils=self.inline_utils(),
             headers=self.header().getvalue(),
@@ -554,10 +751,7 @@ class CKGemmTemplate(CKTemplate):
                 outputs=[Y],
                 names_str="X, W, inv_scale_x, inv_scale_w, Bias, Y",
                 input_reorder=self.input_reorder,
-                size_args=[
-                    f"int32_t {arg}"
-                    for arg in ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
-                ],
+                size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             instance_type=instance_type,
             a_element_dtype=op.a_element_dtype,
@@ -596,15 +790,25 @@ class CKGemmTemplate(CKTemplate):
                 else []
             ),
             version_comment=version_comment,
+            is_batched=self.is_batched,
+            ds_batch_strides=", ".join([]),  # FIXME when supporting baddbmm
         )
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            M, N, K, LDA, LDB, LDC, LDD = (
+            # NOTE: size_arg_strs is defined above
+            size_arg_vals = (
                 self.size_args()
                 if is_static_problem
                 else (
                     f"std::stoi(argv[{k}])" for k, _ in enumerate(self.size_args(), 1)
+                )
+            )
+            size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
+            runtime_args = dict(
+                zip(
+                    [a.name for a in self.get_runtime_arg_info()],
+                    self.get_runtime_arg_values(),
                 )
             )
             runner_code = self._template_from_string(
@@ -612,15 +816,9 @@ class CKGemmTemplate(CKTemplate):
             ).render(
                 inline_utils=self.inline_utils().getvalue(),
                 kernel_name=kernel.kernel_name,
-                M=M,
-                N=N,
-                K=K,
-                LDA=LDA,
-                LDB=LDB,
-                LDC=LDC,
-                LDD=LDD,
                 has_bias=has_bias,
                 has_scale=has_scale,
+                is_batched=self.is_batched,
                 a_ck_dtype=op.a_element_dtype,
                 b_ck_dtype=op.b_element_dtype,
                 c_ck_dtype=op.c_element_dtype,
@@ -652,6 +850,8 @@ class CKGemmTemplate(CKTemplate):
                 compile_cmd=rocm_compile_command(
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
+                **size_args,
+                **runtime_args,
             )
             res += runner_code
 
@@ -677,7 +877,31 @@ class CKGemmTemplate(CKTemplate):
             and Y_layout == "Row"
         )
 
-    def gen_ops(self):
+    # helper to calculate a potentially optimal kBatch(es) for a problem
+    def _get_kBatch(self, op):
+        # we only set a higher kBatch if K > 16 * the larger of M and N
+        # this is a hand-tuned heuristic to start
+        metas = [T.get_layout() for T in [*self.input_nodes]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        M = X_meta.size[-2]
+        K = X_meta.size[-1]
+        N = W_meta.size[-1]
+        if K // max(M, N) < config.rocm.split_k_threshold:
+            return [1]
+        # if the user is telling us which kBatches to sweep, just use those
+        if config.rocm.kBatch_sweep is not None:
+            return config.rocm.kBatch_sweep
+        # Calculate the number of blocks needed for each dimension
+        total_k_blocks = math.ceil(K / op.k_per_block)
+        # we want to calculate how many blocks we need to fit per CU
+        cus = torch.cuda.get_device_properties(X_meta.device).multi_processor_count
+        # again, manual heuristics as much larger kBatch are significantly worse in
+        # initial testing
+        kBatch = min(max(next_power_of_2(total_k_blocks // cus), 1), 128)
+        return [kBatch]
+
+    def gen_ops(self) -> list[InductorROCmOp]:
         """
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
@@ -685,14 +909,36 @@ class CKGemmTemplate(CKTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        unfiltered_instances = (
-            gen_ops_preselected()
-            if config.rocm.use_preselected_instances and self._is_rcr_f16()
-            else gen_ops_library()
-        )
-        filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
-        )
+        try:
+            from ck4inductor.batched_universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_batched_gemm_ops_library,
+            )
+            from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_gemm_ops_library,
+                gen_ops_preselected as gen_gemm_ops_preselected,
+            )
+        except ImportError:
+            return []
+
+        generator = None
+        if self.is_batched:
+            generator = gen_batched_gemm_ops_library
+        else:
+            generator = gen_gemm_ops_library
+        if config.rocm.use_preselected_instances and self._is_rcr_f16():
+            generator = gen_gemm_ops_preselected
+
+        assert generator is not None
+
+        rops = generator()
+        ops = []
+        for o in rops:
+            kBatches = self._get_kBatch(o)
+            for kBatch in kBatches:
+                ops.append(InductorROCmOp(op=o, kBatch=kBatch))
+
+        filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
+
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -734,7 +980,8 @@ class CKGemmTemplate(CKTemplate):
         for op in ops:
             template.maybe_append_choice(
                 choices,
-                op=op,
+                op=op.op,
+                kBatch=op.kBatch,
             )
 
     def size_args(self):
@@ -749,16 +996,19 @@ class CKGemmTemplate(CKTemplate):
         )
         Y = self.output_node
 
-        M = X.get_size()[0]
-        K = X.get_size()[1]
-        N = W.get_size()[1]
-        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
-        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
-        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
+        M = X.get_size()[-2]
+        K = X.get_size()[-1]
+        N = W.get_size()[-1]
+        LDA = X.get_stride()[-2 if X.get_stride()[-1] == 1 else -1]
+        LDB = W.get_stride()[-2 if W.get_stride()[-1] == 1 else -1]
+        LDC = Y.get_stride()[-2 if Y.get_stride()[-1] == 1 else -1]
         LDD = (
             0
             if (Bias is None or len(Bias.get_size()) == 1)
-            else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
+            else Bias.get_stride()[-2 if Bias.get_stride()[-1] == 1 else -1]
         )
-
-        return M, N, K, LDA, LDB, LDC, LDD
+        if self.is_batched:
+            B = X.get_size()[0]
+            return B, M, N, K, LDA, LDB, LDC, LDD
+        else:
+            return M, N, K, LDA, LDB, LDC, LDD

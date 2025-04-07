@@ -1,14 +1,14 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
 
-#include <c10/util/string_view.h>
+#include <string_view>
 
 namespace at {
 
 namespace {
 
 // Verifies the requested type is the same as the Tensor's type.
-void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type_name) {
+void check_type(const TensorBase& tensor, ScalarType type, std::string_view type_name) {
   TORCH_CHECK(
       tensor.scalar_type() == type
       || (isQIntType(tensor.scalar_type())

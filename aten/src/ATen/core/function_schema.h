@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
-#include <c10/util/string_view.h>
 #include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
@@ -9,6 +8,7 @@
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -95,7 +95,7 @@ struct TORCH_API Argument {
   const TypePtr& real_type() const {
     return real_type_;
   }
-  std::optional<int32_t> N() const {
+  const std::optional<int32_t>& N() const {
     return N_;
   }
   const std::optional<IValue>& default_value() const {
@@ -567,7 +567,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
       out << arg.alias_info()->containedTypes()[0];
     }
-    std::string N = "";
+    std::string N;
     if (arg.N()) {
         N = std::to_string(*arg.N());
     }
@@ -651,11 +651,13 @@ template<>
       hash = c10::hash_combine(hash, type_hash);
       hash = c10::hash_combine(hash, kwarg_only_hash);
       // hashing optional fields if they exist
-      if (arg.default_value()) {
-        auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
+      if (arg.default_value().has_value()) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        auto default_value_hash = c10::hash<c10::IValue>{}(*arg.default_value());
         hash = c10::hash_combine(hash, default_value_hash);
       }
-      if (arg.N()) {
+      if (arg.N().has_value()) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         auto N_hash = std::hash<int64_t>{}(*arg.N());
         hash = c10::hash_combine(hash, N_hash);
       }

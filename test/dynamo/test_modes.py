@@ -207,6 +207,18 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(_len_torch_function_stack(), 0)
 
+    def test_is_torch_function_all_disabled(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return (
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
+
     def test_error_empty_stack_pop_torch_function_mode(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -489,7 +501,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, actual)
 
     # Needs larger cache size since we recompile for each op
-    @patch.object(torch._dynamo.config, "cache_size_limit", 48)
+    @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
@@ -582,6 +594,29 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         run_checks(setups_and_oplists, skips, BUILTIN_TO_TENSOR_FN_MAP)
         run_checks(rsetups_and_oplists, rskips, BUILTIN_TO_TENSOR_RFN_MAP)
 
+    def test_expand(self):
+        from torch.distributions import (
+            AffineTransform,
+            ComposeTransform,
+            Normal,
+            TanhTransform,
+            TransformedDistribution,
+        )
+
+        # https://github.com/pytorch/pytorch/issues/141232
+        with torch.device("cpu"):
+
+            @torch.compile(fullgraph=True)
+            def func(a):
+                d = TransformedDistribution(
+                    Normal(a, 1),
+                    ComposeTransform([TanhTransform(), AffineTransform(2, 2)]),
+                )
+                b = d.log_prob(d.rsample((10,)))
+                return b
+
+            func(torch.randn(3))
+
     @requires_cuda
     def test_flex_attention(self):
         import torch
@@ -597,7 +632,28 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+
+    def test_register_hook(self):
+        import functools
+
+        def my_hook(grad, *, k=0):
+            return grad + k
+
+        hook = functools.partial(my_hook, k=3)
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                x.register_hook(hook)
+                y = x.mul(2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x = torch.ones(4, requires_grad=True)
+
+        with torch.device("cpu"):
+            torch.compile(mod, fullgraph=True)(x)
 
 
 if __name__ == "__main__":

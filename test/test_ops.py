@@ -1,5 +1,4 @@
 # Owner(s): ["module: unknown"]
-
 import contextlib
 import copy
 import inspect
@@ -12,7 +11,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
 from importlib import import_module
-from typing import Dict, List
 
 import torch
 import torch._prims as prims
@@ -67,13 +65,13 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
-    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
     unMarkDynamoStrictTest,
 )
+from torch.testing._internal.inductor_utils import maybe_skip_size_asserts
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -171,7 +169,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("lu_solve"),
     xfail("lu_unpack"),
     xfail("matmul"),
-    xfail("mean"),
     xfail("mm"),
     xfail("mode"),
     xfail("msort"),
@@ -470,8 +467,8 @@ class TestCommon(TestCase):
         skip_view_consistency=False,
     ):
         # NOTE: this test works by comparing the reference
-        ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            ex = None
             if (
                 isinstance(sample.input, torch.Tensor)
                 and sample.input.numel() == 0
@@ -640,7 +637,6 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
@@ -1151,7 +1147,8 @@ class TestCommon(TestCase):
         sample = first_sample(self, op.sample_inputs(device, dtype))
 
         # Call op to get prototype for out arguments
-        expect = op(sample.input, *sample.args, **sample.kwargs)
+        with maybe_skip_size_asserts(op):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
         any_requires_grad = False
 
         def set_requires_grad(x):
@@ -1172,7 +1169,7 @@ class TestCommon(TestCase):
             "functions with out=... arguments don't support automatic "
             "differentiation, but one of the arguments requires grad."
         )
-        with self.assertRaises(RuntimeError, msg=msg):
+        with self.assertRaises(RuntimeError, msg=msg), maybe_skip_size_asserts(op):
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
@@ -1484,7 +1481,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = {}
+        dtype_error: dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e
@@ -1688,7 +1685,7 @@ class TestCommon(TestCase):
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        for i, sample in enumerate(samples):
+        for sample in samples:
             input, args, kwargs = (sample.input, sample.args, sample.kwargs)
 
             try:
@@ -1828,6 +1825,7 @@ class TestCompositeCompliance(TestCase):
         def check_cow_input(
             arg,
             arg_copy,
+            arg_raw,
             idx_or_kw,
             backward_or_forward="forward",
             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_forward,
@@ -1840,6 +1838,13 @@ class TestCompositeCompliance(TestCase):
             ) + f" during {backward_or_forward} call"
 
             if is_strided_tensor(arg):
+                self.assertTrue(
+                    torch._C._is_cow_tensor(arg_raw),
+                    msg=(
+                        f"{arg_name} raw input should remain COW, but it "
+                        "unexpectedly materialized."
+                    ),
+                )
                 is_cow = torch._C._is_cow_tensor(arg)
 
                 if supports_cow_input_no_materialize and not check_ignore_materialize(
@@ -1862,6 +1867,17 @@ class TestCompositeCompliance(TestCase):
                         msg=(
                             f"{arg_name} avoided materialization, "
                             "but the operation mutated its data."
+                        ),
+                    )
+                else:
+                    self.assertTrue(
+                        torch.allclose(
+                            arg_raw, arg_copy, rtol=0, atol=0, equal_nan=True
+                        ),
+                        msg=(
+                            f"{arg_name} materialized, which is allowed in this "
+                            "case, but the COW input data was mutated, which is "
+                            "not allowed."
                         ),
                     )
 
@@ -1904,10 +1920,10 @@ class TestCompositeCompliance(TestCase):
 
             # Check that COW inputs remain COW after the forward op is executed
             for idx, arg in enumerate(args):
-                check_cow_input(arg, args_copy[idx], idx)
+                check_cow_input(arg, args_copy[idx], args_raw[idx], idx)
 
             for kw, arg in kwargs.items():
-                check_cow_input(arg, kwargs_copy[kw], kw)
+                check_cow_input(arg, kwargs_copy[kw], kwargs_raw[kw], kw)
 
             # Call backward op if it is supported. This part of the test is
             # based on `composite_compliance.check_backward_formula`
@@ -1944,7 +1960,7 @@ class TestCompositeCompliance(TestCase):
                         output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
-                    input_grads = torch.autograd.grad(
+                    torch.autograd.grad(
                         results,
                         leaf_tensors,
                         output_grads,
@@ -1957,6 +1973,7 @@ class TestCompositeCompliance(TestCase):
                         check_cow_input(
                             arg,
                             args_copy[idx],
+                            args_raw[idx],
                             idx,
                             backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
@@ -1968,6 +1985,7 @@ class TestCompositeCompliance(TestCase):
                         check_cow_input(
                             output_grad,
                             output_grads_copy[idx],
+                            output_grads_raw[idx],
                             f"output grad {idx}",
                             backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
@@ -1988,7 +2006,7 @@ class TestCompositeCompliance(TestCase):
             for sample in op.sample_inputs(device, dtype, requires_grad=False):
                 inp = sample.input
                 outs = op(inp, *sample.args, **sample.kwargs)
-                if not isinstance(outs, (tuple, List)):
+                if not isinstance(outs, (tuple, list)):
                     outs = [outs]
 
                 # for all outputs that are views of the input, we should be able to replay the
@@ -2559,8 +2577,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
-    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip("nn.functional.ctc_loss"),
 }
 
@@ -2767,7 +2783,7 @@ class TestFakeTensor(TestCase):
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        for iter, sample in enumerate(samples):
+        for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
@@ -2784,8 +2800,10 @@ class TestFakeTensor(TestCase):
                 with torch._subclasses.CrossRefFakeMode(
                     ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
                 ):
-                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(
-                        False
+                    with (
+                        warnings.catch_warnings(),
+                        context(),
+                        torch.autograd.set_multithreading_enabled(False),
                     ):
                         composite_compliance.compute_expected_grads(
                             op.get_op(),

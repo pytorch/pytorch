@@ -38,7 +38,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "PyLong_AsUnsignedLong -> THPUtils_unpackUInt32 / THPUtils_unpackUInt64"
   exit 1
 fi
-set -ex
+set -ex -o pipefail
 
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 

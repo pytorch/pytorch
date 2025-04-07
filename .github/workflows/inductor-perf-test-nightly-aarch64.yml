@@ -2,8 +2,6 @@ name: inductor-perf-nightly-aarch64
 
 on:
   schedule:
-    # - cron: 0 7 * * 1-6
-    # - cron: 0 7 * * 0
     # Does not perform max_autotune on CPU, so skip the weekly run setup
     - cron: 0 7 * * *
   # NB: GitHub has an upper limit of 10 inputs here
@@ -27,6 +25,11 @@ on:
         default: true
       dynamic:
         description: Run inductor_dynamic_shapes?
+        required: false
+        type: boolean
+        default: false
+      cppwrapper:
+        description: Run inductor_cpp_wrapper?
         required: false
         type: boolean
         default: false
@@ -107,8 +110,7 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_aarch64", shard: 12, num_shards: 12, runner: "linux.arm64.m7g.metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
 
   linux-jammy-aarch64-py3_10-inductor-test-nightly:
@@ -118,15 +120,13 @@ jobs:
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      # Turn off dynamic-shapes and aotinductor tests for now, to have faster iteration for debugging perf instability.
-      # Will change this back
-      dashboard-tag: training-false-inference-true-default-true-dynamic-false-aotinductor-false
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit
 
 
   linux-jammy-aarch64-py3_10-inductor-test:
@@ -136,10 +136,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

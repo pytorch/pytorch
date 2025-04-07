@@ -3,7 +3,7 @@
 import sys
 import textwrap
 import traceback
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.cuda._sanitizer as csan
@@ -58,7 +58,6 @@ class TestArgumentHandler(TestCase):
         out = torch.split(a, 2)
         argument_handler.parse_outputs(split_func._schema, out, is_factory=False)
 
-        outputs = {out[0].data_ptr(), out[1].data_ptr(), out[2].data_ptr()}
         # Split is a view op, no data is read or written!
         self.assertEqual(len(argument_handler.dataptrs_read), 0)
         self.assertEqual(len(argument_handler.dataptrs_written), 0)
@@ -149,9 +148,9 @@ class TestEventHandler(TestCase):
     def kernel_launch(
         self,
         stream: StreamId,
-        read_only: Optional[List[DataPtr]] = None,
-        read_write: Optional[List[DataPtr]] = None,
-    ) -> List[csan.SynchronizationError]:
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
+    ) -> list[csan.SynchronizationError]:
         if read_only is None:
             read_only = []
         if read_write is None:
@@ -168,8 +167,8 @@ class TestEventHandler(TestCase):
     def assert_good_kernel_launch(
         self,
         stream: StreamId,
-        read_only: Optional[List[DataPtr]] = None,
-        read_write: Optional[List[DataPtr]] = None,
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
     ) -> None:
         self.assertEqual(self.kernel_launch(stream, read_only, read_write), [])
 
@@ -177,8 +176,8 @@ class TestEventHandler(TestCase):
         self,
         number_of_errors: int,
         stream: StreamId,
-        read_only: Optional[List[DataPtr]] = None,
-        read_write: Optional[List[DataPtr]] = None,
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
     ) -> None:
         errors = self.kernel_launch(stream, read_only, read_write)
         self.assertEqual(len(errors), number_of_errors)
@@ -514,8 +513,8 @@ class TestMessages(TestCase):
 
             # These two tests ensure that subclass creation
             # happens smoothly under the mode used by csan
-            t = TwoTensor(torch.rand(2), torch.rand(2))
-            t = MyT(torch.rand(2))
+            TwoTensor(torch.rand(2), torch.rand(2))
+            MyT(torch.rand(2))
         finally:
             csan.cuda_sanitizer.disable()
 

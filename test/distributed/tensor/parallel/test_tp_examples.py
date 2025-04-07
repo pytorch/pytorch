@@ -3,7 +3,7 @@
 
 import itertools
 from copy import deepcopy
-from typing import Dict, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -52,9 +52,9 @@ reduce_scatter, all_gather, all_reduce = (
 
 
 class ExpCommCounts(NamedTuple):
-    fwd: Optional[Dict] = None
-    bwd: Optional[Dict] = None
-    optim: Optional[Dict] = None
+    fwd: Optional[dict] = None
+    bwd: Optional[dict] = None
+    optim: Optional[dict] = None
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -311,7 +311,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         torch.manual_seed(0)
         steps = 10 if type(model) is torch.float64 else 1
-        for iter in range(steps):
+        for _ in range(steps):
             inp = torch.randint(
                 model_args.vocab_size, inp_size, device=self.device_type
             )

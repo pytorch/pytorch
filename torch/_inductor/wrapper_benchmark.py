@@ -1,13 +1,20 @@
-# mypy: allow-untyped-defs
 import dataclasses
+import datetime
 import tempfile
 from collections import defaultdict
+from types import ModuleType
+from typing import Any, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
+from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
+
+
+class BenchmarkCallableType(Protocol):
+    def __call__(self, times: int, repeat: int) -> float: ...
 
 
 _kernel_category_choices = [
@@ -20,7 +27,7 @@ _kernel_category_choices = [
 ]
 
 
-def get_kernel_category_by_source_code(src_code):
+def get_kernel_category_by_source_code(src_code: str) -> str:
     """
     Similar to get_kernel_category but use the source code. Call this API
     if we have not compile the src_code to module yet.
@@ -34,7 +41,7 @@ def get_kernel_category_by_source_code(src_code):
         return "unknown"
 
 
-def get_kernel_category(kernel_mod):
+def get_kernel_category(kernel_mod: ModuleType) -> str:
     """
     Given the module defining a triton kernel, return the category of the kernel.
     Category can be one of:
@@ -52,7 +59,7 @@ def get_kernel_category(kernel_mod):
         return "unknown"
 
 
-def get_triton_kernel(mod):
+def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     cand_list = [
@@ -64,7 +71,9 @@ def get_triton_kernel(mod):
     return cand_list[0]
 
 
-def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
+def benchmark_all_kernels(
+    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
+) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -96,7 +105,13 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         if num_gb is None:
             num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
-        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+        def get_info_str(
+            ms: float,
+            n_regs: Optional[Any],
+            n_spills: Optional[Any],
+            shared: Optional[Any],
+            prefix: str = "",
+        ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):
                 kernel_detail_str = (
                     f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
@@ -122,9 +137,9 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 )
         else:
             ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert (
-                len(triton_kernel.launchers) == 1
-            ), "Autotuner should have selected the best config"
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -154,22 +169,31 @@ class ProfileEvent:
 
 
 def parse_profile_event_list(
-    benchmark_name, event_list, wall_time_ms, nruns, device_name
-):
-    def get_self_device_time(ev):
+    benchmark_name: str,
+    event_list: torch.autograd.profiler_util.EventList,
+    wall_time_ms: float,
+    nruns: int,
+    device_name: str,
+) -> None:
+    def get_self_device_time(
+        ev: torch.autograd.profiler_util.EventList,
+    ) -> float:
         """
         ev.self_device_time_total is in microsecond. Convert to millisecond.
         """
-        return ev.self_device_time_total / 1000 / nruns
+        return ev.self_device_time_total / 1000 / nruns  # type: ignore[attr-defined]
 
-    all_events = defaultdict(list)
+    all_events: dict[str, list[ProfileEvent]] = defaultdict(list)
 
-    def add_event(ev, category):
+    def add_event(
+        ev: torch.autograd.profiler_util.EventList,
+        category: str,
+    ) -> None:
         profile_ev = ProfileEvent(
             category=category,
-            key=ev.key,
+            key=ev.key,  # type: ignore[attr-defined]
             self_device_time_ms=get_self_device_time(ev),
-            count=ev.count / nruns,  # average across all runs
+            count=ev.count / nruns,  # type: ignore[operator] # average across all runs
         )
         all_events[category].append(profile_ev)
 
@@ -192,7 +216,10 @@ def parse_profile_event_list(
 
         add_event(ev, category)
 
-    def report_category(category, profile_events):
+    def report_category(category: str, profile_events: list[ProfileEvent]) -> float:
+        if not device_name:
+            return 0.0
+
         from tabulate import tabulate
 
         profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)
@@ -220,7 +247,7 @@ def parse_profile_event_list(
         )
         return total_time
 
-    def report():
+    def report() -> None:
         category_list = [
             "triton_pointwise",
             "triton_reduction",
@@ -228,9 +255,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert set(all_events.keys()).issubset(
-            set(category_list)
-        ), f"{list(all_events.keys())}"
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{list(all_events.keys())}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0
@@ -241,9 +268,13 @@ def parse_profile_event_list(
                 total_device_ms += _time
 
         device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        print(
-            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
-        )
+        if device_name:
+            print(
+                f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+            )
+        else:
+            print("No device detected")
+
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
@@ -264,8 +295,12 @@ def parse_profile_event_list(
 
 
 def perf_profile(
-    wall_time_ms, times, repeat, benchmark_name, benchmark_compiled_module_fn
-):
+    wall_time_ms: float,
+    times: int,
+    repeat: int,
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+) -> None:
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
 
@@ -280,7 +315,61 @@ def perf_profile(
     )
 
 
-def collect_memory_snapshot(benchmark_compiled_module_fn):
+def ncu_analyzer(
+    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+) -> None:
+    import inspect
+    import os
+    import subprocess
+
+    module_file = inspect.getfile(benchmark_compiled_module_fn)
+    module_dir = os.path.dirname(module_file)
+    module_name = os.path.splitext(os.path.basename(module_file))[0]
+
+    ncu_dir = tempfile.gettempdir()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}.ncu-rep")
+    python_cmd = (
+        f"""import sys; sys.path.insert(0, '{module_dir}'); """
+        f"""from {module_name} import benchmark_compiled_module; """
+        """benchmark_compiled_module(times=1, repeat=1)"""
+    )
+
+    ncu_cmd = [
+        "ncu",
+        "--target-processes",
+        "all",
+        "--replay-mode",
+        "kernel",
+        "--kernel-name-base",
+        "function",
+        "--print-units",
+        "base",
+        "--set",
+        "full",
+        "--import-source",
+        "yes",
+        "--force-overwrite",
+        "--export",
+        ncu_output,
+        "python",
+        "-c",
+        python_cmd,
+    ]
+
+    try:
+        subprocess.run(ncu_cmd, check=True)
+        print(f"\nNCU profiling results for benchmark {benchmark_name}:")
+        print(f"NCU report has been written to {ncu_output}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"NCU profiling failed with error: {e}")
+        return
+
+
+def collect_memory_snapshot(
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+) -> None:
     assert torch.cuda.is_available()
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
@@ -291,7 +380,9 @@ def collect_memory_snapshot(benchmark_compiled_module_fn):
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
-def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
+def compiled_module_main(
+    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+) -> None:
     """
     This is the function called in __main__ block of a compiled module.
     """
@@ -325,6 +416,11 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
             for details about how to visualize the collected snapshot
         """,
     )
+    parser.add_argument(
+        "--ncu",
+        action="store_true",
+        help="Whether to run ncu analysis",
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -339,7 +435,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
 
         if torch.cuda.is_available():
             peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
+            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)
@@ -352,3 +448,5 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
                 benchmark_name,
                 benchmark_compiled_module_fn,
             )
+        if args.ncu:
+            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)

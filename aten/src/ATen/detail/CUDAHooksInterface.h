@@ -74,6 +74,14 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
         CUDA_HELP);
   }
 
+  Generator getNewGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false,
+        "Cannot get CUDA generator without ATen_cuda library. ",
+        CUDA_HELP);
+  }
+
   Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
@@ -188,7 +196,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
 #ifdef USE_ROCM
-  virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
+  virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex = -1 /*device_index*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
   }
 #endif

@@ -2,9 +2,10 @@
 import functools
 import itertools
 import logging
+import operator
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Union
 
 import torch
 import torch._guards
@@ -16,8 +17,8 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
-from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -55,7 +56,9 @@ def lazy_init():
 
 
 def remove_no_ops(
-    gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
+    gm: torch.fx.GraphModule,
+    zeros: OrderedSet[torch.fx.Node],
+    ones: OrderedSet[torch.fx.Node],
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         "Removes no-ops: (+ 0, - 0, * 1, / 1)"
@@ -156,7 +159,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     """
     with torch.utils._python_dispatch._disable_current_modes():
         # A dictionary mapping a tensor to all aliased views.
-        views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
+        views: dict[torch.fx.Node, dict[torch.dtype, torch.fx.Node]] = {}
         graph = gm.graph
 
         for node in graph.find_nodes(
@@ -203,11 +206,11 @@ class UniformValueConstantFolder(ConstantFolder):
 
     def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
-        self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
+        self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
+        self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
-        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
+        self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
 
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
@@ -230,9 +233,11 @@ class UniformValueConstantFolder(ConstantFolder):
             aten.permute,
         ]
 
-        self.indexing_op_packets = {
-            aten.slice,
-        }
+        self.indexing_op_packets = OrderedSet(
+            [
+                aten.slice,
+            ]
+        )
 
     def _support_dynamic_shape(self):
         return True
@@ -245,7 +250,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
-    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+    def insert_placerholder_values(self, env: dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
@@ -283,8 +288,11 @@ class UniformValueConstantFolder(ConstantFolder):
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
-            new_args = [[1], args[1]]
-            return aten.full.default(*new_args, **node.kwargs)
+            value = args[1]
+            # Don't specialize symbolic value.
+            if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                new_args = [[1], value]
+                return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
         if node.target == aten.view.dtype:
@@ -348,8 +356,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         graph = gm.graph
 
-        zeros = set()
-        ones = set()
+        zeros = OrderedSet[Any]()
+        ones = OrderedSet[Any]()
 
         # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
         # so just constant-ify if a Tensor is unaliased
@@ -435,6 +443,81 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         remove_redundant_views(gm)
 
 
+def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
+    """
+
+
+    torch.ops.higher_order.invoke_quant_packed(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
+    ->
+    torch.ops.higher_order.invoke_quant(repeated_subgraph0, arg0_1, arg1_1, scheme = 'nf4');
+    """
+    graph = gm.graph
+    invoke_quant_invocations = graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_quant_packed
+    )
+    for invoke_quant in invoke_quant_invocations:
+        kwargs = dict(invoke_quant.kwargs)
+
+        quant_options_node = kwargs.pop("quant_options", None)
+        if quant_options_node is not None:
+            assert isinstance(quant_options_node, torch.fx.Node)
+            quant_options = torch._higher_order_ops.InvokeQuant(
+                *invoke_quant.kwargs["quant_options"].args,
+                **invoke_quant.kwargs["quant_options"].kwargs,
+            )
+        else:
+            quant_options = torch._higher_order_ops.InvokeQuant()
+
+        subgraph, *args = invoke_quant.args
+        with gm.graph.inserting_before(invoke_quant):
+            invoke_quant_replacement = graph.call_function(
+                torch._higher_order_ops.invoke_quant,
+                (subgraph, *args),
+                kwargs,
+            )
+            invoke_quant_replacement.meta.update(subgraph.meta)
+            invoke_quant_replacement.meta["quant_options"] = quant_options
+
+            invoke_quant.replace_all_uses_with(invoke_quant_replacement)
+            graph.erase_node(invoke_quant)
+
+            if quant_options_node and len(quant_options_node.users) == 0:
+                graph.erase_node(quant_options_node)
+
+            first_user = next(iter(invoke_quant_replacement.users))
+
+            if (
+                len(invoke_quant_replacement.users) == 1
+                and len(subgraph.users) == 1
+                and first_user.target == operator.getitem
+                and first_user.args[1] == 0
+            ):
+                subgraph_graph = getattr(gm, subgraph.target)
+                output_node = torch._inductor.utils.output_node(subgraph_graph)
+                assert (
+                    isinstance(output_node.args[0], (list, tuple))
+                    and len(output_node.args[0]) == 1
+                )
+
+                unpacked_output = output_node.args[0][0]
+                output_node.args = (unpacked_output,)
+                if "val" in output_node.meta:
+                    output_node.meta["val"] = output_node.meta["val"][0]
+                subgraph_graph.recompile()
+
+                invoke_quant_replacement.meta.update(first_user.meta)
+                first_user.replace_all_uses_with(invoke_quant_replacement)
+                graph.erase_node(first_user)
+
+
+def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
+    """
+    Canonicalization passes that will run immediately after aot autograd
+    tracing. Thsis must be run before all other graph passes.
+    """
+    canonicalize_quant_mapping(gm)
+
+
 def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
@@ -446,6 +529,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     lazy_init()
     count = 0
+
+    # must occur before other passes
+    canonicalize_aten_ir_passes(graph)
+
     if config.joint_custom_pre_pass is not None:
         GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
             config.joint_custom_pre_pass
@@ -460,6 +547,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
+
+    if config.joint_custom_pre_pass is not None:
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
@@ -508,7 +601,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
     Rewrite the arange to use CUDA.
     """
     (node,) = match.nodes
-    user_devices: OrderedSet[torch.device] = OrderedSet()
+    user_devices = OrderedSet[torch.device]()
     for user in node.users:
         if (
             user.op == "call_function"
@@ -555,7 +648,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
+    allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
     if dtype1 in allowed and dtype2 in allowed:
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

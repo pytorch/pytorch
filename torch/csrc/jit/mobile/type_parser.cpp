@@ -182,7 +182,7 @@ TypePtr TypeParser::parse() {
 //         ]
 //     ]"
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
-  std::vector<c10::string_view> field_names;
+  std::vector<std::string_view> field_names;
   std::vector<TypePtr> field_types;
   expect(",");
   expect("[");
@@ -282,7 +282,7 @@ void TypeParser::expect(const char* s) {
   advance();
 }
 
-// c10::string_view::operator== calls memcmp to compare against the target
+// std::string_view::operator== calls memcmp to compare against the target
 // string; we can do better if we specialize for a single character.
 void TypeParser::expectChar(char c) {
   std::string_view token = cur();

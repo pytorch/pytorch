@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/error.h>
 
 #include <thread>
@@ -48,24 +47,18 @@ bool _nnpack_available() {
 namespace at::native {
 
 static bool init_nnpack() {
-  static c10::once_flag once_;
-  static bool nnpack_successfully_initialized_ = false;
+  const static nnp_status nnpack_status = nnp_initialize();
+  auto nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
 
-  c10::call_once(once_, []() {
-    const nnp_status nnpack_status = nnp_initialize();
-    nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
-
-    if (nnpack_status != nnp_status_success) {
-      if (nnpack_status == nnp_status_out_of_memory) {
-        LOG(WARNING) << "Could not initialize NNPACK! Reason: Out of memory.";
-      } else if (nnpack_status == nnp_status_unsupported_hardware) {
-        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unsupported hardware.";
-      } else {
-        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unknown error!";
-      }
+  if (nnpack_status != nnp_status_success) {
+    if (nnpack_status == nnp_status_out_of_memory) {
+      LOG(WARNING) << "Could not initialize NNPACK! Reason: Out of memory.";
+    } else if (nnpack_status == nnp_status_unsupported_hardware) {
+      LOG(WARNING) << "Could not initialize NNPACK! Reason: Unsupported hardware.";
+    } else {
+      LOG(WARNING) << "Could not initialize NNPACK! Reason: Unknown error!";
     }
-  });
-
+  }
   return nnpack_successfully_initialized_;
 }
 

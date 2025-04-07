@@ -7,10 +7,8 @@
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
 {%- else %}
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -27,9 +25,6 @@
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
 {%- if config["package_type"] == "manywheel" %}
-  {%- if config["devtoolset"] %}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-  {%- endif %}
   {%- if config.use_split_build is defined %}
       use_split_build: !{{ config["use_split_build"] }}
   {%- endif %}
@@ -39,9 +34,6 @@
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
   {%- endif %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-  {%- if config["devtoolset"] %}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-  {%- endif %}
   {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -76,7 +68,5 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

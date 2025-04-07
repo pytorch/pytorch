@@ -305,6 +305,7 @@ coverage_ignore_functions = [
     "node_arg_is_weight",
     "return_arg_list",
     # torch.ao.quantization.pt2e.graph_utils
+    "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
     "update_equivalent_types_dict",
@@ -423,11 +424,15 @@ coverage_ignore_functions = [
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
     "memory_summary",
     "reset_accumulated_memory_stats",
+    "reset_accumulated_host_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
     "reset_peak_memory_stats",
+    "reset_peak_host_memory_stats",
     "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
@@ -3361,7 +3366,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2024, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

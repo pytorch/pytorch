@@ -7,16 +7,17 @@ ciflow_push_tags:
 - ciflow/inductor
 - ciflow/inductor-periodic
 - ciflow/inductor-rocm
+- ciflow/inductor-perf-test-nightly-rocm
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
-- ciflow/inductor-cu124
 - ciflow/inductor-cu126
 - ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
 - ciflow/rocm
+- ciflow/rocm-mi300
 - ciflow/s390
 - ciflow/slow
 - ciflow/trunk
@@ -24,11 +25,13 @@ ciflow_push_tags:
 - ciflow/xpu
 - ciflow/torchbench
 - ciflow/autoformat
+- ciflow/op-benchmark
 retryable_workflows:
 - pull
 - trunk
 - linux-binary
 - windows-binary
+- inductor-A100-perf-nightly
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
 mergebot: True

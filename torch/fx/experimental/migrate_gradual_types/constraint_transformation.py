@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import copy
 import itertools
-from typing import Callable, Dict, List
+from typing import Callable
 
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     ApplyBroadcasting,
@@ -50,7 +50,7 @@ from torch.fx.experimental.migrate_gradual_types.util import (
 from torch.fx.tensor_type import Dyn, TensorType
 
 
-_TRANSFORMATION_RULES: Dict[Constraint, Callable] = {}
+_TRANSFORMATION_RULES: dict[Constraint, Callable] = {}
 
 
 def register_transformation_rule(call_target):
@@ -797,7 +797,7 @@ def transform_constraint(constraint: Constraint, counter: int):
         return constraint, counter
 
 
-def calc_last_two_dims(constraint, d: List[DVar]):
+def calc_last_two_dims(constraint, d: list[DVar]):
     """
     Generates constraints for the last two dimensions of a convolution or a maxpool output
     Args:
@@ -866,7 +866,7 @@ def calc_last_two_dims(constraint, d: List[DVar]):
     return c4, c5
 
 
-def generate_all_int_dyn_dim_possibilities(my_list: List[DVar]):
+def generate_all_int_dyn_dim_possibilities(my_list: list[DVar]):
     """
     Generate all possibilities of being equal or not equal to dyn for my_list
     Args:
@@ -888,7 +888,7 @@ def generate_all_int_dyn_dim_possibilities(my_list: List[DVar]):
     return all_possibilities
 
 
-def is_target_div_by_dim(target: List[int], dim: List[DVar]):
+def is_target_div_by_dim(target: list[int], dim: list[DVar]):
     """
     Generate constraints to check if the target dimensions are divisible by the input dimensions
     Args:
@@ -901,7 +901,7 @@ def is_target_div_by_dim(target: List[int], dim: List[DVar]):
     return BinConstraintD(BinConstraintD(Prod(target), dim, op_mod), 0, op_eq)
 
 
-def is_dim_div_by_target(target: List[int], dim: List[DVar]):
+def is_dim_div_by_target(target: list[int], dim: list[DVar]):
     """
     Generate constraints to check if the input dimensions is divisible by the target dimensions
     Args:
@@ -1000,9 +1000,9 @@ def apply_padding(
     e11: BinConstraintT,
     e2: BinConstraintT,
     e12: BinConstraintT,
-    d2: List[DVar],
-    d11: List[DVar],
-    d12: List[DVar],
+    d2: list[DVar],
+    d11: list[DVar],
+    d12: list[DVar],
     counter: int,
 ):
     """
@@ -1068,7 +1068,7 @@ def apply_padding(
 
 
 def no_broadcast_dim_with_index(
-    d1: List[DVar], d2: List[DVar], d3: List[DVar], d4: List[DVar], i: int
+    d1: list[DVar], d2: list[DVar], d3: list[DVar], d4: list[DVar], i: int
 ):
     """
     Args:
@@ -1129,10 +1129,10 @@ def create_equality_constraints_for_broadcasting(
     e2: TVar,
     e11: TVar,
     e12: TVar,
-    d1: List[DVar],
-    d2: List[DVar],
-    d11: List[DVar],
-    d12: List[DVar],
+    d1: list[DVar],
+    d2: list[DVar],
+    d11: list[DVar],
+    d12: list[DVar],
 ):
     """
     Create equality constraints for when no broadcasting occurs
@@ -1236,7 +1236,7 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
 
 
 def generate_all_broadcasting_possibilities_no_padding(
-    d1: List[DVar], d2: List[DVar], d11: List[DVar], d12: List[DVar]
+    d1: list[DVar], d2: list[DVar], d11: list[DVar], d12: list[DVar]
 ):
     """
     Generate broadcasting constraints assuming no padding. Broadcasting can happen at any dimension.

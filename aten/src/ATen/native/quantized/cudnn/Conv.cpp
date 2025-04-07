@@ -10,6 +10,7 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -21,12 +22,6 @@
 #include <iostream>
 #include <unordered_map>
 #include <vector>
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
 
 // TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype

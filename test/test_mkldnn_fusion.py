@@ -1,7 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -16,7 +16,7 @@ FUSION_GROUP = 'prim::TensorExprGroup'
 class PointwisePostOp(NamedTuple):
     attr : str
     pointwise_module : nn.Module
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}

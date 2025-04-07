@@ -3,7 +3,7 @@
 
 import math
 from collections import OrderedDict
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -314,7 +314,7 @@ class DeepSpeech(nn.Module):
                 rnn_type=rnn_type,
                 bidirectional=bidirectional,
             )
-            rnns.append(("%d" % (x + 1), rnn))
+            rnns.append((f"{x + 1:d}", rnn))
         self.rnns = nn.Sequential(OrderedDict(rnns))
         self.lookahead = (
             nn.Sequential(
@@ -512,7 +512,7 @@ class MultiheadAttentionContainer(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
             query, key, value (Tensor): map a query and a set of key-value pairs to an output.
@@ -538,21 +538,21 @@ class MultiheadAttentionContainer(torch.nn.Module):
             query.size(-1),
         )
         q, k, v = self.in_proj_container(query, key, value)
-        assert (
-            q.size(-1) % self.nhead == 0
-        ), "query's embed_dim must be divisible by the number of heads"
+        assert q.size(-1) % self.nhead == 0, (
+            "query's embed_dim must be divisible by the number of heads"
+        )
         head_dim = q.size(-1) // self.nhead
         q = q.reshape(tgt_len, bsz * self.nhead, head_dim)
 
-        assert (
-            k.size(-1) % self.nhead == 0
-        ), "key's embed_dim must be divisible by the number of heads"
+        assert k.size(-1) % self.nhead == 0, (
+            "key's embed_dim must be divisible by the number of heads"
+        )
         head_dim = k.size(-1) // self.nhead
         k = k.reshape(src_len, bsz * self.nhead, head_dim)
 
-        assert (
-            v.size(-1) % self.nhead == 0
-        ), "value's embed_dim must be divisible by the number of heads"
+        assert v.size(-1) % self.nhead == 0, (
+            "value's embed_dim must be divisible by the number of heads"
+        )
         head_dim = v.size(-1) // self.nhead
         v = v.reshape(src_len, bsz * self.nhead, head_dim)
 
@@ -589,7 +589,7 @@ class ScaledDotProduct(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Uses a scaled dot product with the projected key-value pair to update
         the projected query.
         Args:
@@ -629,9 +629,9 @@ class ScaledDotProduct(torch.nn.Module):
                 attn_mask = torch.nn.functional.pad(_attn_mask, [0, 1])
 
         tgt_len, head_dim = query.size(-3), query.size(-1)
-        assert (
-            query.size(-1) == key.size(-1) == value.size(-1)
-        ), "The feature dim of query, key, value must be equal."
+        assert query.size(-1) == key.size(-1) == value.size(-1), (
+            "The feature dim of query, key, value must be equal."
+        )
         assert key.size() == value.size(), "Shape of key, value must match"
         src_len = key.size(-3)
         batch_heads = max(query.size(-2), key.size(-2))
@@ -686,7 +686,7 @@ class InProjContainer(torch.nn.Module):
 
     def forward(
         self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""Projects the input sequences using in-proj layers.
         Args:
             query, key, value (Tensors): sequence to be projected
