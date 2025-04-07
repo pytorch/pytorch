@@ -395,11 +395,9 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         output_metadata = ctx._output_metadata
         primals = saved_tensors_and_symints(ctx)
 
-        # While tracing we made the assumption that tangents are contiguous. So,
-        # force the grad_outs to be contiguous.
-        # Also filter out grads that are None or do not require_grad. This was
+        # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
-        contiguous_grad_outs = []
+        filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
                 assert idx in output_metadata.indexes_with_none
@@ -408,13 +406,13 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 # None because the corresponding fwd_out does not require_grad.
                 pass
             else:
-                contiguous_grad_outs.append(o.contiguous())
-        contiguous_grad_outs = tuple(contiguous_grad_outs)
+                filtered_grad_outs.append(o)
+        filtered_grad_outs = tuple(filtered_grad_outs)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
         # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
         # to extract the grads.
-        primals_and_tangents = primals + contiguous_grad_outs
+        primals_and_tangents = primals + filtered_grad_outs
 
         # Check if we have already traced the bwd subgraph.
         bw_graph = None
