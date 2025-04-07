@@ -271,6 +271,8 @@ class Verifier(metaclass=_VerifierMeta):
                         elif type(attr).__name__ == "AOTInductorEPModule":
                             continue
 
+                        elif type(attr).__name__ == "AOTInductorRunnerWrapper":
+                            continue
 
                     if not isinstance(attr, _allowed_getattr_types(is_toplevel_gm)):
                         raise SpecViolationError(
