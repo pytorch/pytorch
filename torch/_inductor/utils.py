@@ -2465,6 +2465,15 @@ def copy_misaligned_inputs(
             new_inputs[i] = clone_preserve_strides(_inp)
 
 
+def is_tensor_aligned(tensor: torch.Tensor) -> bool:
+    from .virtualized import V
+
+    offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+        tensor.storage_offset() * tensor.dtype.itemsize, ALIGNMENT
+    )
+    return offset_aligned
+
+
 def remove_unaligned_input_idxs(
     inputs: Sequence[InputType],
     static_input_idxs: Sequence[int],

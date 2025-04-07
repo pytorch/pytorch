@@ -1129,7 +1129,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required

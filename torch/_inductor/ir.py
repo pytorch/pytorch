@@ -90,6 +90,7 @@ from .utils import (
     ir_dataclass,
     is_dynamic,
     is_gpu,
+    is_tensor_aligned,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -6996,11 +6997,14 @@ class FallbackKernel(ExternKernelAlloc):
                     for key, val in output.items()
                 }
             elif isinstance(output, torch.Tensor):
-                return MultiOutput(
+                buf = MultiOutput(
                     cls.tensor_to_layout(output),
                     packed,
                     indices,
                 )
+                if not is_tensor_aligned(output):
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
+                return buf
             elif isinstance(output, int):
                 return output
             elif isinstance(output, torch.SymInt):
@@ -8051,6 +8055,9 @@ class _CollectiveKernel(FallbackKernel):
                 )
                 for i, tensor in enumerate(example_output)
             ]
+            for buf, tensor in zip(packed.outputs, example_output):
+                if not is_tensor_aligned(tensor):
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
             return packed.outputs
         else:
             packed = cls(
@@ -8060,6 +8067,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            if not is_tensor_aligned(example_output):
+                V.graph.unaligned_buffers.add(packed.name)  # type: ignore[arg-type]
             packed.outputs = [packed]
             return packed
 
