@@ -54,6 +54,8 @@ def count_ops(
                 return node.args[0] == op
             elif node.name == "run_with_rng_state":
                 return node.args[1] == op
+            elif node.name == "graphsafe_run_with_rng_state":
+                return node.args[0] == op
         return False
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
@@ -1018,6 +1020,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._inductor.config.patch(fallback_random=True)
     def test_compile_selective_checkpoint_random_op(self, device):
         for preserve_rng_state in [True, False]:
 
@@ -1251,7 +1254,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(4, 4).to(device)
         opt_fn = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "skip function graph_break in file"
+            torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
             opt_fn(x)
 
