@@ -231,7 +231,7 @@ void InputBuffer::add(
         // (4b)
         execute_accumulation(buffer, pos, var, opt_accumulate_stream);
         // (4c)
-        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+        sync_streams(opt_accumulate_stream, opt_sync_stream, var, device_type);
         return;
       } else {
         opt_accumulate_stream = getStreamForDeviceIdx(device.value());
