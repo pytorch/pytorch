@@ -846,22 +846,13 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     return _getAllocImpl().format_size(size);
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
     if (isSharedBuffer(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
     } else if (isSharedBufferCPUPtr(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
     }
-
-    if (sync) {
-      MPSStream* stream = _getAllocImpl().getStream();
-      stream->addCompletedHandler(^(id<MTLCommandBuffer>) {
-        default_copy_data(dest, src, count);
-      });
-      stream->synchronize(SyncType::COMMIT_AND_WAIT);
-    } else {
-      default_copy_data(dest, src, count);
-    }
+    default_copy_data(dest, src, count);
   }
 
   void* get_cpu_ptr_from_device_ptr(void* device_ptr) const override {
