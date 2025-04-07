@@ -203,10 +203,6 @@ def _gen_ops_cached(arch, version) -> list[Any]:
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
-    elif arch == "90":
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
