@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 import logging
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
-import triton
 from torch._dynamo.utils import counters
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton_tma_device
 
-from ..ir import ChoiceCaller, get_device_type, Layout, TensorBox
+from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
 from ..runtime.runtime_utils import next_power_of_2
 from ..select_algorithm import (
@@ -18,15 +18,24 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import get_num_sms, get_tma_workspace_arg, use_aten_gemm_kernels
-from .mm_common import _is_static_problem, check_supported_striding, persistent_grouped_mm_grid
+from .mm_common import (
+    _is_static_problem,
+    check_supported_striding,
+    persistent_grouped_mm_grid,
+)
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
+@dataclass
+class Config:
+    kwargs: dict[str, int]
+    num_stages: int
+    num_warps: int
 
 _NV_CONFIGS = [
-    triton.Config(
+    Config(
         {
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
@@ -36,15 +45,15 @@ _NV_CONFIGS = [
         num_stages=num_stages,
         num_warps=num_warps,
     )
-    for block_size_m in [64]
-    for block_size_n in [64]
-    for block_size_k in [64]
-    for num_stages in [3]
-    for num_warps in [8]
+    for block_size_m in [64, 128]
+    for block_size_n in [64, 128, 256]
+    for block_size_k in [64, 128, 256]
+    for num_stages in [3, 4]
+    for num_warps in [4, 8]
 ]
 
 _AMD_CONFIGS = [
-    triton.Config(
+    Config(
         {
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
@@ -63,6 +72,7 @@ _AMD_CONFIGS = [
     for num_warps, waves_per_cu in [(4, 1), (8, 2), (16, 4)]
     for matrix_instr_nonkdim in [16]
 ]
+
 
 def scaled_grouped_mm_configs():
     return _AMD_CONFIGS if torch.version.hip else _NV_CONFIGS
@@ -376,7 +386,6 @@ def tuned_scaled_grouped_mm(
         layout,
     )
 
-    device_type = get_device_type(mat_a)
     check_supported_striding(mat_a, mat_b)
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
