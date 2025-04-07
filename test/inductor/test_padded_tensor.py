@@ -188,6 +188,8 @@ class ModelTests(TestCase):
                     torch.arange(0, seqlen, dtype=torch.int32),
                 )
 
+                torch.compiler.cudagraph_mark_step_begin()
+
                 out = transformer(*inputs)
                 out = out.clone()
 
@@ -200,6 +202,8 @@ class ModelTests(TestCase):
                         inputs[1], multipliers={0: seqlen_multiple}, neutral_element=-1
                     ),
                 ]
+
+                torch.compiler.cudagraph_mark_step_begin()
 
                 out_p = transformer(*inputs_p)
                 out_p = out_p.clone()
