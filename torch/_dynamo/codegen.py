@@ -18,7 +18,7 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -54,6 +54,10 @@ from .variables.tensor import (
 from .variables.torch_function import TensorWithTFOverrideVariable
 
 
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslatorBase
+
+
 @dataclasses.dataclass
 class GraphOutputEntry:
     index: int
@@ -67,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx=None,
+        tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
