@@ -96,10 +96,16 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
+pytree_modules = {
+    "python": python_pytree,
+}
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
+
+    pytree_modules["cxx"] = cxx_pytree
 else:
     cxx_pytree = None
+
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -8564,69 +8570,81 @@ def ___make_guard_fn():
         opt()
 
     def test_tracing_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)]
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
 
-        counter = CompileCounter()
-        torch.compile(fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 3)
+                xs = [torch.tensor(i) for i in range(3)]
+
+                counter = CompileCounter()
+                torch.compile(fn, backend=counter, fullgraph=True)(xs)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = [xs, xs, xs, xs]
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = [xs, xs, xs, xs]
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = (xs, xs, xs, xs)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = (xs, xs, xs, xs)
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = {
-            "a": xs,
-            "b": xs,
-            "c": xs,
-        }
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = {
+                    "a": xs,
+                    "b": xs,
+                    "c": xs,
+                }
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 9)
 
     def test_dynamic_one_hot(self):
         def fn(x):
@@ -8645,26 +8663,29 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
-        xsl = {
-            "a": xs,
-            "b": xsa,
-            "c": xsb,
-        }
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 18)
+                xs = [torch.tensor(i) for i in range(3)]
+                xsa = (xs, xs)
+                xsb = {"aa": xsa, "ab": xs}
+                xsl = {
+                    "a": xs,
+                    "b": xsa,
+                    "c": xsb,
+                }
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 18)
 
     def test_any_all_symnode(self):
         cnt = CompileCounter()
@@ -8696,41 +8717,47 @@ def ___make_guard_fn():
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
-        def fn(xs):
-            nested_xs = [[xs]]
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            return flat_xs[0].clone()
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-        # use checkpoint to trigger a "sourceless" tensor subclass
-        def checkpoint_fn(xs):
-            return checkpoint(fn, xs, use_reentrant=True)
+                def fn(xs):
+                    nested_xs = [[xs]]
+                    flat_xs, spec = module.tree_flatten(xs)
+                    return flat_xs[0].clone()
 
-        xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+                # use checkpoint to trigger a "sourceless" tensor subclass
+                def checkpoint_fn(xs):
+                    return checkpoint(fn, xs, use_reentrant=True)
 
-        counter = CompileCounter()
-        torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 2)
+                xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+
+                counter = CompileCounter()
+                torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
-        def fn(xs):
-            def mapper(x):
-                return x.clone()
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
-            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
-            return y
+                def fn(xs):
+                    def mapper(x):
+                        return x.clone()
 
-        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
+                    y = module.tree_map_only(torch.Tensor, mapper, xs)
+                    return y
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
-        real_out = fn(xsb)
+                xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+                xsa = (xs, xs)
+                xsb = {"aa": xsa, "ab": xs}
 
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
+                real_out = fn(xsb)
+
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 9)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -10049,12 +10076,8 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
-            with self.subTest(f"pytree implement: {name}"):
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x):
                     tree = {
@@ -10083,12 +10106,8 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
-            with self.subTest(f"pytree implement: {name}"):
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x, y):
                     tree = {
@@ -10134,12 +10153,8 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
-            with self.subTest(f"pytree implement: {name}"):
+        for name, module in pytree_modules.items():
+            with self.subTest(f"pytree implementation: {name}"):
 
                 def fn(x, y):
                     tree1 = {
