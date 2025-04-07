@@ -1109,15 +1109,15 @@ def _jinja2_env():
         return None
 
 
-class GeneratedModulesCacheEntry(NamedTuple):
+class GeneratedCodeCacheEntry(NamedTuple):
     code: str
     extra: str
     events: list[Any]
 
 
-class GeneratedModulesCache:
+class GeneratedCodeCache:
     def __init__(self, *args, **kwargs):
-        self._cache: dict[bytes, GeneratedModulesCacheEntry] = {}
+        self._cache: dict[str, GeneratedCodeCacheEntry] = {}
 
     def cache_clear(self) -> None:
         self._cache.clear()
@@ -1188,7 +1188,7 @@ class GeneratedModulesCache:
 
     def get_entry(
         self, cache_key: Optional[bytes]
-    ) -> Optional[GeneratedModulesCacheEntry]:
+    ) -> Optional[GeneratedCodeCacheEntry]:
         if cache_key is None:
             return None
 
@@ -1204,7 +1204,7 @@ class GeneratedModulesCache:
     ) -> None:
         if cache_key is None:
             return
-        entry = GeneratedModulesCacheEntry(code, extra, events)
+        entry = GeneratedCodeCacheEntry(code, extra, events)
 
         self._cache.update({cache_key: entry})
 
@@ -1228,7 +1228,7 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
-        self._generated_module_cache: GeneratedModulesCache = GeneratedModulesCache()
+        self._generated_module_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_module_cache)
 
     # Those class fields are used for testing _generated_module_cache.
