@@ -17,6 +17,7 @@ __all__ = [
     "current_stream",
     "device_count",
     "is_available",
+    "memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
