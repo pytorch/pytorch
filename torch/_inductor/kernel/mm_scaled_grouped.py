@@ -28,11 +28,13 @@ from .mm_common import (
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
+
 @dataclass
 class Config:
     kwargs: dict[str, int]
     num_stages: int
     num_warps: int
+
 
 _NV_CONFIGS = [
     Config(
