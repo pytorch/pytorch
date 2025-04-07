@@ -150,7 +150,9 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/dist/{repaired_wheel_name}",
         )
     else:
-        repaired_wheel_name = wheel_name.replace("linux_aarch64", "manylinux_2_28_aarch64")
+        repaired_wheel_name = wheel_name.replace(
+            "linux_aarch64", "manylinux_2_28_aarch64"
+        )
         print(f"Renaming {wheel_name} wheel to {repaired_wheel_name}")
         os.rename(
             f"/{folder}/dist/{wheel_name}",
