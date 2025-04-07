@@ -638,11 +638,7 @@ class XPUAllocator : public Allocator {
     this->free(ptr);
   }
 
-  void copy_data(
-      void* dest,
-      const void* src,
-      std::size_t count,
-      bool sync = false) const final {
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
     xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
   }
 

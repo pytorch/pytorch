@@ -48,6 +48,7 @@ from itertools import product
 import operator
 
 test_consistency_op_db = copy.deepcopy(op_db)
+test_cow_inputs_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
 
 # Add bicubic2d_aa to test_consistency_op_db
@@ -12840,12 +12841,29 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
+    def test_fmax_mixed_dtypes(self, device):
+        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # fmax and fmin are implemented as binary metal shaders and they were implemented
+        # with the assumption that both args have the same dtype
+        x = torch.rand((3, 3), device=device, dtype=torch.float32)
+        x_int = torch.randint(-10, 10, (3, 3), device=device, dtype=torch.int8)
+        y = torch.rand((3, 3), device=device, dtype=torch.float16)
+        for op in [torch.fmax, torch.fmin]:
+            self.assertEqual(op(x, y), op(x.to("mps"), y.to("mps")).cpu())
+            self.assertEqual(op(x_int, y), op(x_int.to("mps"), y.to("mps")).cpu())
+            # Stride
+            self.assertEqual(op(x.t(), y), op(x.to("mps").t(), y.to("mps")).cpu())
+            # Broadcast
+            self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
+
+
+class TestCOWInputs(TestCase):
     # Tests that MPS ops do not mutate the underlying data of COW inputs.
     # Materialization is allowed, but the original data buffer should never be
     # written to.
     # TODO: When we enable the `test_cow_input` test from `test_ops.py` for MPS,
     # we can remove this test.
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=(torch.float,))
+    @ops(test_cow_inputs_op_db, allowed_dtypes=(torch.float,))
     def test_cow_input_not_mutated(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 
@@ -12985,22 +13003,6 @@ class TestConsistency(TestCaseMPS):
                             f"output grad {idx}",
                             backward_or_forward="backward",
                         )
-
-    def test_fmax_mixed_dtypes(self, device):
-        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
-        # fmax and fmin are implemented as binary metal shaders and they were implemented
-        # with the assumption that both args have the same dtype
-        x = torch.rand((3, 3), device=device, dtype=torch.float32)
-        x_int = torch.randint(-10, 10, (3, 3), device=device, dtype=torch.int8)
-        y = torch.rand((3, 3), device=device, dtype=torch.float16)
-        for op in [torch.fmax, torch.fmin]:
-            self.assertEqual(op(x, y), op(x.to("mps"), y.to("mps")).cpu())
-            self.assertEqual(op(x_int, y), op(x_int.to("mps"), y.to("mps")).cpu())
-            # Stride
-            self.assertEqual(op(x.t(), y), op(x.to("mps").t(), y.to("mps")).cpu())
-            # Broadcast
-            self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
-
 
 
 class TestErrorInputs(TestCase):
