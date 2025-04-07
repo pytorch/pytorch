@@ -65,9 +65,6 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
       - name: Populate binary env
         shell: cmd
         run: |
@@ -78,7 +75,7 @@ jobs:
         shell: cmd
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"   
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -164,11 +161,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:

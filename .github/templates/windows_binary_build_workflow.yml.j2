@@ -12,11 +12,11 @@ name: !{{ build_environment }}
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
 {%- endmacro %}
 
 on:
@@ -89,13 +89,18 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ set_runner_specific_vars() }}
+{%- if os == "windows-arm64" %}
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - name: Bootstrap folders
         shell: cmd
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-{%- if os == "windows-arm64" %}      
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"   
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -137,7 +142,8 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-{%- else %}      
+{%- else %}
+      !{{ set_runner_specific_vars() }}
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
 {%- endif %}

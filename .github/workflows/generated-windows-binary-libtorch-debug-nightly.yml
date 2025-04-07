@@ -63,16 +63,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -239,11 +234,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -316,16 +311,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -493,11 +483,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -571,16 +561,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -748,11 +733,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -826,16 +811,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1003,11 +983,11 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
