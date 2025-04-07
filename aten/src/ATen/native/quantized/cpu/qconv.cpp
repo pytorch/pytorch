@@ -1758,8 +1758,17 @@ namespace at::native {
       std::optional<std::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
 
-    if (act.dim() == 3 || act.dim() == 5) {
-      // Conv1D/3D post op check
+    if (act.dim() == 3) {
+      // Conv1D post op check
+      TORCH_CHECK(
+        attr == "none" || attr == "relu",
+        "quantized pointwise conv",
+        act.dim()-2,
+        "d doesn't support unary_post_op fusion. Got unary_post_op: ",
+        attr,
+        ".")
+    } else if (act.dim() == 5) {
+      // Conv3D post op check
       TORCH_CHECK(
         attr == "none",
         "quantized pointwise conv",
@@ -2079,6 +2088,8 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), at::native::QConvoneDNN::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"), at::native::QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise"), at::native::QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
 
   // Conv2D with binary postop
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), at::native::QConvoneDNN::run_pointwise_binary);

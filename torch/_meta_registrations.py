@@ -2508,6 +2508,7 @@ if torch._C._has_mkldnn:
     )
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
+    @register_meta(torch.ops.onednn.qconv_pointwise.default)
     def meta_qconv2d_pointwise(
         x,
         x_scale,
@@ -2539,7 +2540,9 @@ if torch._C._has_mkldnn:
         )
         assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
-        out = out.to(memory_format=torch.channels_last)
+        format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
+        out = out.to(memory_format=format)
+        # out = out.to(memory_format=torch.channels_last)
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)

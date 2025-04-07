@@ -7010,7 +7010,7 @@ class TestQuantizedConv(TestCase):
             if (output_dtype is not None or channel_last_weight_format) and not (use_bias and use_channelwise):
                 # Remove some test combination to reduce UT test time
                 continue
-            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv = torch.ops.onednn.qconv_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels_per_group * groups,
@@ -7123,7 +7123,7 @@ class TestQuantizedConv(TestCase):
         output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
         for groups, use_bias, use_channelwise, output_dtype in options:
-            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv = torch.ops.onednn.qconv_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels_per_group * groups,
@@ -7174,7 +7174,7 @@ class TestQuantizedConv(TestCase):
         output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
         for groups, use_bias, use_channelwise, output_dtype in options:
-            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv = torch.ops.onednn.qconv_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels_per_group * groups,
@@ -7225,7 +7225,7 @@ class TestQuantizedConv(TestCase):
         output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
         for groups, use_bias, use_channelwise, output_dtype in options:
-            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv = torch.ops.onednn.qconv_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels_per_group * groups,
@@ -7277,7 +7277,7 @@ class TestQuantizedConv(TestCase):
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
 
         for groups, use_bias, use_channelwise, output_dtype in options:
-            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv = torch.ops.onednn.qconv_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels_per_group * groups,
