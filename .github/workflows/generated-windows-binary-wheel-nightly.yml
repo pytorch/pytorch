@@ -62,9 +62,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -229,9 +229,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -299,9 +299,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -467,9 +467,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -538,9 +538,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -706,9 +706,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -777,9 +777,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -945,9 +945,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1015,9 +1015,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1182,9 +1182,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1251,9 +1251,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1418,9 +1418,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1488,9 +1488,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1656,9 +1656,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1727,9 +1727,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1895,9 +1895,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1966,9 +1966,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2134,9 +2134,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2204,9 +2204,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2371,9 +2371,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2440,9 +2440,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2607,9 +2607,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2677,9 +2677,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2845,9 +2845,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2916,9 +2916,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3084,9 +3084,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3155,9 +3155,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3323,9 +3323,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3393,9 +3393,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3560,9 +3560,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3629,9 +3629,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3796,9 +3796,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3866,9 +3866,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4034,9 +4034,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4105,9 +4105,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4273,9 +4273,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4344,9 +4344,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4512,9 +4512,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4582,9 +4582,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4749,9 +4749,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4818,9 +4818,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4985,9 +4985,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -5055,9 +5055,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5223,9 +5223,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -5294,9 +5294,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5462,9 +5462,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -5533,9 +5533,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5701,9 +5701,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -5771,9 +5771,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5938,9 +5938,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -6007,9 +6007,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6174,9 +6174,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -6244,9 +6244,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6412,9 +6412,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -6483,9 +6483,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6651,9 +6651,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -6722,9 +6722,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -6890,9 +6890,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -6960,9 +6960,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}      
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
       - name: Display EC2 information
         shell: bash
         run: |
@@ -7127,9 +7127,9 @@ jobs:
       - name: Populate binary env
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=${RUNNER_TEMP}/env >> ${GITHUB_ENV}
-          echo PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> ${GITHUB_ENV}
-          echo WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
