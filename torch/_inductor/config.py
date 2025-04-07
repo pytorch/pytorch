@@ -730,6 +730,13 @@ use_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
 )
 
+# Disable compiling triton kernels earlier and caching them
+# We've had some internal reports of flakiness in rare cases, so this
+# can mitigate for now.
+disable_compiled_triton_kernel_cache: bool = (
+    os.environ.get("TORCHINDUCTOR_DISABLE_COMPILED_TRITON_KERNEL_CACHE", "0") == "1"
+)
+
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"

@@ -171,11 +171,15 @@ class CompiledTritonKernels:
         TODO: Source code here is not just the kernel's source code, but also includes the inductor preamble, etc.
         so it could be less strict.
         """
+        if torch._inductor.config.disable_compiled_triton_kernel_cache:
+            return
         key = CompiledTritonKernels.key(kernel_src)
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
     def get(kernel_src: str) -> Optional[CodeCacheFuture]:
+        if torch._inductor.config.disable_compiled_triton_kernel_cache:
+            return None
         key = CompiledTritonKernels.key(kernel_src)
         return CompiledTritonKernels._cache.get(key, None)
 

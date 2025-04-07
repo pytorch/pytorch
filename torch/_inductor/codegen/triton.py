@@ -4138,7 +4138,10 @@ class TritonScheduling(SIMDScheduling):
             _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
             compile_wrapper = IndentedBuffer()
 
-            if async_compile.use_process_pool():
+            if (
+                async_compile.use_process_pool()
+                and not torch._inductor.config.disable_compiled_triton_kernel_cache
+            ):
                 # The process pool is warm, we can shell out to workers right away. This
                 # allows us to save the result in async_compile.CompiledTritonKernels,
                 # so that the second time we call async_compile.triton, we do no work.
