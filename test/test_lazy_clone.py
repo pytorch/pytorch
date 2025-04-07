@@ -222,7 +222,7 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
 
         self.assertEqual(a_clone, b_clone)
-
+        self.assertTrue((a == b).all())
         self.assertEqual(a, b)
 
         self.assertEqual(a.device, src_device_check)
