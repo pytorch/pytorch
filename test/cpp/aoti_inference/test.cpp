@@ -568,6 +568,7 @@ void test_aoti_user_managed_buffer() {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
+  ASSERT_TRUE(torchReserved > initTorchReserved);
   ASSERT_EQ(
       initMemory - DATASIZE - (torchReserved - initTorchReserved),
       updateMemory);
