@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import contextlib
 import dataclasses
 import enum
@@ -10,6 +8,7 @@ import math
 import operator
 import re
 import typing
+from collections.abc import Iterator, MutableMapping, Sequence
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -58,8 +57,6 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
-
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -89,7 +86,7 @@ class WorkspaceZeroMode(enum.Enum):
     ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
 
     @staticmethod
-    def combine(a: WorkspaceZeroMode, b: WorkspaceZeroMode) -> WorkspaceZeroMode:
+    def combine(a: "WorkspaceZeroMode", b: "WorkspaceZeroMode") -> "WorkspaceZeroMode":
         if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
             return a
         if a == WorkspaceZeroMode.UNINITIALIZED:
@@ -97,7 +94,7 @@ class WorkspaceZeroMode(enum.Enum):
         raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
 
     @staticmethod
-    def from_bool(zero_fill: bool) -> WorkspaceZeroMode:
+    def from_bool(zero_fill: bool) -> "WorkspaceZeroMode":
         if zero_fill:
             return WorkspaceZeroMode.ZERO_ON_CALL
         return WorkspaceZeroMode.UNINITIALIZED
@@ -128,13 +125,13 @@ class WorkspaceArg:
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
-    def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
+    def can_join(a: "WorkspaceArg", b: "WorkspaceArg") -> bool:
         return (
             a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
         )
 
     @staticmethod
-    def join(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
+    def join(a: "WorkspaceArg", b: "WorkspaceArg") -> "WorkspaceArg":
         return WorkspaceArg(
             count=a.count + b.count,
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
@@ -145,7 +142,7 @@ class WorkspaceArg:
         )
 
     @staticmethod
-    def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
+    def maximum(a: "WorkspaceArg", b: "WorkspaceArg") -> "WorkspaceArg":
         assert (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
@@ -167,7 +164,7 @@ class WorkspaceArg:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_layout(self) -> FixedLayout:
+    def get_layout(self) -> "FixedLayout":
         from ..ir import FixedLayout
 
         return FixedLayout(
@@ -178,7 +175,7 @@ class WorkspaceArg:
         )
 
     @property
-    def layout(self) -> FixedLayout:
+    def layout(self) -> "FixedLayout":
         return self.get_layout()
 
     get_output_spec = get_layout
@@ -548,14 +545,14 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+        return V.graph.get_dtype(buf_name)  # Hype: ignore[arg-type]
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
 
 
 def check_dtype(
-    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
+    buffer: IndentedBuffer, var: "CSEVariableType", dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
@@ -580,7 +577,7 @@ def check_dtype(
 
 
 class DataTypePropagation:
-    def __init__(self, body: LoopBody) -> None:
+    def __init__(self, body: "LoopBody") -> None:
         self.body = body
         self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
@@ -624,7 +621,11 @@ class DataTypePropagation:
             return None
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
+            from ..ir import IRNode
+
+            node_arg = node.args[0]
+            assert isinstance(node_arg, IRNode)
+            return self.deduce_node_dtype(node_arg)
 
         assert isinstance(node.target, str)
 
@@ -664,11 +665,11 @@ class DataTypePropagation:
         return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body: LoopBody) -> Optional[torch.dtype]:
+    def propagate_loopbody(cls, body: "LoopBody") -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node: SchedulerNode) -> Optional[torch.dtype]:
+    def propagate_scheduler_node(cls, node: "SchedulerNode") -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
@@ -1288,7 +1289,7 @@ class DeferredLine(DeferredLineBase):
             return self.line
         return None
 
-    def _new_line(self, line: str) -> DeferredLine:
+    def _new_line(self, line: str) -> "DeferredLine":
         return DeferredLine(self.name, line)
 
 
@@ -1580,7 +1581,7 @@ class KernelArgs:
     ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
-        arg_types: list[torch.dtype] = []
+        arg_types: list[Any] = []
         precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
@@ -1613,7 +1614,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(ArgName(inner))
             call_args.append(outer)
-            arg_types.append(type(outer))  # type: ignore[arg-type]
+            arg_types.append(type(outer))  # Hype: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1648,7 +1649,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self) -> OrderedSet[str]:
-        live_outs = OrderedSet()  # type: ignore[var-annotated]
+        live_outs = OrderedSet[str]()  # Hype: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
                 continue
@@ -1928,7 +1929,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.kernel_name: Optional[str] = None
 
     @contextlib.contextmanager
-    def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
+    def set_current_node(self, node: "SchedulerNode") -> Iterator[None]:
         prior = self.current_node
         self.current_node = node
         self.node_to_bounds = node._body.bounds().get_bounds()
@@ -2146,7 +2147,9 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
+            return [
+                self.rename_indexing(x) for x in index
+            ]  # Hype: ignore[return-value]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
@@ -2166,7 +2169,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         return CSEVariable(*args, **kwargs)
 
-    def arg_name(self, node: IRNode) -> Optional[str]:
+    def arg_name(self, node: "IRNode") -> Optional[str]:
         """
         Returns arg name of a given input or output node.
         """
@@ -2260,7 +2263,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer],
+        fake_outs: Union[list["Buffer"], "Buffer"],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2302,7 +2305,7 @@ class KernelTemplate:
             )
             return e
 
-    def generate(self, **kwargs: Any) -> ChoiceCaller:
+    def generate(self, **kwargs: Any) -> "ChoiceCaller":
         """
         Generates a ChoiceCaller instance from the given arguments.
         """
@@ -2324,7 +2327,9 @@ class CSEProxy(DefaultHandler):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         bounds = self._bound_variable(name, *args, **kwargs)
 
-        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        value = getattr(self.parent_handler, name)(
+            *args, **kwargs
+        )  # Hype: ignore[has-type]
         dtype_handler = DtypePropagationOpsHandler()
 
         backend = get_current_backend()
@@ -2349,8 +2354,8 @@ class CSEProxy(DefaultHandler):
         def do_cse(v: str) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
-            var_dtype: torch.dtype = (
-                output_dtype[output_idx]  # type: ignore[assignment]
+            var_dtype: Optional[torch.dtype] = (
+                output_dtype[output_idx]  # Hype: ignore[assignment]
                 if isinstance(output_dtype, (list, tuple))
                 else output_dtype
             )
@@ -2373,6 +2378,7 @@ class CSEProxy(DefaultHandler):
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
             ):
+                assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
@@ -2429,11 +2435,11 @@ class CSEProxy(DefaultHandler):
         assert isinstance(size, sympy.Expr), size
         # Skip CSE since this doesn't return an expression
 
-        if var.bounds.lower < 0:  # type: ignore[operator]
+        if var.bounds.lower < 0:  # Hype: ignore[operator]
             if wrap_neg:
                 stm = ops.add(var, ops.index_expr(size, torch.long))
                 # Mixed negative and non-negative
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:  # Hype: ignore[operator]
                     lt = ops.lt(var, 0)
                     stm = ops.where(lt, stm, var)
             else:
@@ -2450,7 +2456,7 @@ class CSEProxy(DefaultHandler):
                     neg_bounds.lower + size, neg_bounds.upper + size
                 )
                 # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:  # Hype: ignore[operator]
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
@@ -2503,7 +2509,7 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             return self.kernel.store(name, index, value, mode=mode)
-        return None  # type: ignore[return-value]
+        return None  # Hype: ignore[return-value]
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
