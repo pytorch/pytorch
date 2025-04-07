@@ -1419,16 +1419,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
-    %all_reduce : [num_users=1] = call_function[target=torch.ops._c10d_functional.all_reduce.default](args = (%arg0_1, avg, 0), kwargs = {})
-    %all_reduce_1 : [num_users=1] = call_function[target=torch.ops._c10d_functional.all_reduce.default](args = (%arg1_1, avg, 0), kwargs = {})
-    %all_reduce_2 : [num_users=1] = call_function[target=torch.ops._c10d_functional.all_reduce.default](args = (%arg2_1, avg, 0), kwargs = {})
-    %wait_tensor : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce_2,), kwargs = {})
-    %wait_tensor_1 : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce_1,), kwargs = {})
-    %wait_tensor_2 : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce,), kwargs = {})
-    return (wait_tensor, wait_tensor_1, wait_tensor_2)
-""",  # noqa: B950
+    %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%arg0_1, 1), kwargs = {})
+    %all_reduce : [num_users=1] = call_function[target=torch.ops._c10d_functional.all_reduce.default](args = (%add, sum, 0), kwargs = {})
+    %full : [num_users=0] = call_function[target=torch.ops.aten.full.default](args = ([4, 4], 1), kwargs = {dtype: torch.float32, layout: torch.strided, device: cuda:0, pin_memory: False})
+    %wait_tensor : [num_users=1] = call_function[target=torch.ops._c10d_functional.wait_tensor.default](args = (%all_reduce,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 2), kwargs = {})
+    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([4, 4], 23.0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cuda:0, pin_memory: False})
+    return (wait_tensor, add_1, full_default)""",  # noqa: B950
             )
 
         torch._inductor.config.post_grad_custom_post_pass = assert_pass
