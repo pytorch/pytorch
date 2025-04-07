@@ -70,7 +70,12 @@ jobs:
         run: |
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%      
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:

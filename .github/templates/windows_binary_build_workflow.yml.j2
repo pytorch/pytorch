@@ -90,6 +90,11 @@ jobs:
     {%- endif %}
     steps:
       !{{ set_runner_specific_vars() }}
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 {%- if os == "windows-arm64" %}      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
