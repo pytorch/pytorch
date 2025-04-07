@@ -7987,8 +7987,8 @@ class WhileLoop(ExternKernel):
         for i, (op, bo) in enumerate(zip(carried_inputs_, body_outputs)):
 
             def _guard_list_equals(
-                lhs_exprs: Sequence[Union[int, sympy.expr]],
-                rhs_exprs: Sequence[Union[int, sympy.expr]],
+                lhs_exprs: Sequence[Union[int, sympy.Expr]],
+                rhs_exprs: Sequence[Union[int, sympy.Expr]],
             ) -> None:
                 assert len(lhs_exprs) == len(rhs_exprs)
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):

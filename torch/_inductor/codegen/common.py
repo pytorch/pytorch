@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import re
-import typing
 from collections.abc import Iterator, MutableMapping, Sequence
 from enum import auto, Enum
 from itertools import chain
@@ -22,7 +21,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import TypeVar
+from typing_extensions import Self, TypeVar
 
 import sympy
 
@@ -62,14 +61,16 @@ if TYPE_CHECKING:
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
 
-    _T = TypeVar("_T")
-    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
+    SchedulingConstructor = Callable[[Optional["Scheduler"]], "BaseScheduling"]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
 
-    # OpVarT should really be Union[CSEVariable, str], however this
-    # causes typing errors in subclasses (defined in other files).
-    OpVarT = str
+
+_T = TypeVar("_T")
+
+# OpVarT should really be Union[CSEVariable, str], however this
+# causes typing errors in subclasses (defined in other files).
+OpVarT = str
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
@@ -226,9 +227,9 @@ class TMADescriptorArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: SchedulingConstructor
-    wrapper_codegen: WrapperConstructor
-    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
+    scheduling: "SchedulingConstructor"
+    wrapper_codegen: "WrapperConstructor"
+    cpp_wrapper_codegen: Optional["WrapperConstructor"] = None
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
@@ -316,9 +317,9 @@ device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: SchedulingConstructor,
-    device_wrapper_codegen: WrapperConstructor,
-    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_scheduling: "SchedulingConstructor",
+    device_wrapper_codegen: "WrapperConstructor",
+    device_cpp_wrapper_codegen: Optional["WrapperConstructor"] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
@@ -364,13 +365,13 @@ def has_backend_feature(
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
+def get_scheduling_for_device(device: str) -> Optional["SchedulingConstructor"]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
 def get_wrapper_codegen_for_device(
     device: str, cpp_wrapper: bool = False
-) -> Optional[WrapperConstructor]:
+) -> Optional["WrapperConstructor"]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         return (
@@ -1532,7 +1533,7 @@ class KernelArgs:
     def wrap_ptr_arg(self, buf: str, dtype: torch.dtype) -> str:
         return buf
 
-    def wrap_size_arg(self, size: SymbolLike) -> str:
+    def wrap_size_arg(self, size: "SymbolLike") -> str:
         return str(size)
 
     def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
@@ -1700,12 +1701,11 @@ class CSEVariable:
 AugmentedKeyT = TypeVar("AugmentedKeyT", default=str)
 CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
 
-if TYPE_CHECKING:
-    ReductionCacheKey = tuple[
-        torch.dtype,
-        ReductionType,
-        Union[CSEVariable, tuple[CSEVariable, ...]],
-    ]
+ReductionCacheKey = tuple[
+    torch.dtype,
+    ReductionType,
+    Union["CSEVariable", tuple["CSEVariable", ...]],
+]
 
 
 class CSE(Generic[CSEVariableType, AugmentedKeyT]):
@@ -1716,7 +1716,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         prefix: str = "",
         suffix: str = "",
         name_prefix: str = "tmp",
-        iter_buffers: Optional[itertools.count[int]] = None,
+        iter_buffers: Optional["itertools.count[int]"] = None,
         store_cache: Optional[MutableMapping[str, CSEVariableType]] = None,
         reduction_cache: Optional[
             MutableMapping[ReductionCacheKey, CSEVariableType]
@@ -1745,7 +1745,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         else:
             self._cache = {}
 
-    def clone(self) -> typing.Self:
+    def clone(self) -> Self:
         return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
@@ -1756,7 +1756,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             reduction_cache=self.reduction_cache,
         )
 
-    def scoped_copy(self) -> typing.Self:
+    def scoped_copy(self) -> Self:
         """Return a copy of using ScopedDict so changes to *_cache aren't visible in self"""
         new_cse = self.clone()
         new_cse._cache = ScopedDict(self._cache)
@@ -1881,7 +1881,7 @@ class CodeGen:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
-    def __enter__(self) -> typing.Self:
+    def __enter__(self) -> Self:
         self.exit_stack.__enter__()
         return self
 
@@ -2076,7 +2076,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
 
-    def __enter__(self) -> typing.Self:
+    def __enter__(self) -> Self:
         super().__enter__()
         assert self.overrides
         self.exit_stack.enter_context(

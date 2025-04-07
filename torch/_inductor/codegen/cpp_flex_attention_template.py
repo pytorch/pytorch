@@ -941,6 +941,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
+        from ..ir import IRNode
+
         if epilogue_nodes is not None and epilogue_nodes != []:
             raise NotImplementedError(
                 "Unsupported for `epilogue_nodes` in CppFlexAttentionTemplate."
@@ -959,7 +961,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        buf_out = TensorBox.create(self.output_node)
+        assert isinstance(self.output_node, ir.IRNode)
+        buf_out: IRNode = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(
