@@ -484,7 +484,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # are no input, output aliasing via views or direct referencing.
     def gen_schema(self, *args, **kwargs):
         raise NotImplementedError(
-            f"HigherOrderOperator {self._name} does not implement a gen_schema."
+            f"HigherOrderOperator {self._name} does not implement a gen_schema. "
+            f"This is OK as long as the hop is functional. "
+            f"e.g. it should not mutate its inputs and there are no input, output aliasing "
+            f"via views or direct referencing."
         )
 
     def __str__(self):
@@ -1103,7 +1106,7 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key):
+    def __getattr__(self, key) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if key == "__file__":
             return "torch.ops"
@@ -1263,7 +1266,7 @@ class _OpNamespace(types.ModuleType):
     def __iter__(self):
         return iter(self._dir)
 
-    def __getattr__(self, op_name):
+    def __getattr__(self, op_name) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
