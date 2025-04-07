@@ -1406,8 +1406,7 @@ class TritonTemplate(KernelTemplate):
 
         mod = PyCodeCache.load(code, extra)
 
-        # Note anything returned by this function that is input dependent and computed by kernel.rendershould be included
-        # input_dependent_preserved_state. otheriwise it should be cached or trivially computed from the input fucti
+        # note to add new outputs to this function you need to make sure that current caching mechanism does not break.
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
