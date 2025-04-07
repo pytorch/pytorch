@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Iterator, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -1342,6 +1342,15 @@ class PythonWrapperCodegen(CodeGen):
         else:
             return 1
 
+    @contextlib.contextmanager
+    def set_writeline(self, new: Callable[..., None]) -> Iterator[Callable[..., None]]:
+        old = self.writeline
+        try:
+            self.writeline = new  # type: ignore[method-assign]
+            yield new
+        finally:
+            self.writeline = old  # type: ignore[method-assign]
+
     def _write_multi_kernel_defs(self) -> None:
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
@@ -1369,11 +1378,14 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()
 
-            for line in self.lines:
-                if isinstance(line, WrapperLine):
-                    line.codegen(self.wrapper_call)
-                else:
-                    self.wrapper_call.writeline(line)
+            # At this point, we shouldn't generate any new memory planning lines.
+            # Override writeline to point at the wrapper call, in case it gets called.
+            with self.set_writeline(self.wrapper_call.writeline):
+                for line in self.lines:
+                    if isinstance(line, WrapperLine):
+                        line.codegen(self.wrapper_call)
+                    else:
+                        self.wrapper_call.writeline(line)
 
             self._write_multi_kernel_defs()
 
