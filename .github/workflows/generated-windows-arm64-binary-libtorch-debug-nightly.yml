@@ -33,7 +33,7 @@ env:
   ENABLE_OPENBLAS: 0
   MSVC_VERSION : 14.42
 concurrency:
-  group: windows-arm64-binary-libtorch-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: windows-arm64-binary-libtorch-debug-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
