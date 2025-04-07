@@ -1854,7 +1854,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
 
     def convert(self, model: torch.fx.GraphModule, observer_node: Node):
         """
-        Converts the ovserver node in the graph into its quantized representation
+        Converts the observer node in the graph into its quantized representation
 
         Args:
             model: graph module to conver the observer node in
