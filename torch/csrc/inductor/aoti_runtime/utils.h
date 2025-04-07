@@ -135,38 +135,39 @@ class RAIIAtenTensorHandle {
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
-class ConstantAtenTensorHandle {
+class MaybeOwningAtenTensorHandle {
  public:
-  ConstantAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
-  // We skip copy constructor as ConstantAtenTensorHandle might be RAII which
+  MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
+  // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
-  ConstantAtenTensorHandle(const ConstantAtenTensorHandle& other) = delete;
-  ConstantAtenTensorHandle& operator=(const ConstantAtenTensorHandle& other) =
+  MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =
       delete;
+  MaybeOwningAtenTensorHandle& operator=(
+      const MaybeOwningAtenTensorHandle& other) = delete;
 
   // Move constructor and move assignment operator
-  ConstantAtenTensorHandle(ConstantAtenTensorHandle&& other) = default;
-  ConstantAtenTensorHandle& operator=(ConstantAtenTensorHandle&& other) =
+  MaybeOwningAtenTensorHandle(MaybeOwningAtenTensorHandle&& other) = default;
+  MaybeOwningAtenTensorHandle& operator=(MaybeOwningAtenTensorHandle&& other) =
       default;
 
   // Steal the ownership from another RAIIAtenTensorHandle using std::move
-  ConstantAtenTensorHandle(RAIIAtenTensorHandle&& other)
+  MaybeOwningAtenTensorHandle(RAIIAtenTensorHandle&& other)
       : raii_handle_(std::move(other)) {
     handle_ = raii_handle_.get();
   }
-  ConstantAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) {
+  MaybeOwningAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) {
     raii_handle_ = std::move(other);
     handle_ = raii_handle_.get();
     return *this;
   }
 
   // By default, steal the ownership from raw AtenTensorHandle
-  ConstantAtenTensorHandle(AtenTensorHandle handle) : raii_handle_(handle) {
+  MaybeOwningAtenTensorHandle(AtenTensorHandle handle) : raii_handle_(handle) {
     handle_ = raii_handle_.get();
   }
 
   // If user_managed is true, we do not steal the ownership.
-  ConstantAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
+  MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
     if (user_managed) {
       handle_ = handle;
     } else {
@@ -175,9 +176,9 @@ class ConstantAtenTensorHandle {
     }
   }
 
-  ~ConstantAtenTensorHandle() {
+  ~MaybeOwningAtenTensorHandle() {
     // This is no-op if we don't hold raii_handle with the
-    // ConstantAtenTensorHandle.
+    // MaybeOwningAtenTensorHandle.
     raii_handle_.reset();
   }
 

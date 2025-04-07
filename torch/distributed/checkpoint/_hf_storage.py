@@ -11,6 +11,7 @@ from torch.distributed.checkpoint._hf_planner import (
     _FqnToFileMapping,
     _HuggingFaceLoadPlanner,
 )
+from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
@@ -64,7 +65,11 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
 
-        super().__init__(path=path, token=token)
+        super().__init__(
+            path=path,
+            token=token,
+            serialization_format=SerializationFormat.SAFETENSORS,
+        )
         self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -99,7 +104,7 @@ class _HuggingFaceStorageWriter(FsspecWriter):
                 (self.fs.concat_path(self.path, file_name), file_name, write_items)
             )
 
-        return super()._write_data(planner, file_queue, safe_tensors=True)
+        return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         metadata_to_write = {}
