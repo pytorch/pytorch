@@ -2479,7 +2479,8 @@ class TestSDPACudaOnly(NNTestCase):
         # Sample call to SDPA - GQ
         query = torch.rand(batch, 32, seq_len_q, D, device='cuda', dtype=torch.bfloat16)
         key = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
-        value = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        # cuDNN supports h_k != h_v
+        value = torch.rand(batch, 4, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
         with sdpa_kernel([SDPBackend.MATH]):
             output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
 
