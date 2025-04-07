@@ -995,7 +995,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ir.ShapeAsConstantBuffer]:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
