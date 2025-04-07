@@ -2031,7 +2031,15 @@ communication mechanism.
               R"(Allreduces the provided tensors across all processes in the process group.
 
               See :func:`torch.distributed.all_reduce` for more details.)")
-
+          .def(
+              "as_work",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& x) {
+                return self->as_work(x);
+              },
+              py::arg("tensor"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Extracts the Work object associated with a Tensor.)")
           .def(
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,

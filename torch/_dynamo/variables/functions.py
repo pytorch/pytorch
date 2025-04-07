@@ -1428,9 +1428,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         args = ()
 
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
-            unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
-            )
+            pass
+        #     unimplemented(
+        #         f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+        #     )
 
         if self.fn in (
             dist.all_reduce,

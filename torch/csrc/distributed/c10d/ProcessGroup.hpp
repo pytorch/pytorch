@@ -243,6 +243,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
+  virtual c10::intrusive_ptr<Work> as_work(at::Tensor& tensor);
+
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) {

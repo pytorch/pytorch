@@ -592,6 +592,20 @@ class TensorVariable(VariableTracker):
         except AttributeError:
             is_base_tensor_method = False
 
+        if name == "wait":
+            # and this tensor can be waited? maybe just create an asynccollectivetensor variable?
+            # torch.distributed.breakpoint()
+            from .builder import wrap_fx_proxy
+            assert not kwargs
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    *proxy_args_kwargs([self], {}),
+                ),
+            )
+
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
             and is_base_tensor_method
