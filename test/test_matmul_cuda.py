@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM
+    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -32,6 +32,10 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     tol as xtol,
     toleranceOverride,
+    e4m3_type,
+    e5m2_type,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
 )
 
 from torch.testing._internal.common_utils import (
@@ -254,20 +258,178 @@ class TestMatmulCuda(TestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
+    def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
+        for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
+            a = a.clone().detach().requires_grad_()
+            b = b.clone().detach().requires_grad_()
+            out_ref = torch.mm(a, b.t())
+            out_ref.backward(gO)
+            self.assertEqual(out, out_ref)
+            self.assertEqual(agrad, a.grad)
+            self.assertEqual(bgrad, b.grad)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
+        dtype = torch.bfloat16
+        m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
+        if a_row_major:
+            a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        else:
+            a = torch.randn(k * n_groups + k * int(strided), m, device=device, dtype=dtype).t()[:, :k * n_groups]
+
+        if b_row_major:
+            b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        else:
+            b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        out = torch._grouped_mm(a, b.t(), offs=offs,
+                                out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        offs_cpu = offs.cpu()
+        alist, blist, agradlist, bgradlist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[:, start:offs_cpu[i]])
+            blist.append(b[:, start:offs_cpu[i]])
+            agradlist.append(a.grad[:, start:offs_cpu[i]])
+            bgradlist.append(b.grad[:, start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
+        dtype = torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        if a_row_major:
+            a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        else:
+            a = torch.randn(k, (m + 2 * s_int) * n_groups, device=device, dtype=dtype).t()[:m * n_groups, :]
+
+        if b_row_major:
+            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.t()
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+        offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+
+        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        offs_cpu = offs.cpu()
+        alist, agradlist, gOlist, outlist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[start:offs_cpu[i]])
+            agradlist.append(a.grad[start:offs_cpu[i]])
+            outlist.append(out[start:offs_cpu[i]])
+            gOlist.append(gO[start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, b, gOlist, agradlist, b.grad, outlist)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
+        dtype = torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        if a_row_major:
+            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        if b_row_major:
+            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.transpose(-2, -1)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+
+        out = torch._grouped_mm(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
+        dtype = torch.bfloat16
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 16, 4
+        if a_row_major:
+            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        if b_row_major:
+            b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        else:
+            b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.transpose(-2, -1)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+        offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                out_dtype=torch.bfloat16)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        offs_cpu = offs.cpu()
+        blist, outlist, bgradlist, gOlist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            blist.append(b[start:offs_cpu[i]])
+            bgradlist.append(b.grad[start:offs_cpu[i]])
+            outlist.append(out[:, start:offs_cpu[i]])
+            gOlist.append(gO[:, start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(a, blist, gOlist, a.grad, bgradlist, outlist)
+
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-
-if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
-    e4m3_type = torch.float8_e4m3fnuz
-    e5m2_type = torch.float8_e5m2fnuz
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
-else:
-    e4m3_type = torch.float8_e4m3fn
-    e5m2_type = torch.float8_e5m2
-    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -1265,7 +1427,7 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    def grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
+    def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
                                        out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
@@ -1275,7 +1437,7 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_2d_2d(self, fast_accum, strided):
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
         device = "cuda"
         m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
@@ -1294,14 +1456,14 @@ class TestFP8MatmulCuda(TestCase):
             ascalelist.append(scale_a[i * m : (i + 1) * m])
             bscalelist.append(scale_b[i * n : (i + 1) * n])
             start = offs_cpu[i]
-        self.grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
+        self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_2d_3d(self, fast_accum, strided):
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1324,14 +1486,14 @@ class TestFP8MatmulCuda(TestCase):
             ascalelist.append(scale_a[start:offs_cpu[i]])
             outlist.append(out[start:offs_cpu[i]])
             start = offs_cpu[i]
-        self.grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
+        self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_3d_3d(self, fast_accum, strided):
+    def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1345,14 +1507,14 @@ class TestFP8MatmulCuda(TestCase):
         out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
-        self.grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
+        self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    def test_grouped_gemm_3d_2d(self, fast_accum, strided):
+    def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided):
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 16, 4
@@ -1374,7 +1536,8 @@ class TestFP8MatmulCuda(TestCase):
             bscalelist.append(scale_b[start:offs_cpu[i]])
             outlist.append(out[:, start:offs_cpu[i]])
             start = offs_cpu[i]
-        self.grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+        self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_mxfp8_compile(self) -> None:
@@ -1394,6 +1557,35 @@ class TestFP8MatmulCuda(TestCase):
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        C = compiled_scaled_mm(
+            A,
+            B.t(),
+            A_scale,
+            B_scale,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+        )
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    def test_blockwise_nvfp4_compile(self) -> None:
+
+        device = "cuda"
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 16
+
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+
+        A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+        B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        C_ref = A_ref @ B_ref.t()
+
+        compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        # C = torch._scaled_mm(
         C = compiled_scaled_mm(
             A,
             B.t(),

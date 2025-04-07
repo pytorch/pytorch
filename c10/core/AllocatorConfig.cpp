@@ -392,7 +392,7 @@ void AllocatorConfig::parseArgs(const char* env) {
       i = parseReleaseLockOnDeviceMalloc(config, i);
       used_native_specific_option = true;
     } else if (
-        config_item_view == "pinned_use_host_register"
+        config_item_view == "pinned_use_device_host_register"
     // Keep this for backwards compatibility
     // ROCm build's hipify step will change "cuda" to "hip", but for
     // ease of use, accept both. We must break up the string to
