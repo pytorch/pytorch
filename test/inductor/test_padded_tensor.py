@@ -93,6 +93,8 @@ class PaddedTensorFunctionalTests(TestCase):
             self.assertEqual(y.shape, (16, 16))
             self.assertEqual(y.original_tensor.shape, (3, i))
 
+        torch._dynamo.config.error_on_recompile = False
+
     def test_bucketize(self):
         """
         Test that we compile a new graph on a shape that is larger than the original bucket.
@@ -121,6 +123,8 @@ class PaddedTensorFunctionalTests(TestCase):
 
             self.assertEqual(y.shape, (16, 16 if i <= 16 else 32))
             self.assertEqual(y.original_tensor.shape, (3, i))
+
+        torch._dynamo.config.error_on_recompile = False
 
 
 class NNOpTests(TestCase):
@@ -210,6 +214,8 @@ class ModelTests(TestCase):
 
                 # Check
                 self.assertEqual(out, out_p.unpad())
+
+        torch._dynamo.config.error_on_recompile = False
 
 
 if __name__ == "__main__":
