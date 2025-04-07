@@ -10,12 +10,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import (
-    get_func_call,
-    get_kernel_launch,
-    HAS_CPU,
-    HAS_CUDA,
-)
+from torch.testing._internal.inductor_utils import get_func_call, HAS_CPU, HAS_CUDA
 
 
 # Make the helper files in test/ importable
