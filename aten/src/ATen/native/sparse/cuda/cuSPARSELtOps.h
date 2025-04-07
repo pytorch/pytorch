@@ -21,7 +21,7 @@ namespace at::native {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input);
 
-TORCH_CUDA_CPP_API std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
+TORCH_CUDA_CPP_API std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
