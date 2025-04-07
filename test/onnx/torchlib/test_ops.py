@@ -352,7 +352,9 @@ class TestOutputConsistencyFullGraph(common_utils.TestCase):
                 opset_introduced = ops_test_data.TORCHLIB_OPINFO_MAPPING[
                     op.name
                 ].opset_introduced
-                if opset_introduced <= opset_version:
+                # Skip ops introduced in opest version 18,
+                # which are already tested in test_output_match_opinfo_
+                if opset_introduced != 18 and opset_introduced == opset_version:
                     run_test_output_match(
                         self,
                         device,
