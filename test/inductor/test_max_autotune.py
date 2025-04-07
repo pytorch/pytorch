@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import re
 import tempfile
 import unittest
 from typing import Callable, Optional
@@ -1167,13 +1168,66 @@ class TestMaxAutotune(TestCase):
         finally:
             TritonTemplateKernel.input_dependent_preserved_state = original
 
-        # Test symbolic shapes.
-
+        # Test symbolic shapes with different symbols.
         with fresh_inductor_cache():
             reset_counters()
             torch.compile(func_test1, dynamic=True)(a, b, c, d)
             self.assertEqual(TritonTemplate.generated_module_cache_hit, 6)
             self.assertEqual(TritonTemplate.generated_module_cache_miss, 6)
+
+            # print first cache entry key and events.
+            cache = TritonTemplate.all_templates["mm"]._generated_code_cache._cache
+            cache_key = next(iter(cache))
+            events = str(cache[cache_key].events)
+
+            def cleanup(x: str) -> str:
+                # remove white space from x, also remove 'epilogue_fn': number
+                # since id of epilogue_fn changes across runs.
+                x = re.sub(r"\s+", "", x)
+                pattern = r"'epilogue fn':\d+"
+                x = re.sub(pattern, "", x)
+                return x
+
+            print(cache_key)
+            self.assertEqual(
+                cleanup(cache_key),
+                cleanup(
+                    """
+            {'input_nodes': ["
+            [
+                ['_normalized_symbol1', '_normalized_symbol2'],
+                ['_normalized_symbol2', '1'],
+                torch.float32,
+                device(type='cuda', index=0), '0']",
+            "[
+                ['_normalized_symbol2', '_normalized_symbol3'],
+                ['_normalized_symbol3', '1'],
+                torch.float32,
+                device(type='cuda', index=0), '0']"],
+            'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
+            'call_sizes': ['_normalized_symbol1', '_normalized_symbol3'],
+            'layout': "[
+                ['_normalized_symbol1', '_normalized_symbol3'],
+                ['_normalized_symbol3', '1'],
+                torch.float32, device(type='cuda', index=0), '0']",
+            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
+            'kwargs': {'GROUP_M': 8, 'EVEN_K': False, 'ALLOW_TF32': True, 'ACC_TYPE': 'tl.float32',
+            'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16}, 'epilogue_fn': 140188453944576}"""
+                ),
+            )
+
+            self.assertEqual(
+                cleanup(events),
+                cleanup(
+                    """[
+             ('def_kernel', ['A', 'B'], {}), ('size', ['A', 0], {}),
+             ('size', ['B', 1], {}), ('size', ['A', 1], {}),
+             ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
+             ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8}),
+             ('store_output', [('idx_m', 'idx_n'), 'acc', 'mask'], {})]
+             """
+                ),
+            )
 
         # Test no symbolic shapes.
         with fresh_inductor_cache():

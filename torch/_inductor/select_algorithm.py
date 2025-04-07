@@ -1121,6 +1121,9 @@ class GeneratedCodeCache:
     def cache_clear(self) -> None:
         self._cache.clear()
 
+    def __repr__(self):
+        return repr(self._cache)
+
     def make_key(
         self,
         input_nodes: tuple[ir.StorageBox],
@@ -1230,7 +1233,7 @@ class TritonTemplate(KernelTemplate):
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
 
-    # Those class fields are used for testing _generated_code_cache.
+    # These class fields are used for testing _generated_code_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = False
