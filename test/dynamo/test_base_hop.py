@@ -74,7 +74,6 @@ class GraphModule(torch.nn.Module):
 """,  # NOQA: B950
         )
 
-    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_schema_gen_single_return(self):
         def inner(x, y):
             return (x @ y).sin().cos()
@@ -97,7 +96,6 @@ class GraphModule(torch.nn.Module):
             """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
         )
 
-    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_schema_gen_pytree_in_out(self):
         def inner(x_y):
             x, y = x_y
@@ -126,9 +124,6 @@ class GraphModule(torch.nn.Module):
             """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
-    # input mutation is not supported yet
-    @unittest.expectedFailure
-    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_schema_gen_single_return_with_mutation(self):
         def inner(x, y):
             x.add_(1)
@@ -140,22 +135,16 @@ class GraphModule(torch.nn.Module):
 
         backend = EagerAndRecordGraphs()
 
-        @torch.compile(backend=backend)
+        @torch.compile(backend=backend, fullgraph=True)
         def f(x, y):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        out = f(x.clone(), y)
-        self.assertEqual(out, inner(x.clone(), y))
-        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
-        self.assertEqual(len(schemas), 1)
-        self.assertExpectedInline(
-            str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor(a2!) arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
-        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(x.clone(), y)
 
-    # input mutation is not supported yet
-    @unittest.expectedFailure
-    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_schema_gen_pytree_in_out_with_mutation(self):
         def inner(x_y):
             x, y = x_y
@@ -172,17 +161,82 @@ class GraphModule(torch.nn.Module):
 
         backend = EagerAndRecordGraphs()
 
-        @torch.compile(backend=backend)
+        @torch.compile(backend=backend, fullgraph=True)
         def f(x, y):
             return invoke_quant_test(inner, [x, y], scheme="nf4")
 
-        out = f(x.clone(), y)
-        self.assertEqual(out, inner([x.clone(), y]))
-        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
-        self.assertEqual(len(schemas), 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(x.clone(), y)
+
+    def test_none_input(self):
+        def inner(x, y):
+            if x is not None:
+                return y.sin()
+            return y.cos()
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        x = None
+        y = torch.randn(3, 4)
+        out = f(x, y)
+        self.assertEqual(out, inner(x, y))
         self.assertExpectedInline(
-            str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+            normalize_graph(backend.graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_: "f32[3, 4]"):
+        l_y_ = L_y_
+
+        subgraph_0 = self.subgraph_0
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_y_, scheme = 'nf4');  subgraph_0 = l_y_ = None
+        getitem: "f32[3, 4]" = invoke_quant_test[0];  invoke_quant_test = None
+        return (getitem,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_y_: "f32[3, 4]"):
+            cos: "f32[3, 4]" = l_y_.cos();  l_y_ = None
+            return (cos,)
+""",
+        )
+
+    def test_int_input(self):
+        def inner(x, y):
+            return x + y
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        x = 1
+        y = torch.randn(3, 4)
+        out = f(x, y)
+        self.assertEqual(out, inner(x, y))
+        self.assertExpectedInline(
+            normalize_graph(backend.graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_: "f32[3, 4]"):
+        l_y_ = L_y_
+
+        subgraph_0 = self.subgraph_0
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_y_, scheme = 'nf4');  subgraph_0 = l_y_ = None
+        getitem: "f32[3, 4]" = invoke_quant_test[0];  invoke_quant_test = None
+        return (getitem,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_y_: "f32[3, 4]"):
+            add: "f32[3, 4]" = 1 + l_y_;  l_y_ = None
+            return (add,)
+""",
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
