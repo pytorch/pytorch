@@ -798,6 +798,7 @@ class BuildExtension(build_ext):
 
             if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
                 cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
+                cuda_dlink_post_cflags = [shlex.quote(f) for f in cuda_dlink_post_cflags]
             else:
                 cuda_dlink_post_cflags = None
 
@@ -2139,7 +2140,9 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        return _join_rocm_home('bin', 'hipcc.bat')
+        # mypy thinks ROCM_VERSION is None but it will never be None here
+        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
 
