@@ -1575,12 +1575,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self, dtype, batch_size, in_features, out_features, group_size
     ):
         """
+        Note:
         `torch._weight_int4pack_mm_for_cpu` computes with float32, while the AMX-based GEMM
         template computes with bfloat16. So, the difference of computation results may be big.
         But we need `_weight_int4pack_mm_for_cpu` for its pattern.
-        To this end, we define module M1 for its pattern and parameters and define module M2
-        for the reference computation. M2's forward function gets the dequantized and unpacked
-        weight in bfloat16 then computes GEMM with bfloat16.
+        Therefore, we define module M1 for its pattern and parameters and define module M2 for
+        the reference computation. M2's forward function gets the dequantized and unpacked weight
+        in bfloat16 then computes GEMM with bfloat16.
         Besides, we need to skip the VERIFY patch and cannot use self.common for testing.
         """
 
@@ -1627,12 +1628,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=1e-2,
                 rtol=1e-2,
             )
-            available_isa = torch._inductor.cpu_vec_isa.pick_vec_isa()
-            amx_available = "amx" in str(available_isa)
-            autotune_count = 1 if amx_available else 0
-            self.assertEqual(
-                counters["inductor"]["select_algorithm_autotune"], autotune_count
-            )
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
