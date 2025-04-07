@@ -500,20 +500,21 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
     if op_sig == "GemmStridedBatchedTunableOp":
         assert untuned_gemm_temp[6] == "ld"
-        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
+        [lda, ldb, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
     else:
         assert untuned_gemm_temp[4] == "ld"
-        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
+        [lda, ldb, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # We cannot handle submatrices in offline tuning
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
-        pass
+        subMatrix=False
     else:
+        subMatrix=True
         warnings.warn(
             "Offline tuning is not supported on submatrices. Use online tuning instead. "
             + f"Skipped tuning for: {untuned_gemm[1]}"
         )
-        return
+    #     return
 
     if op_sig == "GemmTunableOp":
         # Warnings for unsupported cases:
@@ -530,15 +531,36 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 return
 
         matA = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
+            torch.rand(k, ldb, dtype=dtype, device=deviceid).t()
             if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
+            else torch.rand(ldb, k, dtype=dtype, device=deviceid)
         )
         matB = (
-            torch.rand(n, k, dtype=dtype, device=deviceid).t()
+            torch.rand(lda, k, dtype=dtype, device=deviceid).t()
             if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid)
+            else torch.rand(k, lda, dtype=dtype, device=deviceid)
         )
+        print(n, m, k, lda, ldb, ldc)
+
+        # m = max(k, ldc) # OK
+        # n = max(k, ldb)
+        if subMatrix:
+            m = max(k, ldc)
+
+            subA = (
+                matA[:k, :m]
+                if transB
+                else matA[:m, :k]
+            )
+            
+            subB = (
+                matB[:n, :k]
+                if transA
+                else matB[:k, :m]
+            )
+
+            torch.mm(subA, subB)
+
         torch.mm(matA, matB)
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
