@@ -585,12 +585,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
             func(args)
 
 
-"""
-A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
-directly outside of it. For passing around internal state representations of this object,
-prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
-"""
 
 
 # Like a Set[Guard] but will record the user stack on all guards at the
@@ -639,6 +633,12 @@ class GuardsSet:
         }
 
 
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
