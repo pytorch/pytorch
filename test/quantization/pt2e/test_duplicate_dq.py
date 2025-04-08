@@ -101,7 +101,10 @@ class TestDuplicateDQPass(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(
+            m,
+            example_inputs,
+        ).module()
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate

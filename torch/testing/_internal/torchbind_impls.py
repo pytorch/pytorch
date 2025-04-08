@@ -61,13 +61,6 @@ def register_fake_operators():
         b = foo.add_tensor(a)
         return (a, b)
 
-    @torch.library.register_fake("_TorchScriptTesting::takes_foo_tensor_return")
-    def meta_takes_foo_tensor_return(foo, x):
-        # This implementation deliberately creates unbacked symint for testing
-        ctx = torch.library.get_ctx()
-        fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
-        return torch.empty(fake_shape, dtype=torch.int, device="cpu")
-
     torch.ops._TorchScriptTesting.takes_foo_list_return.default.py_impl(
         torch._C.DispatchKey.Meta
     )(meta_takes_foo_list_return)
@@ -108,44 +101,6 @@ def register_fake_classes():
 
         def get(self):
             return self.t
-
-    @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-    class FakeTensorQueue:
-        def __init__(self, queue):
-            self.queue = queue
-
-        @classmethod
-        def __obj_unflatten__(cls, flattened_ctx):
-            return cls(**dict(flattened_ctx))
-
-        def push(self, x):
-            self.queue.append(x)
-
-        def pop(self):
-            if self.is_empty():
-                return torch.empty([])
-            return self.queue.pop(0)
-
-        def size(self):
-            return len(self.queue)
-
-        def is_empty(self):
-            return len(self.queue) == 0
-
-        def float_size(self):
-            return float(len(self.queue))
-
-    @torch._library.register_fake_class("_TorchScriptTesting::_FlattenWithTensorOp")
-    class FakeFlatten:
-        def __init__(self, t):
-            self.t = t
-
-        def get(self):
-            return self.t
-
-        @classmethod
-        def __obj_unflatten__(cls, flattened_ctx):
-            return cls(**dict(flattened_ctx))
 
 
 def load_torchbind_test_lib():

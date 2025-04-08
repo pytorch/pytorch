@@ -16,7 +16,6 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
-    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -270,9 +269,6 @@ def _single_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
-    if not torch.jit.is_scripting():
-        lr = _to_scalar(lr)
-
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -387,8 +383,6 @@ def _multi_tensor_radam(
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-
-    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, state_steps]  # type: ignore[list-item]

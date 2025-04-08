@@ -309,13 +309,9 @@ static optional_variable_list _process_backward_mode_ad(
       }
       // No need to mark as modified Tensors that are not inputs.
       if (!is_input) {
-        const char* mark_dirty_error_msg =
-            "ctx.mark_dirty() received a tensor that was not an input. "
-            "Only input Tensors that have been mutated should be passed to "
-            "ctx.mark_dirty().";
-        // We reach this path in the view of intermediate case
-        TORCH_CHECK(!var.is_view(), mark_dirty_error_msg);
-        TORCH_WARN(mark_dirty_error_msg);
+        TORCH_WARN(
+            "Only input Tensors should be given to ctx.mark_dirty(). If a Tensor is not an input, there"
+            " is no need to pass it to mark_dirty().");
       }
       // If the input is a view, the rebase will need to rewrite the graph and
       // this only works if we have a single output to this Function.

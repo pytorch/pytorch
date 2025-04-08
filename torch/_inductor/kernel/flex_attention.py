@@ -46,12 +46,7 @@ from ..lowering import (
     register_lowering,
     to_dtype,
 )
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    realize_inputs,
-    SymbolicGridFn,
-    TritonTemplate,
-)
+from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
 
 
 log = logging.getLogger(__name__)
@@ -96,14 +91,15 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
     return construct_strides(size, fill_order)
 
 
-@SymbolicGridFn
-def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
+def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    import triton
+
+    return (triton.cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
 
 
 def create_placeholder(
@@ -1557,13 +1553,7 @@ def flex_attention(
         autotune_select_algorithm(
             "flex_attention",
             choices,
-            # Need to filter out symbols since there is an invariant
-            # that all input_nodes are of type IRNode
-            [
-                x
-                for x in inputs_for_autotuning
-                if isinstance(x, torch._inductor.ir.IRNode)
-            ],
+            inputs_for_autotuning,
             layout,
             input_gen_fns=input_gen_fns,
         ),

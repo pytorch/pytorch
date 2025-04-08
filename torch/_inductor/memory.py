@@ -267,9 +267,9 @@ def estimate_peak_memory(
 
     # get the execution step of each node, this will be used to determine
     # the end_step of buffers
-    node_to_step: dict[BaseSchedulerNode, int] = {
-        node: step for step, node in enumerate(nodes)
-    }
+    node_to_step: dict[BaseSchedulerNode, int] = dict()
+    for step, node in enumerate(nodes):
+        node_to_step[node] = step
 
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []

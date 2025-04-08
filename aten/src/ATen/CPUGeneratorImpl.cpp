@@ -69,7 +69,7 @@ Generator createCPUGenerator(uint64_t seed_val) {
  * Helper function to concatenate two 32 bit unsigned int
  * and return them as a 64 bit unsigned int
  */
-inline static uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
+inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
   return (static_cast<uint64_t>(hi) << 32) | lo;
 }
 

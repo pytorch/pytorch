@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     subtest,
-    TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -2866,10 +2865,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    @unittest.skipIf(
-        TEST_CUDA_MEM_LEAK_CHECK,
-        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
-    )
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2884,10 +2879,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    @unittest.skipIf(
-        TEST_CUDA_MEM_LEAK_CHECK,
-        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
-    )
     def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
@@ -2906,10 +2897,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
-    @unittest.skipIf(
-        TEST_CUDA_MEM_LEAK_CHECK,
-        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
-    )
     def test_linearize_composition_grad(self, device, dtype):
         x_p = make_tensor((3,), device=device, dtype=dtype)
         x_t = make_tensor((3,), device=device, dtype=dtype)
@@ -2929,10 +2916,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
-    @unittest.skipIf(
-        TEST_CUDA_MEM_LEAK_CHECK,
-        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
-    )
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -5168,10 +5151,6 @@ class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
-    @unittest.skipIf(
-        TEST_CUDA_MEM_LEAK_CHECK,
-        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
-    )
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:

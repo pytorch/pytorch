@@ -108,16 +108,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (py::error_already_set&) {                                  \
+  catch (py::error_already_set & e) {                               \
     throw;                                                          \
   }                                                                 \
-  catch (py::builtin_exception&) {                                  \
+  catch (py::builtin_exception & e) {                               \
     throw;                                                          \
   }                                                                 \
-  catch (torch::jit::JITException&) {                               \
+  catch (torch::jit::JITException & e) {                            \
     throw;                                                          \
   }                                                                 \
-  catch (const std::exception&) {                                   \
+  catch (const std::exception& e) {                                 \
     torch::translate_exception_to_python(std::current_exception()); \
     throw py::error_already_set();                                  \
   }

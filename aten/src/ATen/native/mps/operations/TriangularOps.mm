@@ -34,29 +34,30 @@ TORCH_IMPL_FUNC(triu_mps_out)
   if (self.numel() == 0) {
     return;
   }
-  auto stream = getCurrentMPSStream();
+  MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
     string key = "triu_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* outputTensor = nil;
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      auto minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
+      MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
 
       if (k > 0) {
-        auto diagMinusOneTensor = [mpsGraph constantWithScalar:(k - 1) dataType:MPSDataTypeInt32];
-        auto onesTensor = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt32];
-        auto maskTensor = [mpsGraph bandPartWithTensor:onesTensor
-                                        numLowerTensor:minusOneTensor
-                                        numUpperTensor:diagMinusOneTensor
-                                                  name:nil];
+        MPSGraphTensor* diagMinusOneTensor = [mpsGraph constantWithScalar:(k - 1) dataType:MPSDataTypeInt32];
+        MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1 dataType:MPSDataTypeInt32];
+        onesTensor = [mpsGraph broadcastTensor:onesTensor toShape:inputTensor.shape name:nil];
+        MPSGraphTensor* maskTensor = [mpsGraph bandPartWithTensor:onesTensor
+                                                   numLowerTensor:minusOneTensor
+                                                   numUpperTensor:diagMinusOneTensor
+                                                             name:nil];
         outputTensor = [mpsGraph selectWithPredicateTensor:maskTensor
                                        truePredicateTensor:[mpsGraph constantWithScalar:0 dataType:inputTensor.dataType]
                                       falsePredicateTensor:inputTensor
                                                       name:nil];
       } else {
-        auto minusDiagTensor = [mpsGraph constantWithScalar:(-k) dataType:MPSDataTypeInt32];
+        MPSGraphTensor* minusDiagTensor = [mpsGraph constantWithScalar:(-k) dataType:MPSDataTypeInt32];
         outputTensor = [mpsGraph bandPartWithTensor:inputTensor
                                      numLowerTensor:minusDiagTensor
                                      numUpperTensor:minusOneTensor
@@ -67,9 +68,11 @@ TORCH_IMPL_FUNC(triu_mps_out)
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    runMPSGraph(stream, cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -82,44 +85,40 @@ TORCH_IMPL_FUNC(tril_mps_out)
     return;
   }
 
-  auto stream = getCurrentMPSStream();
+  MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
     string key = "tril_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* outputTensor = nil;
 
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      auto minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
+      MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
 
       if (k >= 0) {
-        auto diagTensor = [mpsGraph constantWithScalar:k dataType:MPSDataTypeInt32];
+        MPSGraphTensor* diagTensor = [mpsGraph constantWithScalar:k dataType:MPSDataTypeInt32];
         outputTensor = [mpsGraph bandPartWithTensor:inputTensor
                                      numLowerTensor:minusOneTensor
                                      numUpperTensor:diagTensor
                                                name:nil];
       } else {
-        auto negDiagMinusOneTensor = [mpsGraph constantWithScalar:(-k - 1) dataType:MPSDataTypeInt32];
-        auto complementTensor = [mpsGraph bandPartWithTensor:inputTensor
-                                              numLowerTensor:negDiagMinusOneTensor
-                                              numUpperTensor:minusOneTensor
-                                                        name:nil];
-        auto zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:getMPSDataType(self)];
-        auto mask = [mpsGraph equalWithPrimaryTensor:complementTensor secondaryTensor:zeroTensor name:nil];
-        outputTensor = [mpsGraph selectWithPredicateTensor:mask
-                                       truePredicateTensor:inputTensor
-                                      falsePredicateTensor:zeroTensor
-                                                      name:nil];
+        MPSGraphTensor* negDiagMinusOneTensor = [mpsGraph constantWithScalar:(-k - 1) dataType:MPSDataTypeInt32];
+        MPSGraphTensor* complementTensor = [mpsGraph bandPartWithTensor:inputTensor
+                                                         numLowerTensor:negDiagMinusOneTensor
+                                                         numUpperTensor:minusOneTensor
+                                                                   name:nil];
+        outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:complementTensor name:nil];
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    runMPSGraph(stream, cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

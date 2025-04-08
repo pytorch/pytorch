@@ -417,7 +417,7 @@ Tensor internal_new_from_data(
             " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
-            {0}, // sizes. Storage will be set later.
+            sizes,
             at::initialTensorOptions()
                 .dtype(
                     is_typed_storage ? storage_scalar_type
@@ -705,7 +705,7 @@ c10::TensorOptions typeIdWithDefault(
 
 } // namespace
 
-static Tensor legacy_tensor_generic_ctor_new(
+Tensor legacy_tensor_generic_ctor_new(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PyObject* args,
@@ -1360,7 +1360,7 @@ void _validate_sparse_compressed_tensor_args(
 }
 
 template <c10::Layout required_layout>
-static void _validate_sparse_compressed_tensor_args_template(
+void _validate_sparse_compressed_tensor_args_template(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PyObject* args,

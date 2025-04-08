@@ -5,7 +5,7 @@
 
 namespace at {
 
-thread_local static bool NamesMode_enabled = true;
+thread_local bool NamesMode_enabled = true;
 
 bool NamesMode::is_enabled() {
   return NamesMode_enabled;

@@ -283,14 +283,12 @@ def aot_compile(
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options
     )
-    from torch._export.utils import _compiling_state_context
 
-    with _compiling_state_context():
-        return compile_fx_aot(
-            gm,
-            flat_example_inputs,  # type: ignore[arg-type]
-            config_patches=options,
-        )
+    return compile_fx_aot(
+        gm,
+        flat_example_inputs,  # type: ignore[arg-type]
+        config_patches=options,
+    )
 
 
 def list_mode_options(

@@ -133,7 +133,7 @@ its type to `common_constant_types`.
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx,
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",

@@ -2,7 +2,7 @@
 
 #include <c10/xpu/XPUFunctions.h>
 
-static bool has_xpu() {
+bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
 

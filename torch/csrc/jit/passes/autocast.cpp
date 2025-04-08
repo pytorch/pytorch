@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
-#include <atomic>
 #include <optional>
 
 #include <stack>
@@ -18,7 +17,7 @@ namespace torch::jit {
 
 namespace {
 
-std::atomic<bool> autocast_enabled = true;
+bool autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
@@ -510,7 +509,9 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 } // namespace
 
 bool setAutocastMode(bool value) {
-  return autocast_enabled.exchange(value);
+  auto old_value = autocast_enabled;
+  autocast_enabled = value;
+  return old_value;
 }
 
 bool autocastEnabled() {

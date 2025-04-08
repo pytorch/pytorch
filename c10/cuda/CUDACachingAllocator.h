@@ -264,8 +264,7 @@ class CUDAAllocator : public Allocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      RecordContext when,
-      bool clearHistory) = 0;
+      RecordContext when) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& md) {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
@@ -415,10 +414,9 @@ inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    RecordContext when,
-    bool clearHistory) {
+    RecordContext when) {
   return get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
 inline void recordAnnotation(

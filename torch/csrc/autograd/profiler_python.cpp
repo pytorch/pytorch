@@ -705,12 +705,9 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
-      PyObject* arg,
-      bool start_frame = false);
+      PyObject* arg);
 
   const std::vector<PyThreadState*> interpreterThreads() const;
-
-  PyObject* get_callable_from_frame(PyFrameObject* frame);
 
   std::atomic<bool> active_lock_{false};
   bool active_{false};
@@ -790,16 +787,6 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
       recordPyCall(thread_local_results_.back(), it->get(), true);
-      PyFrameObject* frame = it->get();
-      PyObject* callable = get_callable_from_frame(frame);
-      if (callable) {
-        // If the frame has a callable, record it as a C call since
-        // PyEval_GetFrame only gets the python frame. We need to record this C
-        // call so that when exiting the profiler we don't have a mismatched C
-        // call.
-        recordCCall(thread_local_results_.back(), it->get(), callable, true);
-      }
-
       auto frame_refcount = Py_REFCNT(it->get());
 
       // We hold one reference in `current_stack`, and the interpreter holds
@@ -903,13 +890,8 @@ void PythonTracer::recordPyCall(
 void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
-    PyObject* arg,
-    bool start_frame) {
-  // for starting frames we duplicate callable python functions to avoid having
-  // empty C frames in trace when exiting
-  if (!start_frame) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
-  }
+    PyObject* arg) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
@@ -917,26 +899,6 @@ void PythonTracer::recordCCall(
   auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
       arg, (void*)(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
-}
-
-PyObject* PythonTracer::get_callable_from_frame(PyFrameObject* frame) {
-  if (frame == nullptr) {
-    return nullptr;
-  }
-  // Get the code object associated with the frame
-  auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-  if (code == nullptr) {
-    return nullptr;
-  }
-  // Get the function name (if needed)
-  auto name = THPUtils_unpackStringView(code->co_name).data();
-  // To get the function object, you will need to look in the globals or the
-  // frame's f_globals
-  PyObject* func = PyDict_GetItemString(PyFrame_GetGlobals(frame), name);
-  if (func) {
-    Py_INCREF(func); // Make sure the returned function has a reference
-  }
-  return func; // Returns a PyObject* (the function)
 }
 
 // ============================================================================
@@ -1021,13 +983,9 @@ class PostProcess {
     using stack_t = std::vector<std::shared_ptr<Result>>;
     const auto initial_size = out.size();
     auto pop = [](stack_t& stack, c10::time_t t) {
-      if (!stack.empty()) {
-        std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
-        stack.pop_back();
-      } else {
-        TORCH_WARN_ONCE(
-            "Python replay stack is empty during pop operation! May result in incorrect stack tracing.");
-      }
+      TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
+      std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      stack.pop_back();
     };
 
     ska::flat_hash_map<size_t, stack_t> stacks;

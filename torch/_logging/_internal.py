@@ -1294,7 +1294,7 @@ def dtrace_structured(
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
-    expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
 ):
     """

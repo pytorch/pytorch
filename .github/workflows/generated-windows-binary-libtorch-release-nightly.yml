@@ -157,7 +157,7 @@ jobs:
     needs:
       - libtorch-cpu-shared-with-deps-release-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
