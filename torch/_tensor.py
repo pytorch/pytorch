@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C as _C
@@ -1093,29 +1093,27 @@ class Tensor(torch._C.TensorBase):
             self, return_inverse=return_inverse, return_counts=return_counts, dim=dim
         )
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
-        return _C._VariableFunctions.rsub(self, other)
+    # The typehints for these dunder methods are auto-generated as part of
+    # _C.TensorBase's typestubs. Use those at type-check time
+    if not TYPE_CHECKING:
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
-        return self.reciprocal() * other
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rsub__(self, other):
+            return _C._VariableFunctions.rsub(self, other)
 
-    __rtruediv__ = __rdiv__
-    __itruediv__ = _C.TensorBase.__idiv__
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rdiv__(self, other):
+            return self.reciprocal() * other
 
-    __pow__ = cast(
-        Callable[
-            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
-            "Tensor",
-        ],
-        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+        __rtruediv__ = __rdiv__
+        __itruediv__ = _C.TensorBase.__idiv__
+
+        __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
             _C.TensorBase.pow
-        ),
-    )
-    __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow_
-    )
+        )
+        __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow_
+        )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
@@ -1130,17 +1128,19 @@ class Tensor(torch._C.TensorBase):
             return self.detach().item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
-        return torch.pow(other, self)
+    if not TYPE_CHECKING:
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rpow__(self, other):
+            return torch.pow(other, self)
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __floordiv__(self, other):
+            return torch.floor_divide(self, other)
+
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rfloordiv__(self, other):
+            return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
@@ -1150,9 +1150,11 @@ class Tensor(torch._C.TensorBase):
     def __rrshift__(self, other):
         return torch.bitwise_right_shift(other, self)
 
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
-        return torch.matmul(other, self)
+    if not TYPE_CHECKING:
+
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rmatmul__(self, other):
+            return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive
     __neg__ = _C.TensorBase.neg
