@@ -7,16 +7,22 @@ import unittest
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_ARM64, IS_LINUX, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
+    skipIfTorchDynamo,
+    TEST_PRIVATEUSE1,
+)
 
 
 # This TestCase should be mutually exclusive with other backends.
-acc = torch.accelerator.current_accelerator()
-is_skip = not (acc is None or acc.type == "mtia")
+HAS_CUDA = torch.backends.cuda.is_built()
+HAS_XPU = torch.xpu._is_compiled()
+HAS_MPS = torch.backends.mps.is_built()
 
 
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or is_skip,
+    IS_ARM64 or not IS_LINUX or HAS_CUDA or HAS_XPU or HAS_MPS or TEST_PRIVATEUSE1,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -127,16 +133,10 @@ class TestCppExtensionMTIABackend(common.TestCase):
         device_0 = torch.device("mtia:0")
         device_1 = torch.device("mtia:1")
         with torch.mtia.device(device_0):
-            self.assertTrue(
-                torch.mtia.current_device() == device_0.index,
-                f"{torch.mtia.current_device()} != {device_0.index}",
-            )
+            self.assertTrue(torch.mtia.current_device() == device_0.index)
 
         with torch.mtia.device(device_1):
-            self.assertTrue(
-                torch.mtia.current_device() == device_1.index,
-                f"{torch.mtia.current_device()} != {device_1.index}",
-            )
+            self.assertTrue(torch.mtia.current_device() == device_1.index)
 
 
 if __name__ == "__main__":
