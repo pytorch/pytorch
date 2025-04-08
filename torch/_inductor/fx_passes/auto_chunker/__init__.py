@@ -17,7 +17,6 @@ from torch.utils._ordered_set import OrderedSet
 from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
 from .partitioner import Partitioner
-from .old_propagator import Propagator
 from .collector import get_fake_tensor_from_node_arg, maybe_permuted, get_tangent_nodes
 
 aten = torch.ops.aten
