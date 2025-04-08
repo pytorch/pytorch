@@ -10,7 +10,7 @@ These are a collection of scripts that are to be used for release activities.
 ## Requirements to actually run these scripts
 * AWS access to pytorch account
 * Access to the PyPI repositories
-
+* Access to upload conda packages to the `pytorch` conda channel
 
 ## Promote
 
@@ -33,6 +33,11 @@ promote/s3_to_s3.sh
 #### Promoting libtorch archives
 ```bash
 PACKAGE_TYPE=libtorch PACKAGE_NAME=libtorch promote/s3_to_s3.sh
+```
+
+#### Promoting conda packages
+```bash
+promote/conda_to_conda.sh
 ```
 
 #### Promoting wheels to PyPI
