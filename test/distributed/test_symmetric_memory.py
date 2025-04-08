@@ -20,7 +20,6 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.distributed.distributed_c10d import gather
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -772,7 +771,7 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-#@skipIfRocm
+# @skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcessTestCase):
@@ -964,7 +963,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
             numel = size_bytes // t.element_size()
             res = t[shift : shift + numel].normal_()
             if split_last_dim:
-                res = res.view(-1, 128//t.element_size())
+                res = res.view(-1, 128 // t.element_size())
             inp = res.clone()
             out_size = list(inp.shape)
             out_size[-1] = inp.shape[-1] // self.world_size
@@ -978,17 +977,18 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-
     def _verify_reduce_scatter_result(self, inp, res):
         gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
         gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
         sum_inps = gathered_inps.sum(0)
         slice_width = sum_inps.shape[-1] // self.world_size
         for i in range(self.world_size):
-            torch.testing.assert_close(gathered_res[i], sum_inps[..., i * slice_width:(i+1) * slice_width], 
-                                       rtol=1e-01, atol=1e-01)
-
-
+            torch.testing.assert_close(
+                gathered_res[i],
+                sum_inps[..., i * slice_width : (i + 1) * slice_width],
+                rtol=1e-01,
+                atol=1e-01,
+            )
 
     @skip_if_lt_x_gpu(4)
     @parametrize("align_bytes", [4, 8, 16])

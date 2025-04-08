@@ -810,7 +810,7 @@ at::Tensor two_shot_all_reduce_out(
 at::Tensor reduce_scatter_out(
     at::Tensor input,
     std::string group_name,
-    bool split_last_dim, 
+    bool split_last_dim,
     at::Tensor output
     ) {
   TORCH_CHECK(
