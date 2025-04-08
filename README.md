@@ -265,7 +265,6 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
@@ -350,7 +349,6 @@ with such a step.
 
 On Linux
 ```bash
-# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
@@ -358,7 +356,6 @@ ccmake build  # or cmake-gui build
 
 On macOS
 ```bash
-# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
@@ -381,9 +378,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 #### Building the image yourself
 
 **NOTE:** Must be built with a Docker version > 18.06
-<!---
-# TODO: Update this.
--->
+
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
