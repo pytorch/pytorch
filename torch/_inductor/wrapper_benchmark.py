@@ -4,6 +4,7 @@ import tempfile
 from collections import defaultdict
 from types import ModuleType
 from typing import Any, Optional, Protocol
+import argparse
 
 import torch
 from torch.autograd import DeviceType
@@ -316,11 +317,18 @@ def perf_profile(
 
 
 def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+    args: argparse.Namespace,
 ) -> None:
     import inspect
     import os
     import subprocess
+
+    # Access arguments from the args object
+    kernel_regex = args.ncu_kernel_regex
+    metrics = args.ncu_metrics
+    enable_csv_output = args.ncu_csv
 
     module_file = inspect.getfile(benchmark_compiled_module_fn)
     module_dir = os.path.dirname(module_file)
@@ -328,7 +336,9 @@ def ncu_analyzer(
 
     ncu_dir = tempfile.gettempdir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}.ncu-rep")
+    ncu_rep_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}_{benchmark_name}.ncu-rep")
+    ncu_csv_output = os.path.join(ncu_dir, f"ncu_metrics_{timestamp}_{benchmark_name}.csv")
+
     python_cmd = (
         f"""import sys; sys.path.insert(0, '{module_dir}'); """
         f"""from {module_name} import benchmark_compiled_module; """
@@ -341,26 +351,51 @@ def ncu_analyzer(
         "all",
         "--replay-mode",
         "kernel",
-        "--kernel-name-base",
-        "function",
         "--print-units",
         "base",
-        "--set",
-        "full",
         "--import-source",
         "yes",
         "--force-overwrite",
         "--export",
-        ncu_output,
+        ncu_rep_output,
         "python",
         "-c",
         python_cmd,
     ]
 
+    # Add kernel regex filter if provided
+    if kernel_regex:
+        ncu_cmd.extend(["--kernel-name", f"regex:{kernel_regex}"])
+    else:
+        ncu_cmd.extend(["--kernel-name-base", "function"])
+
+    # Add metrics or set full
+    if metrics:
+        ncu_cmd.extend(["--metrics", metrics])
+    else:
+        ncu_cmd.extend(["--set", "full"])
+
+
     try:
         subprocess.run(ncu_cmd, check=True)
         print(f"\nNCU profiling results for benchmark {benchmark_name}:")
-        print(f"NCU report has been written to {ncu_output}")
+        print(f"NCU report has been written to {ncu_rep_output}")
+
+        if enable_csv_output:
+            ncu_csv_cmd = [
+                "ncu",
+                "-i",
+                ncu_rep_output,
+                "--csv",
+                "--page",
+                "raw",
+            ]
+            if metrics:
+                ncu_csv_cmd.extend(["--metrics", metrics])
+
+            with open(ncu_csv_output, "w") as f_csv:
+                subprocess.run(ncu_csv_cmd, check=True, stdout=f_csv, stderr=subprocess.PIPE)
+            print(f"NCU report (CSV format) have been written to {ncu_csv_output}")
 
     except subprocess.CalledProcessError as e:
         print(f"NCU profiling failed with error: {e}")
@@ -421,6 +456,23 @@ def compiled_module_main(
         action="store_true",
         help="Whether to run ncu analysis",
     )
+    parser.add_argument(
+        "--ncu-kernel-regex",
+        type=str,
+        default=None,
+        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'.",
+    )
+    parser.add_argument(
+        "--ncu-metrics",
+        type=str,
+        default=None,
+        help="Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). If not set, NCU will use '--set full'.",
+    )
+    parser.add_argument(
+        "--ncu-csv",
+        action="store_true",
+        help="Save NCU metrics output to a CSV file.",
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -449,4 +501,8 @@ def compiled_module_main(
                 benchmark_compiled_module_fn,
             )
         if args.ncu:
-            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
+            ncu_analyzer(
+                benchmark_name,
+                benchmark_compiled_module_fn,
+                args=args,
+            )
