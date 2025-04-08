@@ -18,8 +18,8 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_gpu_shared_memory,
     get_num_sms,
-    get_shared_memory,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
 )
@@ -107,7 +107,7 @@ def early_config_prune(configs, named_args):
         )
 
         # 1. make sure we have enough smem
-        max_shared_memory = get_shared_memory()
+        max_shared_memory = get_gpu_shared_memory()
 
         if torch.version.hip:
             required_shared_memory = BLOCK_N * BLOCK_K * num_stages * dtsize

@@ -1291,15 +1291,6 @@ def get_max_num_sms() -> int:
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
-@functools.lru_cache
-def get_shared_memory() -> int:
-    from triton.runtime import driver
-
-    return driver.active.utils.get_device_properties(torch.cuda.current_device())[
-        "max_shared_mem"
-    ]
-
-
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
