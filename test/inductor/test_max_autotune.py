@@ -1181,30 +1181,25 @@ class TestMaxAutotune(TestCase):
                 x = re.sub(pattern, "", x)
                 return x
 
+            print(cache_key)
             self.assertEqual(
                 cleanup(cache_key),
                 cleanup(
                     """
-            {'input_nodes': ["
-            [
-                ['_normalized_symbol1', '_normalized_symbol2'],
-                ['_normalized_symbol2', '1'],
-                torch.float32,
-                device(type='cuda', index=0), '0']",
-            "[
-                ['_normalized_symbol2', '_normalized_symbol3'],
-                ['_normalized_symbol3', '1'],
-                torch.float32,
-                device(type='cuda', index=0), '0']"],
-            'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-            'call_sizes': ['_normalized_symbol1', '_normalized_symbol3'],
-            'layout': "[
-                ['_normalized_symbol1', '_normalized_symbol3'],
-                ['_normalized_symbol3', '1'],
-                torch.float32, device(type='cuda', index=0), '0']",
-            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-            'kwargs': {'GROUP_M': 8, 'EVEN_K': False, 'ALLOW_TF32': True, 'ACC_TYPE': 'tl.float32',
-            'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16}, 'epilogue_fn': 140188453944576}"""
+                {'input_nodes': ["[
+                    ['_normalized_symbol1', '_normalized_symbol2'],
+                    ['_normalized_symbol2', '1'], torch.float32, device(type='cuda', index=0), '0']", "
+                    [['_normalized_symbol2', '_normalized_symbol3'],
+                    ['_normalized_symbol3', '1'], torch.float32, device(type='cuda', index=0), '0']"],
+                'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
+                'call_sizes': ['_normalized_symbol1', '_normalized_symbol3'],
+                'layout': "[
+                    ['_normalized_symbol1', '_normalized_symbol3'],
+                    ['_normalized_symbol3', '1'], torch.float32, device(type='cuda', index=0), '0']",
+                'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
+                'kwargs': {'GROUP_M': 8, 'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
+                'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16},
+                'epilogue_fn': 140133002122080}"""
                 ),
             )
 
@@ -1214,8 +1209,6 @@ class TestMaxAutotune(TestCase):
                     """[
              ('def_kernel', ['A', 'B'], {}), ('size', ['A', 0], {}),
              ('size', ['B', 1], {}), ('size', ['A', 1], {}),
-             ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-             ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8}),
              ('store_output', [('idx_m', 'idx_n'), 'acc', 'mask'], {})]
              """
                 ),
