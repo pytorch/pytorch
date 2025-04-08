@@ -22,7 +22,7 @@ df -h
 pushd "$PYTORCH_ROOT/.ci/pytorch/"
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
-if [[ "$PROCESSOR_ARCHITECTURE" == "ARM64" ]]; then
+if [[ "$OS" == "windows-arm64" ]]; then
     if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
         ./windows/arm64/build_libtorch.bat
     elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
