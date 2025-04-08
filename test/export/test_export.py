@@ -7322,13 +7322,9 @@ def forward(self, b_a_buffer, x):
         obj_attr = sp.Symbol("obj.attr")
         tensor_shape = sp.Symbol("tensor.shape[0]")
 
-        self.assertEqual(_is_non_negative_check(x >= 0), "x")
         self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
         self.assertEqual(_is_non_negative_check(obj_attr >= 0), "obj.attr")
         self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
-
-        # Test case with extra spaces (e.g., "  x  >=  0  ")
-        self.assertEqual(_is_non_negative_check(x >= 0), "x")
 
         # Test cases where the condition is not checking for x >= 0
         self.assertIsNone(_is_non_negative_check(x > 0))

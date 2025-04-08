@@ -7332,11 +7332,8 @@ def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
     Returns the variable name if it's a non-negative check (>= 0), None otherwise.
     """
     if isinstance(cond, sympy.Rel):
-        if cond.rel_op == ">=":
-            left = cond.lhs
-            right = cond.rhs
-            if right == 0:
-                return str(left)
+        if cond.rel_op == ">=" and right == 0:
+            return str(cond.lhs)
     return None
 
 
