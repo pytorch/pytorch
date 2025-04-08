@@ -196,7 +196,7 @@ def run_single_experiment_group(
         try:
             _ = compiled_op(A, B)
         except Exception as e:
-            log.warning(f"Benchmark config {config.name()} failed: {e}")
+            log.warning(f"Benchmark config {config.name()} failed: {e}")  # noqa: G004
             results.append(
                 ExperimentResults(
                     name=config.name(),
