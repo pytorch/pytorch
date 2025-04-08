@@ -1029,32 +1029,9 @@ class GetAttrVariable(VariableTracker):
                 self.obj.convert_to_unspecialized(tx)
 
         elif name == "keys" and self.name == "__dict__" and not args and not kwargs:
-            from .base import ValueMutationExisting
-            from .dicts import ConstDictVariable, MappingProxyVariable
-            from .lazy import LazyVariableTracker
-
-            def wrap_mapping_proxy(value):
-                def build_key_value(k, v):
-                    key = ConstantVariable.create(k)
-                    source_key = k
-
-                    source_value = GetItemSource(self.source, source_key)
-                    value = LazyVariableTracker.create(v, source_value)
-
-                    return key, value
-
-                items = dict(build_key_value(k, v) for k, v in value.items())
-
-                # Create a dict_vt to be used in the mapping proxy variable
-                dict_vt = ConstDictVariable(items, source=None)
-                result = MappingProxyVariable(
-                    dict_vt, mutation_type=ValueMutationExisting(), source=self.source
-                )
-                return result
-
             if isinstance(self.obj, variables.UserDefinedClassVariable):
                 cls_dict = self.obj.value.__dict__
-                mp_vt = wrap_mapping_proxy(cls_dict)
+                mp_vt = VariableTracker.build(tx, cls_dict, self.source)
                 keys = mp_vt.call_method(tx, "keys", args=[], kwargs={})
                 return keys
 
