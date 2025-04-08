@@ -10,13 +10,10 @@ install_ubuntu() {
   # instead of
   #   "$UBUNTU_VERSION" == "18.04"
   if [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
-    cmake3="cmake=3.16*"
     maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
-    cmake3="cmake=3.22*"
     maybe_libiomp_dev=""
   else
-    cmake3="cmake=3.5*"
     maybe_libiomp_dev="libiomp-dev"
   fi
 
@@ -52,7 +49,6 @@ install_ubuntu() {
     $ccache_deps \
     $numpy_deps \
     ${deploy_deps} \
-    ${cmake3} \
     apt-transport-https \
     autoconf \
     automake \
@@ -82,6 +78,21 @@ install_ubuntu() {
     gpg-agent \
     gdb \
     bc
+
+  # Use CMake PPA, see https://apt.kitware.com
+  test -f /usr/share/doc/kitware-archive-keyring/copyright ||
+wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+  if [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
+    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+    apt-get update
+  elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+    apt-get update
+  elif [[ "$UBUNTU_VERSION" == "24.04"* ]]; then
+    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ noble main' | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+    apt-get update
+  fi
+  apt-get install -y --no-install-recommends cmake
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931

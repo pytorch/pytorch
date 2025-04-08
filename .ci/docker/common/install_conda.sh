@@ -76,7 +76,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
 
   # Use conda cmake in some cases. Conda cmake will be newer than our supported
-  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
+  # min version, so we only do it in those
   # following builds that we know should use conda. Specifically, Ubuntu bionic
   # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
   if [ -n "${CONDA_CMAKE}" ]; then

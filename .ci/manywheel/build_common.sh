@@ -35,7 +35,23 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
 
     retry apt-get update
-    retry apt-get -y install zip openssl
+    retry apt-get -y install zip openssl ca-certificates gpg wget
+
+    # Use CMake PPA, see https://apt.kitware.com
+    test -f /usr/share/doc/kitware-archive-keyring/copyright ||
+  wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+    UBUNTU_VERSION=$(awk -F= '/^VERSION_ID/{print $2}' /etc/os-release)
+    if [[ "$UBUNTU_VERSION" == *"20.04"* ]]; then
+      echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
+      retry apt-get update
+    elif [[ "$UBUNTU_VERSION" == *"22.04"* ]]; then
+      echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
+      retry apt-get update
+    elif [[ "$UBUNTU_VERSION" == *"24.04"* ]]; then
+      echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ noble main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
+      retry apt-get update
+    fi
+    retry apt-get install -y --no-install-recommends cmake
 fi
 
 # We use the package name to test the package by passing this to 'pip install'

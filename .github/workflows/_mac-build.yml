@@ -163,6 +163,8 @@ jobs:
           # NB: Same trick as Linux, there is no need to initialize sccache with the risk of getting
           # it hangs or timeout at initialization. The cache will be started automatically
           export SKIP_SCCACHE_INITIALIZATION=1
+          CONDA_RUNTIME=$(which conda)
+          "${CONDA_RUNTIME}" install --yes cmake
           ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
