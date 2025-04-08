@@ -1275,7 +1275,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 60  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1377,7 +1377,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
             return False
 
         dtype = x.get_dtype()
-        if dtype not in (torch.float16, torch.bfloat16):
+        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
         layout = x.get_layout()
@@ -1388,6 +1388,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         inner_dim = layout.size[1]
         if transposed:
             inner_dim = layout.size[0]
+
+        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
+            inner_dim, 32
+        ):
+            return False
+
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
 

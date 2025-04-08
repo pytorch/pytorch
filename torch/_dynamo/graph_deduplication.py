@@ -12,18 +12,19 @@ import operator
 from collections.abc import Iterable
 from typing import Any
 
+import torch
 import torch.fx
 from torch._dynamo import config
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
+from .graph_utils import _detect_cycles, _flatten_args_kwargs
 
 
 log = logging.getLogger(__name__)
 
 
-def apply_graph_deduplication(output_graph) -> dict[Node, Node]:  # type: ignore[no-untyped-def]
+def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
     """
     This is the main entry point for applying the graph deduplication pass. \
 Deduplication occurs in two phases:
@@ -50,15 +51,14 @@ The deduplication mutates the output_graph argument in place.
 Returns a mapping of nodes to their subgraph output replacement node to remap outputs
 when they are created in output_graph.
     """
+    from torch._inductor.pattern_matcher import stable_topological_sort
+
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
 
-    # Used to track which nodes were replaced with subgraph outputs
-    # today, we have to register the new subgraph submodules before the
-    # graph outputs have been created, so we pass the replacement mapping
-    # back to output graph to do the replacements at the site of output creation
-    output_replacements: dict[Node, Node] = {}
+    sub_gms: dict[str, torch.fx.GraphModule] = {}
+
     for region_group in duplicated_region_groups:
         inds_with_external_users = _get_all_output_indices(region_group)
         region = region_group[0]
@@ -66,8 +66,14 @@ when they are created in output_graph.
             subgraph,
             node_ind_arg_inds,
         ) = _create_subgraph(region, inds_with_external_users)
+
+        # Ignore regions with no args for now, could they possibly be evaluated at compile time?
+        if not list(node_ind_arg_inds):
+            continue
+
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
         subgraph_name = output_graph.install_subgraph("subgraph", sub_gm)
+        sub_gms[subgraph_name] = sub_gm
         with output_graph.graph.inserting_before():
             get_subgraph_node = output_graph.graph.create_node(
                 "get_attr", subgraph_name, (), {}
@@ -81,34 +87,10 @@ when they are created in output_graph.
                 inds_with_external_users,
                 sub_gm,
                 subgraph_name,
-                output_replacements,
             )
 
-    return output_replacements
-
-
-# flattens with support for slices
-# Note: a better way to do this would
-# be register/unregister slices as pytree nodes
-# but there is no unregister API in the pytorch
-# pytree impl
-def _flatten_args_kwargs(args: Any) -> list[Node]:
-    fully_flattened = []
-
-    def flatten(args: Any) -> None:
-        flattened, _ = tree_flatten(args)
-        for arg in flattened:
-            if isinstance(arg, slice):
-                start = arg.start
-                stop = arg.stop
-                step = arg.step
-                flatten((start, stop, step))
-            else:
-                fully_flattened.append(arg)
-
-    flatten(args)
-
-    return fully_flattened
+    stable_topological_sort(output_graph.graph)
+    return sub_gms
 
 
 def _replace_region_with_subgraph(
@@ -119,7 +101,6 @@ def _replace_region_with_subgraph(
     inds_with_external_users: list[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
-    output_replacements: dict[Node, Node],
 ) -> None:
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
@@ -137,23 +118,26 @@ def _replace_region_with_subgraph(
         )
         return
 
-    latest_region_node = region[-1]
-    with graph.inserting_after(latest_region_node):
-        invoke_subgraph_node = graph.create_node(
-            "call_function", torch.ops.higher_order.invoke_subgraph, invoke_args, {}
-        )
-        with graph.inserting_after(invoke_subgraph_node):
-            for ind, external_user_ind in enumerate(inds_with_external_users):
-                node = region[external_user_ind]
-                subgraph_output = graph.create_node(
-                    "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
-                )
-                output_replacements[node] = subgraph_output
-                node.replace_all_uses_with(subgraph_output, propagate_meta=True)
+    from torch._inductor.pattern_matcher import stable_topological_sort
 
-        # Erase in reverse topological order
-        for node in reversed(region):
-            graph.erase_node(node)
+    invoke_subgraph_node = graph.create_node(
+        "call_function", torch.ops.higher_order.invoke_subgraph, invoke_args, {}
+    )
+    for ind, external_user_ind in enumerate(inds_with_external_users):
+        node = region[external_user_ind]
+        subgraph_output = graph.create_node(
+            "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
+        )
+        node.replace_all_uses_with(subgraph_output, propagate_meta=True)
+
+    # Erase in reverse topological order
+    for node in reversed(region):
+        graph.erase_node(node)
+
+    if config.graph_deduplication_lint:
+        _detect_cycles(graph)
+        stable_topological_sort(graph)
+        graph.lint()
 
     if config.graph_deduplication_lint:
         graph.lint()

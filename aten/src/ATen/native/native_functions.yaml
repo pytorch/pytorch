@@ -4165,6 +4165,10 @@
     MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
 
+- func: _weight_int4pack_mm_with_scales_and_zeros(Tensor self, Tensor mat2, int qGroupSize, Tensor qScale, Tensor qZeros) -> Tensor
+  dispatch:
+    XPU: _weight_int4pack_mm_xpu
+
 # Split int4 pack weight between cpu and other devices due to
 # https://github.com/pytorch/ao/issues/1117#issuecomment-2451252756.
 - func: _convert_weight_to_int4pack_for_cpu(Tensor self, int innerKTiles) -> Tensor
@@ -7075,6 +7079,11 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
+
+- func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _grouped_mm_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -10389,6 +10398,7 @@
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
     CPU: _amp_foreach_non_finite_check_and_unscale_cpu_
+    MPS: _amp_foreach_non_finite_check_and_unscale_mps_
   autogen: _amp_foreach_non_finite_check_and_unscale, _amp_foreach_non_finite_check_and_unscale.out
 
 - func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
@@ -10396,6 +10406,7 @@
   dispatch:
     CUDA: _amp_update_scale_cuda_
     CPU: _amp_update_scale_cpu_
+    MPS: _amp_update_scale_mps_
   autogen: _amp_update_scale, _amp_update_scale.out
 
     #- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
@@ -15262,7 +15273,7 @@
 - func: special_hermite_polynomial_h.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_hermite_polynomial_h_out
+    CPU, CUDA, MPS: special_hermite_polynomial_h_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

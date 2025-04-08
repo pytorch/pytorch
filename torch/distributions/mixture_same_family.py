@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -59,7 +60,7 @@ class MixtureSameFamily(Distribution):
         self,
         mixture_distribution: Categorical,
         component_distribution: Distribution,
-        validate_args=None,
+        validate_args: Optional[bool] = None,
     ) -> None:
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
