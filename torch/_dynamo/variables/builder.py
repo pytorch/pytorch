@@ -154,6 +154,7 @@ from .base import (
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
+    DynamoConfigPatchVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
@@ -582,6 +583,8 @@ class VariableBuilder:
         # import here to avoid circular dependencies
         from torch.utils._triton import has_triton, has_triton_tma
 
+        from ..decorators import DynamoConfigPatchProxy
+
         if has_triton():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
@@ -894,6 +897,8 @@ class VariableBuilder:
                     {},
                 )
             )
+        elif isinstance(value, DynamoConfigPatchProxy):
+            return DynamoConfigPatchVariable(value.changes)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
