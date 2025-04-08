@@ -486,7 +486,9 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
   constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
+#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
   constexpr int vec8_alignment = std::alignment_of_v<aligned_vector<scalar_t, 8>>;
+#endif
 #ifdef USE_ROCM
   constexpr int vec16_alignment = std::alignment_of_v<aligned_vector<scalar_t, 16>>;
   constexpr int type_size = sizeof(scalar_t);
@@ -495,7 +497,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   } else if (type_size <= 2 && (address % vec8_alignment == 0)) {
     return 8;
   } else
-#else
+#elif defined(CUDA_VERSION) && CUDA_VERSION >= 12080
   if (address % vec8_alignment == 0) {
    return 8;
   } else
