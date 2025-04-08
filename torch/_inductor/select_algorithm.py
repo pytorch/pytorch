@@ -379,13 +379,20 @@ class TritonTemplateKernel(TritonKernel):
         # input names or symbol names, we do a record and replay method.
         # During template expansions we record all function calls that change input_dependent_preserved_state
         # and replay them on a cache hit to regenerate them.  Namely we want to be able to regenerate:
-        # 1) kernel.args
-        # 2) kernel.prologue_supported_inputs
+        # 1) self.args.input_buffers
+        # 2) self.args.sizevars
+        # 3) self.prologue_supported_inputs
 
         self.cached_replay_events: RecordedEventsType = []
 
     def input_dependent_preserved_state(self) -> str:
-        return repr([self.args, self.prologue_supported_inputs])
+        return repr(
+            [
+                self.args.input_buffers,
+                self.args.sizevars,
+                self.prologue_supported_inputs,
+            ]
+        )
 
     def record_input_dependent_tracked_event(self) -> Callable[..., Any]:
         def decorator(fn) -> Callable[..., Any]:
@@ -394,7 +401,6 @@ class TritonTemplateKernel(TritonKernel):
                 result = fn(*args, **kwargs)
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
-                    assert str(pre_state) != str(post_state)
                     self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
                 return result
 
@@ -1208,7 +1214,6 @@ class GeneratedCodeCache:
         if cache_key is None:
             return
         entry = GeneratedCodeCacheEntry(code, extra, events)
-
         self._cache.update({cache_key: entry})
 
 
