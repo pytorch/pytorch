@@ -127,7 +127,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # then we assume the following applies.
 custom_op_default_layout_constraint: Literal[
     "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
+] = "needs_exact_strides"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
