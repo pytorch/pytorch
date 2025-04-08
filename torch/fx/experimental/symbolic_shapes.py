@@ -7325,15 +7325,17 @@ class _PythonMsgPrinter(PythonPrinter):
     def _print_Symbol(self, sym: sympy.Symbol) -> str:
         return self.src_map[sym.name][0]
 
+
 def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
     """
     Check if a condition (SymPy expression) is checking for non-negative values (>= 0).
     Returns the variable name if it's a non-negative check (>= 0), None otherwise.
     """
     if isinstance(cond, sympy.Rel):
-        if cond.rel_op == ">=" and right == 0:
+        if cond.rel_op == ">=" and cond.rhs == 0:
             return str(cond.lhs)
     return None
+
 
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
@@ -7348,16 +7350,14 @@ def _suggest_torch_checks(
     msg = e.args[0]
     msg += "\nTo fix the error, insert one of the following checks before this call:"
 
-    cond_str = printer.doprint(cond)
     not_cond_str = printer.doprint(sympy.Not(cond))
-    var_name = _is_non_negative_check(cond_str)
+    var_name = _is_non_negative_check(cond)
 
     # suggested fixes to resolve `cond` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
     suggested_fixes = []
 
     if var_name:
-        # For non-negative checks, suggest check_is_size instead of _check(u>=0)
         suggested_fixes = [
             f"You can add either: torch._check_is_size({var_name}) or torch._check({var_name}>=0)"
             f" Note: torch._check_is_size({var_name}) could prevent data dependent errors that"
@@ -7369,7 +7369,7 @@ def _suggest_torch_checks(
     else:
         suggested_fixes = [
             f"torch._check({printer.doprint(cond)})",
-            f"torch._check({printer.doprint(sympy.Not(cond))})",
+            f"torch._check({not_cond_str})",
         ]
 
     for i, fix in enumerate(suggested_fixes):

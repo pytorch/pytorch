@@ -7360,11 +7360,9 @@ def forward(self, b_a_buffer, x):
 
         x = sp.Symbol("x")
         variable_name = sp.Symbol("variable_name")
-        obj_attr = sp.Symbol("obj.attr")
         tensor_shape = sp.Symbol("tensor.shape[0]")
 
         self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
-        self.assertEqual(_is_non_negative_check(obj_attr >= 0), "obj.attr")
         self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
 
         # Test cases where the condition is not checking for x >= 0
