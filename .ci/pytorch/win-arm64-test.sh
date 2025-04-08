@@ -5,14 +5,9 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-cmd.exe /c ./.ci/pytorch/windows/arm64/bootstrap_tests.bat
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to bootstrap tests."
-    exit 1
-fi
+cmd //c .\\.ci\\pytorch\\windows\\arm64/bootstrap_tests.bat
 
 run_tests() {
-
     echo Running smoke_test.py...
     python ./.ci/pytorch/smoke_test/smoke_test.py --package torchonly
 
