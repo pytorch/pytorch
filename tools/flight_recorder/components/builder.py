@@ -18,6 +18,7 @@ from tools.flight_recorder.components.types import (
     Group,
     MatchInfo,
     MatchState,
+    MatchStateRecord,
     Membership,
     NCCLCall,
     Op,
@@ -126,6 +127,158 @@ def build_groups_memberships(
     return groups, _groups, memberships, _memberships, _pg_guids
 
 
+def check_current_entry_match(
+    all_entries: dict[int, list[dict[str, Any]]],
+    _pg_guids: dict[tuple[str, int], str],
+    pg_info: tuple[str, str],
+    current_entry: dict[str, Any],
+    _memberships: dict[str, set[Any]],
+    mismatch: dict[str, int],
+    match_record: MatchStateRecord,
+) -> None:
+    pg_name, desc = pg_info[0], pg_info[1]
+    for o in match_record.expected_ranks.intersection(set(match_record.other_ranks)):
+        for i, e in enumerate(all_entries[o]):  # type: ignore[index]
+            # step over ops from other PGs
+            # only check match state when seq_id matches
+            if (
+                _pg_guids[(e["process_group"][0], o)] == pg_name
+                and e["process_group"][1] == desc
+                and e["collective_seq_id"] == match_record.entry_state.collective_seq_id
+            ):
+                match_info = match_one_event(current_entry, e, _memberships, pg_name)
+                if (
+                    match_info.state in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
+                    and mismatch[pg_name] == 0
+                ):
+                    match_record.found_ranks.add(o)
+                    match_record.found_idx[o] = i
+                    match_record.has_undecided_case = (
+                        match_info.state == MatchState.UNDECIDED
+                    )
+                else:
+                    match_record.candidate_ranks.add(o)
+                    match_record.candidate_idx[o] = i
+                    if match_info.state not in [
+                        MatchState.FULLY_MATCHED,
+                        MatchState.UNDECIDED,
+                    ]:
+                        # Here we assume the current rank is not the source of the error.
+                        # But it's possible that the current rank is the culprit, then users will
+                        # see lots of normal ranks reported as culprit.
+                        # TODO: we need to figure out a better way to handle the case mentioned above.
+                        match_record.errors.add((o, match_info))
+                break
+
+
+def error_analysis(
+    all_entries: dict[int, list[dict[str, Any]]],
+    match_record: MatchStateRecord,
+    dumps_ranks: set[int],
+    first_rank: int,
+    current_entry: dict[str, Any],
+    mismatch: dict[str, int],
+    version: tuple[int, int],
+    pg_name: str,
+) -> None:
+    major_v, minor_v = version[0], version[1]
+    # case one: not every rank join the collective or in the flight recorder.
+    if (
+        match_record.candidate_ranks | match_record.found_ranks
+    ) != match_record.expected_ranks and match_record.expected_ranks - (
+        match_record.candidate_ranks | match_record.found_ranks
+    ) <= dumps_ranks:
+        mismatch[pg_name] += 1
+        logger_msg = "Not all ranks joining collective, sequence number: %s"
+        missing_ranks = match_record.expected_ranks - (
+            match_record.candidate_ranks | match_record.found_ranks
+        )
+        match_record.entry_state.log(
+            logger, logger_msg, format_frames, missing_ranks=missing_ranks
+        )
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+    elif (
+        len(match_record.candidate_ranks) == 1
+        and dumps_ranks == match_record.expected_ranks
+    ):
+        # case two: alltoall or alltoall_base case.
+        if match_record.has_undecided_case:
+            alltoall_cases = [current_entry] + [
+                all_entries[o][match_record.found_idx[o]]
+                for o in match_record.found_ranks
+            ]
+            fail_check, total_input_numel, total_output_numel = check_size_alltoall(
+                alltoall_cases
+            )
+            if major_v <= 2 and minor_v <= 3:
+                # We don't log the input/output sizes for alltoall before v2.4,
+                # so we don't consider the size mismatch as an error for now.
+                fail_check = False
+            if fail_check:
+                # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
+                mismatch[pg_name] += 1
+                logger_msg = (
+                    "Input/output mismatch in the collective sequence number: %s"
+                )
+                match_record.entry_state.log(
+                    logger,
+                    logger_msg,
+                    format_frames,
+                    total_numel=(total_input_numel, total_output_numel),
+                )
+                match_record.candidate_ranks.update(match_record.found_ranks)
+                match_record.candidate_idx.update(match_record.found_idx)
+                match_record.found_idx.clear()
+                match_record.found_ranks.clear()
+                match_record.errors.add(
+                    (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
+                )
+            else:
+                match_record.found_ranks.update(match_record.candidate_ranks)
+                match_record.found_idx.update(match_record.candidate_idx)
+                match_record.candidate_idx.clear()
+                match_record.candidate_ranks.clear()
+        # case three: all joined and everything matches on all ranks.
+        else:
+            match_record.found_ranks.update(match_record.candidate_ranks)
+            match_record.found_idx.update(match_record.candidate_idx)
+            match_record.candidate_idx.clear()
+            match_record.candidate_ranks.clear()
+    # case four: mismatch cases due to not same type, size mismatch or state mismatch.
+    elif len(match_record.errors) > 0:
+        mismatch[pg_name] += 1
+        logger_msg = "Collective sequence number: %s has errors"
+        match_record.entry_state.log(
+            logger, logger_msg, format_frames, errors=match_record.errors
+        )
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+    # partial analysis case when we cannot decide what's wrong with this collective entry.
+    else:
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+        if match_record.expected_ranks - dumps_ranks:
+            mismatch[pg_name] += 1
+            logger.info(
+                "We cannot decide what's wrong with this collective entry "
+                "because we missed FR dumps from ranks (%s) so we don't have enough "
+                "information. If you want to debug further use -j to dump all raw trace",
+                str(match_record.expected_ranks - dumps_ranks),
+            )
+        else:
+            logger.info(
+                "No errors found for this collective entry, There could be some "
+                "other reasons why we see collective timeout."
+            )
+
+
 def build_collectives(
     all_entries: dict[int, list[dict[str, Any]]],
     _groups: dict[str, Group],
@@ -161,7 +314,6 @@ def build_collectives(
         ]
     }
     """
-    major_v, minor_v = get_version_detail(version)
     tracebacks: list[Traceback] = []
 
     collectives: list[Collective] = []
@@ -200,11 +352,16 @@ def build_collectives(
         pg_name = _pg_guids[(original_pg_name, first_rank)]
         expected_ranks = set(_memberships[pg_name])
         entry_state = EntryState(entries[0], expected_ranks)
-        candidate_ranks = {first_rank}
-        candidate_idx = {}
-        found_ranks = set()
-        found_idx = {}
-        errors = set()
+        match_record = MatchStateRecord(
+            expected_ranks=expected_ranks,
+            other_ranks=other_ranks,
+            entry_state=entry_state,
+            candidate_ranks={first_rank},
+            candidate_idx={},
+            found_ranks=set(),
+            found_idx={},
+            errors=set(),
+        )
 
         if find_coalesced_group(pg_name, entries, _pg_guids, first_rank):
             expected_ranks.add(first_rank)
@@ -256,137 +413,42 @@ def build_collectives(
                     )
                 )
         else:
-            has_undecided_case = False
-            for o in expected_ranks.intersection(set(other_ranks)):
-                for i, e in enumerate(all_entries[o]):  # type: ignore[index]
-                    # step over ops from other PGs
-                    # only check match state when seq_id matches
-                    if (
-                        _pg_guids[(e["process_group"][0], o)] == pg_name
-                        and e["process_group"][1] == desc
-                        and e["collective_seq_id"] == entry_state.collective_seq_id
-                    ):
-                        match_info = match_one_event(
-                            entries[0], e, _memberships, pg_name
-                        )
-                        if (
-                            match_info.state
-                            in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
-                            and mismatch[pg_name] == 0
-                        ):
-                            found_ranks.add(o)
-                            found_idx[o] = i
-                            has_undecided_case = (
-                                match_info.state == MatchState.UNDECIDED
-                            )
-                        else:
-                            candidate_ranks.add(o)
-                            candidate_idx[o] = i
-                            if match_info.state not in [
-                                MatchState.FULLY_MATCHED,
-                                MatchState.UNDECIDED,
-                            ]:
-                                # Here we assume the current rank is not the source of the error.
-                                # But it's possible that the current rank is the culprit, then users will
-                                # see lots of normal ranks reported as culprit.
-                                # TODO: we need to figure out a better way to handle the case mentioned above.
-                                errors.add((o, match_info))
-                        break
+            # Iterate through all the ranks and check if there is a mis-match for the current entry.
+            check_current_entry_match(
+                all_entries,
+                _pg_guids,
+                (pg_name, desc),
+                entries[0],
+                _memberships,
+                mismatch,
+                match_record,
+            )
 
-            # case one: not every rank join the collective or in the flight recorder.
-            if (candidate_ranks | found_ranks) != expected_ranks and expected_ranks - (
-                candidate_ranks | found_ranks
-            ) <= dumps_ranks:
-                mismatch[pg_name] += 1
-                logger_msg = "Not all ranks joining collective, sequence number: %s"
-                missing_ranks = expected_ranks - (candidate_ranks | found_ranks)
-                entry_state.log(
-                    logger, logger_msg, format_frames, missing_ranks=missing_ranks
-                )
-                candidate_ranks.update(found_ranks)
-                candidate_idx.update(found_idx)
-                found_idx.clear()
-                found_ranks.clear()
-            elif len(candidate_ranks) == 1 and dumps_ranks == expected_ranks:
-                # case two: alltoall or alltoall_base case.
-                if has_undecided_case:
-                    alltoall_cases = [entries[0]] + [
-                        all_entries[o][found_idx[o]] for o in found_ranks
-                    ]
-                    fail_check, total_input_numel, total_output_numel = (
-                        check_size_alltoall(alltoall_cases)
-                    )
-                    if major_v <= 2 and minor_v <= 3:
-                        # We don't log the input/output sizes for alltoall before v2.4,
-                        # so we don't consider the size mismatch as an error for now.
-                        fail_check = False
-                    if fail_check:
-                        # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
-                        mismatch[pg_name] += 1
-                        logger_msg = "Input/output mismatch in the collective sequence number: %s"
-                        entry_state.log(
-                            logger,
-                            logger_msg,
-                            format_frames,
-                            total_numel=(total_input_numel, total_output_numel),
-                        )
-                        candidate_ranks.update(found_ranks)
-                        candidate_idx.update(found_idx)
-                        found_idx.clear()
-                        found_ranks.clear()
-                        errors.add(
-                            (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
-                        )
-                    else:
-                        found_ranks.update(candidate_ranks)
-                        found_idx.update(candidate_idx)
-                        candidate_idx.clear()
-                        candidate_ranks.clear()
-                # case three: all joined and everything matches on all ranks.
-                else:
-                    found_ranks.update(candidate_ranks)
-                    found_idx.update(candidate_idx)
-                    candidate_idx.clear()
-                    candidate_ranks.clear()
-            # case four: mismatch cases due to not same type, size mismatch or state mismatch.
-            elif len(errors) > 0:
-                mismatch[pg_name] += 1
-                logger_msg = "Collective sequence number: %s has errors"
-                entry_state.log(logger, logger_msg, format_frames, errors=errors)
-                candidate_ranks.update(found_ranks)
-                candidate_idx.update(found_idx)
-                found_idx.clear()
-                found_ranks.clear()
-            # partial analysis case when we cannot decide what's wrong with this collective entry.
-            else:
-                candidate_ranks.update(found_ranks)
-                candidate_idx.update(found_idx)
-                found_idx.clear()
-                found_ranks.clear()
-                if expected_ranks - dumps_ranks:
-                    mismatch[pg_name] += 1
-                    logger.info(
-                        "We cannot decide what's wrong with this collective entry "
-                        "because we missed FR dumps from ranks (%s) so we don't have enough "
-                        "information. If you want to debug further use -j to dump all raw trace",
-                        str(expected_ranks - dumps_ranks),
-                    )
-                else:
-                    logger.info(
-                        "No errors found for this collective entry, There could be some "
-                        "other reasons why we see collective timeout."
-                    )
+            # Use heuristics to decide what type of errors and error messages we should print.
+            error_analysis(
+                all_entries,
+                match_record,
+                dumps_ranks,
+                first_rank,
+                entries[0],
+                mismatch,
+                get_version_detail(version),
+                pg_name,
+            )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
             #  -> we create a Collective and remove the individual entries from their original lists
-            if found_ranks == expected_ranks and mismatch[pg_name] == 0:
-                collectives.append(entry_state.to_collective(len(collectives)))
+            if match_record.found_ranks == expected_ranks and mismatch[pg_name] == 0:
+                collectives.append(
+                    match_record.entry_state.to_collective(len(collectives))
+                )
                 idx_map = {
-                    r: found_idx[r] if r != first_rank else 0 for r in found_ranks
+                    r: match_record.found_idx[r] if r != first_rank else 0
+                    for r in match_record.found_ranks
                 }
                 nccl_calls.extend(
-                    entry_state.to_nccl_call(
+                    match_record.entry_state.to_nccl_call(
                         all_entries, idx_map, len(nccl_calls), collectives[-1].id
                     )
                 )
@@ -398,19 +460,19 @@ def build_collectives(
             else:
                 logger.debug("appending a non-matching collective")
                 idx_map = {
-                    r: candidate_idx[r] if r != first_rank else 0
-                    for r in candidate_ranks
+                    r: match_record.candidate_idx[r] if r != first_rank else 0
+                    for r in match_record.candidate_ranks
                 }
                 collectives.append(
-                    entry_state.to_collective(
+                    match_record.entry_state.to_collective(
                         len(collectives),
-                        errors=errors,
+                        errors=match_record.errors,
                         idx_map=idx_map,
                         all_entries=all_entries,
                     )
                 )
                 nccl_calls.extend(
-                    entry_state.to_nccl_call(
+                    match_record.entry_state.to_nccl_call(
                         all_entries, idx_map, len(nccl_calls), None
                     )
                 )
