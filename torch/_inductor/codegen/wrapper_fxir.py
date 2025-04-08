@@ -153,16 +153,17 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         an FX node.
         """
         assert node not in self.buffer_to_node
-        self.buffer_to_node[buffer.name] = node
+        self.buffer_to_node[buffer.get_name()] = node
 
     def _free(self, buffer: Union[BufferLike, ir.TorchBindObject]) -> None:
         """
         Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
         """
-        node = self.buffer_to_node[buffer.name]
+        name = buffer.get_name()
+        node = self.buffer_to_node[name]
         self.gm.graph.call_function(delete, args=(node,))
-        del self.buffer_to_node[buffer.name]
+        del self.buffer_to_node[name]
 
     def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         """
@@ -189,8 +190,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         for ir_node in V.graph.graph_inputs.values():
             buffer = self._get_buffer(ir_node)
-            assert buffer.name
-            node = self.gm.graph.placeholder(buffer.name)
+            assert buffer.get_name()
+            node = self.gm.graph.placeholder(buffer.get_name())
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
@@ -310,7 +311,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
         buffer = line.node
-        name = buffer.name
+        name = buffer.get_name()
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()

@@ -221,10 +221,6 @@ class WorkspaceArg:
     def get_name(self) -> str:
         return self.outer_name
 
-    @property
-    def name(self) -> str:
-        return self.get_name()
-
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
