@@ -127,10 +127,16 @@ class TestCppExtensionMTIABackend(common.TestCase):
         device_0 = torch.device("mtia:0")
         device_1 = torch.device("mtia:1")
         with torch.mtia.device(device_0):
-            self.assertTrue(torch.mtia.current_device() == device_0.index)
+            self.assertTrue(
+                torch.mtia.current_device() == device_0.index,
+                f"{torch.mtia.current_device()} != {device_0.index}",
+            )
 
         with torch.mtia.device(device_1):
-            self.assertTrue(torch.mtia.current_device() == device_1.index)
+            self.assertTrue(
+                torch.mtia.current_device() == device_1.index,
+                f"{torch.mtia.current_device()} != {device_1.index}",
+            )
 
 
 if __name__ == "__main__":
