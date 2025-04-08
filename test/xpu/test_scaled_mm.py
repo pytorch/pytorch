@@ -1,4 +1,4 @@
-# Owner(s): ["module: linear algebra"]
+# Owner(s): ["module: intel"]
 
 import re
 from typing import Optional
