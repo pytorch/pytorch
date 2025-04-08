@@ -351,11 +351,13 @@ def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
             if not isinstance(B, ir.TensorBox):
                 B = ir.TensorBox(B)
             assert hasattr(X, "get_size")
-            B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
+            if len(B.get_size()) == 1:
+                B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
             assert isinstance(B, torch.Tensor)
             assert isinstance(X, torch.Tensor)
-            B = B.expand(X.shape[0], B.shape[-1])
+            if len(B.shape) == 1:
+                B = B.expand(X.shape[0], B.shape[-1])
     return B
 
 
@@ -888,8 +890,6 @@ class CppGemmTemplate(CppTemplate):
                     view_size, view_stride, view_offset
                 )
 
-            if not trans_w:
-                return new_inputs, layout_or_out
             X = new_inputs[0]
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
