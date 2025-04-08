@@ -4338,7 +4338,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def mv(self, vec):
     torch._check(
