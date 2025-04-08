@@ -41,7 +41,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
-    IncorrectUsage,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -65,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -76,6 +75,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._higher_order_ops.triton_kernel_wrap import (
         TritonGridType,
@@ -471,7 +471,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
@@ -521,7 +521,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            tracer.generator_exhausted = True
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -550,9 +550,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -664,19 +663,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # * If the generator function does not catch the passed-in exception,
             # or raises a different exception, then that exception propagates to the caller.
 
-            if len(args) > 1:
-                raise IncorrectUsage(
-                    "the (type, exc, tb) signature of throw() is deprecated, "
-                    "use the single-arg signature instead."
-                )
-
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
             try:
-                self._setup_exception(tx, args[0])
-            except ObservedException:
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
             retval = self.next_variable(tx)
@@ -749,9 +745,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
@@ -1022,6 +1015,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         wrapped_fn=None,
         **kwargs,
     ) -> None:
+        if kwargs.get("mutation_type") is None:
+            kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -1068,6 +1063,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        tx.output.side_effects.store_attr(self, name_var.value, val)
+        return ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
+
     def has_closure(self):
         return self.closure is not None
 
@@ -1101,7 +1110,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -1146,6 +1155,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
+        # codegen attributes
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if tx.output.side_effects.has_pending_mutation(self):
+            for name, value in tx.output.side_effects.store_attr_mutations[
+                self
+            ].items():
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+
 
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -1178,10 +1200,12 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented_v2(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
                 context=str(self.value),
-                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                explanation=f"Skip calling function `{self.value}` since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],
@@ -1483,7 +1507,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def python_type(self):
         return functools.partial
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
@@ -1939,7 +1963,7 @@ class TMADescriptorVariable(VariableTracker):
             self.element_size.as_proxy(),
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "triton.tools.experimental_descriptor",
