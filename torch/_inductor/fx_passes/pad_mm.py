@@ -396,12 +396,28 @@ def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
         return _should_pad_bench(*args, **kwargs)
 
 
-def get_do_bench() -> Callable[[Callable[[], Any]], float]:
-    with dynamo_timed("pad_mm_benchmark_get_do_bench"):
-        return functools.partial(
-            torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
-            warmup=5,
-        )
+def _synchronize_once(
+    fn: Callable[..., Any],
+    **fixed_kwargs: Any,
+) -> Callable[..., Any]:
+    """
+    Works like functools.partial, but calls torch.cuda.synchronize() once
+    before the first call and times it for logging. For accounting purposes,
+    it's helpful to synchronize before benchmarking in order to separate out
+    the overhead of the first sync from the rest of the benchmarking.
+    """
+    synchronized = False
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        nonlocal synchronized
+        if not synchronized:
+            synchronized = True
+            with dynamo_timed("pad_mm_synchronize", log_pt2_compile_event=True):
+                torch.cuda.synchronize()
+
+        return fn(*args, **{**kwargs, **fixed_kwargs})
+
+    return wrapper
 
 
 def _should_pad_bench(
@@ -411,7 +427,10 @@ def _should_pad_bench(
     op: torch._ops.OpOverloadPacket,
     input: Optional[Tensor] = None,
 ) -> bool:
-    do_bench = get_do_bench()
+    do_bench = _synchronize_once(
+        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
+        warmup=5,
+    )
 
     m_padded_length = 0
     n_padded_length = 0
