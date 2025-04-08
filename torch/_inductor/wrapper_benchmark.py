@@ -357,9 +357,6 @@ def ncu_analyzer(
         "--force-overwrite",
         "--export",
         ncu_rep_output,
-        "python",
-        "-c",
-        python_cmd,
     ]
 
     # Add kernel regex filter if provided
@@ -374,6 +371,11 @@ def ncu_analyzer(
     else:
         ncu_cmd.extend(["--set", "full"])
 
+    ncu_cmd.extend([
+        "python",
+        "-c",
+        python_cmd,
+    ])
 
     try:
         subprocess.run(ncu_cmd, check=True)
