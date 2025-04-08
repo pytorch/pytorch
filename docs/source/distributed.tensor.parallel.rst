@@ -46,6 +46,10 @@ the ``parallelize_plan`` when calling ``parallelize_module``:
   :members:
   :undoc-members:
 
+.. autoclass:: torch.distributed.tensor.parallel.PrepareModuleInputOutput
+  :members:
+  :undoc-members:
+
 .. note:: when using the ``Shard(dim)`` as the input/output layouts for the above
   ``ParallelStyle`` s, we assume the input/output activation tensors are evenly sharded on
   the tensor dimension ``dim`` on the ``DeviceMesh`` that TP operates on. For instance,
