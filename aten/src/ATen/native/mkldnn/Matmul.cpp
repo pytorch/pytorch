@@ -423,7 +423,7 @@ void mkldnn_matmul(
 
 }
 
-#if defined(__aarch64__)
+#if AT_MKLDNN_ACL_ENABLED()
 // Experimentally derived heuristics for MKLDNN+ACL on NEOVERSE cores
 static inline int64_t get_mkldnn_acl_addmm_min_dim() {
   static auto value = [&] {
@@ -473,7 +473,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
     return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
-#if defined(__aarch64__)
+#if AT_MKLDNN_ACL_ENABLED()
     const int64_t mkldnn_acl_addmm_min_dim = get_mkldnn_acl_addmm_min_dim();
     const int64_t mkldnn_acl_addmm_min_size = get_mkldnn_acl_addmm_min_size();
     // M > MIN_DIM and N > MIN_DIM and K > MIN_DIM and M*N*K > MIN_SIZE
@@ -486,7 +486,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
 #endif
   } else {
     // aten::bmm, aten::baddbmm
-#if defined(__aarch64__)
+#if AT_MKLDNN_ACL_ENABLED()
     const int64_t mkldnn_acl_bmm_baddbmm_threshold = get_mkldnn_acl_bmm_baddbmm_threshold();
     // BATCH_SIZE^2 * M * N * K >= THRESHOLD
     return mat1.size(0) * mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) >= mkldnn_acl_bmm_baddbmm_threshold;
