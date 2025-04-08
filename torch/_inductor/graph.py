@@ -70,6 +70,7 @@ from .ir import (
     InputBuffer,
     Pointwise,
     Reduction,
+    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
     TorchBindObject,
@@ -1220,7 +1221,9 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
+    ) -> Union[
+        Constant, TensorBox, ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
+    ]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
