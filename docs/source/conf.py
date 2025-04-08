@@ -191,11 +191,6 @@ html_context = {
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
     "language_bindings_links": theme_variables.get("language_bindings_links", []),
-    "date_info": {
-        "enabled": True,
-        "paths_to_skip": ["generated/"],
-        "source_to_build_mapping": {"": ""},
-    },
 }
 
 napoleon_use_ivar = True
@@ -3724,9 +3719,6 @@ def setup(app):
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
-    # add last-updated date to doc
-    from pytorch_sphinx_theme2 import on_build_finished
-    app.connect("build-finished", on_build_finished)
     return {"version": "0.1", "parallel_read_safe": True}
 
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
