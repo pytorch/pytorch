@@ -14494,6 +14494,18 @@ if RUN_GPU:
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").run(code[0])
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_maintain_last_usage(self):
+            m = torch.nn.Sequential(
+                torch.nn.Linear(32, 32, bias=False),
+                torch.nn.Dropout(),
+                torch.nn.Linear(32, 32, bias=False),
+                torch.nn.Dropout(),
+            ).to(self.device)
+
+            m = torch.compile(m)
+            m(torch.randn([8, 32], device=self.device))
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 

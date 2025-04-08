@@ -2054,6 +2054,10 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
+
+        if torch._inductor.config.graph_partition:
+            self.nodes = self.reorder_for_partition(self.nodes)
+
         self.compute_last_usage()
         log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -4291,8 +4295,6 @@ class Scheduler:
         Given a list of BaseSchedulerNodes, split into a list of
         graph partitions and compute partition input/output signatures.
         """
-        self.nodes = self.reorder_for_partition(self.nodes)
-
         partitions: list[PartitionType] = []
         skip_cudagraph = True
         cur_partition: PartitionType = []
