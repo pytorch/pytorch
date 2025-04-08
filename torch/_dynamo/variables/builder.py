@@ -1724,6 +1724,22 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
+        # Only want to check if immediate is local source
+        # Assumption: LocalSource is the only way fn input passed
+        # NOTE: Should we also check is_from_unspecialized_param_buffer_source?
+        if (
+            config.install_params_as_graph_attr
+            and not (isinstance(source, LocalSource) and source.is_input)
+            and (
+                isinstance(value, torch.nn.parameter.Parameter)
+                or isinstance(value, torch.nn.parameter.Buffer)
+            )
+        ):
+            # Install params/bufs which are not directly inputs when explicitly asked
+            return self.tx.output.register_attr_or_module(
+                value, self.name, source=source
+            )
+
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules
             or is_parameter_freezing()
