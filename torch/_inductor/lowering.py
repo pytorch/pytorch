@@ -3158,6 +3158,10 @@ def _full(fill_value, device, dtype, size):
     )
 
 
+def full_like(x, fill_value, **kwargs):
+    return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
+
+
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
