@@ -3614,7 +3614,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   std::swap(sizes[dim0], sizes[dim1]);
   SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided__symint(std::move(sizes), std::move(strides));
+  self.as_strided__symint(std::move(sizes), std::move(strides));
   return self;
 }
 
