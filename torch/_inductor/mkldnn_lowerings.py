@@ -534,8 +534,8 @@ def register_onednn_fusion_ops():
             return TensorBox.create(
                 mkldnn_ir.QConvPointWiseBinaryPT2E.create(
                     x,
-                    x_scale,
-                    x_zp,
+                    x_scale,  # type: ignore[arg-type]
+                    x_zp,  # type: ignore[arg-type]
                     packed_weight,
                     w_scale,
                     w_zp,
@@ -632,7 +632,7 @@ def register_onednn_fusion_ops():
             ):
                 # W_zp might be a ConstantBuffer with int64, convert it to int32
                 w_zp_tensor = V.graph.constants[w_zp.get_name()].to(torch.int32)
-                w_zp = V.graph.add_tensor_constant(
+                w_zp = V.graph.add_tensor_constant(  # type: ignore[assignment]
                     torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
                 )
 
@@ -936,7 +936,7 @@ def register_onednn_fusion_ops():
                 ir.ConstantBuffer,
             ):
                 w_zp_tensor = V.graph.constants[w_zp.get_name()].to(torch.int32)
-                w_zp = V.graph.add_tensor_constant(
+                w_zp = V.graph.add_tensor_constant(  # type: ignore[assignment]
                     torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
                 )
             if binary_attr == "sum":
