@@ -948,11 +948,11 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         for dtype, size_bytes, align_bytes, split_last_dim in itertools.product(
             [torch.float, torch.bfloat16],
-            [256, 8192],
+            [128, 8192, 36 * 1024 * 16],
             [4, 8, 16],
             [True, False],
         ):
-            t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+            t = symm_mem.empty(36 * 1024 * 16, dtype=dtype, device=self.device).fill_(0)
             symm_mem.rendezvous(t, group=group_name)
 
             self.assertTrue(t.data_ptr() % 16 == 0)
