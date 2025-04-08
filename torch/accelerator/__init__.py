@@ -48,7 +48,7 @@ def is_available() -> bool:
 
     .. note:: This API delegates to the device-specific version of `is_available`.
         On CUDA, when the environment variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set,
-        this function will not poison fork. Otherwise, it will. For more details, see
+        this function will NOT poison fork. Otherwise, it will. For more details, see
         :ref:`multiprocessing-poison-fork-note`.
 
     Example::
