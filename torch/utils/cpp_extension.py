@@ -458,7 +458,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     if not CUDA_HOME:
         raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
-    nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
+    nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc.exe' if IS_WINDOWS else 'nvcc')
+    if not os.path.exists(nvcc):
+        raise FileNotFoundError(f"nvcc not found at '{nvcc}'. Ensure CUDA path '{CUDA_HOME}' is correct.")
+
     cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode(*SUBPROCESS_DECODE_ARGS)
     cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
     if cuda_version is None:
@@ -655,7 +658,6 @@ class BuildExtension(build_ext):
                     if val is not None and not IS_WINDOWS:
                         self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
-            self._add_gnu_cpp_abi_flag(extension)
 
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
@@ -796,6 +798,7 @@ class BuildExtension(build_ext):
 
             if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
                 cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
+                cuda_dlink_post_cflags = [shlex.quote(f) for f in cuda_dlink_post_cflags]
             else:
                 cuda_dlink_post_cflags = None
 
@@ -1112,10 +1115,6 @@ class BuildExtension(build_ext):
         name = names[-1]
         define = f'-DTORCH_EXTENSION_NAME={name}'
         self._add_compile_flag(extension, define)
-
-    def _add_gnu_cpp_abi_flag(self, extension):
-        # use the same CXX ABI as what PyTorch was compiled with
-        self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1688,10 +1687,6 @@ def _get_pybind11_abi_build_flags():
             abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
     return abi_cflags
 
-def _get_glibcxx_abi_build_flags():
-    glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    return glibcxx_abi_cflags
-
 def check_compiler_is_gcc(compiler):
     if not IS_LINUX:
         return False
@@ -1822,7 +1817,6 @@ def _check_and_build_extension_h_precompiler_headers(
 
     common_cflags += ['-std=c++17', '-fPIC']
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
@@ -2146,7 +2140,9 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        return _join_rocm_home('bin', 'hipcc.bat')
+        # mypy thinks ROCM_VERSION is None but it will never be None here
+        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
 
@@ -2643,8 +2639,6 @@ def _write_ninja_file_to_build_library(path,
     else:
         common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
         common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
-
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 
     if IS_WINDOWS:
         cflags = common_cflags + ['/std:c++17'] + extra_cflags

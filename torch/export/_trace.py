@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import re
+import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -499,11 +500,12 @@ def _produce_aten_artifact(
 
     It does:
     1. Applies runtime assertion pass
-    2. Populate meta val when missing
-    3. Lift constants as placeholders
-    4. Replace raw autograd and autocast ops with HOPs
-    5. Prettify names for placeholders
-    6. Preserve requires_grad value on node meta val
+    2. Recompute unbacked_bindings pass
+    3. Populate meta val when missing
+    4. Lift constants as placeholders
+    5. Replace raw autograd and autocast ops with HOPs
+    6. Prettify names for placeholders
+    7. Preserve requires_grad value on node meta val
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
@@ -1096,6 +1098,13 @@ def _log_export_wrapper(fn):
                     message=str(e),
                     flags=_EXPORT_FLAGS,
                 )
+
+            if hasattr(e, "partial_fx_graph"):
+                print(
+                    e.partial_fx_graph,
+                    file=sys.stderr,
+                )
+
             raise e
         finally:
             _EXPORT_FLAGS = None
@@ -1147,10 +1156,15 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     kwargs = kwargs if kwargs is not None else {}
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
-    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+    if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
+        verify_additional_inputs = dynamic_shapes.verify
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    else:
+        verify_additional_inputs = lambda ep: None  # noqa: E731
+        if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+            dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
 
 def _get_module_call_graph(
@@ -1963,6 +1977,7 @@ def _export_for_training(
         kwargs,
         orig_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2025,6 +2040,7 @@ def _export_for_training(
         verifiers=[TrainingIRVerifier],
     )
 
+    verify_additional_inputs(exported_program)
     return exported_program
 
 
@@ -2124,6 +2140,7 @@ def _export(
         kwargs,
         original_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2197,4 +2214,5 @@ def _export(
 
     dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
+    verify_additional_inputs(exported_program)
     return exported_program
