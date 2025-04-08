@@ -24,7 +24,7 @@ import onnxruntime.capi.onnxruntime_pybind11_state
 import onnxscript
 import onnxscript.evaluator
 import pytest
-from onnxscript import ir, version_converter
+from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
@@ -52,12 +52,6 @@ FLOAT_TYPES = (
     torch.float64,
 )
 
-
-OPSET_VERSION_MAPPING = {
-    18: onnxscript.opset18,
-    19: onnxscript.opset19,
-    20: onnxscript.opset20,
-}
 
 TEST_OPSET_VERSION = 18
 IS_MACOS = sys.platform.startswith("darwin")
@@ -511,7 +505,7 @@ def graph_executor(
             opset_imports={"": opset_version, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        opset = OPSET_VERSION_MAPPING[opset_version]
+        opset = onnxscript.values.Opset("", opset_version)
         tracer = _building.OpRecorder(opset, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
@@ -598,10 +592,9 @@ def graph_executor(
                 proto = onnxscript_function.to_function_proto()
                 ir_function = ir.serde.deserialize_function(proto)
             onnx_model.functions[identifier] = ir_function
-        _ir_passes.add_torchlib_common_imports(onnx_model)
+        _ir_passes.add_torchlib_common_imports(onnx_model, opset_version=opset_version)
         _ir_passes.add_opset_imports(onnx_model)
         # Make sure the model is valid
-        version_converter.convert_version(onnx_model, target_version=opset_version)
         model_proto = ir.to_proto(onnx_model)
         try:
             onnx.checker.check_model(model_proto, full_check=True)

@@ -50,7 +50,7 @@ def export_compat(
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    opset_version: int | None = 18,
+    opset_version: int | None = _constants.TORCHLIB_OPSET,
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]

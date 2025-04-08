@@ -42,7 +42,9 @@ class OnnxDecompMeta:
     signature: The ONNX signature of the function. When None, the signature is inferred.
     is_custom: Whether the function is a custom function.
     is_complex: Whether the function is a function that handles complex valued inputs.
-    opset_introduced: The opset version the function is introduced in.
+    opset_introduced:
+        The ONNX opset version in which the function was introduced.
+        Its specifies the minimum ONNX opset version required to use the function.
     device: The device the function is registered to. If None, it is registered to all devices.
     skip_signature_inference: Whether to skip signature inference for the function.
     """
@@ -279,10 +281,7 @@ class ONNXRegistry:
         return bool(self.get_decomps(target))
 
     def _cleanup_registry_based_on_opset_version(self) -> None:
-        """
-        Removes avoid duplicates implementations of an op with same signatures based on opset version.
-        Pick the implementation with the highest opset version valid until the current opset version.
-        """
+        """Pick the implementation with the highest opset version valid until the current opset version."""
         cleaned_functions = {}
         for target_or_name, decomps in self.functions.items():
             # Filter decompositions to only include those with opset_introduced <= opset_version

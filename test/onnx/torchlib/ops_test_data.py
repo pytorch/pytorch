@@ -78,6 +78,11 @@ class TorchLibOpInfo:
     compare_shape_only_for_output: tuple[int, ...] = ()
     # Whether the function is designed for complex inputs
     complex: bool = False
+    # The ONNX opset version in which the function was introduced.
+    # Its specifies the minimum ONNX opset version required to use the function.
+    # It ensures that the function is only used when the target ONNX opset version
+    # is compatible. For example, if `opset_introduced=20`, the function will only
+    # be used when exporting to ONNX models targeting opset version 20 or higher.
     opset_introduced: int = 18
     # The acceptable tolerance of the inference result difference between PyTorch and ORT.
     # Format: {dtype: (rtol, atol)}.
