@@ -373,8 +373,8 @@ class TritonTemplateKernel(TritonKernel):
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
         # The generated code is not dependent on the input nodes names, or symbolic sizes names.
-        # However, some of the variables returned by generate_and_load are computed during the
-        # triton template expansions (Code generation) are dependent on those.
+        # However, some of the variables returned by generate_and_load that are computed during the
+        # triton template expansions (code generation) are dependent on those.
         # In order to cache the code generation and avoid redoing it for similar inputs that varies only by
         # input names or symbol names, we do a record and replay method.
         # During template expansions we record all function calls that change input_dependent_preserved_state
@@ -1144,7 +1144,7 @@ class GeneratedCodeCache:
         next_symbol_index = 1
 
         def normalize_symbols(x: sympy.core.Expr) -> str:
-            symbols = x.free_symbols  #
+            symbols = x.free_symbols
             nonlocal next_symbol_index
             original_string = str(x)
             for s in symbols:
@@ -1160,7 +1160,7 @@ class GeneratedCodeCache:
         def normalize_list(ls: Sequence[sympy.core.Expr]) -> list[str]:
             return [normalize_symbols(x) for x in ls]
 
-        def layout_key(layout) -> str:
+        def layout_key(layout: ir.Layout) -> str:
             return repr(
                 [
                     normalize_list(layout.size),
@@ -1174,7 +1174,9 @@ class GeneratedCodeCache:
         if subgraphs is None and workspace_arg is None:
             return repr(
                 {
-                    "input_nodes": [layout_key(input.layout) for input in input_nodes],
+                    "input_nodes": [
+                        layout_key(input.get_layout()) for input in input_nodes
+                    ],
                     "num_stages": num_stages,
                     "num_warps": num_warps,
                     "prefix_args": prefix_args,
@@ -1249,7 +1251,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
-        subgraphs,
+        subgraphs: Optional[list[ir.Buffer]],
         workspace_arg: Optional[WorkspaceArg],
         num_consumer_groups: int,
         num_buffers_warp_spec: int,

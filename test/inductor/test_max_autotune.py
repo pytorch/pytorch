@@ -1182,7 +1182,6 @@ class TestMaxAutotune(TestCase):
                 x = re.sub(pattern, "", x)
                 return x
 
-            print(cache_key)
             self.assertEqual(
                 cleanup(cache_key),
                 cleanup(
