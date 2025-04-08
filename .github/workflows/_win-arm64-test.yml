@@ -111,7 +111,7 @@ jobs:
 
       - name: Test
         id: test
-        shell: bash
+        shell: cmd
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           USE_CUDA: '0'
@@ -138,4 +138,7 @@ jobs:
           popd
           cd pytorch
 
+          set VS_PATH=%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat
+          call "%VS_PATH%" arm64
+          
           .ci/pytorch/win-arm64-test.sh

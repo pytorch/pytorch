@@ -5,7 +5,17 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-cmd //c .\\.ci\\pytorch\\windows\\arm64/bootstrap_tests.bat
+prepare_test_env() {
+    # Create virtual environment
+    python -m venv .venv
+    echo "*" > .venv/.gitignore
+    source .venv/Scripts/activate
+
+    # Install dependencies
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+    pip install pytest numpy protobuf expecttest hypothesis
+}
 
 run_tests() {
     echo Running smoke_test.py...
@@ -24,5 +34,6 @@ run_tests() {
     done
 }
 
+prepare_test_env
 run_tests
 echo "TEST PASSED"
