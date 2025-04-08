@@ -195,11 +195,15 @@ struct DumpPipe {
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
         "Error removing existing named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     TORCH_CHECK(
         mkfifo(filename.c_str(), 0666) != -1,
         "Error creating named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
     LOG(INFO) << "Pipe file " << filename
               << " has been opened, write to it to trigger NCCL Debug Dump.";
@@ -555,7 +559,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   class DesyncDebugger {
    public:
     // Initialize and enable DesyncDebugger
-    void init(int rank, int size, c10::intrusive_ptr<Store> store);
+    void init(
+        int rank,
+        int size,
+        int globalRank,
+        int pgId,
+        c10::intrusive_ptr<Store> store);
 
     // Run desync debug. This function is called by watchdog at time of timeout.
     void run();
@@ -574,6 +583,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // From ProcessGroupNCCL
     int rank_;
     int size_;
+    int globalRank_;
+    int pgId_;
 
     // Reference to the store so that we can log start/end event.
     c10::intrusive_ptr<Store> store_;
@@ -1161,9 +1172,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
-
-  // promise to coordinate flight recorder dump.
-  std::promise<void> promiseFlightRecorderDump_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.
