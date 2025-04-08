@@ -767,7 +767,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5))
 
         # program capture
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(
+            m,
+            example_inputs,
+        ).module()
         m = prepare_pt2e(m, BackendAQuantizer())
         # make sure the two observers for input are shared
         conv_output_obs = []
@@ -827,7 +830,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
         # program capture
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(
+            m,
+            example_inputs,
+        ).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         # make sure the two input observers and output are shared
@@ -1146,7 +1152,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
         # program capture
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(
+            m,
+            example_inputs,
+        ).module()
         quantizer = BackendAQuantizer()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
@@ -1296,7 +1305,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = M().eval()
         example_inputs = torch.randn(1, 2, 3, 3)
-        m = export_for_training(m, (example_inputs,), strict=True).module()
+        m = export_for_training(m, (example_inputs,)).module()
         with self.assertRaises(Exception):
             m = prepare_pt2e(m, BackendAQuantizer())
 
@@ -1419,7 +1428,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(
+            m,
+            example_inputs,
+        ).module()
         weight_meta = None
         for n in m.graph.nodes:
             if (
@@ -1506,7 +1518,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         quantizer = TestQuantizer()
         example_inputs = (torch.randn(1, 2, 3, 3),)
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         node_occurrence = {
@@ -1557,7 +1569,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.randn(1, 2, 3, 3),
             torch.randn(1, 2, 3, 3),
         )
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         node_occurrence = {
@@ -1812,7 +1824,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1),)
         m = M().train()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         if inplace:
             target = torch.ops.aten.dropout_.default
         else:
@@ -1877,7 +1889,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
         bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
 
         # Assert that batch norm op exists and is in train mode
         bn_node = self._get_node(m, bn_train_op)
@@ -1908,7 +1920,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
 
         # After export: this is not OK
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1949,7 +1961,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
         bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
 
         def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
             targets = [n.target for n in m.graph.nodes]
@@ -2015,7 +2027,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = M().train()
         example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         torch.ao.quantization.allow_exported_model_train_eval(m)
 
         # Mock m.recompile() to count how many times it's been called
@@ -2047,7 +2059,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
-        exported_gm = export_for_training(m, example_inputs, strict=True).module()
+        exported_gm = export_for_training(m, example_inputs).module()
         fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
         self.assertTrue(
             torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm)
@@ -2065,9 +2077,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
         )
-        m.conv_bn_relu = export_for_training(
-            m.conv_bn_relu, example_inputs, strict=True
-        ).module()
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
         m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
         m(*example_inputs)
         m.conv_bn_relu = convert_pt2e(m.conv_bn_relu)
@@ -2075,7 +2085,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer().set_module_type(
             torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False)
         )
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m = convert_pt2e(m)
 
@@ -2247,7 +2257,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         def dynamic_quantize_pt2e(model, example_inputs):
             torch._dynamo.reset()
-            model = export_for_training(model, example_inputs, strict=True).module()
+            model = export_for_training(model, example_inputs).module()
             # Per channel quantization for weight
             # Dynamic quantization for activation
             # Please read a detail: https://fburl.com/code/30zds51q
@@ -2350,7 +2360,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
         m = M()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export_for_training(m, example_inputs).module()
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(),
         )
@@ -2432,7 +2442,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     edge_or_node_to_obs_or_fq[x] = new_observer
 
         example_inputs = (torch.rand(1, 32, 16, 16),)
-        gm = export_for_training(Model().eval(), example_inputs, strict=True).module()
+        gm = export_for_training(Model().eval(), example_inputs).module()
         gm = prepare_pt2e(gm, BackendAQuantizer())
         gm = convert_pt2e(gm)
         for n in gm.graph.nodes:
@@ -2459,9 +2469,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 "ConvWithBNRelu" in node.meta["nn_module_stack"]["L__self__"][1]
             )
 
-        m.conv_bn_relu = export_for_training(
-            m.conv_bn_relu, example_inputs, strict=True
-        ).module()
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
         for node in m.conv_bn_relu.graph.nodes:
             if node.op not in ["placeholder", "output", "get_attr"]:
                 check_nn_module(node)

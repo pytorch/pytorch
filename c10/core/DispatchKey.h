@@ -45,7 +45,6 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(MTIA, extra)                                \
-  _(MAIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)                         \
@@ -180,6 +179,13 @@ enum class DispatchKey : uint16_t {
   // TODO: put this in BackendComponents
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
+
+  // TODO: put this in BackendComponents
+  // MAIA backend lives out of tree
+  // - test/cpp_extensions/maia_extension.cpp
+  // - test/test_torch.py
+  // - aten/src/ATen/test/extension_backend_test.cpp
+  MAIA,
 
   Vulkan, // TODO: put this in BackendComponents
   Metal, // TODO: put this in BackendComponents
@@ -348,7 +354,6 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastMTIA,
-  AutocastMAIA,
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,

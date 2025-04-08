@@ -318,7 +318,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
         self.assertIn(
-            """tensor 'y' requires_grad mismatch. expected requires_grad=1""",
+            """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
             failure_reason,
         )
 
@@ -436,7 +436,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""x is y""", failure_reason)
+        self.assertIn("""L['x'] is L['y']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
@@ -470,7 +470,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """a is b""",
+            """L['a'] is L['b']""",
             failure_reason,
         )
 
@@ -487,7 +487,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3, 3, 3)
         f(c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""a is b""", failure_reason)
+        self.assertIn("""L['a'] is L['b']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -524,7 +524,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """a is b""",
+            """L['a'] is L['b']""",
             failure_reason,
         )
 
@@ -560,7 +560,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """a is b""",
+            """L['a'] is L['b']""",
             failure_reason,
         )
 
@@ -610,7 +610,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """a is b""",
+            """L['a'] is L['b']""",
             failure_reason,
         )
 
@@ -627,7 +627,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3)
         f(c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""a is b""", failure_reason)
+        self.assertIn("""L['a'] is L['b']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
@@ -659,7 +659,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """a is b""",
+            """L['a'] is L['b']""",
             failure_reason,
         )
 
@@ -676,7 +676,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""c is d""", failure_reason)
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
 
     def test_alias_inputs(self):
         def fn():
@@ -1523,7 +1523,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[args[1], args[2]], non_overlapping=[args[0]])""",
+            """0/0: check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
         )
 
     def test_different_inputs_overlapping_set_with_mutation(self):
@@ -1546,7 +1546,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
+            """0/0: check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
         )
 
     def _test_no_storage_overlap_guards(self, f, argsfn):

@@ -277,7 +277,7 @@ class ObservedException(TorchDynamoException):
 
 
 class ObservedUserStopIteration(ObservedException):
-    # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
     value: Optional[Any]
 
     # Reference `StopIteration_init` in CPython
@@ -343,9 +343,8 @@ observed_exception_map = {
 
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
-        name = getattr(exc_type, "__name__", str(exc_type))
         observed_exception_map[exc_type] = type(
-            f"Observed{name}Error", (ObservedException,), {}
+            f"Observed{exc_type.__name__}Error", (ObservedException,), {}
         )
     return observed_exception_map[exc_type]
 
@@ -362,7 +361,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.set_current_exception(exception_vt)
+    tx.exn_vt_stack.append(exception_vt)
     raise observed_exception_map[exc_type]
 
 
@@ -391,7 +390,7 @@ def handle_observed_exception(tx: Any) -> None:
     #
 
     # Fortunately this translates to a simple pop from the exn_vt_stack
-    tx.exn_vt_stack.clear_current_exception()
+    tx.exn_vt_stack.pop()
 
 
 # These exceptions are ok to fallback to eager/graph_break.

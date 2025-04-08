@@ -1,22 +1,10 @@
 # mypy: allow-untyped-defs
-"""The ONNX verification module provides a set of tools to verify the correctness of ONNX models."""
+"""Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
+
+ONNX Runtime is required, and is used as the ONNX backend for export verification.
+"""
 
 from __future__ import annotations
-
-
-__all__ = [
-    "OnnxBackend",
-    "VerificationOptions",
-    "verify",
-    "check_export_model_diff",
-    "VerificationInfo",
-    "verify_onnx_program",
-    "GraphInfo",
-    "GraphInfoPrettyPrinter",
-    "OnnxTestCaseRepro",
-    "find_mismatch",
-    "verify_aten_graph",
-]
 
 import contextlib
 import copy
@@ -43,19 +31,8 @@ from torch import _C
 from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
-from torch.onnx._internal.exporter._verification import (
-    VerificationInfo,
-    verify_onnx_program,
-)
 from torch.types import Number
 
-
-# TODO: Update deprecation messages to recommend the new classes
-
-VerificationInfo.__module__ = "torch.onnx.verification"
-verify_onnx_program.__module__ = "torch.onnx.verification"
-
-# Everything below are deprecated ##############################################
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -834,22 +811,24 @@ def verify(
         ``ONNXProgram`` to test the ONNX model.
 
     Args:
-        model: See :func:`torch.onnx.export`.
-        input_args: See :func:`torch.onnx.export`.
-        input_kwargs: See :func:`torch.onnx.export`.
-        do_constant_folding: See :func:`torch.onnx.export`.
-        dynamic_axes: See :func:`torch.onnx.export`.
-        input_names: See :func:`torch.onnx.export`.
-        output_names: See :func:`torch.onnx.export`.
-        training: See :func:`torch.onnx.export`.
-        opset_version: See :func:`torch.onnx.export`.
-        keep_initializers_as_inputs: See :func:`torch.onnx.export`.
-        verbose: See :func:`torch.onnx.export`.
-        fixed_batch_size: Legacy argument, used only by rnn test cases.
-        use_external_data: Explicitly specify whether to export the model with external data.
-        additional_test_inputs: List of tuples. Each tuple is a group of
-            input arguments to test. Currently only ``*args`` are supported.
-        options: A VerificationOptions object that controls the verification behavior.
+        model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
+        input_args (tuple): See :func:`torch.onnx.export`.
+        input_kwargs (dict): See :func:`torch.onnx.export`.
+        do_constant_folding (bool, optional): See :func:`torch.onnx.export`.
+        dynamic_axes (dict, optional): See :func:`torch.onnx.export`.
+        input_names (list, optional): See :func:`torch.onnx.export`.
+        output_names (list, optional): See :func:`torch.onnx.export`.
+        training (torch.onnx.TrainingMode): See :func:`torch.onnx.export`.
+        opset_version (int, optional): See :func:`torch.onnx.export`.
+        keep_initializers_as_inputs (bool, optional): See :func:`torch.onnx.export`.
+        verbose (bool, optional): See :func:`torch.onnx.export`.
+        fixed_batch_size (bool, optional): Legacy argument, used only by rnn test cases.
+        use_external_data (bool, optional): Explicitly specify whether to export the
+            model with external data.
+        additional_test_inputs (list, optional): List of tuples. Each tuple is a group of
+            input arguments to test. Currently only *args are supported.
+        options (_VerificationOptions, optional): A _VerificationOptions object that
+            controls the verification behavior.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not

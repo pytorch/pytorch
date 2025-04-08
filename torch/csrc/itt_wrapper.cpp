@@ -3,7 +3,7 @@
 #include <torch/csrc/profiler/stubs/base.h>
 
 namespace torch::profiler {
-static __itt_domain* _itt_domain = __itt_domain_create("PyTorch");
+__itt_domain* _itt_domain = __itt_domain_create("PyTorch");
 
 bool itt_is_available() {
   return torch::profiler::impl::ittStubs()->enabled();

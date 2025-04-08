@@ -71,13 +71,6 @@ def _remove_effect_tokens_from_graph_helper(
             new_node = ep.graph.call_function(func, node.args[2:], node.kwargs)
         for k, v in node.meta.items():
             new_node.meta[k] = v
-            if k == "unbacked_bindings":
-                # Remove the extra layer for effect token
-                old_bindings = new_node.meta[k]
-                new_bindings = {
-                    k: path[1:] if path else path for k, path in old_bindings.items()
-                }
-                new_node.meta[k] = new_bindings
 
         node.replace_all_uses_with(new_node)
 

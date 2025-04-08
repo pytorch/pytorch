@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -ex
 
+# The generic Linux job chooses to use base env, not the one setup by the image
+CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
+conda activate "${CONDA_ENV}"
+
 # Use uv to speed up lintrunner init
 python3 -m pip install uv==0.1.45
 

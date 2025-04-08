@@ -2603,10 +2603,8 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
   }
 
 #if LLVM_VERSION_MAJOR > 17
-  irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");
-  varToVal_[v->buffer_var()] = I;
 #else
   llvm::Instruction* I = llvm::CallInst::CreateMalloc(
       irb_.GetInsertBlock(),
@@ -2615,11 +2613,11 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
       size,
       nullptr,
       nullptr);
+#endif
   // Insert the bitcast into the block.
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);
   varToVal_[v->buffer_var()] = malloc;
-#endif
 }
 
 void LLVMCodeGenImpl::visit(const PlacementAllocatePtr& v) {
@@ -2643,7 +2641,7 @@ void LLVMCodeGenImpl::visit(const FreePtr& v) {
 
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
 #if LLVM_VERSION_MAJOR > 17
-    irb_.CreateFree(ptr);
+    irb_.Insert(irb_.CreateFree(ptr));
 #else
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
 #endif

@@ -5,7 +5,6 @@
 #include <ATen/ExpandUtils.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/ACLUtils.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -385,67 +384,6 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 }
 #endif // USE_XNNPACK
 
-#if AT_MKLDNN_ACL_ENABLED()
-Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
-  TORCH_CHECK(
-      qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
-      "Only per tensor quantization is supported in ACL quantized add.");
-
-  Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
-  Tensor qb_contig = qb.contiguous(qa.suggest_memory_format());
-  auto qa_mem_format = qa_contig.suggest_memory_format();
-  Tensor dst = at::native::empty_affine_quantized(
-      at::infer_size_dimvector(qa_contig.sizes(), qb_contig.sizes()),
-      qa_contig.scalar_type(),
-      std::nullopt /* layout */,
-      kCPU,
-      std::nullopt /* pin_memory */,
-      scale,
-      zero_point,
-      qa_mem_format);
-
-  if (qb_contig.size(0) == 0) {
-    return dst;
-  }
-
-  auto input_dims = qa_contig.sizes().vec();
-  auto acl_dtype = dst.scalar_type() == kQInt8
-      ? arm_compute::DataType::QASYMM8_SIGNED
-      : arm_compute::DataType::QASYMM8;
-  auto acl_add = std::make_shared<acl_utils::QuantAdd>(
-      acl_dtype,
-      input_dims,
-      qa_contig.q_scale(),
-      qa_contig.q_zero_point(),
-      qb_contig.q_scale(),
-      qb_contig.q_zero_point(),
-      dst.q_scale(),
-      dst.q_zero_point());
-
-  auto status = acl_add->validate();
-  TORCH_CHECK(
-      status.error_code() == arm_compute::ErrorCode::OK,
-      "Arm Compute Library's Quantized Matmul Validation Failed: " +
-          status.error_description());
-
-  acl_add->configure();
-
-  acl_add->qa_tensor.allocator()->import_memory(qa_contig.data_ptr());
-  acl_add->qb_tensor.allocator()->import_memory(qb_contig.data_ptr());
-  acl_add->qdst_tensor.allocator()->import_memory(dst.data_ptr());
-
-  acl_add->q_add.run();
-
-  // this will not free memory, it will just tell ACL that we're no longer
-  // using the pointer
-  acl_add->qa_tensor.allocator()->free();
-  acl_add->qb_tensor.allocator()->free();
-  acl_add->qdst_tensor.allocator()->free();
-
-  return dst;
-}
-#endif // AT_MKLDNN_ACL_ENABLED()
-
 template <bool ReLUFused = false>
 Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
@@ -468,15 +406,6 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     }
 #endif // USE_PYTORCH_QNNPACK
   }
-
-#if AT_MKLDNN_ACL_ENABLED()
-  if (!ReLUFused && qa.ndimension() > 0 && qa.sizes() == qb.sizes() &&
-      qa.scalar_type() == qb.scalar_type() &&
-      (qa.scalar_type() == kQInt8 || qa.scalar_type() == kQUInt8)) {
-    return acl_qadd(qa, qb, scale, zero_point);
-  }
-#endif // AT_MKLDNN_ACL_ENABLED()
-
   auto qc = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(kCPU)

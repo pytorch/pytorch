@@ -19,7 +19,7 @@ static inline c10::ScalarType qconv_decide_out_dtype(
   return dst_dtype;
 }
 
-static at::Tensor qconv_prepack_xpu(
+at::Tensor qconv_prepack_xpu(
     at::Tensor weight,
     at::Tensor weight_scales,
     double input_scale,

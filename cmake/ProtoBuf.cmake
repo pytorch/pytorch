@@ -52,14 +52,7 @@ macro(custom_protobuf_find)
     endif(MSVC_Z7_OVERRIDE)
   endif(MSVC)
 
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-    message(WARNING "Ancient protobuf forces CMake compatibility")
-    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
-    unset(CMAKE_POLICY_VERSION_MINIMUM)
-  else()
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
-  endif()
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 

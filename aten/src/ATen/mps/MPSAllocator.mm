@@ -699,7 +699,19 @@ ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {
 }
 
 inline std::string MPSHeapAllocatorImpl::format_size(uint64_t size) const {
-  return c10::CachingAllocator::format_size(size);
+  std::ostringstream os;
+  os.precision(2);
+  os << std::fixed;
+  if (size <= 1024UL) {
+    os << size << " bytes";
+  } else if (size <= 1048576UL) {
+    os << ((float)size / 1024.0) << " KB";
+  } else if (size <= 1073741824UL) {
+    os << ((float)size / 1048576.0) << " MB";
+  } else {
+    os << ((float)size / 1073741824.0) << " GB";
+  }
+  return os.str();
 }
 
 } // namespace HeapAllocator

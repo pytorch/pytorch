@@ -159,18 +159,19 @@ TEST(LoggingDeathTest, TestEnforceUsingFatal) {
 }
 #endif
 
-#ifdef FBCODE_CAFFE2
-static C10_NOINLINE void f1() {
+C10_NOINLINE void f1() {
   CAFFE_THROW("message");
 }
 
-static C10_NOINLINE void f2() {
+C10_NOINLINE void f2() {
   f1();
 }
 
-static C10_NOINLINE void f3() {
+C10_NOINLINE void f3() {
   f2();
 }
+
+#ifdef FBCODE_CAFFE2
 TEST(LoggingTest, ExceptionWhat) {
   std::optional<::c10::Error> error;
   try {

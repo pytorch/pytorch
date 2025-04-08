@@ -72,7 +72,7 @@ static get_elementwise_nested_tensor_impl(
 }
 
 template <typename Func>
-static Tensor NestedTensor_elementwise_Tensor(
+Tensor NestedTensor_elementwise_Tensor(
     const Tensor& self,
     const Tensor& other,
     const std::string& op_name,
@@ -234,7 +234,7 @@ Tensor NestedTensor_masked_fill(
 
 
 template <typename Func>
-static Tensor& NestedTensor_elementwise__Tensor(
+Tensor& NestedTensor_elementwise__Tensor(
     Tensor& self,
     const Tensor& other,
     const std::string& op_name,

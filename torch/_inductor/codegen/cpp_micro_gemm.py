@@ -972,15 +972,15 @@ class CppMicroGemmAMX(CppMicroGemm):
         // Load a tile of B & cache it in L1D.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
-        {%- for vec_idx in range(0, block_n, 32) %}
-            {%- if (block_n - vec_idx) >= 32 %}
-            auto b_int8_idx_{{vec_idx}} = at::vec::Vectorized<int8_t>::loadu(
+        {%- for vec_idx in range(0, block_n - 1, 32) %}
+            auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
                 base_addr + idx_q + {{vec_idx}} ,
                 static_cast<int64_t>(32)
             );
-            auto b_bf16_idx_{{vec_idx}} = at::vec::convert<{{input_t}}>(b_int8_idx_{{vec_idx}});
-            b_bf16_idx_{{vec_idx}}.store(dequantized_B_buf + idx_dq + {{vec_idx}});
-            {%- else %}
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+            b_bf16.store(dequantized_B_buf + idx_dq + {{vec_idx}});
+        {%- endfor %}
+        {%- if (block_n % 32) != 0 %}
             auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
                 base_addr + idx_q + {{block_n - (block_n % 32)}},
                 static_cast<int64_t>({{block_n % 32}})
@@ -990,8 +990,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                 dequantized_B_buf + idx_dq + {{block_n - (block_n % 32)}},
                 static_cast<int64_t>({{block_n % 32}})
             );
-            {%- endif %}
-        {%- endfor %}
+        {%- endif %}
         }
     };
 {%- endif %}

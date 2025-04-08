@@ -355,7 +355,6 @@ def _get_aten_graph_module_for_pattern(
         pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
-        strict=True,
     ).module()
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]

@@ -27,8 +27,7 @@ namespace torch::lazy {
 // be simplified but it should probably be done together with
 // designing/refactoring the overall approach to get/set of default eager/lazy
 // device types
-static torch::lazy::BackendDevice GetDeviceOrCurrent(
-    const std::string& device_str) {
+torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   if (device_str.empty()) {
     getBackend()->GetDefaultDeviceType();
     return torch::lazy::BackendDevice();
@@ -36,12 +35,12 @@ static torch::lazy::BackendDevice GetDeviceOrCurrent(
   return torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
 }
 
-static std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
+std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
   torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(tensor);
   return lazy_tensor->GetUniqueId();
 }
 
-static std::string GetTensorsDump(
+std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
     const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
         coverter) {
@@ -57,7 +56,7 @@ static std::string GetTensorsDump(
   return coverter(nodes);
 }
 
-static std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
+std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
     const std::vector<at::Tensor>& tensors,
     bool want_all) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors;
@@ -77,15 +76,14 @@ static std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
   return lazy_tensors;
 }
 
-static std::string GetTensorsBackendGraph(
-    const std::vector<at::Tensor>& tensors) {
+std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors =
       GetLtcTensors(tensors, /*want_all=*/false);
   return torch::lazy::LazyGraphExecutor::Get()->DumpBackendComputation(
       lazy_tensors);
 }
 
-static void SyncTensors(
+void SyncTensors(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices,
     bool wait,
