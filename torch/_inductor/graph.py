@@ -80,11 +80,13 @@ from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
+    get_layout_constraint_tag,
     lowerings,
     make_fallback,
     maybe_layout_constraints,
     needs_realized_inputs,
     require_contiguous,
+    tag_to_layout_constraint,
     unsupported_output_tensor,
 )
 from .runtime import autotune_cache
@@ -240,6 +242,14 @@ def mark_nodes_dislike_padding(
         if isinstance(
             cur.target,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
+        if (
+            isinstance(cur.target, torch._ops.OpOverload)
+            and get_layout_constraint_tag(cur.target)
+            == torch._C.Tag.needs_exact_strides
         ):
             cur.meta["dislike_padding"] = True
             continue
@@ -1150,34 +1160,26 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                # use contiguous unless the (custom) op asks something else
-                # explicitly
-                if torch._C.Tag.needs_exact_strides in target.tags:
-                    decided_constraint = constrain_to_fake_tensors  # type: ignore[assignment]
-                elif torch._C.Tag.needs_fixed_stride_order in target.tags:
-                    decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
-                elif torch._C.Tag.flexible_layout in target.tags:
-                    decided_constraint = None  # type: ignore[assignment]
-                else:
-                    # If there are no tags, we do different things depending on
-                    # if it's a builtin ATen/prim ops or custom ops.
-                    # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
-                    # For custom ops, we constrain_to_fx_strides to maintain the
-                    # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
+                tag = get_layout_constraint_tag(target, with_default=False)
+                if (
+                    tag is None
+                    and torch._library.utils.is_builtin(target)
+                    and self.is_backward
+                ):
+                    # for implicit fallback ATen ops during backward, if there
+                    # is no layout constraint tag, we conservatively require contiguous
+                    # input since some eager kernels do not
+                    # support non-contiguous inputs. Otherwise they may silently cause
+                    # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
+                    # We only do this For ATen ops and for backward.
                     #
-                    # For ATen ops, only apply the constraint for backward
-                    # ops since fwd ops should work for any strides.
-                    if torch._library.utils.is_builtin(target) and self.is_backward:
-                        decided_constraint = require_contiguous  # type: ignore[assignment]
-                    else:
-                        # maybe_layout_constraints will decide the layout constraint for the custom op
-                        # lazily
-                        decided_constraint = None  # type: ignore[assignment]
+                    # TODO: should really switch to "needs_fixed_stride" constraint on these
+                    # and identify them one by one.
+                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                else:
+                    tag = get_layout_constraint_tag(target, with_default=True)
+                    decided_constraint = tag_to_layout_constraint(tag)
 
-                # for implicitly fallback ops, we conservatively requires
-                # contiguous input since some eager kernels does not
-                # support non-contiguous inputs. They may silently cause
-                # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
                 make_fallback(target, layout_constraint=decided_constraint)
 
             elif get_decompositions([target]):
