@@ -464,6 +464,18 @@ class BaseSchedulerNode:
             | self.scheduler.completed_operations
         )
 
+        def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
+            # Inside of NodeUser, we track that the read and write are equivalent 
+            # before deciding if the use can be inplace. 
+            # But if that use is fused into a larger kernel, we need to check equivalence
+            # of other accesses as well.
+            fused_node = buf_to_be_inplaced.scheduler.get_fused_node(self)
+            buf_name = buf_to_be_inplaced.get_name()
+            # Will Dedup read/writes with equivalent indices
+            return len(OrderedSet([
+                r for r in itertools.chain(fused_node.read_writes.reads, fused_node.read_writes.writes) if r.name == buf_name
+            ])) <= 1
+
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -515,6 +527,7 @@ class BaseSchedulerNode:
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
                         and can_match_buffer_size(input_buf.node, buf.node)
+                        and single_index_in_fused_node(input_buf)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
