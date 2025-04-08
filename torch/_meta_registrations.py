@@ -2509,7 +2509,7 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
     @register_meta(torch.ops.onednn.qconv_pointwise.default)
-    def meta_qconv2d_pointwise(
+    def meta_qconv_pointwise(
         x,
         x_scale,
         x_zp,
