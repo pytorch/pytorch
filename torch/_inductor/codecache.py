@@ -644,7 +644,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 def build_code_hash(
-    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
+    roots: Optional[list[str]], prefix: str, hasher: hashlib._hashlib.HASH
 ) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
@@ -2086,7 +2086,7 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
+    def _get_uncompiled_header(cls, device: str) -> Optional[str]:
         """
         Given a device type, returns the path to a CPP header file to be precompiled.
         Currently, this is only utilized by the cpp_wrapper classes.
@@ -2427,7 +2427,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
     @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
+    def _get_uncompiled_header(cls, device: str) -> Optional[str]:
         """
         Given a device type, returns the path to a CPP header file to be precompiled.
         Currently, this is only utilized by the cpp_wrapper classes.
