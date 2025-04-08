@@ -3079,6 +3079,11 @@ def all_gather_object(object_list, obj, group=None):
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
+
+    .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
@@ -3177,6 +3182,11 @@ def gather_object(
         ``torch.cuda.current_device()`` and it is the user's responsiblity to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -3300,6 +3310,11 @@ def send_object_list(
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
+
+    .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
@@ -3396,6 +3411,11 @@ def recv_object_list(
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -3506,6 +3526,11 @@ def broadcast_object_list(
     .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -3625,6 +3650,11 @@ def scatter_object_list(
     .. note:: Note that this API differs slightly from the scatter collective
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  Read the "Object collectives" section of `torch.distributed` docs
+        for more information.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
