@@ -130,6 +130,11 @@ struct DropoutDescriptor
              unsigned long long seed, bool use_mask, bool state_evo, miopenRNGType_t rng_mode) {
       MIOPEN_CHECK(miopenSetDropoutDescriptor(mut_desc(), handle, dropout, states, stateSizeInBytes, seed, use_mask, state_evo, rng_mode));
     }
+
+    void restore(miopenHandle_t handle, float dropout, void* states, size_t stateSizeInBytes,
+      unsigned long long seed, bool use_mask, bool state_evo, miopenRNGType_t rng_mode) {
+      MIOPEN_CHECK(miopenRestoreDropoutDescriptor(mut_desc(), handle, dropout, states, stateSizeInBytes, seed, use_mask, state_evo, rng_mode));
+    }
 };
 
 struct RNNDescriptor

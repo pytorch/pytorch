@@ -72,28 +72,25 @@ namespace at::native {
 
 namespace at::native {
 
-// Workspace copied from Conv_miopen.cpp but is put here inside anonymous namespace
-// to avoid duplicate symbols and to avoid the need to expose as a public struct.
-
 namespace {
 
-struct Workspace {
-  Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
-  }
-  Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
-  ~Workspace() {
-    if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(data);
-    }
-  }
-
-  size_t size;
-  void* data;
-};
-
+    struct DropoutState {
+        DropoutState(size_t size) : size(size), data(NULL) {
+            data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+        }
+        DropoutState(const DropoutState&) = delete;
+        DropoutState(DropoutState&&) = default;
+        DropoutState& operator=(DropoutState&&) = default;
+        ~DropoutState() {
+            if (data) {
+                c10::hip::HIPCachingAllocator::raw_delete(data);
+            }
+        }
+    
+        size_t size;
+        void* data;
+    };
+    
 } // anonymous
 
 //RNNDescriptor.
@@ -146,12 +143,8 @@ struct RNNDescriptorParams {
 
     void set_dropout(double dropout_rate, uint64_t dropout_seed = 0) {
         this->dropout_rate = dropout_rate;
-        if (dropout_seed == 0) {
-            // rand() returns 32 bit values so we combine two of them
-            this->dropout_seed = rand() << 32 | rand();
-        } else {
-            this->dropout_seed = dropout_seed;
-        }
+        // TODO: Implement seed setting for RNN dropout
+        this->dropout_seed = dropout_seed;
     }
 
     void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype, miopenRNNBiasMode_t bias_mode) {
@@ -179,7 +172,7 @@ struct RNNDescriptorParams {
 //TensorDescriptor list.
 std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntArrayRef batch_sizes) {
     std::vector<TensorDescriptor> descriptors(batch_sizes.size());
-    size_t i =0;
+    size_t i = 0;
 
     auto batch_tensor_size = tensor.sizes().vec();
     for (auto batch_size : batch_sizes) {
@@ -250,8 +243,8 @@ struct RNNParams {
 
 struct RNNDescriptors {
     RNNDescriptor rnn_desc;
-    DropoutDescriptor dropout_desc;
-    std::unique_ptr<Workspace> dropout_states;
+    static thread_local DropoutDescriptor dropout_desc;
+    static thread_local std::unique_ptr<DropoutState> dropout_states;
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
     TensorDescriptor hx_desc;
@@ -263,19 +256,33 @@ struct RNNDescriptors {
         if (fn.rnn.dropout_rate == 0.0) {
             rnn_desc = fn.rnn.descriptor();
         } else {
-            size_t statesSizeInBytes = 0;
-            miopenDropoutGetStatesSize(handle, &statesSizeInBytes);
-            size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
+            if (!dropout_states) {
+                size_t states_size_in_bytes = 0;
+                MIOPEN_CHECK(miopenDropoutGetStatesSize(handle, &states_size_in_bytes));
+                size_t states_size = states_size_in_bytes / sizeof(rocrand_state_xorwow);
 
-            dropout_states = std::unique_ptr<Workspace>(new Workspace(states_size * sizeof(rocrand_state_xorwow)));
-            dropout_desc.set(handle,
-                             fn.rnn.dropout_rate,
-                             dropout_states->data,
-                             dropout_states->size,
-                             fn.rnn.dropout_seed,
-                             false,
-                             false,
-                             miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
+                dropout_states = std::make_unique<DropoutState>(states_size * sizeof(rocrand_state_xorwow));
+
+                dropout_desc.set(handle,
+                                 fn.rnn.dropout_rate,
+                                 dropout_states->data,
+                                 dropout_states->size,
+                                 fn.rnn.dropout_seed,
+                                 false,
+                                 false,
+                                 miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
+            } else {
+                dropout_desc.restore(handle,
+                                    fn.rnn.dropout_rate,
+                                    dropout_states->data,
+                                    dropout_states->size,
+                                    fn.rnn.dropout_seed,
+                                    // use_mask flag must be true in order to continue from a saved RNG state
+                                    true,
+                                    false,
+                                    miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
+            }
+
             rnn_desc = fn.rnn.descriptorWithDropout(dropout_desc);
         }
 
@@ -304,6 +311,11 @@ struct RNNDescriptors {
         return get_descs(y_descs);
     }
 };
+
+// We need to store both the dropout descriptor and state thread locally to avoid multithreading issues
+thread_local DropoutDescriptor RNNDescriptors::dropout_desc {};
+// Each state is 0.75 MB so there is no problem in caching all of them for each thread
+thread_local std::unique_ptr<DropoutState> RNNDescriptors::dropout_states { nullptr };
 
 Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 {
@@ -976,6 +988,6 @@ REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
-}} // namespace at::native
+} // namespace at::native
 
 #endif
