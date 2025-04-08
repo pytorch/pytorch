@@ -3048,6 +3048,153 @@ if HAS_CUDA:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_multi_devices(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                y_cpu0 = y_cpu + 1
+                y_cpu1 = y_cpu0 @ weight_cpu
+
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                return x_cuda2, y_cpu1, z_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # reorder merges ops on cuda into 1 graph partition
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_multi_devices_interleave(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                y_cpu0 = y_cpu + 1
+                x_cuda2_cpu = x_cuda2.cpu()  # adds dependency on gpu computations
+                y_cpu1 = y_cpu0 @ weight_cpu + x_cuda2_cpu
+
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                y_cpu2 = y_cpu + 5
+                y_cpu3 = y_cpu2 @ weight_cpu
+
+                u_cuda0 = z_cuda + 3
+                u_cuda1 = u_cuda0 @ weight_cuda
+                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+
+                return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # cross-device dependency forces 1 extra graph partition but remaining part
+            # are still reordered into 1 graph partition. So 2 partitions in total.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_custom_op_with_no_dependency(self):
+            # Two reasons for this:
+            # 1. We want to reuse the same mask for many masked_fill calls
+            # 2. Prevent inductor from fusing this op into other ops (e.g. masked_fill)
+            #    so we can still reorder in scheduler
+            @torch.library.custom_op(
+                "mylib::create_mask",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def create_mask(
+                padded_size: int, original_size: int, device: torch.device
+            ) -> torch.Tensor:
+                mask = torch.zeros((padded_size,), dtype=torch.bool, device=device)
+                mask[original_size:] = True
+                return mask
+
+            @create_mask.register_fake
+            def _(padded_size, original_size, device):
+                return torch.empty((padded_size,), dtype=torch.bool, device=device)
+
+            def f(padded_tensor, original_tensor, weight):
+                original_size = original_tensor.size()[0]
+                padded_size = padded_tensor.size()[0]
+
+                # element wise op so we don't care padding value
+                padded_tensor = padded_tensor + 1
+                padded_tensor = torch.nn.functional.relu(padded_tensor)
+
+                # dot product requires padding with 0
+                dot_res = padded_tensor.dot(weight)
+                padded_tensor += dot_res
+
+                # min requires padding with inf, so we create mask now
+                mask = create_mask(padded_size, original_size, padded_tensor.device)
+                min_res = torch.min(
+                    torch.ops.aten.masked_fill(padded_tensor, mask, float("inf"))
+                )
+
+                # max requires padding with inf. we can reuse previous mask
+                max_res = torch.max(
+                    torch.ops.aten.masked_fill(padded_tensor, mask, -float("inf"))
+                )
+
+                return min_res + max_res + padded_tensor
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(padded_size, original_size):
+                padded_tensor = torch.randn(padded_size, device="cuda")
+                padded_tensor[original_size:] = 0
+                original_tensor = torch.randn(original_size, device="meta")
+
+                weight = torch.randn(padded_size, device="cuda")
+                eager_out = f(padded_tensor, original_tensor, weight)
+                for _ in range(3):
+                    compiled_out = compiled_f(padded_tensor, original_tensor, weight)
+                    self.assertEqual(eager_out, compiled_out)
+
+            # although custom op `create_mask` happens at the middle of function, reorder
+            # moves it to the front so we only have 1 partition. This leads to 1 cudagraph
+            run(8, 4)
+
+            # recompilation leads to 1 NEW cudagraph
+            run(8, 6)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
         def test_meta_tensor(self):
             def foobar(x, y):
                 return x * 2, y * 3

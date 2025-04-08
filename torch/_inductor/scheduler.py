@@ -4214,9 +4214,10 @@ class Scheduler:
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
         """
-        Given topologically sorted `nodes`, reorder by devices while respecting dependencies.
-        Specifically, when a node reads from another device, execute all leading nodes on that
-        device since we already have a graph partition for that device.
+        Given topologically sorted `nodes`, reorder by devices while
+        respecting dependencies. Specifically, when a node reads from
+        another device, execute all leading nodes on that device since
+        we already have a graph partition for that device.
         """
 
         result: list[BaseSchedulerNode] = []
