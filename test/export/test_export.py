@@ -77,9 +77,9 @@ from torch.testing._internal.custom_tensor import (
     ConstantExtraMetadataTensor,
     CustomTensorPlainOut,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import HAS_GPU, requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
