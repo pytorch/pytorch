@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import operator
 import random
 import textwrap
@@ -74,7 +73,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     Generate Wrapper FX IR, for use in other backends.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         graph = torch.fx.Graph()
         self.gm = GraphModule({}, graph)  # Wrapper FX IR.
@@ -99,7 +98,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
-    ):
+    ) -> "WrapperFxCodegen":
         # For derived backends, this could be a subclass.
         return cls()
 
@@ -128,12 +127,19 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(kernel, CachingAutotuner)
         return kernel
 
-    def _fake_tensor(self, size, stride, **kwargs) -> torch.Tensor:
+    def _fake_tensor(
+        self,
+        size: tuple[Any, ...],
+        stride: tuple[Any, ...],
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[torch.device] = None,
+    ) -> torch.Tensor:
         with V.fake_mode:
             return torch.empty_strided(
                 size,
                 stride,
-                **kwargs,
+                dtype=dtype,
+                device=device,
             )
 
     def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
@@ -205,7 +211,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             if isinstance(node, (ir.Buffer, WorkspaceArg)):
                 return node
             elif isinstance(node, ir.NoneAsConstantBuffer):
-                self.buffer_to_node[None] = None
                 return None
             elif isinstance(node, ir.StorageBox):
                 return generate_to_buffer(node.data)
@@ -237,7 +242,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         buffer = generate_to_buffer(node)
         return self.buffer_to_node[buffer.get_name()] if buffer is not None else None
 
-    def _generate_output(self):
+    def _generate_output(self) -> None:
         """
         Generate FX IR for graph outputs.
         """
@@ -247,12 +252,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         ]
 
         # Single return elements don't use a tuple.
-        if len(output_nodes) == 1:
-            output_nodes = output_nodes[0]
+        output_value = output_nodes[0] if len(output_nodes) == 1 else output_nodes
 
-        self.gm.graph.output(output_nodes)
+        self.gm.graph.output(output_value)
 
-    def _generate(self, is_inference) -> tuple[WrapperGraphModule, None]:
+    def _generate(self, is_inference: bool) -> tuple[WrapperGraphModule, None]:
         # We disable planning during training because it presently increases peak memory consumption.
         # TODO don't duplicate this code. Refactor into a helper in the base class.
         if is_inference and config.memory_planning:
@@ -355,7 +359,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         buf = line.node
 
         # No need to free placeholders.
-        if self.buffer_to_node[buf.name].op == "placeholder":
+        if self.buffer_to_node[buf.get_name()].op == "placeholder":
             return
 
         self._free(buf)
@@ -363,7 +367,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_free_if_not_reused(self, line: Line) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
-        assert buf.name not in V.graph.removed_buffers
+        assert buf.get_name() not in V.graph.removed_buffers
         if not line.is_reused:
             self._free(buf)
 
@@ -403,10 +407,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, ReuseLine)
         old = line.node
         new = line.reused_as
-        assert not any(buf.name in V.graph.removed_buffers for buf in (old, new))
+        assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
         assert old.get_dtype() == new.get_dtype()
 
-        old_node = self.buffer_to_node[old.name]
+        old_node = self.buffer_to_node[old.get_name()]
         result_node = old_node
 
         # Change shape and stride.
@@ -427,7 +431,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         # Free the old buffer, if we allocated a new tensor.
         if (
-            old.name not in V.graph.get_output_names()
+            old.get_name() not in V.graph.get_output_names()
             and line.delete_old
             and result_node is not old_node
         ):
@@ -459,7 +463,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, CommBufferFreeLine)
 
         buf = line.node
-        assert buf.name not in V.graph.removed_buffers
+        assert buf.get_name() not in V.graph.removed_buffers
         device = torch.device(f"cuda:{self.node.get_device().index}")
         dtype = buf.get_dtype()
         shape = tuple(buf.get_size())
