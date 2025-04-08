@@ -206,7 +206,7 @@ mkldnn_gemm(
     float* c_data, int64_t ldc) {
 // introduce heuristic to validate dispatch to MKLDNN
 // (m * n * k <= 16 * 16 * 16)
-  bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
+  bool bf16_usable = use_mkldnn_bf16_matmul();
   if (!bf16_usable) {
     return false;
   }
@@ -228,9 +228,6 @@ mkldnn_gemm(
   }
 
   auto idtype = ideep::tensor::data_type::bf16;
-  if constexpr (std::is_same_v<scalar_t, float>) {
-    idtype = ideep::tensor::data_type::f32;
-  }
 
   ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
   ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
