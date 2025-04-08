@@ -191,6 +191,10 @@ html_context = {
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
     "language_bindings_links": theme_variables.get("language_bindings_links", []),
+    "date_info": {
+        "enabled": True,
+        "paths_to_skip": ["generated"],
+    },
 }
 
 napoleon_use_ivar = True
@@ -3716,6 +3720,7 @@ def process_docstring(app, what_, name, obj, options, lines):
 
 
 def setup(app):
+    pytorch_sphinx_theme2.setup(app)
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
