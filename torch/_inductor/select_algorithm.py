@@ -559,6 +559,8 @@ class TritonTemplateKernel(TritonKernel):
         for input_node in self.input_nodes[: self.prefix_args]:
             # get args in correct order
             self.args.input(input_node.get_name())
+            self.prologue_supported_inputs.add(input_node.get_name())
+
 
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
@@ -744,7 +746,6 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        self.prologue_supported_inputs.add(input_node.get_name())
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
