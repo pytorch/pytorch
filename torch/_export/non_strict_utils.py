@@ -27,6 +27,7 @@ from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
     _DimHint,
+    _DimHintType,
     _process_dynamic_shapes,
     _RelaxedConstraint,
     _tree_map_with_path,
@@ -435,10 +436,19 @@ def make_constraints(
                         upper=int_oo if dim.max is None else dim.max,
                     )
                     if is_int(d):
-                        trace_vr & user_vr
+                        out_vr = trace_vr & user_vr
                     else:
                         range_constraints[d.node.expr] &= user_vr
                         shape_env.var_to_range[d.node._expr] &= user_vr
+                        out_vr = range_constraints[d.node.expr]
+                    # check for specializations
+                    if dim.type == _DimHintType.DYNAMIC and out_vr.is_singleton():
+                        msg = (
+                            f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                            f"but tracing inferred a static shape of {out_vr.lower} for dimension "
+                            f"inputs{pytree.keystr(flat_paths[input_index])}.shape[{i}]."
+                        )
+                        range_violations.append(msg)
                 except torch.utils._sympy.value_ranges.ValueRangeError:
                     msg = (
                         f"- Received user-specified min/max range of [{dim.min}, {dim.max}], "
@@ -699,9 +709,38 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
-            # Redirect to torch.select for indexing with symint.
-            if isinstance(args[1], torch.SymInt):
-                return torch.select, [args[0], 0, args[1]], {}
+
+            def rewrite(dim, item):
+                # Redirect to torch.select for indexing.
+                if isinstance(item, (int, torch.SymInt)):
+                    return dim, (torch.select, [dim, item])
+                # Redirect to torch.ops.aten.slice for slicing.
+                if isinstance(item, slice):
+                    return dim + 1, (
+                        torch.ops.aten.slice,
+                        [dim, item.start, item.stop, item.step or 1],
+                    )
+                # Otherwise do nothing.
+
+            items = args[1] if isinstance(args[1], tuple) else (args[1],)
+            dim = 0
+            # Sequence rewrites.
+            sequence = []
+            for item in items:
+                if (r := rewrite(dim, item)) is None:
+                    return func, args, kwargs
+                dim, call_spec = r
+                sequence.append(call_spec)
+
+            def run():
+                # Run sequence.
+                t = args[0]
+                for _method, _args in sequence:
+                    t = _method(t, *_args)
+                return t
+
+            return run, [], {}
+
         return func, args, kwargs
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
