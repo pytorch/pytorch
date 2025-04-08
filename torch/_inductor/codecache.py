@@ -644,7 +644,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 def build_code_hash(
-    roots: Optional[list[str]], prefix: str, hasher: hashlib._hashlib.HASH
+    roots: Optional[list[str]], prefix: str, hasher: "hashlib._Hash"
 ) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)

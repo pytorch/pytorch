@@ -348,7 +348,7 @@ def get_backend_features(
     if isinstance(device, torch.device):
         device_type = device.type
     else:
-        assert isinstance(device, str)
+        assert isinstance(device, str), type(device)
         device_type = device
         device = torch.device(device_type)
     scheduling_ctor = get_scheduling_for_device(device_type)
@@ -361,7 +361,7 @@ def has_backend_feature(
     device: Union[torch.device, str, None], feature: BackendFeature
 ) -> bool:
     """See also V.graph.has_feature"""
-    assert isinstance(feature, BackendFeature)
+    assert isinstance(feature, BackendFeature), type(feature)
     return feature in get_backend_features(device)
 
 
@@ -478,7 +478,7 @@ def register_device_op_overrides(
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
-    assert isinstance(device, str)
+    assert isinstance(device, str), type(device)
 
     if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
@@ -561,7 +561,7 @@ def check_dtype(
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
-        assert isinstance(var, CppCSEVariable)
+        assert isinstance(var, CppCSEVariable), type(var)
         if dtype == torch.bool:
             if var.is_vec:
                 is_same_dt = f"IsVecMaskType<decltype({var})>::value"
@@ -622,13 +622,11 @@ class DataTypePropagation:
             return None
 
         if node.target == operator.getitem:
-            from ..ir import IRNode
-
             node_arg = node.args[0]
-            assert isinstance(node_arg, IRNode)
+            assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
 
-        assert isinstance(node.target, str)
+        assert isinstance(node.target, str), type(node.target)
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -674,8 +672,8 @@ class DataTypePropagation:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
-        assert isinstance(node, SchedulerNode)
-        assert isinstance(node._body, LoopBody)
+        assert isinstance(node, SchedulerNode), type(node)
+        assert isinstance(node._body, LoopBody), type(node._body)
         return DataTypePropagation.propagate_loopbody(node._body)
 
 
@@ -1283,7 +1281,7 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name: str, line: str):
         super().__init__(line)
         self.name = name
-        assert not isinstance(line, DeferredLineBase)
+        assert not isinstance(line, DeferredLineBase), type(line)
 
     def __call__(self) -> Optional[str]:
         if not is_buffer_removed(self.name):
@@ -1399,7 +1397,7 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name: str, output_name: str) -> None:
-        assert output_name not in self.inplace_buffers
+        assert output_name not in self.inplace_buffers, output_name
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
             assert not isinstance(buf, RemovedArg)
@@ -1461,7 +1459,7 @@ class KernelArgs:
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
-            )
+            ), existing_arg
         self.workspace_args.append(arg)
         return arg.inner_name, 0
 
@@ -1489,7 +1487,7 @@ class KernelArgs:
         )
         for existing_arg in self.workspace_args:
             if existing_arg.inner_name == arg.inner_name:
-                assert arg == existing_arg
+                assert arg == existing_arg, (arg, existing_arg)
         self.workspace_args.append(arg)
         return arg.inner_name
 
@@ -1676,7 +1674,7 @@ class CSEVariable:
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
-        assert isinstance(bounds, ValueRanges)
+        assert isinstance(bounds, ValueRanges), type(bounds)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
@@ -1806,7 +1804,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         elif isinstance(expr, DeferredLineBase):
             cache_key = expr.line
         else:
-            assert isinstance(expr, str)
+            assert isinstance(expr, str), type(expr)
             cache_key = expr
         var = self.try_get(cache_key)
         if not var:
@@ -2047,7 +2045,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
-        assert isinstance(var, str)
+        assert isinstance(var, str), type(var)
         assert lower is None or isinstance(lower, str)
         assert upper is None or isinstance(upper, str)
         if lower and upper:
@@ -2393,7 +2391,9 @@ class CSEProxy(DefaultHandler):
 
         fx_node = V.interpreter.current_node
         if fx_node.target == name and self.kernel.node_to_bounds is not None:
-            assert isinstance(self.kernel.node_to_bounds, dict)
+            assert isinstance(self.kernel.node_to_bounds, dict), type(
+                self.kernel.node_to_bounds
+            )
             return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
         elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
             # These create lots of inner strings. We would need to compute the bounds at the ops
@@ -2428,7 +2428,7 @@ class CSEProxy(DefaultHandler):
     ) -> sympy.Symbol:
         if isinstance(size, int):
             size = sympy.Integer(size)
-        assert isinstance(size, sympy.Expr), size
+        assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
 
         if var.bounds.lower < 0:
