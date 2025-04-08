@@ -484,7 +484,7 @@ Tensor& log_softmax_out(
     std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
-  if ((input_.is_cuda()||input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
+  if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
       dtype == ScalarType::Float) {
     if (!output_.is_contiguous()) {
       auto options =
