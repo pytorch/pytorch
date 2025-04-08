@@ -132,6 +132,7 @@ class MPSBasicTests(TestCase):
             "chebyshev_polynomial_u",
             "chebyshev_polynomial_v",
             "chebyshev_polynomial_w",
+            "hermite_polynomial_h",
         ],
     )
     def test_pointwise_binary_op(self, op_name):
@@ -230,6 +231,7 @@ for test_name in [
     "test_sum_keepdims",
     "test_tanh",
     "test_vectorized_ops_masked",
+    "test_var_mean_tile_reduction_True",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",
