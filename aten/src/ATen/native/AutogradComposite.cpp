@@ -112,6 +112,19 @@ Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
       "or between the same device. Got ", src_device, " to ", dst_device
     );
 
+    if (src_device_type == dst_device_type) {
+      c10::DeviceIndex src_index = at::empty({}, at::TensorOptions().device(src_device)).device().index();
+      c10::DeviceIndex dst_index = at::empty({}, at::TensorOptions().device(dst_device)).device().index();
+
+      // NOTE: This case might already work, but we do not have any tests for it
+      // yet, so throw an error.
+      TORCH_CHECK(
+        src_index == dst_index,
+        "Lazy cloning between the same device type is only supported if the ",
+        "device indices are the same. Got ", src_device, " to ", dst_device
+      );
+    }
+
     c10::Allocator* allocator = nullptr;
 
     if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
