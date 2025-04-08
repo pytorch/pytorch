@@ -1375,6 +1375,16 @@
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
+- func: _bmm_dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _bmm_dtype_cuda
+
+- func: _bmm_dtype.out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CUDA: _bmm_out_dtype_cuda
+
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
   device_guard: False

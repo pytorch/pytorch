@@ -248,6 +248,16 @@ namespace at::cuda::blas {
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
+#define BGEMM_CHECK_ARGVALUES_C_DTYPE(Dtype, C_Dtype)           \
+  do {                                        \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, m); \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, n); \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, k); \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, lda);  \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldb);  \
+    CUDABLAS_POSINT_CHECK(bgemm<C_Dtype>, ldc);  \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
+  } while (0)
 
 namespace {
 // Following the pattern of CuSparseDescriptor
@@ -334,8 +344,8 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 } // namespace
 
 
-template <typename Dtype>
-static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
+template <typename Dtype, typename C_Dtype = Dtype>
+static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
@@ -495,9 +505,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
 }
 
 
-template <typename Dtype>
-inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-  static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublas: not implemented");
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
 template <>
@@ -618,6 +628,67 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 }
 
 template <>
+void bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  BGEMM_CHECK_ARGVALUES_C_DTYPE(at::Half, float);
+  float falpha = alpha;
+  float fbeta = beta;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+  auto compute_type = CUDA_R_32F;
+#endif
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
+#ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
+  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
+                                   hipOperationToRocOperation(opa),
+                                   hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
+                                   (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
+                                   b, rocblas_datatype_f16_r, (int)ldb, strideb,
+                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+                                   0, flag)));
+#else
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    halpha = alpha;
+    hbeta = beta;
+    compute_type = CUDA_R_16F;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
+  if (prop->major >= 5){
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+      handle, opa, opb, m, n, k,
+      alpha_ptr, a, CUDA_R_16F, lda, stridea,
+      b, CUDA_R_16F, ldb, strideb, beta_ptr,
+      c, CUDA_R_32F, ldc, stridec,
+      num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  } else {
+    for (const auto i : c10::irange(num_batches)) {
+      at::cuda::blas::gemm<at::Half, float>(
+        transa, transb,
+        m, n, k,
+        alpha, (a + i * stridea), lda,
+        (b + i * strideb), ldb, beta,
+        (c + i * stridec), ldc);
+    }
+  }
+#endif // USE_ROCM
+}
+
+template <>
 void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
@@ -643,6 +714,35 @@ void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) 
                                   compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
+
+
+template <>
+void bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  BGEMM_CHECK_ARGVALUES(at::BFloat16);
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  const float falpha = alpha;
+  const float fbeta = beta;
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+
+#if defined(USE_ROCM)
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
+                                  opa, opb, (int)m, (int)n, (int)k,
+                                  (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
+                                  b, CUDA_R_16BF, (int)ldb, strideb,
+                                  (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
+                                  (int)num_batches,
+                                  compute_type,
+                                  CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+}
+
 
 template <>
 void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double))
@@ -739,6 +839,42 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
 #endif
   else {
     bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
+}
+
+template<>
+void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
+{
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+    if (!bgemm_internal_cublaslt<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half))) {
+      bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
+    }
+  }
+#if defined(USE_ROCM) && !defined(_MSC_VER)
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::bgemm_internal_ck<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  }
+#endif
+  else {
+    bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
+  }
+}
+
+template<>
+void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
+{
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+    if (!bgemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
+      bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+    }
+  }
+#if defined(USE_ROCM) && !defined(_MSC_VER)
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
+#endif
+  else {
+    bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
 }
 
@@ -852,6 +988,31 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
     bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
 }
+
+template <>
+void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  // if (tuning_ctx->IsTunableOpEnabled()) {
+  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
+  // }
+  // else {
+    bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
+  // }
+}
+
+
+template <>
+void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  // if (tuning_ctx->IsTunableOpEnabled()) {
+  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
+  // }
+  // else {
+    bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  // }
+}
+
+
 
 template <typename Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
@@ -1180,6 +1341,18 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
   }
 }
 
+template<>
+void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
+{
+  return;
+}
+
+template<>
+void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
+{
+  return;
+}
+
 template <typename DType>
 inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
   tunable::GemmParams<DType> params;
@@ -1286,6 +1459,30 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
 }
+
+template <>
+void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  // if (tuning_ctx->IsTunableOpEnabled()) {
+  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
+  // }
+  // else {
+    gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  // }
+}
+
+
+template <>
+void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  // if (tuning_ctx->IsTunableOpEnabled()) {
+  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
+  // }
+  // else {
+    gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  // }
+}
+
 
 
 template <typename Dtype>
