@@ -184,7 +184,7 @@ fi
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   echo "Checking that MKL is available"
   build_and_run_example_cpp check-torch-mkl
-elif [[ "$(uname -m)" != "arm64" && "$(uname -m)" != "s390x" ]]; then
+elif [[ "$(uname -m)" != "arm64" && "$(uname -m)" != "s390x" && "$(uname -m)" != "ppc64le" ]]; then
   if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]]; then
     if [[ "$(uname -m)" == "aarch64" ]]; then
       echo "Checking that MKLDNN is available on aarch64"
@@ -208,7 +208,7 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   echo "Checking that XNNPACK is available"
   build_and_run_example_cpp check-torch-xnnpack
 else
-  if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]] && [[ "$(uname -m)" != "s390x"  ]]; then
+  if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]] && [[ "$(uname -m)" != "s390x" && "$(uname -m)" != "ppc64le"  ]]; then
     echo "Checking that XNNPACK is available"
     pushd /tmp
     python -c 'import torch.backends.xnnpack; exit(0 if torch.backends.xnnpack.enabled else 1)'
@@ -229,7 +229,7 @@ if [[ "$OSTYPE" == "msys" ]]; then
 fi
 
 # Test that CUDA builds are setup correctly
-if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" ]]; then
+if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" && "$(uname -m)" != "ppc64le" ]]; then
   if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     build_and_run_example_cpp check-torch-cuda
   else
@@ -305,7 +305,7 @@ if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   # between precompiled headers and vectorization builtins.
   # This fix is not available in earlier gcc versions.
   # gcc-14 uses ABI19.
-  if [[ "$(uname -m)" != "s390x" ]]; then
+  if [[ "$(uname -m)" != "s390x" && "$(uname -m)" != "ppc64le" ]]; then
     python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
   fi
   popd
