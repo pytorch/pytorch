@@ -482,15 +482,6 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             tp_parallelize_plan.pop("0.out_proj")
 
         with cm:
-            tp_parallelize_plan = {
-                "0.in_proj": ColwiseParallel(),
-                "0.out_proj": RowwiseParallel(),
-                "1.in_proj": ColwiseParallel(),
-                "1.out_proj": RowwiseParallel(),
-                "2.in_proj": ColwiseParallel(),
-                "2.out_proj": RowwiseParallel(),
-            }
-
             # init device mesh
             dp_size = 2
             global_mesh_1d = init_device_mesh(
