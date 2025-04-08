@@ -201,17 +201,17 @@ class GuardManagerWrapper:
         self.id_matched_objs = {}
         self.no_tensor_aliasing_sources = []
 
-        self.print_no_tensor_aliasing_guard = True
+        self.printed_relational_guards = set()
 
         self.diff_guard_sources: OrderedSet[str] = OrderedSet()
 
     @contextmanager
-    def _preserve_print_no_tensor_aliasing_flag(self):
-        self.print_no_tensor_aliasing_guard = True
+    def _preserve_printed_relational_guards(self):
+        self.printed_relational_guards = set()
         try:
             yield
         finally:
-            self.print_no_tensor_aliasing_guard = True
+            self.printed_relational_guards = set()
 
     def collect_diff_guard_sources(self):
         # At the time of finalize, we have only marked guard managers with
@@ -314,9 +314,9 @@ class GuardManagerWrapper:
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if self.print_no_tensor_aliasing_guard:
-                        self.print_no_tensor_aliasing_guard = False
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in self.printed_relational_guards:
+                        self.printed_relational_guards.add(guard)
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -353,7 +353,7 @@ class GuardManagerWrapper:
                 else:
                     super().writeline("+- " + line)
 
-        with self._preserve_print_no_tensor_aliasing_flag():
+        with self._preserve_printed_relational_guards():
             body = IndentedBufferWithPrefix()
             body.tabwidth = 1
             body.writeline("", skip_prefix=True)
