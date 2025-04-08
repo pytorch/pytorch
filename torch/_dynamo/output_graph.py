@@ -56,6 +56,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     guard_scalar,
@@ -479,6 +480,8 @@ class OutputGraph:
 
         self.guard_on_key_order: set[str] = set()
 
+        self.maybe_install_saved_tensors_hooks_subgraphs()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -553,6 +556,41 @@ class OutputGraph:
                     GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
                 )
             )
+
+    def maybe_install_saved_tensors_hooks_subgraphs(self):
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            return
+
+        hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+        if not torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable(
+            hooks
+        ):
+            return
+
+        p_hook, u_hook = hooks
+        inp = torch.randn(1)
+        p_gm = make_fx(p_hook)(inp)
+        p_out = p_gm(inp)
+
+        u_gm = make_fx(u_hook)(p_out)
+
+        p_g = p_gm.graph
+        u_g = u_gm.graph
+
+        # self.install_subgraph(
+        #     "saved_tensors_hooks_pack",
+        #     torch.fx.GraphModule(
+        #         self.nn_modules,
+        #         p_gm.graph
+        #     )
+        # )
+        # self.install_subgraph(
+        #     "saved_tensors_hooks_unpack",
+        #     torch.fx.GraphModule(
+        #         self.nn_modules,
+        #         u_gm.graph
+        #     )
+        # )
 
     def synthetic_graph_input(self, fn, args):
         """
@@ -797,7 +835,7 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target, self.root_tx.export):
+        if is_dynamic_nn_module(target, self.export):
             # Instead of returning UnspecializedNNModuleVariable, call
             # VariableTracker.build so that it is tracked for mutation.
             return VariableTracker.build(self.current_tx, target, **options)

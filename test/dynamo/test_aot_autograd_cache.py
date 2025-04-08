@@ -1218,6 +1218,85 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_saved_tensors_hooks_autograd_cache(self):
+        from torch._dynamo.decorators import _inlineable_saved_tensors_hook
+
+        @_inlineable_saved_tensors_hook()
+        def pack_mul2(x):
+            return x * 2
+
+        @_inlineable_saved_tensors_hook()
+        def unpack_mul2(x):
+            return x / 2
+
+        @_inlineable_saved_tensors_hook()
+        def pack_mul2_2(x):
+            return x * 2
+
+        @_inlineable_saved_tensors_hook()
+        def unpack_mul2_2(x):
+            return x / 2
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        def fn(x):
+            x = x + 1
+            x = SAF.apply(x)
+            return x
+
+        device = torch.device("cuda:0")
+        backend = "inductor"
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        # with fresh_inductor_cache():
+        x = inp_fn()
+        fn_compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        y = fn_compiled(x)
+        y.sum().backward()
+
+        def print_counters(s):
+            C = counters["aot_autograd"]
+            print(f"XXX {s} counters:{C}")
+
+        C = counters["aot_autograd"]
+        print_counters("0")
+        # self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        # self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        # self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_mul2, unpack_mul2):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+            print_counters("1")
+            # self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            # self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            # self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_mul2_2, unpack_mul2_2):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+            print_counters("2")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -844,26 +844,22 @@ def maybe_inline_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        pack_hook_fn_out = pack_hook(val)
+        pack_out_val = pack_hook(val)
 
         requires_sc_handling = is_traceable_wrapper_subclass(val) or any(
-            is_traceable_wrapper_subclass(x)
-            for x in pytree.tree_leaves(pack_hook_fn_out)
+            is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
         )
 
-        subclass_p_inp_meta = create_subclass_meta((val,), count_symints=False)
-        pack_hook_fn_out_flat, p_out_spec = pytree.tree_flatten(pack_hook_fn_out)
+        pack_out_val_flat, p_out_spec = pytree.tree_flatten(pack_out_val)
         subclass_p_out_meta = create_subclass_meta(
-            pack_hook_fn_out_flat, count_symints=False
+            pack_out_val_flat, count_symints=False
         )
+        # TODO: Use installed by dynamo pack/unpack subgraphs.
         pack_hook_fn_to_trace = pack_hook
         if requires_sc_handling:
 
             def pack_hook_sc_wrapper(arg):
-                args_sc = wrap_tensor_subclasses(
-                    (arg,), subclass_metas=subclass_p_inp_meta
-                )
-                outs = pack_hook(*args_sc)
+                outs = pack_hook(arg)
                 return unwrap_tensor_subclasses(
                     pytree.tree_leaves(outs), append_symints=False
                 )
@@ -908,8 +904,6 @@ def maybe_inline_saved_tensors_hooks(
         for n in pytree.tree_leaves(fw_pack_out_n.args[0]):
             if not isinstance(n, torch.fx.Node):
                 continue
-            if "val" not in n.meta:
-                breakpoint()
 
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)

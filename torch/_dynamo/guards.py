@@ -1592,28 +1592,31 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard):
+        hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable
+        )
+
         def hooks_ids_fn(hooks):
-            if not torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable(
-                hooks
-            ):
+            # From recompilation perspective treat no hooks and non-inlineable hooks
+            # similarly.
+            if not are_inline_hooks(hooks):
                 return None
 
             pack_hook, unpack_hook = hooks
             return tuple(map(id, hooks))
 
-        hooks_ids = hooks_ids_fn(
+        guard_hooks_ids = hooks_ids_fn(
             torch._C._autograd._top_saved_tensors_default_hooks(True)
         )
 
-        # Do not guard on non-inlineable saved tensors hooks
-        if not hooks_ids:
-            return
-
-        code = ["torch._C._autograd._top_saved_tensors_default_hooks(True)"]
+        code = [
+            f"torch._C._autograd._top_saved_tensors_default_hooks ids == {guard_hooks_ids}"
+        ]
         self._set_guard_export_info(guard, code)
 
         def fn(x):
-            return hooks_ids == hooks_ids_fn(
+            return guard_hooks_ids == hooks_ids_fn(
                 torch._C._autograd._top_saved_tensors_default_hooks(True)
             )
 
