@@ -181,6 +181,9 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_mutation_names()
 
+    def get_device(self) -> Optional[torch.device]:
+        return self.node.get_output_spec().get_device()
+
 
 @dataclasses.dataclass
 class SchedulerDonatedBuffer(SchedulerBuffer):
@@ -4207,6 +4210,78 @@ class Scheduler:
 
         return signatures[::-1]
 
+    def reorder_for_partition_based_on_devices(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Given topologically sorted `nodes`, reorder by devices while respecting dependencies.
+        Specifically, when a node reads from another device, execute all leading nodes on that
+        device since we already have a graph partition for that device.
+        """
+
+        result: list[BaseSchedulerNode] = []
+        device_to_nodes: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
+            collections.defaultdict(list)
+        )
+
+        def visit(node: BaseSchedulerNode) -> None:
+            node_device = node.get_device()
+            for dep in node.unmet_dependencies:
+                if (
+                    buffer := self.name_to_buf.get(dep.name, None)
+                ) and buffer.get_device() != node_device:
+                    input_device = buffer.get_device()
+                    input_device_nodes = device_to_nodes.pop(input_device)
+                    result.extend(input_device_nodes)
+            device_to_nodes[node_device].append(node)
+
+        for node in nodes:
+            visit(node)
+
+        for on_device_nodes in device_to_nodes.values():
+            result.extend(on_device_nodes)
+
+        return result
+
+    def reorder_for_partition_with_simple_dependency(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder a node if it should be partitioned and has simple dependency:
+        1. move a partitioned node to the front if it has no dependency
+        2. move a partitioned node to the back if it is only used by OutputNode
+        3. otherwise do not reorder
+        """
+
+        front: list[BaseSchedulerNode] = []
+        middle: list[BaseSchedulerNode] = []
+        back: list[BaseSchedulerNode] = []
+
+        def only_output_user(node: BaseSchedulerNode) -> bool:
+            for buf in node.get_outputs():
+                for use in buf.users:
+                    if not isinstance(use.node, OutputNode):
+                        return False
+            return True
+
+        for node in nodes:
+            should_partition = self.should_partition(node)
+            if should_partition and len(node.unmet_dependencies) == 0:
+                front.append(node)
+            elif should_partition and only_output_user(node):
+                back.append(node)
+            else:
+                middle.append(node)
+
+        return front + middle + back
+
+    def reorder_for_partition(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        nodes = self.reorder_for_partition_based_on_devices(nodes)
+        nodes = self.reorder_for_partition_with_simple_dependency(nodes)
+        return nodes
+
     def graph_partition(
         self,
     ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
@@ -4214,8 +4289,9 @@ class Scheduler:
         Given a list of BaseSchedulerNodes, split into a list of
         graph partitions and compute partition input/output signatures.
         """
-        partitions: list[PartitionType] = []
+        self.nodes = self.reorder_for_partition(self.nodes)
 
+        partitions: list[PartitionType] = []
         skip_cudagraph = True
         cur_partition: PartitionType = []
         skip_cudagraphs = []
