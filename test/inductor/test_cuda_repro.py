@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# ruff: noqa: F841,
+# ruff: noqa: F841
 
 import functools
 import gc
