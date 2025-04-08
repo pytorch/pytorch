@@ -620,15 +620,6 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-        # NB: Why is this the dynamo_compile counter?  The rule here is that
-        # if it gets an entry in the dynamo_compile table, we also want to
-        # tick up the wait counter.  We have to displeasingly manually trigger
-        # the counter here because we may dropped into compile_fx directly
-        # from lazy backwards compilation.
-        stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
-        stack.enter_context(
-            _WaitCounter("pytorch.wait_counter.all_compilation_types").guard()
-        )
 
         if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
@@ -659,6 +650,10 @@ def _compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     aot_mode: bool = V.aot_compilation
+
+    # Clean up Compiled Triton Kernels per inductor compile, as the future objects
+    # may not be valid for use after they are run/autotuned
+    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -691,7 +686,6 @@ def _compile_fx_inner(
 
     with (
         _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
-        _WaitCounter("pytorch.wait_counter.all_compilation_types").guard(),
     ):
         use_cache = (
             not config.force_disable_caches
@@ -876,7 +870,8 @@ def _compile_fx_inner(
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
-            name, m, n, k = key.split("_")
+            m, n, k = key.split("_")[-3:]
+            name = "_".join(key.split("_")[:-3])
             mm_table_data.append([name, m, n, k, value])
         log.info("Overview info of inductor aten mms: ")
         log.info(
@@ -889,8 +884,8 @@ def _compile_fx_inner(
             log.info("{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 100)
 
-    # Clear Compiled Triton Kernels per inductor compile, as the future objects
-    # may not be valid for use after they are run/autotuned
+    # Not strictly necessary, but good to clean up straggling futures
+    # that are unused to reclaim memory.
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
