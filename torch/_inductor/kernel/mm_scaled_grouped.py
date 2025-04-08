@@ -17,7 +17,12 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import get_num_sms, get_tma_workspace_arg, use_aten_gemm_kernels
+from ..utils import (
+    get_num_sms,
+    get_shared_memory,
+    get_tma_workspace_arg,
+    use_aten_gemm_kernels,
+)
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
@@ -81,9 +86,6 @@ def scaled_grouped_mm_configs():
 
 
 def early_config_prune(configs, named_args):
-    from triton.runtime import driver
-
-    device = torch.cuda.current_device()
     dtsize = 1
 
     pruned_configs = []
@@ -105,9 +107,8 @@ def early_config_prune(configs, named_args):
         )
 
         # 1. make sure we have enough smem
-        max_shared_memory = driver.active.utils.get_device_properties(device)[
-            "max_shared_mem"
-        ]
+        max_shared_memory = get_shared_memory()
+
         if torch.version.hip:
             required_shared_memory = BLOCK_N * BLOCK_K * num_stages * dtsize
         else:
@@ -130,9 +131,8 @@ def early_config_prune(configs, named_args):
         if BLOCK_M < 128 and BLOCK_M < (M_PER_GROUP // 2):
             continue
 
-        num_sm = driver.active.utils.get_device_properties(device)[
-            "multiprocessor_count"
-        ]
+        num_sm = get_num_sms()
+
         N_TILES = N // BLOCK_N
         MIN_N_TILES = 32 if torch.version.hip else 64
         # 4. make sure we don't load N tiles that are too big
