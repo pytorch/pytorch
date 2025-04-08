@@ -285,7 +285,7 @@ dependencies as well as the nightly binaries into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-The following packages should be installed with `pip`:
+The following packages should be installed with either `conda` or `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
@@ -751,9 +751,8 @@ situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
 Before building pytorch, install ccache from your package manager of choice:
-<!---
-TODO: needs updated example
--->
+
+
 ```bash
 conda install ccache -c conda-forge
 sudo apt install ccache
