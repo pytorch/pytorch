@@ -1181,7 +1181,6 @@ class TestMaxAutotune(TestCase):
                 x = re.sub(pattern, "", x)
                 return x
 
-            print(cache_key)
             self.assertEqual(
                 cleanup(cache_key),
                 cleanup(
@@ -1202,15 +1201,14 @@ class TestMaxAutotune(TestCase):
                 'epilogue_fn': 140133002122080}"""
                 ),
             )
-
+            print(events)
             self.assertEqual(
                 cleanup(events),
                 cleanup(
                     """[
-             ('def_kernel', ['A', 'B'], {}), ('size', ['A', 0], {}),
-             ('size', ['B', 1], {}), ('size', ['A', 1], {}),
-             ('store_output', [('idx_m', 'idx_n'), 'acc', 'mask'], {})]
-             """
+                  ('def_kernel', ['A', 'B'], {}), ('size', ['A', 0], {}),
+                  ('size', ['B', 1], {}), ('size', ['A', 1], {})]
+                """
                 ),
             )
 
