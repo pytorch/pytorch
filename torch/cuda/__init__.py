@@ -162,10 +162,9 @@ def is_available() -> bool:
     r"""
     Return a bool indicating if CUDA is currently available.
 
-    .. note:: This API will avoid poisoning when the environment
-        variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set.
-        Some features, such as multiprocessing-based components rely on this behavior.
-        See :ref:`multiprocessing-poison-fork-note` for more details.
+    .. note:: This function will NOT poison fork if the environment variable
+        ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
     """
     if not _is_compiled():
         return False
@@ -990,8 +989,7 @@ def device_count() -> int:
     r"""
     Return the number of GPUs available.
 
-    .. note:: This API will avoid poisoning if NVML discovery succeeds.
-        Some features, such as multiprocessing-based components rely on this behavior.
+    .. note:: This API will NOT posion fork if NVML discovery succeeds.
         See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     global _cached_device_count
