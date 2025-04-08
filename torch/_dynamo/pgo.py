@@ -18,6 +18,7 @@ import enum
 import logging
 import os
 import pickle
+import re
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
@@ -178,9 +179,9 @@ class FrameStateSizeEntry:
     scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[
-        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]
-    ] = dataclasses.field(default=auto_unset)
+    size: Union[AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]] = (
+        dataclasses.field(default=auto_unset)
+    )
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
@@ -500,7 +501,8 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
     from torch._inductor.runtime.runtime_utils import cache_dir
 
-    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
+    code_state_key = re.sub(r'[<>:"/\\|?*]', "_", f"code_state_{cache_key}.pkl")
+    return os.path.join(cache_dir(), "dynamo", code_state_key)
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
@@ -603,7 +605,9 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
-            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
@@ -683,7 +687,7 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
         with open(tmp_path, "wb") as f:
             f.write(pickled_code)
             size = f.tell()
-        os.rename(tmp_path, path)
+        os.replace(tmp_path, path)
     return path, size
 
 
@@ -714,7 +718,11 @@ def put_local_code_state(cache_key: str) -> None:
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
+    with dynamo_timed(
+        name := "pgo.put_remote_code_state",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
+    ):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 

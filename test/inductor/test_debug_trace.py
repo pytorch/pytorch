@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_inductor_cache
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 
@@ -230,6 +231,8 @@ op2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
+    # AOT compiler have not supported windows yet.
+    @skipIfWindows
     def test_debug_printer_const(self):
         """Test that having a const example_input does not break the debug printer."""
 

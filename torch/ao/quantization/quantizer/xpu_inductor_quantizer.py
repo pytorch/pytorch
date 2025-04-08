@@ -96,23 +96,6 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     ):
         pass
 
-    def _annotate_linear_fusion_pattern(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        self._annotate_linear_unary(model, quantization_config, filter_fn)
-        self._annotate_linear(model, quantization_config, filter_fn)
-
-    def _annotate_matmul(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        pass
-
     def _annotate_maxpool2d(
         self,
         node: Node,

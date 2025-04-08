@@ -230,6 +230,7 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
+    size_oblivious: bool
 
 
 @dataclass_slots
@@ -630,8 +631,12 @@ class GuardsSet:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -667,12 +672,19 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_identifiers: dict[str, str] = {}
+        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
@@ -691,6 +703,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
+        self.lazy_bwd_cache[identifier] = gmod
+
+    def get_lazy_bwd_entry(self, identifier: str):
+        return self.lazy_bwd_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
@@ -866,9 +884,10 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        with unittest.mock.patch.object(
-            tc, "frame_summary_stack", []
-        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+        with (
+            unittest.mock.patch.object(tc, "frame_summary_stack", []),
+            unittest.mock.patch.object(tc, "loc_in_frame", None),
+        ):
             try:
                 yield
             except Exception as e:
@@ -1015,6 +1034,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

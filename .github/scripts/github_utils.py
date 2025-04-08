@@ -57,10 +57,10 @@ def gh_fetch_url_and_headers(
             print(
                 f"""{url}
                 Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}"""
+                Used: {err.headers["X-RateLimit-Used"]}
+                Limit: {err.headers["X-RateLimit-Limit"]}
+                Remaining: {err.headers["X-RateLimit-Remaining"]}
+                Resets at: {err.headers["x-RateLimit-Reset"]}"""
             )
         else:
             print(f"Error fetching {url} {err}")

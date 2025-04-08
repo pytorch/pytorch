@@ -1,0 +1,14 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+# Python
+[*.py]
+indent_style = space
+indent_size = 4
+
+# Make
+[Makefile]
+indent_style = tab
