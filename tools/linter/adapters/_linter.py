@@ -12,29 +12,28 @@ from enum import Enum
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
-from typing import Any, Generic, get_args, TYPE_CHECKING
-from typing_extensions import Never, Self, TypeVar
+from typing import Any, TYPE_CHECKING
+from typing_extensions import Never
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-# Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
-NO_TOKEN = -1
-FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)
-FSTRING_END: int = getattr(token, "FSTRING_END", NO_TOKEN)
-
-START_OF_LINE_TOKENS = dict.fromkeys((token.DEDENT, token.INDENT, token.NEWLINE))
-IGNORED_TOKENS = dict.fromkeys(
-    (token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL)
+FSTRING_START = getattr(token, "FSTRING_START", None)  # py3.12+
+FSTRING_END = getattr(token, "FSTRING_END", None)
+EMPTY_TOKENS = dict.fromkeys(
+    [
+        token.COMMENT,
+        token.DEDENT,
+        token.ENCODING,
+        token.INDENT,
+        token.NEWLINE,
+        token.NL,
+    ]
 )
-EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
-
 BRACKETS = {"{": "}", "(": ")", "[": "]"}
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
-
-ROOT = Path(__file__).absolute().parents[3]
 
 
 def is_name(t: TokenInfo, *names: str) -> bool:
@@ -108,27 +107,21 @@ class LintResult:
     def is_edit(self) -> bool:
         return None not in (self.char, self.length, self.line, self.replacement)
 
-    def apply(self, lines: list[str]) -> None:
-        if not (
-            self.char is None
-            or self.length is None
-            or self.line is None
-            or self.replacement is None
-        ):
-            line = lines[self.line - 1]
-            before = line[: self.char]
-            after = line[self.char + self.length :]
-            lines[self.line - 1] = f"{before}{self.replacement}{after}"
+    def apply(self, lines: list[str]) -> bool:
+        if self.line is None:
+            return False
+        line = lines[self.line - 1]
 
-    def contains(self, r: LintResult) -> bool:
-        assert self.char is not None and self.line is not None
-        assert r.char is not None and r.line is not None
-        return self.line == r.line and self.char <= r.char and self.end >= r.end
+        if self.char is None:
+            return False
+        before = line[: self.char]
 
-    @property
-    def end(self) -> int:
-        assert self.char is not None and self.length is not None
-        return self.char + self.length
+        if self.length is None:
+            return False
+        after = line[self.char + self.length :]
+
+        lines[self.line - 1] = f"{before}{self.replacement}{after}"
+        return True
 
     def as_message(self, code: str, path: str) -> LintMessage:
         d = dc.asdict(self)
@@ -151,6 +144,11 @@ class ParseError(ValueError):
     def __init__(self, token: TokenInfo, *args: str) -> None:
         super().__init__(*args)
         self.token = token
+
+    @classmethod
+    def check(cls, cond: Any, token: TokenInfo, *args: str) -> None:
+        if not cond:
+            raise cls(token, *args)
 
 
 class ArgumentParser(argparse.ArgumentParser):
@@ -180,6 +178,9 @@ class ArgumentParser(argparse.ArgumentParser):
         help = "Run for lintrunner and print LintMessages which aren't edits"
         self.add_argument("-l", "--lintrunner", action="store_true", help=help)
 
+        help = "Run for test, print all LintMessages"
+        self.add_argument("-t", "--test", action="store_true", help=help)
+
         help = "Print more debug info"
         self.add_argument("-v", "--verbose", action="store_true", help=help)
 
@@ -205,18 +206,11 @@ class OmittedLines:
         omitted = ((i, s.rstrip()) for i, s in enumerate(lines))
         self.omitted = {i + 1 for i, s in omitted if s.endswith(suffix)}
 
-    def __call__(
-        self, tokens: Sequence[TokenInfo], begin: int = 0, end: int = NO_TOKEN
-    ) -> bool:
-        if end == NO_TOKEN:
-            end = len(tokens)
+    def __call__(self, tokens: Sequence[TokenInfo]) -> bool:
         # A token_line might span multiple physical lines
-        start = min((tokens[i].start[0] for i in range(begin, end)), default=0)
-        end = max((tokens[i].end[0] for i in range(begin, end)), default=-1)
-        return self.contains_lines(start, end)
-
-    def contains_lines(self, begin: int, end: int) -> bool:
-        return bool(self.omitted.intersection(range(begin, end + 1)))
+        lines = sorted(i for t in tokens for i in (t.start[0], t.end[0]))
+        lines_covered = list(range(lines[0], lines[-1] + 1)) if lines else []
+        return bool(self.omitted.intersection(lines_covered))
 
 
 class PythonFile:
@@ -232,7 +226,7 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path and (path.relative_to(ROOT) if path.is_absolute() else path)
+        self.path = path
         if contents is None and path is not None:
             contents = path.read_text()
 
@@ -240,13 +234,13 @@ class PythonFile:
         self.lines = self.contents.splitlines(keepends=True)
 
     @classmethod
-    def make(cls, linter_name: str, pc: Path | str | None = None) -> Self:
+    def make(cls, linter_name: str, pc: Path | str | None = None) -> PythonFile:
         if isinstance(pc, Path):
             return cls(linter_name, path=pc)
         return cls(linter_name, contents=pc)
 
-    def with_contents(self, contents: str) -> Self:
-        return self.__class__(self.linter_name, self.path, contents)
+    def with_contents(self, contents: str) -> PythonFile:
+        return PythonFile(self.linter_name, self.path, contents)
 
     @cached_property
     def omitted(self) -> OmittedLines:
@@ -286,12 +280,6 @@ class PythonFile:
 
         return [froms, imports]
 
-    @cached_property
-    def opening_comment_lines(self) -> int:
-        """The number of comments at the very top of the file."""
-        it = (i for i, s in enumerate(self.lines) if not s.startswith("#"))
-        return next(it, 0)
-
 
 def bracket_pairs(tokens: Sequence[TokenInfo]) -> dict[int, int]:
     """Returns a dictionary mapping opening to closing brackets"""
@@ -303,23 +291,23 @@ def bracket_pairs(tokens: Sequence[TokenInfo]) -> dict[int, int]:
             if t.string in BRACKETS:
                 stack.append(i)
             elif inv := BRACKETS_INV.get(t.string):
-                if not stack:
-                    raise ParseError(t, "Never opened")
+                ParseError.check(stack, t, "Never opened")
                 begin = stack.pop()
 
                 if not (stack and stack[-1] == FSTRING_START):
                     braces[begin] = i
 
                 b = tokens[begin].string
-                if b != inv:
-                    raise ParseError(t, f"Mismatched braces '{b}' at {begin}")
-        elif t.type == FSTRING_START:
+                ParseError.check(b == inv, t, f"Mismatched braces '{b}' at {begin}")
+        elif FSTRING_START and t.type == FSTRING_START:
             stack.append(FSTRING_START)
-        elif t.type == FSTRING_END:
-            if stack.pop() != FSTRING_START:
-                raise ParseError(t, "Mismatched FSTRING_START/FSTRING_END")
-    if stack:
-        raise ParseError(t, "Left open")
+        elif FSTRING_END and t.type == FSTRING_END:
+            ParseError.check(
+                stack.pop() == FSTRING_START, t, "Mismatched FSTRING_START/FSTRING_END"
+            )
+
+    if tokens:
+        ParseError.check(not stack, t, "Left open")
     return braces
 
 
@@ -331,10 +319,7 @@ class ErrorLines:
     AFTER = WINDOW - BEFORE - 1
 
 
-PythonFileT = TypeVar("PythonFileT", bound=PythonFile)
-
-
-class FileLinter(Generic[PythonFileT], ABC):
+class FileLinter(ABC):
     """The base class that all token-based linters inherit from"""
 
     description: str
@@ -345,21 +330,22 @@ class FileLinter(Generic[PythonFileT], ABC):
     report_column_numbers: bool = False
 
     @abstractmethod
-    def _lint(self, python_file: PythonFileT) -> Iterator[LintResult]:
+    def _lint(self, python_file: PythonFile) -> Iterator[LintResult]:
         raise NotImplementedError
 
-    def __init__(self, argv: Sequence[str] | None = None) -> None:
+    def __init__(self, argv: list[str] | None = None) -> None:
         self.argv = argv
         self.parser = ArgumentParser(
             is_fixer=self.is_fixer,
             description=self.description,
             epilog=self.epilog,
         )
-        self.result_shown = False
 
     @classmethod
     def run(cls) -> Never:
-        sys.exit(not cls().lint_all())
+        linter = cls()
+        success = linter.lint_all()
+        sys.exit(not success)
 
     def lint_all(self) -> bool:
         if self.args.fix and self.args.lintrunner:
@@ -370,16 +356,10 @@ class FileLinter(Generic[PythonFileT], ABC):
             success = self._lint_file(p) and success
         return self.args.lintrunner or success
 
-    @classmethod
-    def make_file(cls, pc: Path | str | None = None) -> PythonFileT:
-        c = cls.__orig_bases__[0]  # type: ignore[attr-defined]
-        # See https://github.com/microsoft/pyright/issues/3442
-        actual_python_file_type: PythonFileT = get_args(c)[0]
-        return actual_python_file_type.make(cls.linter_name, pc)
-
     @cached_property
     def args(self) -> Namespace:
         args = self.parser.parse_args(self.argv)
+        args.lintrunner = args.lintrunner or args.test
 
         return args
 
@@ -400,22 +380,18 @@ class FileLinter(Generic[PythonFileT], ABC):
 
     def _lint_file(self, p: Path) -> bool:
         if self.args.verbose:
-            print(p, "Reading", file=sys.stderr)
+            print(p, "Reading")
 
-        pf = self.make_file(p)
+        pf = PythonFile(self.linter_name, p)
         replacement, results = self._replace(pf)
 
-        if display := list(self._display(pf, results)):
-            print(*display, sep="\n")
+        print(*self._display(pf, results), sep="\n")
         if results and self.args.fix and pf.path and pf.contents != replacement:
             pf.path.write_text(replacement)
 
         return not results or self.args.fix and all(r.is_edit for r in results)
 
-    def _error(self, pf: PythonFileT, result: LintResult) -> None:
-        """Called on files that are unparseable"""
-
-    def _replace(self, pf: PythonFileT) -> tuple[str, list[LintResult]]:
+    def _replace(self, pf: PythonFile) -> tuple[str, list[LintResult]]:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
         previous_result_count = float("inf")
@@ -424,33 +400,21 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         while True:
             try:
-                results = sorted(self._lint(pf), key=LintResult.sort_key)
+                results = list(self._lint(pf))
             except IndentationError as e:
                 error, (_name, lineno, column, _line) = e.args
-
                 results = [LintResult(error, lineno, column)]
-                self._error(pf, *results)
 
-            except ParseError as e:
-                results = [LintResult(str(e), *e.token.start)]
-                self._error(pf, *results)
+            if first_results is None:
+                first_results = sorted(results, key=LintResult.sort_key)
 
-            for i, ri in enumerate(results):
-                if not ri.is_recursive:
-                    for rj in results[i + 1 :]:
-                        if ri.contains(rj):
-                            rj.is_recursive = True
-                        else:
-                            break
-
-            first_results = first_results or results
             if not results or len(results) >= previous_result_count:
                 break
             previous_result_count = len(results)
 
             lines = pf.lines[:]
             for r in reversed(results):
-                if r.is_edit and not r.is_recursive:
+                if not r.is_recursive:
                     r.apply(lines)
             replacement = "".join(lines)
 
@@ -465,23 +429,27 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         return replacement, first_results
 
-    def _display(self, pf: PythonFileT, results: list[LintResult]) -> Iterator[str]:
+    def _display(self, pf: PythonFile, results: list[LintResult]) -> Iterator[str]:
         """Emit a series of human-readable strings representing the results"""
+        show_edits = not self.args.fix or self.args.verbose
+
+        first = True
         for r in results:
-            if self.args.lintrunner:
-                msg = r.as_message(code=self.code, path=str(pf.path))
-                yield json.dumps(msg.asdict(), sort_keys=True)
-            else:
-                if self.result_shown:
-                    yield ""
+            if show_edits or r.is_edit:
+                if self.args.test or self.args.lintrunner:
+                    msg = r.as_message(code=self.code, path=str(pf.path))
+                    yield json.dumps(msg.asdict(), sort_keys=True)
+                    continue
+                if first:
+                    first = False
                 else:
-                    self.result_shown = True
+                    yield ""
                 if r.line is None:
                     yield f"{pf.path}: {r.name}"
                 else:
                     yield from (i.rstrip() for i in self._display_window(pf, r))
 
-    def _display_window(self, pf: PythonFileT, r: LintResult) -> Iterator[str]:
+    def _display_window(self, pf: PythonFile, r: LintResult) -> Iterator[str]:
         """Display a window onto the code with an error"""
         if r.char is None or not self.report_column_numbers:
             yield f"{pf.path}:{r.line}: {r.name}"

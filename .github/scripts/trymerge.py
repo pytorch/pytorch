@@ -819,9 +819,10 @@ class GitHubPR:
                     cursor=info["reviews"]["pageInfo"]["startCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
-        reviews = {
-            author: state for author, state in self._reviews if state != "COMMENTED"
-        }
+        reviews = {}
+        for author, state in self._reviews:
+            if state != "COMMENTED":
+                reviews[author] = state
         return list(reviews.items())
 
     def get_approved_by(self) -> list[str]:
@@ -2281,8 +2282,7 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
-                flush=True,
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
             )
             time.sleep(5 * 60)
     # Finally report timeout back

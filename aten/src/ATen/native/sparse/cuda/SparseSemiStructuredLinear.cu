@@ -75,6 +75,12 @@ Tensor two_four_sgemm(
     using LayoutC = LayoutOutput;
     constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
 
+    using BiasTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
+        ThreadblockShape,
+        WarpShape,
+        ElementC,
+        AlignmentC,
+        NumEVTEpilogueStages>;
     using OutputTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
         ThreadblockShape,
         WarpShape,
@@ -88,7 +94,7 @@ Tensor two_four_sgemm(
         cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementC>;
     using BiasTensor =
         cutlass::epilogue::threadblock::VisitorColBroadcast<
-            OutputTileThreadMap,
+            BiasTileThreadMap,
             ElementC,
             cute::Stride<cute::_1, cute::_0, int64_t>>;
     using Bias = std::conditional_t<use_bias, BiasTensor, BiasScalar>;

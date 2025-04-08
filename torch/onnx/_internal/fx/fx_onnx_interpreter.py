@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import operator
+import re
 from typing import Callable, TYPE_CHECKING
 
 import onnxscript
@@ -15,6 +17,7 @@ import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal.fx import (
     _pass,
+    diagnostics,
     onnxfunction_dispatcher,
     type_utils as fx_type_utils,
 )
@@ -43,6 +46,44 @@ def _fx_graph_to_onnx_message_formatter(
     **kwargs,
 ) -> str:
     return f"FX Graph: {fx_graph_module._get_name()}. "
+
+
+def _location_from_fx_stack_trace(
+    node_stack_trace: str,
+) -> diagnostics.infra.Location | None:
+    """Extract location from FX node stack trace.
+
+    TODO(bowbao): Create fx utils module and move this function there.
+
+    Args:
+        node_stack_trace: The stack trace of the FX node. Example:
+
+            File "path/file.py", line 311, in <function>
+                <code>
+            |   File "path/file2.py", line 389, in <function>
+                <code>
+
+    Returns:
+        location: The location of the FX node.
+    """
+    if "File" not in node_stack_trace:
+        return None
+
+    lines = node_stack_trace.strip().split("\n")
+    idx = 0
+    while idx < len(lines) and "File" not in lines[idx]:
+        idx += 1
+    if idx + 1 >= len(lines):
+        return None
+
+    pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+    matches = pattern.match(lines[idx].strip())
+    if matches:
+        uri = matches.group(1)
+        line_number = int(matches.group(2))
+        snippet = lines[idx + 1].strip()
+        return diagnostics.infra.Location(uri=uri, line=line_number, snippet=snippet)
+    return None
 
 
 def _retrieve_or_adapt_input_to_graph_set(
@@ -338,8 +379,24 @@ class FxOnnxInterpreter:
     Each operator's implementation returns either an `onnxscript.OnnxFunction` or
     `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm. They can
     also raise RuntimeError: If there are no overloaded functions available for the given FX node.
+
+    TODO: Convert methods to @staticmethod when the diagnostic system supports it
+          DO NOT ADD NEW ATTRIBUTES TO THIS CLASS!
     """
 
+    def __init__(
+        self,
+        diagnostic_context: diagnostics.DiagnosticContext,
+    ):
+        # THIS SHOULD BE THE ONLY STATE IN THIS CLASS (constraint from diagnosticS API)
+        # TODO: Diagnostics API should be revised to get rid of this attribute.
+        # DO NOT add other class-level attributes.
+        self.diagnostic_context = diagnostic_context
+
+    @diagnostics.diagnose_call(
+        diagnostics.rules.fx_node_to_onnx,
+        diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
+    )
     def run_node(
         self,
         node,
@@ -366,6 +423,18 @@ class FxOnnxInterpreter:
         Raises:
             RuntimeError: When a node.op is not supported.
         """
+        # Record stack trace of node in diagnostic.
+        node_stack_trace = node.stack_trace
+        if node_stack_trace:
+            diagnostic = self.diagnostic_context.inflight_diagnostic(
+                rule=diagnostics.rules.fx_node_to_onnx
+            )
+            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
+                diagnostic.info("```\n%s\n```", node_stack_trace)
+            location = _location_from_fx_stack_trace(node_stack_trace)
+            if location is not None:
+                diagnostic.with_location(location)
+
         if node.op == "placeholder":
             self.placeholder(node, onnxscript_graph, fx_name_to_onnxscript_value)
         elif node.op == "get_attr":
@@ -399,6 +468,10 @@ class FxOnnxInterpreter:
         else:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
+    @diagnostics.diagnose_call(
+        diagnostics.rules.fx_graph_to_onnx,
+        diagnostic_message_formatter=_fx_graph_to_onnx_message_formatter,
+    )
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
@@ -415,6 +488,13 @@ class FxOnnxInterpreter:
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
         """
+        diagnostic = self.diagnostic_context.inflight_diagnostic()
+        with diagnostic.log_section(logging.DEBUG, "FX Graph:"):
+            diagnostic.debug(
+                "```\n%s\n```",
+                diagnostics.LazyString(fx_graph_module.print_readable, False),
+            )
+
         if parent_onnxscript_graph is not None:
             # If parent_onnxscript_graph is provided, we assume fx_graph_module is a
             # submodule representing a forward call of an nn.Module.
@@ -470,6 +550,9 @@ class FxOnnxInterpreter:
                     onnxscript_tracer,
                     fx_name_to_onnxscript_value,
                 )
+
+        with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)  # type: ignore[attr-defined]
 
         return onnxscript_graph
 
@@ -572,6 +655,7 @@ class FxOnnxInterpreter:
             node=node,
             onnx_args=onnx_args,  # type: ignore[arg-type]
             onnx_kwargs=onnx_kwargs,
+            diagnostic_context=self.diagnostic_context,
         )
         with onnxscript.evaluator.default_as(onnxscript_tracer):
             output: (

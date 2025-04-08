@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import functools
 from collections.abc import Sequence
 from typing import Callable, Optional, Union
 
@@ -127,7 +126,7 @@ def local_map(
     .. note:: This API is currently experimental and subject to change
     """
 
-    def wrapped(device_mesh: Optional[DeviceMesh], *args, **kwargs):
+    def wrapped(*args, **kwargs):
         # process input args
         flat_args, args_spec = pytree.tree_flatten(args)
         if in_placements is not None:
@@ -138,6 +137,7 @@ def local_map(
 
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
+        nonlocal device_mesh  # access var device_mesh from the outer scope
         seen_dtensor_arg = False
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
@@ -232,4 +232,4 @@ def local_map(
         else:
             return out
 
-    return functools.partial(wrapped, device_mesh)
+    return wrapped

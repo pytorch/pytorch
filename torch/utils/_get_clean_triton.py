@@ -45,23 +45,23 @@ def rename_kernels(source_code: str) -> str:
 
 
 def merge_params(original_params: list[str], new_params: list[str]) -> list[str]:
+    assert len(new_params) >= len(original_params)
     for idx in range(len(new_params)):
         if new_params[idx] == "T":
             new_params[idx] = original_params[idx]
     return new_params
 
 
-def add_launch_params(
-    original: str, kernel_to_params: dict[str, tuple[str, str]]
-) -> str:
+def add_launch_params(original: str, kernel_to_params: dict[str, str]) -> str:
     # Regex to match the function call in the original string
-    pattern = r"(\w+)\.run\((.*)\)"
+    pattern = r"(\w+)\.run\((.*), grid=(.*\)), [^)]*\)"
 
     def replace(match) -> str:
         # Extract parts from the regex match
         func_name = match.group(1)
         params = match.group(2)
-        new_params, grid = kernel_to_params[func_name]
+        grid = match.group(3)
+        new_params = kernel_to_params[func_name]
         new_params = merge_params(params.split(", "), new_params.split(", "))
 
         # Format the new function call
@@ -103,8 +103,9 @@ def process_file(input_filename: str, output_filename: str) -> str:
         launch_params_meta = f.readlines()
 
     split_params = [i.split("|") for i in launch_params_meta]
-    kernel_args_grid = {a.strip(): (b.strip(), c.strip()) for a, b, c in split_params}
-    transformed_code = add_launch_params(transformed_code, kernel_args_grid)
+    strip_params = [[a.strip(), b.strip()] for a, b in split_params]
+    kernel_to_args: dict[str, str] = dict(strip_params)
+    transformed_code = add_launch_params(transformed_code, kernel_to_args)
 
     with open(output_filename, "w") as file:
         file.write(transformed_code)

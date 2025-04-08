@@ -124,8 +124,7 @@ static void updateOutputTensorTracker(const at::RecordFunction& fn) {
 }
 
 template <bool report_input_shapes>
-static std::unique_ptr<at::ObserverContext> enterNVTX(
-    const at::RecordFunction& fn) {
+std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
   if (NVTXThreadLocalState::getTLS() != nullptr) {
     auto input_op_ids = getInputTensorOpIds(fn);
     torch::profiler::impl::cudaStubs()->rangePush(

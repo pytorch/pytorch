@@ -28,8 +28,10 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       opt_device_type = at::getAccelerator(false);
     }
     if (opt_device_type.has_value()) {
-      return at::globalContext().getPinnedMemoryAllocator(
-          opt_device_type.value());
+      at::globalContext().lazyInitDevice(opt_device_type.value());
+      return at::globalContext()
+          .getAcceleratorHooksInterface(opt_device_type)
+          .getPinnedMemoryAllocator();
     } else {
       TORCH_CHECK(
           false, "Need to provide pin_memory allocator to use pin memory.")
@@ -170,7 +172,7 @@ SymInt computeStorageNbytes(
 }
 
 template <typename T>
-static TensorBase _empty_generic(
+TensorBase _empty_generic(
     ArrayRef<T> size,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
@@ -223,7 +225,7 @@ TensorBase empty_generic_symint(
 }
 
 template <typename T>
-static TensorBase _empty_strided_generic(
+TensorBase _empty_strided_generic(
     T size,
     T stride,
     c10::Allocator* allocator,

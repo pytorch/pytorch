@@ -178,7 +178,6 @@ static bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
 static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 
 // Private api to be called from CUDAHooks.cpp
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_CUDA_API void setHasPrimaryContext(bool (*func)(DeviceIndex)) {
   hasPrimaryContext = func ? func : dummyHasPrimaryContext;
 }

@@ -59,7 +59,7 @@ SymDimVector infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b) {
 }
 
 template<typename Container>
-C10_ALWAYS_INLINE static InferExpandGeometryResult<Container> inferExpandGeometryImpl(
+C10_ALWAYS_INLINE InferExpandGeometryResult<Container> inferExpandGeometryImpl(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {

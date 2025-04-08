@@ -146,20 +146,6 @@ torch.ao.quantization.pt2e.export_utils
 
 .. currentmodule:: torch.ao.quantization
 
-torch.ao.quantization.pt2e.lowering
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. currentmodule:: torch.ao.quantization.pt2e.lowering
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    lower_pt2e_quantized_to_x86
-
-.. currentmodule:: torch.ao.quantization
-
 PT2 Export (pt2e) Numeric Debugger
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::

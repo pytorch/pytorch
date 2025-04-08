@@ -22,6 +22,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils._triton import has_triton
 
 
@@ -930,6 +931,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(bias_mod, dtype)
         self.run_test_with_paged_attention(bias_mod, dtype)
 
+    @skipIfRocm
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):

@@ -16,12 +16,7 @@ from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 from torch.types import FileLike
 
-from .pt2_archive_constants import (
-    AOTINDUCTOR_DIR,
-    ARCHIVE_VERSION,
-    CONSTANTS_DIR,
-    CUSTOM_OBJ_FILENAME_PREFIX,
-)
+from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
 
 log = logging.getLogger(__name__)
@@ -217,10 +212,7 @@ def package_aoti(
                         )
 
                 filename = os.path.basename(file)
-                if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
-                    new_filepath = os.path.join(CONSTANTS_DIR, filename)
-                else:
-                    new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
+                new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
                 log.debug(
                     "Saving AOTI generated file %s to archive in %s", file, new_filepath
                 )
@@ -283,10 +275,7 @@ class AOTICompiledModel:
 
 
 def load_package(
-    path: FileLike,
-    model_name: str = "model",
-    run_single_threaded: bool = False,
-    num_runners: int = 1,
+    path: FileLike, model_name: str = "model", run_single_threaded: bool = False
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
@@ -302,12 +291,12 @@ def load_package(
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
-                f.name, model_name, run_single_threaded, num_runners
+                f.name, model_name, run_single_threaded
             )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded, num_runners
+        path, model_name, run_single_threaded
     )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

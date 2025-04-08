@@ -26,7 +26,7 @@ jobs:
     environment: target-determinator-env
     steps:
       - name: Clone PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           path: pytorch
 
@@ -59,21 +59,21 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
 
       - name: Clone CodeLlama
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/codellama
           ref: 1ec50e0cfc0fadc3b6ceb146617e2119ab26eb34
           path: codellama
 
       - name: Clone Target Determination Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.2
           path: llm-target-determinator
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read_write
           aws-region: us-east-1
@@ -101,7 +101,7 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
-            "${GPU_FLAG:-}" \
+            ${GPU_FLAG:-} \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \

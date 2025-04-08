@@ -31,7 +31,7 @@ def _add_file(filename: str) -> None:
     try:
         with tokenize.open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
-    except (OSError, tokenize.TokenError):
+    except OSError:
         cache[filename] = {}
         return
 

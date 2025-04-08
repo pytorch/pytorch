@@ -20,7 +20,6 @@
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif
-#include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
@@ -90,9 +89,15 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
+enum ConstantType : uint8_t {
+  Unknown = 0,
+  Parameter = 1,
+  Buffer = 2,
+  TensorConstant = 3,
+  FoldedConstant = 4,
+};
 
-using ConstantMap =
-    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
@@ -285,11 +290,9 @@ class AOTInductorModelBase {
 
   void load_constants() {
     size_t num_constants = this->num_constants();
-    size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
 
-    std::vector<size_t> constants_internal_offset(
-        num_constants - num_folded_constants);
+    std::vector<size_t> constants_internal_offset(num_constants);
     size_t blob_size = 0;
     compute_constant_blob(blob_size, constants_internal_offset);
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -314,7 +317,7 @@ class AOTInductorModelBase {
                 constants_internal_offset[i],
                 bytes_read,
                 data_size,
-                /* skip_copy = */ false)
+                from_folded)
           : nullptr;
       bytes_read += data_size;
 
@@ -398,17 +401,13 @@ class AOTInductorModelBase {
       std::vector<size_t>& constants_internal_offset) {
     size_t num_constants = this->num_constants();
     blob_size = 0;
-    size_t curr_idx = 0;
     for (size_t i = 0; i < num_constants; i++) {
-      if (this->constant_from_folded(i)) {
-        continue;
-      }
       size_t data_size = this->constant_data_size(i);
       if (data_size % AOTI_CONST_ALIGNMENT) {
         data_size = AOTI_CONST_ALIGNMENT +
             (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
       }
-      constants_internal_offset[curr_idx++] = blob_size;
+      constants_internal_offset[i] = blob_size;
       blob_size += data_size;
     }
   }
@@ -423,17 +422,6 @@ class AOTInductorModelBase {
 
   size_t num_constants() const {
     return constants_info_.size();
-  }
-
-  size_t num_folded_constants() const {
-    size_t total_consts = this->num_constants();
-    size_t folded_consts = 0;
-    for (size_t i = 0; i < total_consts; i++) {
-      if (this->constant_from_folded(i)) {
-        folded_consts++;
-      }
-    }
-    return folded_consts;
   }
 
   const char* input_name(int64_t idx) const {

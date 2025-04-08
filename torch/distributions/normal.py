@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -52,12 +51,7 @@ class Normal(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.stddev.pow(2)
 
-    def __init__(
-        self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()

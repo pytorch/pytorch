@@ -9,7 +9,6 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/xpu/Module.h>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -39,7 +38,7 @@ static void poison_fork() {
 
 // XPU management methods
 
-static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
+PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #ifdef XPU_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
@@ -56,7 +55,7 @@ static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
 
@@ -67,7 +66,7 @@ static PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchange_device");
 
@@ -83,9 +82,7 @@ static PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_maybeExchangeDevice_wrap(
-    PyObject* self,
-    PyObject* arg) {
+PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to maybe_exchange_device");
@@ -102,7 +99,7 @@ static PyObject* THXPModule_maybeExchangeDevice_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
+PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   auto device_index = c10::xpu::current_device();
@@ -111,16 +108,14 @@ static PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_getDeviceCount_wrap(
-    PyObject* self,
-    PyObject* noargs) {
+PyObject* THXPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
   return THPUtils_packUInt64(at::xpu::device_count());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_getCurrentStream_wrap(
+PyObject* THXPModule_getCurrentStream_wrap(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -141,7 +136,7 @@ static PyObject* THXPModule_getCurrentStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_getCurrentStream_raw(
+PyObject* THXPModule_getCurrentStream_raw(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -154,7 +149,7 @@ static PyObject* THXPModule_getCurrentStream_raw(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_setStream_wrap(
+PyObject* THXPModule_setStream_wrap(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
@@ -191,7 +186,7 @@ static PyObject* THXPModule_setStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
   auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -205,14 +200,14 @@ static PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
+PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::xpu::XPUCachingAllocator::emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
 
-static PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_stats");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -255,9 +250,7 @@ static PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THXPModule_resetPeakMemoryStats(
-    PyObject* self,
-    PyObject* arg) {
+PyObject* THXPModule_resetPeakMemoryStats(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
@@ -267,7 +260,7 @@ static PyObject* THXPModule_resetPeakMemoryStats(
   Py_RETURN_NONE;
 }
 
-static PyObject* THXPModule_resetAccumulatedMemoryStats(
+PyObject* THXPModule_resetAccumulatedMemoryStats(
     PyObject* self,
     PyObject* arg) {
   HANDLE_TH_ERRORS

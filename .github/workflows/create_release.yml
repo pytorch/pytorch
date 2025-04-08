@@ -69,7 +69,7 @@ jobs:
             echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
       - name: Upload source distribution to GHA artifacts for release tags
@@ -80,7 +80,7 @@ jobs:
           path: ${{ env.PT_RELEASE_FILE }}
       - name: Set output
         id: release_name
-        run: echo "name=pt_release_name::${{ env.PT_RELEASE_NAME }}.tar.gz" >> "${GITHUB_OUTPUT}"
+        run: echo "::set-output name=pt_release_name::${{ env.PT_RELEASE_NAME }}.tar.gz"
 
   upload_source_code_to_s3:
     if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
@@ -97,7 +97,7 @@ jobs:
         with:
           name: ${{ needs.release.outputs.pt_release_name }}
       - name: Configure AWS credentials(PyTorch account)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
           aws-region: us-east-1

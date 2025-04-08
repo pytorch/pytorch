@@ -210,7 +210,7 @@ class SubsetRandomSampler(Sampler[int]):
         self.generator = generator
 
     def __iter__(self) -> Iterator[int]:
-        for i in torch.randperm(len(self.indices), generator=self.generator).tolist():
+        for i in torch.randperm(len(self.indices), generator=self.generator):
             yield self.indices[i]
 
     def __len__(self) -> int:
