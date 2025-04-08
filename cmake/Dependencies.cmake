@@ -741,6 +741,8 @@ if(USE_FBGEMM)
       # See https://github.com/pytorch/pytorch/issues/74352
       target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
       target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
+      target_compile_options_if_supported(fbgemm_generic -Wno-vla-cxx-extension)
+      target_compile_options_if_supported(fbgemm -Wno-vla-cxx-extension)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
