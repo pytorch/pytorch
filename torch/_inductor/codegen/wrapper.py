@@ -12,7 +12,6 @@ import operator
 import random
 import re
 import tempfile
-from collections.abc import Iterator
 from itertools import count
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
@@ -741,7 +740,6 @@ class MultiOutputLine(WrapperLine):
                     return codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
                 elif issubclass(itype, tuple):
                     # cpp wrapper code needs to use std::get<> to access a tuple
-                    # TODO(blainer) does this refactor break cpp_codegen? It seems to override this entirely.
                     tuple_access = self.wrapper.codegen_tuple_access(
                         basename, self.result_name, str(i)
                     )
