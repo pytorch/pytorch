@@ -209,7 +209,7 @@ class GuardManagerWrapper:
         try:
             yield
         finally:
-            self.printed_relational_guards = True
+            self.printed_relational_guards = set()
 
     def collect_diff_guard_sources(self):
         # At the time of finalize, we have only marked guard managers with
