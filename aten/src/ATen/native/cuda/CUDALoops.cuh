@@ -78,7 +78,7 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION < 12080)
+#if defined(USE_ROCM)
 template <int io_sizes>
 constexpr auto elems_per_thread(){
   if constexpr (io_sizes == 1) {
