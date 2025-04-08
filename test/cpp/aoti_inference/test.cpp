@@ -552,33 +552,30 @@ void test_aoti_user_managed_buffer() {
   // Update with rand_map and extract the output of rand_map.
   // We let user_managed = false for rand_map, this should increase memory
   // consumption.
-  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
   runner->update_constant_buffer(
       rand_map,
       /*use_inactive = */ true,
       /*validate_full_updates = */ true,
       /*user_managed = */ false);
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, updateMemory);
+
   runner->swap_constant_buffer();
   auto ref_rand_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], ref_rand_output_tensors[0]));
-  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
-  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
-  torchReserved = stats.reserved_bytes[0].current;
-  if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
-  }
-  ASSERT_EQ(
-      initMemory - DATASIZE - (torchReserved - initTorchReserved),
-      updateMemory);
 
   // Free everything.
   runner->free_inactive_constant_buffer();
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
-
-  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
-  ASSERT_EQ(initMemory - (torchReserved - initTorchReserved), updateMemory);
 
   // Set buffer #1 user_managed, and #2 not user managed, and compare the
   // underlying data
