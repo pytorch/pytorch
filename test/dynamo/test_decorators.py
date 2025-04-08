@@ -1626,6 +1626,19 @@ If the above doesn't work, please subtmit an issue to GitHub.
             res = torch.compile(f4, backend=cnts)(inp)
         self.assertEqual(res, inp + 15)
 
+        # test skipped function from different dont_skip_tracing regions
+        @torch.compile(backend=cnts)
+        def g6(x):
+            fn1 = f5
+            with torch._dynamo.dont_skip_tracing():
+                fn2 = f5
+                x = fn1(x, 1)
+            x = fn2(x, 2)
+            return x
+
+        res = g6(inp)
+        self.assertEqual(res, inp + 1)
+
     def test_patch_dynamo_config_errors(self):
         @torch.compile(backend="eager")
         def f1(x):

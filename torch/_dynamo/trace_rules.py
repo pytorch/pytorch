@@ -367,6 +367,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.isinf",
         "math.isnan",
         "math.isqrt",
+        "math.lcm",
         "math.ldexp",
         "math.lgamma",
         "math.log",
@@ -1626,6 +1627,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._values_copy",
         "torch._weight_int4pack_mm",
         "torch._weight_int4pack_mm_for_cpu",
+        "torch._weight_int4pack_mm_with_scales_and_zeros",
         "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
@@ -2238,7 +2240,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
@@ -3176,7 +3177,6 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
-    unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3582,6 +3582,12 @@ def check_file(filename, is_inlined_call=False):
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
     ):
         return SkipResult(True, "FBCODE_SKIP_TORCHREC_DIRS")
+
+    if (
+        filename.startswith(_module_dir(unittest))
+        and not torch._dynamo.config.enable_trace_unittest
+    ):
+        return SkipResult(True, "unittest")
 
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")

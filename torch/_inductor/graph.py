@@ -430,7 +430,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs: OrderedSet[str] = OrderedSet()
+        # Track the buffers that we know is unaligned
+        # This can either be a graph input or the output of fallback
+        # kernels.
+        self.unaligned_buffers: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names = OrderedSet[str]()
 
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
@@ -1116,8 +1119,8 @@ class GraphLowering(torch.fx.Interpreter):
         # expensive and cause recompiles; Instead, we're generating code
         # based on the alignment of the example input without guarding.
         with maybe_get_suppress_shape_guards_ctx():
-            if should_assume_input_aligned(example):
-                self.aligned_inputs.add(target)
+            if not should_assume_input_aligned(example):
+                self.unaligned_buffers.add(target)
         return tensor
 
     def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
