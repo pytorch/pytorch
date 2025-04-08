@@ -6967,6 +6967,12 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        # We need this extra check for input alignment since the example
+        # inputs we created are always aligned.
+        has_unaligned_input = any(
+            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
+        )
+
         device = cls.find_device(tensor_args, example_output)
 
         if not device and isinstance(
@@ -7013,8 +7019,10 @@ class FallbackKernel(ExternKernelAlloc):
                     packed,
                     indices,
                 )
-                if config.assume_unaligned_fallback_output or not tensor_is_aligned(
-                    output
+                if (
+                    config.assume_unaligned_fallback_output
+                    or has_unaligned_input
+                    or not tensor_is_aligned(output)
                 ):
                     V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
                 return buf

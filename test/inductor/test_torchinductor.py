@@ -12958,6 +12958,9 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
+    @skip_if_cpp_wrapper(
+        "Inductor does not generate alignment assertion for cpp_wrapper right now"
+    )
     def test_incorrect_meta_for_custom_op_2d(self):
         def slice2d(x):
             return (3 * x)[..., 1:-15]
