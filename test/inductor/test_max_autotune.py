@@ -1184,7 +1184,7 @@ class TestMaxAutotune(TestCase):
                 # remove white space from x, also remove 'epilogue_fn': number
                 # since id of epilogue_fn changes across runs.
                 x = re.sub(r"\s+", "", x)
-                pattern = r"'epilogue fn':\d+"
+                pattern = r"\'epilogue_fn\':\d+"
                 x = re.sub(pattern, "", x)
                 return x
 

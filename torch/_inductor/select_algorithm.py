@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -286,7 +286,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
 
 # Function name, followed by args and kwargs.
-RecordedEventsType: TypeAlias = list[tuple[str, list[Any], dict[str, Any]]]
+RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
 class TritonTemplateKernel(TritonKernel):
