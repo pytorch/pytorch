@@ -4232,8 +4232,9 @@ class Scheduler:
                     buffer := self.name_to_buf.get(dep.name, None)
                 ) and buffer.get_device() != node_device:
                     input_device = buffer.get_device()
-                    input_device_nodes = device_to_nodes.pop(input_device)
-                    result.extend(input_device_nodes)
+                    # the dependent node may have been processed
+                    if input_device_nodes := device_to_nodes.pop(input_device, None):
+                        result.extend(input_device_nodes)
             device_to_nodes[node_device].append(node)
 
         for node in nodes:
