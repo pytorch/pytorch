@@ -429,11 +429,8 @@ graph():
             grad1 = torch.ops._c10d_functional.wait_tensor.default(handle1)
             return grad3, grad2, grad1
 
-        with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=True
-        ):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, fake_pg=True):
             fn(g1, g2, g3)
-
 
     def test_nccl_heuristics(self):
         assert len(baseLat) == len(NCCL_ALGO)
