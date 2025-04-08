@@ -977,6 +977,28 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_corner_cases(self) -> None:
+        dtype = torch.bfloat16
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(t, group=group_name)
+        res = t[:0]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[:48]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[: 2 * 48].view(2, 48)
+        out = torch.empty(2, 48 // self.world_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
+
     def _verify_reduce_scatter_result(self, inp, res):
         gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
         gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)

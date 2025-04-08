@@ -811,8 +811,7 @@ at::Tensor reduce_scatter_out(
     at::Tensor input,
     std::string group_name,
     bool split_last_dim,
-    at::Tensor output
-    ) {
+    at::Tensor output) {
   TORCH_CHECK(
       input.is_contiguous(), "reduce_scatter: input must be contiguous.");
   TORCH_CHECK(
@@ -829,8 +828,11 @@ at::Tensor reduce_scatter_out(
       get_and_verify_alignment(input, "reduce_scatter");
 
   TORCH_CHECK(
-      input.numel() % symm_mem->get_world_size() * alignment == 0,
-      "expected number of elements to be divisble by world_size * alignment, number of elements ",
+      input.numel() %
+              (symm_mem->get_world_size() *
+               (alignment / input.element_size())) ==
+          0,
+      "expected number of elements to be divisible by world_size * alignment, number of elements ",
       input.numel(),
       " world size ",
       symm_mem->get_world_size(),
@@ -849,8 +851,11 @@ at::Tensor reduce_scatter_out(
         "reduce_scatter expected output last dim size to be input last dim size / world_size");
 
     TORCH_CHECK(
-        input.size(-1) % symm_mem->get_world_size() * alignment == 0,
-        "expected last dimension to be divisble by world_size * alignment, last dimension ",
+        input.size(-1) %
+                (symm_mem->get_world_size() *
+                 (alignment / input.element_size())) ==
+            0,
+        "expected last dimension to be divisible by world_size * alignment, last dimension ",
         input.size(-1),
         " world size ",
         symm_mem->get_world_size(),
@@ -860,6 +865,10 @@ at::Tensor reduce_scatter_out(
     TORCH_CHECK(input.dim() == 1, "reduce_scatter expected 1D input");
     TORCH_CHECK(output.dim() == 1, "reduce_scatter expected 1D output");
     TORCH_CHECK(output.numel() == input.numel() / symm_mem->get_world_size());
+  }
+  if (input.numel() == 0) {
+    TORCH_CHECK(input.scalar_type() == output.scalar_type());
+    return output;
   }
 
   TORCH_CHECK(
@@ -881,11 +890,16 @@ at::Tensor reduce_scatter_out(
         input.scalar_type(), "two_shot_all_reduce", [&]() {
           DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
             DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
-              two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size, true, true>
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  true>
                   <<<num_blocks,
-                    num_threads,
-                    0,
-                    at::cuda::getCurrentCUDAStream()>>>(
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
                       reinterpret_cast<scalar_t**>(
                           symm_mem->get_buffer_ptrs_dev()),
                       output.data_ptr<scalar_t>(),
@@ -894,7 +908,8 @@ at::Tensor reduce_scatter_out(
                       reinterpret_cast<uint32_t**>(
                           symm_mem->get_signal_pad_ptrs_dev()),
                       symm_mem->get_rank(),
-                      symm_mem->get_world_size(), input.size(-1));
+                      symm_mem->get_world_size(),
+                      input.size(-1));
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             });
           });
@@ -904,11 +919,16 @@ at::Tensor reduce_scatter_out(
         input.scalar_type(), "two_shot_all_reduce", [&]() {
           DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
             DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
-              two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size, true, false>
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  false>
                   <<<num_blocks,
-                    num_threads,
-                    0,
-                    at::cuda::getCurrentCUDAStream()>>>(
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
                       reinterpret_cast<scalar_t**>(
                           symm_mem->get_buffer_ptrs_dev()),
                       output.data_ptr<scalar_t>(),
@@ -917,12 +937,12 @@ at::Tensor reduce_scatter_out(
                       reinterpret_cast<uint32_t**>(
                           symm_mem->get_signal_pad_ptrs_dev()),
                       symm_mem->get_rank(),
-                      symm_mem->get_world_size(), input.size(-1));
+                      symm_mem->get_world_size(),
+                      input.size(-1));
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             });
           });
         });
-
   }
   return output;
 }
