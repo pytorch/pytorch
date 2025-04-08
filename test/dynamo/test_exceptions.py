@@ -176,7 +176,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_raise_match(self):
         a = AttributeError
@@ -258,7 +257,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -852,7 +850,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
