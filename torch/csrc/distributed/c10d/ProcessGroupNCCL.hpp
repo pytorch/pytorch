@@ -1286,10 +1286,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether or not to hook the cache allocator to register all allocated
-  // tensors
-  bool useTensorRegisterAllocatorHook_ = false;
-
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
