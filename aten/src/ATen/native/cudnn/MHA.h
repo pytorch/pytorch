@@ -72,7 +72,9 @@ void run_cudnn_SDP_bprop(
 
 void run_cudnn_SDP_bprop_nestedtensor(
     int64_t b,
-    int64_t h,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
     int64_t s_q,
     int64_t s_kv,
     int64_t d_qk,
