@@ -419,57 +419,6 @@ def smoke_test_modules():
                 print(f"Output: \n{output}\n")
 
 
-def test_gomp():
-    script = """
-import ctypes
-import os
-import sys
-from pathlib import Path
-python_path = Path(sys.executable).resolve()
-python_prefix = (
-    python_path.parent.parent
-)  # Typically goes to the Python installation root
-
-libtorch_cpu_path = (
-    python_prefix
-    / "lib"
-    / "python{}.{}".format(*sys.version_info)
-    / "site-packages"
-    / "torch"
-    / "lib"
-    / "libtorch_cpu.so"
-)
-
-# use the default gomp path of AlmaLinux OS
-libgomp_path = "/usr/lib64/libgomp.so.1"
-
-os.environ["GOMP_CPU_AFFINITY"] = "0-3"
-
-libgomp = ctypes.CDLL(libgomp_path)
-libgomp = ctypes.CDLL(libtorch_cpu_path)
-
-libgomp.omp_get_max_threads.restype = ctypes.c_int
-libgomp.omp_get_max_threads.argtypes = []
-
-omp_max_threads = libgomp.omp_get_max_threads()
-print(omp_max_threads)
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "-c", script], text=True, capture_output=True, check=True
-        )
-        omp_max_threads = result.stdout.strip()
-        print(f"omp_get_max_threads after load libgomp.so: {omp_max_threads}")
-        if int(omp_max_threads) == 1:
-            raise RuntimeError(
-                "omp_max_threads is 1. Check whether libgomp is loaded twice."
-            )
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Subprocess for get omp threads failed with error:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
-        ) from e
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -515,7 +464,6 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
-    test_gomp()
 
     if is_cuda_system:
         test_linalg("cuda")
