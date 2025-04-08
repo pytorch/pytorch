@@ -1,6 +1,6 @@
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, Optional
 
 import torch
 import torch.distributed.tensor._api as dtensor
@@ -110,9 +110,19 @@ def compute_local_shape_and_global_offset(
         identifying how this shard fits into the global tensor in each dimension.
 
     """
-    ordered_placements = _explicit_order_placements(mesh.shape, placements)
+    return _compute_local_shape_and_global_offset(
+        global_shape, mesh.shape, mesh.get_coordinate(), placements
+    )
 
-    my_coordinate = mesh.get_coordinate()
+
+# accept 'plain data types' to enable simpler unit testing without creating device mesh
+def _compute_local_shape_and_global_offset(
+    global_shape: ShapeType,
+    mesh_shape: ShapeType,
+    my_coordinate: Optional[list[int]],
+    placements: Sequence[Placement],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
@@ -121,7 +131,7 @@ def compute_local_shape_and_global_offset(
         local_shape = list(global_shape)
         global_offset = [0] * len(global_shape)
         for mesh_dim, placement in ordered_placements:
-            mesh_dim_size = mesh.size(mesh_dim)
+            mesh_dim_size = mesh_shape[mesh_dim]
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)

@@ -8,6 +8,7 @@ from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _explicit_order_placements,
+    _compute_local_shape_and_global_offset,
     compute_local_shape_and_global_offset,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -101,6 +102,30 @@ class LocalTest(TestCase):
                 _explicit_order_placements(
                     test_case["mesh_shape"], test_case["placements"]
                 )
+
+
+    def test_compute_local_shape_and_global_offset_uneven(self):
+        global_shape = (4096, 4096)
+        DP = 30
+        TP = 8
+        mesh_shape = (DP, TP)
+        placements = [_StridedShard(0, split_factor=8), Shard(0)]
+        TP_shard_size = global_shape[0] / TP
+        for my_coordinate in itertools.product(range(DP), range(TP)):
+            local_shape, global_offset = _compute_local_shape_and_global_offset(
+                global_shape, mesh_shape, list(my_coordinate), placements
+            )
+            print(f"{my_coordinate=}: {local_shape=}, {global_offset=}")
+            dp_rank, tp_rank = my_coordinate
+            if dp_rank < 28:
+                self.assertEqual(local_shape, (18, 4096))
+                self.assertEqual(global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0))
+            elif dp_rank == 28:
+                self.assertEqual(local_shape, (8, 4096))
+                self.assertEqual(global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0))
+            elif dp_rank == 29:
+                self.assertEqual(local_shape, (0, 4096))
+
 
 
 class UtilTest(DTensorTestBase):
