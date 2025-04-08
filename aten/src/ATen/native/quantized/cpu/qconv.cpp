@@ -1773,9 +1773,9 @@ namespace at::native {
     }
     TORCH_CHECK(
       std::find(supported_postop.begin(), supported_postop.end(), attr) != supported_postop.end(),
-      "Unsupported post op",
+      "Unsupported post op ",
       attr,
-      "for quantized pointwise conv",
+      " for quantized pointwise conv",
       act.dim()-2,
       "d.")
     return _quantized_convolution_onednn(
