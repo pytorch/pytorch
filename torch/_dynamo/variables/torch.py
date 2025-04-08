@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -169,8 +169,9 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-def tracing_state_functions():
-    # Avoid circular import like torch.onnx
+@functools.lru_cache(None)
+def tracing_state_functions() -> dict[Callable, bool]:
+    # Defined as a function to avoid circular import like torch.onnx
     return {
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
