@@ -325,7 +325,6 @@ def ncu_analyzer(
     import os
     import subprocess
 
-    # Access arguments from the args object
     kernel_regex = args.ncu_kernel_regex
     metrics = args.ncu_metrics
     enable_csv_output = args.ncu_csv
