@@ -790,12 +790,18 @@ API Reference
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autofunction:: torch.export.dynamic_shapes.Dim
+.. autoclass:: torch.export.dynamic_shapes.Dim
 .. autofunction:: torch.export.exported_program.default_decompositions
 .. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
 
     .. automethod:: dynamic_shapes
+
+.. autoclass:: torch.export.dynamic_shapes.AdditionalInputs
+
+    .. automethod:: add
+    .. automethod:: dynamic_shapes
+    .. automethod:: verify
 
 .. autofunction:: torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes
 .. autoclass:: Constraint

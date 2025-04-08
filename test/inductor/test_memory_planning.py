@@ -53,11 +53,13 @@ class TestMemoryPlanning(TestCase):
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided_" + GPU_TYPE + "((4*s0*s1 + align(4*s0*s0), ), (1, )"
+            "pool1 = empty_strided_"
+            + GPU_TYPE
+            + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
         ).check_next(
-            "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
+            "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s77, s77), (s77, 1))"
         ).check(
-            "buf1 = alloc_from_pool(pool1, align(4*s0*s0),"
+            "buf1 = alloc_from_pool(pool1, align(4*s77*s77),"
         ).run(
             code
         )
@@ -91,11 +93,11 @@ class TestMemoryPlanning(TestCase):
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         result, code = run_and_get_cpp_code(
-            lambda: AOTIRunnerUtil.run(GPU_TYPE, f, args, dynamic_shapes=dynamic_shapes)
+            lambda: AOTIRunnerUtil.run(f, args, dynamic_shapes=dynamic_shapes)
         )
 
         FileCheck().check(
-            "int64_t int_array_2[] = {24L + align(12L*s0), };"
+            "int64_t int_array_2[] = {24L + align(12L*s77), };"
         ).check_next("int64_t int_array_3[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
@@ -103,7 +105,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "RAIIAtenTensorHandle pool1(pool1_handle);"
         ).check_next(
-            "int64_t int_array_4[] = {s0, 3L};"
+            "int64_t int_array_4[] = {s77, 3L};"
         ).check_next(
             "int64_t int_array_5[] = {3L, 1L};"
         ).check_next(
