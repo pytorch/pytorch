@@ -28,6 +28,8 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+from __future__ import annotations
+
 import functools
 import inspect
 import logging
