@@ -262,12 +262,12 @@ class primitive_ext : public primitive {
 
   template <typename M>
   void set_attribute(int slot, int arg_class, void* handle, M constructor) {
-    if (m[slot])
-      m[slot].set_data_handle(handle);
+    if (mem_arg_cache[slot])
+      mem_arg_cache[slot].set_data_handle(handle);
     else {
-      m[slot] = constructor();
+      mem_arg_cache[slot] = constructor();
       c_args[slot].arg = arg_class;
-      c_args[slot].memory = m[slot].get();
+      c_args[slot].memory = mem_arg_cache[slot].get();
     }
   }
 
@@ -278,7 +278,7 @@ class primitive_ext : public primitive {
       int slot_off = 2) {
     auto off = slot_off;
     for (const auto& p : handles) {
-      auto& m_arg = m[off];
+      auto& m_arg = mem_arg_cache[off];
       if (m_arg)
         m_arg.set_data_handle(p.second);
       else {
@@ -299,7 +299,7 @@ class primitive_ext : public primitive {
   }
 
  private:
-  memory m[max_args];
+  memory mem_arg_cache[max_args];
   dnnl_exec_arg_t c_args[max_args];
 };
 

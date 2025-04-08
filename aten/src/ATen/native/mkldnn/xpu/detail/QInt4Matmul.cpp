@@ -160,12 +160,12 @@ static at::Tensor dnnl_matmul_w4a16_common(
     Tensor& result, // dst, [b, m, n]
     const Tensor& mat1_, // src, [b, m, k]
     const Tensor& mat2, // quantized weight, [K/8, N] transpose
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [k/group_size, n]
     const Tensor& zp, // [k/group_size, n/8]
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx,
+    const std::optional<Tensor>& g_idx,
     F pattr,
     Tensor res_flat,
     Tensor res1_flat) {
@@ -314,12 +314,12 @@ static at::Tensor dnnl_matmul_w4a16(
     Tensor& result, // dst, [b, m, n]
     const Tensor& mat1, // src, [b, m, k]
     const Tensor& mat2, // quantized weight, [k, n] transpose
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [k/group_size, n]
     const Tensor& zp, // [k/group_size, n/8]
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION("dnnl_matmul_w4a16", std::vector<c10::IValue>({mat1, mat2}));
 
   auto quant = [&](primitive_attr& pattr) {
@@ -347,12 +347,12 @@ static at::Tensor dnnl_matmul_w4a16_and_silu(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_silu", std::vector<c10::IValue>({mat1, mat2}));
 
@@ -384,13 +384,13 @@ static at::Tensor dnnl_matmul_w4a16_and_resmul(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_resmul", std::vector<c10::IValue>({mat1, mat2}));
 
@@ -423,13 +423,13 @@ static at::Tensor dnnl_matmul_w4a16_and_bias_gelu(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     int64_t group_size,
     c10::string_view approximate,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_bias_gelu",
       std::vector<c10::IValue>({mat1, mat2}));
@@ -468,14 +468,14 @@ static at::Tensor dnnl_matmul_w4a16_and_bias_resadd_resadd(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     const Tensor& res1,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_bias_resadd_resadd",
       std::vector<c10::IValue>({mat1, mat2}));
@@ -511,13 +511,13 @@ static at::Tensor dnnl_matmul_w4a16_and_silu_mul(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_silu_mul", std::vector<c10::IValue>({mat1, mat2}));
 
@@ -551,13 +551,13 @@ static at::Tensor dnnl_matmul_w4a16_and_bias_silu_mul(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_bias_silu_mul",
       std::vector<c10::IValue>({mat1, mat2}));
@@ -592,13 +592,13 @@ static at::Tensor dnnl_matmul_w4a16_and_add(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_add", std::vector<c10::IValue>({mat1, mat2}));
 
@@ -631,13 +631,13 @@ static at::Tensor dnnl_matmul_w4a16_and_bias_add(
     Tensor& result, // dst, [b, M, N]
     const Tensor& mat1, // src, [b, M, K]
     const Tensor& mat2, // quantized weight, [K/8, N]
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& scale, // [K/group_size, N]
     const Tensor& zp, // [k/group_size, N/8]
     const Tensor& res,
     int64_t group_size,
     bool m2_trans,
-    const c10::optional<Tensor>& g_idx) {
+    const std::optional<Tensor>& g_idx) {
   RECORD_FUNCTION(
       "dnnl_matmul_w4a16_and_bias_add", std::vector<c10::IValue>({mat1, mat2}));
 
