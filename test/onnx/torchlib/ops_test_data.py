@@ -448,7 +448,7 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("abs", core_ops.aten_abs_complex, complex=True),
     TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
     TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
-    TorchLibOpInfo("nn.functional.gelu", nn_ops.aten_gelu_opset20, opset_introduced=20),
+    TorchLibOpInfo("gelu_op20", nn_ops.aten_gelu_opset20, opset_introduced=20),
 )
 
 
@@ -503,6 +503,7 @@ ops_test_common.duplicate_opinfo(
         "nn.functional.replication_pad3d",
     ),
 )
+ops_test_common.duplicate_opinfo(OPS_DB, "nn.functional.gelu", ("gelu_op20",))
 ops_test_common.duplicate_opinfo(
     OPS_DB,
     "nn.functional.scaled_dot_product_attention",

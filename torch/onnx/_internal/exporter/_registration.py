@@ -188,7 +188,7 @@ class ONNXRegistry:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
 
-        registry.cleanup_registry()
+        registry._cleanup_registry_based_on_opset_version()
         return registry
 
     def _register(
@@ -278,8 +278,11 @@ class ONNXRegistry:
         """
         return bool(self.get_decomps(target))
 
-    def cleanup_registry(self) -> None:
-        """Cleans up the registry to avoid duplicates based on opset version."""
+    def _cleanup_registry_based_on_opset_version(self) -> None:
+        """
+        Removes avoid duplicates implementations of an op with same signatures based on opset version.
+        Pick the implementation with the highest opset version valid until the current opset version.
+        """
         cleaned_functions = {}
         for target_or_name, decomps in self.functions.items():
             # Filter decompositions to only include those with opset_introduced <= opset_version
