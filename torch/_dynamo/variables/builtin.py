@@ -1012,18 +1012,62 @@ class BuiltinVariable(VariableTracker):
                 # scenario is to de-sugar eagerly.
                 fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
-            if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
-                # Standard indexing will force specialization due to
-                # __index__.  Rewrite as a regular torch op which will
-                # trace fine
-                fn, args = (
-                    torch.select,
-                    [
-                        args[0],
-                        variables.ConstantVariable.create(0),
-                        args[1],
-                    ],
-                )
+            if fn is operator.getitem and isinstance(args[0], variables.TensorVariable):
+
+                def rewrite(dim, item):
+                    if isinstance(item, (variables.ConstantVariable, SymNodeVariable)):
+                        # Standard indexing will force specialization due to
+                        # __index__.  Rewrite as a regular torch op which will
+                        # trace fine
+                        return dim, (
+                            torch.select,
+                            [
+                                variables.ConstantVariable.create(dim),
+                                item,
+                            ],
+                        )
+                    if isinstance(item, variables.SliceVariable):
+                        # Standard slicing will force specialization due to
+                        # __index__.  Rewrite as a regular torch op which will
+                        # trace fine
+                        start, stop, step = item.items
+                        if step.as_python_constant() is None:
+                            step = variables.ConstantVariable.create(1)
+                        return dim + 1, (
+                            torch.ops.aten.slice,
+                            [
+                                variables.ConstantVariable.create(dim),
+                                start,
+                                stop,
+                                step,
+                            ],
+                        )
+
+                items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
+                dim = 0
+                # Sequence rewrites.
+                sequence = []
+                for item in items:
+                    if (r := rewrite(dim, item)) is not None:
+                        dim, call_spec = r
+                        sequence.append(call_spec)
+
+                if len(sequence) == len(items):
+                    *rest, last = sequence
+
+                    # Run rest.
+                    t = args[0]
+                    for _method, _args in rest:
+                        proxy = tx.output.create_proxy(
+                            "call_function",
+                            _method,
+                            *proxy_args_kwargs([t, *_args], {}),
+                        )
+                        t = wrap_fx_proxy(tx, proxy)
+
+                    # Return last.
+                    _method, _args = last
+                    fn, args = _method, [t, *_args]
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
