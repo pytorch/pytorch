@@ -3190,6 +3190,7 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+        default=True
     )
 
     parser.add_argument(
@@ -3483,6 +3484,8 @@ def run(runner, args, original_dir=None):
             torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
+        # the benchmark mark_dynamic heuristic is wrong
+        torch._dynamo.config.allow_ignore_mark_dynamic = True
     if args.propagate_real_tensors:
         # TODO: Separate flag for data dependent
         torch._dynamo.config.capture_scalar_outputs = True
