@@ -1,4 +1,4 @@
-from torch.fx import Node, GraphModule
+from torch.fx import Node, Graph, GraphModule
 from typing import Sequence, Optional
 from torch.utils._pytree import tree_flatten
 import torch
@@ -140,3 +140,10 @@ def tangent_has_chunking_meta(gm: GraphModule) -> bool:
         node.op == "placeholder" and "tangent" in node.target and get_chunking_meta(node) is not None
         for node in gm.graph.nodes
     )
+
+def get_tangent_nodes(graph: Graph):
+    tangents = []
+    for node in graph.nodes:
+        if node.op == "placeholder" and "tangent" in node.name:
+            tangents.append(node)
+    return tangents
