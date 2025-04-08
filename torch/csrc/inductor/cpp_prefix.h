@@ -9,10 +9,10 @@
 #include <memory>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
-// Because AOTInductor generated code directly includes this for the CPU
+// Because AOTInductor generated code will include this header for the CPU
 // backend, we have to make sure the used headers are implemented in a
 // header-only way, i.e. all the function and class definitions are in .h files
-// instead of .cpp files, to avoid ABI backward-compatiblity breakage.
+// instead of .cpp files, to avoid ABI backward-compatibility breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
@@ -20,9 +20,7 @@
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
-#include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/generic_math.h>
@@ -53,8 +51,6 @@ typedef at::BFloat16 bfloat16;
 
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
-typedef at::Float8_e4m3fnuz float8_e4m3fnuz;
-typedef at::Float8_e5m2fnuz float8_e5m2fnuz;
 
 template <typename T>
 struct Welford {
