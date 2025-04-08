@@ -411,7 +411,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
 Tensor softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
-    if ((input_.is_cuda()||input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+    if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float) {
         return at::_softmax(input_, dim_, true);
     } else {
         Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
