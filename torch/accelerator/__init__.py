@@ -30,8 +30,17 @@ def device_count() -> int:
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
             If there is no available accelerators, return 0.
+
+    .. note:: This API delegates to the device-specific version of `device_count`.
+        On CUDA, this API will NOT posion fork if NVML discovery succeeds.
+        Otherwise, it will. For more details, see :ref:`multiprocessing-poison-fork-note`.
     """
-    return torch._C._accelerator_deviceCount()
+    acc = current_accelerator()
+    if acc is None:
+        return 0
+
+    mod = torch.get_device_module(acc)
+    return mod.device_count()
 
 
 def is_available() -> bool:
