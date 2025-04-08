@@ -7,24 +7,16 @@ import unittest
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    IS_LINUX,
-    skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_PRIVATEUSE1,
-    TEST_XPU,
-)
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.testing._internal.common_utils import IS_ARM64, IS_LINUX, skipIfTorchDynamo
 
 
-# define TEST_ROCM before changing TEST_CUDA
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+# This TestCase should be mutually exclusive with other backends.
+acc = torch.accelerator.current_accelerator()
+is_skip = not (acc is None or acc.type == "mtia")
 
 
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM or TEST_XPU,
+    IS_ARM64 or not IS_LINUX or is_skip,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
