@@ -1753,10 +1753,13 @@ class GraphModule(torch.nn.Module):
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self._prev = torch._dynamo.config.enable_trace_contextlib
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
+        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         torch._dynamo.config.enable_trace_contextlib = self._prev
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2698,43 +2701,6 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
-
-
-class TestExitStack(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
-
-    def test_exitstack(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(set_default_dtype(torch.float64))
-                return t.sin()
-
-        t = torch.randn(2, dtype=torch.float64)
-        y = fn(t)
-        self.assertEqual(y, t.sin())
-        self.assertEqual(y.dtype, torch.float64)
-
-    @make_dynamo_test
-    def test_ensure_exc_is_active_in_two_contexts(self):
-        def raise_exc(exc):
-            self.assertIsNotNone(sys.exc_info()[1])
-            raise exc
-
-        try:
-            with contextlib.ExitStack() as stack:
-                stack.callback(raise_exc, IndexError)
-                stack.callback(raise_exc, KeyError)
-                raise ZeroDivisionError
-        except IndexError as exc:
-            self.assertIsInstance(exc.__context__, KeyError)
-        else:
-            self.fail("Expected IndexError, but no exception was raised")
 
 
 instantiate_parametrized_tests(CtxManagerTests)
