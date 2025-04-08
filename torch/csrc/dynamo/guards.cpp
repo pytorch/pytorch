@@ -5422,8 +5422,10 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
       py_m, "RelationalGuard");
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<OBJECT_ALIASING, RelationalGuard, std::shared_ptr<OBJECT_ALIASING>>(
-      py_m, "OBJECT_ALIASING");
+  py::class_<
+      OBJECT_ALIASING,
+      RelationalGuard,
+      std::shared_ptr<OBJECT_ALIASING>>(py_m, "OBJECT_ALIASING");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       NO_TENSOR_ALIASING,
