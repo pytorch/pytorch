@@ -289,8 +289,13 @@ class ONNXRegistry:
 
             # Keep only the decomposition with the highest opset_introduced
             if decomps:
-                max_opset_decomp = max(decomps, key=lambda x: x.opset_introduced)
-                cleaned_functions[target_or_name] = [max_opset_decomp]
+                # Find the maximum opset_introduced
+                max_opset = max(d.opset_introduced for d in decomps)
+
+                # Keep all decompositions with the maximum opset_introduced
+                cleaned_functions[target_or_name] = [
+                    d for d in decomps if d.opset_introduced == max_opset
+                ]
 
         self.functions = cleaned_functions
 
