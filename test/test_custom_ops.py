@@ -3699,6 +3699,7 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertEqual(result, w * 2 * 3 * 42)
 
     def test_layout_constraint_tags(self):
+        needs_exact_strides = torch._C.Tag.needs_exact_strides
         needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
         flexible_layout = torch._C.Tag.flexible_layout
         # (tags, the result of the tag inference)
@@ -3706,7 +3707,7 @@ Please use `add.register_fake` to add an fake impl.""",
             ({needs_fixed_stride_order}, needs_fixed_stride_order),
             ({flexible_layout}, flexible_layout),
             # If no tags are provided, then the following is the default
-            (set(), needs_fixed_stride_order),
+            (set(), needs_exact_strides),
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
