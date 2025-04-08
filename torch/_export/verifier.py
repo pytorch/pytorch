@@ -145,11 +145,11 @@ class Verifier(metaclass=_VerifierMeta):
         return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> tuple[type[Any], ...]:
-        return (torch.fx.GraphModule,)
+        return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
 
     def check_valid_op(self, op):
         pass
@@ -271,6 +271,8 @@ class Verifier(metaclass=_VerifierMeta):
                         elif type(attr).__name__ == "AOTInductorEPModule":
                             continue
 
+                        elif type(attr).__name__ == "AOTInductorRunnerWrapper":
+                            continue
 
                     if not isinstance(attr, _allowed_getattr_types(is_toplevel_gm)):
                         raise SpecViolationError(

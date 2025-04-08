@@ -151,6 +151,24 @@ class align(sympy.Function):
             return value
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionMap:
+    """
+    Mapping from the partition info (e.g., input/output) to the graph info
+    """
+
+    # a unique id of graph partition
+    id: int
+
+    # map partition input/output indices to graph input/output indices. None indicates
+    # a partition input/output is not a graph input/output.
+    input_index_mapping: list[Optional[int]]
+    output_index_mapping: list[Optional[int]]
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
+
+
 def do_bench_using_profiling(
     fn: Callable[[], Any], warmup: int = 25, rep: int = 100
 ) -> float:
@@ -322,8 +340,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    for v in list(tys.values()):
-        tys[v] = v
+    tys.update({v: v for v in list(tys.values())})
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
@@ -617,9 +634,7 @@ def get_kernel_metadata(
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
             if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
-                node_to_idx_map = {}
-                for idx, n in enumerate(single_graph.nodes):
-                    node_to_idx_map[n] = idx
+                node_to_idx_map = {n: idx for idx, n in enumerate(single_graph.nodes)}
                 single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
             inductor_nodes.sort(
                 key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
@@ -837,8 +852,20 @@ def get_first_incompatible_cudagraph_node(
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
+
+        if (
+            not torch._inductor.config.graph_partition
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+        ):
+            # skip cudagraph if a cudagraph_unsafe op is detected.
+            # graph_partition helps by spliting on this cudagraph_unsafe
+            # op and cudagraphifying the subgraphs.
+            return node
+
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
+
     return None
 
 
@@ -888,7 +915,11 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
+                        if isinstance(
+                            result,
+                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
+                        ):
+                            result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
@@ -1256,8 +1287,15 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 
 @functools.lru_cache
-def get_num_sms() -> int:
+def get_max_num_sms() -> int:
     return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+def get_num_sms() -> int:
+    """Handle experimental carveout if set otherwise return hardware SM count"""
+    # TODO we need to properly guard on this global
+    carveout = torch._C._get_sm_carveout_experimental()
+    return get_max_num_sms() - (carveout if carveout is not None else 0)
 
 
 def get_tma_workspace_arg(
@@ -1339,7 +1377,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
             return False
 
         dtype = x.get_dtype()
-        if dtype not in (torch.float16, torch.bfloat16):
+        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
         layout = x.get_layout()
@@ -1350,6 +1388,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         inner_dim = layout.size[1]
         if transposed:
             inner_dim = layout.size[0]
+
+        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
+            inner_dim, 32
+        ):
+            return False
+
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
 
@@ -2598,10 +2642,24 @@ def register_op_dtype_propagation_rules(
     )
 
 
+def get_current_backend() -> str:
+    from torch._inductor.virtualized import V
+
+    device_str = V.graph.get_current_device_or_throw().type
+    if device_str == "cpu":
+        return config.cpu_backend
+    elif device_str == "mps":
+        return "mps"
+    else:
+        return config.cuda_backend
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
-    if config.triton.codegen_upcast_to_fp32 and (
+    if (
         dtype in (torch.float16, torch.bfloat16)
+        and config.triton.codegen_upcast_to_fp32
+        and get_current_backend() == "triton"
     ):
         return torch.float32
     return dtype
@@ -2687,13 +2745,19 @@ def set_kernel_post_grad_provenance_tracing(
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
     from .virtualized import V
 
-    for node in node_schedule:
-        if node not in (EnableReduction, DisableReduction):
-            if node.node is not None:
-                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+    for snode in node_schedule:
+        if snode not in (EnableReduction, DisableReduction):
+            if snode.node is not None:
+                curr_node_info = (
+                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                        kernel_name, []
+                    )
+                )
+                curr_node_info.extend(
                     origin.name
-                    for origin in node.node.origins  # type: ignore[attr-defined]
-                ]
+                    for origin in snode.node.origins  # type: ignore[attr-defined]
+                    if origin.name not in curr_node_info
+                )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
@@ -2734,3 +2798,35 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
+
+
+def is_cudagraph_unsafe_op(node: Operation) -> bool:
+    """
+    Returns True if the node is an op that is not cudagraphable.
+    Usually only custom ops have this tag.
+    """
+    from . import ir
+
+    if not isinstance(node, ir.FallbackKernel):
+        return False
+
+    if (
+        isinstance(node.op_overload, torch._ops.OpOverload)
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+    ):
+        return True
+
+    return False
+
+
+def get_ld_library_path() -> str:
+    path = os.environ.get("LD_LIBRARY_PATH", "")
+    if config.is_fbcode():
+        from libfb.py.parutil import get_runtime_path
+
+        runtime_path = get_runtime_path()
+        if runtime_path:
+            lib_path = os.path.join(runtime_path, "runtime", "lib")
+            path = os.pathsep.join([lib_path, path]) if path else lib_path
+
+    return path
