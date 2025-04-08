@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import os
 import pickle
 import shutil
@@ -1769,6 +1770,69 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
+
+    @requires_triton()
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"bundled_autotune_remote_cache": False})
+    @config.patch({"max_autotune": True})
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Worker processes do not register PatchCaches() properly
+    @parametrize("remote_cache", (True, False))
+    def test_modified_autotune_cache(self, remote_cache):
+        """
+        If a developer changes the way the autotune cache is handled,
+        there's a chance it'll break the cache. This happened with
+        #150122. This test ensures that if torch code changes, then
+        old cache entries will be invalidated.
+        """
+
+        def mock_torch_key(value: str) -> bytes:
+            return value.encode("utf-8")
+
+        def get_autotune_stats():
+            if remote_cache:
+                return global_stats.autotune_remote
+            return global_stats.autotune_local
+
+        def fn(x, y):
+            return (x + y).relu()
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+
+        with config.patch(
+            {
+                "autotune_local_cache": not remote_cache,
+                "autotune_remote_cache": remote_cache,
+            }
+        ):
+            with PatchCaches():
+                with mock.patch(
+                    "torch._inductor.codecache.torch_key",
+                    functools.partial(mock_torch_key, "torchkey1"),
+                ):
+                    f_compiled = torch.compile(fn, fullgraph=True)
+                    res1 = f_compiled(x, y)
+
+                self.assertEqual(get_autotune_stats(), Stats(1, 0, 1))
+
+                torch._dynamo.reset()
+                PyCodeCache.cache_clear()
+
+                with mock.patch(
+                    "torch._inductor.codecache.torch_key",
+                    functools.partial(mock_torch_key, "torchkey2"),
+                ):
+                    f_compiled = torch.compile(fn, fullgraph=True)
+                    res2 = f_compiled(x, y)
+
+                self.assertEqual(get_autotune_stats(), Stats(2, 0, 2))
+
+                self.assertEqual(res1, res2)
 
 
 class TestRemoteAOTAutogradCache(TestCase):
