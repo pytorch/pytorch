@@ -2386,15 +2386,6 @@
   "torch.utils.collect_env": [
     "namedtuple"
   ],
-  "torch.utils.data.datapipes.gen_pyi": [
-    "Any",
-    "Dict",
-    "List",
-    "Set",
-    "Tuple",
-    "Union",
-    "defaultdict"
-  ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",
     "apply_random_seed"
