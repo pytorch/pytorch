@@ -814,7 +814,9 @@ def compile_times(repr="str", aggregate: bool = False):
 
         # unaccounted
         accounted = dynamo_total + aot_total + inductor_total + triton_total
-        unaccounted = entire_frame_fwd + inductor_bwd_triton - accounted
+        unaccounted = (
+            entire_frame_fwd + inductor_bwd_triton + triton_autotuning - accounted
+        )
 
         if accounted:
             out += "Approximate Compilation Time Breakdown:\n"
