@@ -109,7 +109,7 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str == "cpu");
+        json_filename, device_str);
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {
