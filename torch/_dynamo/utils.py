@@ -779,7 +779,7 @@ def compile_times(repr="str", aggregate: bool = False):
     def get_metric(name):
         if name not in compilation_time_metrics:
             return 0
-        return fmt_fn(compilation_time_metrics[name])
+        return sum(compilation_time_metrics[name])
 
     if repr == "str":
         rows = [
