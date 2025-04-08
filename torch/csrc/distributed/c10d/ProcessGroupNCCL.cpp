@@ -3273,6 +3273,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
   auto ncclStream = ncclStreams_.at(key);
+  auto opProfilerTitle = optype != OpType::COALESCED
+      ? "nccl:" + opTypeToString(optype) + "_coalesced"
+      : "nccl:coalesced";
 
   // Create Work object
   c10::cuda::CaptureStatus capture_status =
@@ -3284,7 +3287,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
       rank_,
       optype,
       coalescing_state_ & CoalP2P,
-      "nccl:coalesced",
+      opProfilerTitle.c_str(),
       {},
       {},
       enqueue);
@@ -3440,7 +3443,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (work->timingEnabled_) {
+  if (work->timingEnabled_ && !coalescing_state_) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
