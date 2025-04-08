@@ -86,11 +86,14 @@ void run_cudnn_SDP_bprop(
 
 void run_cudnn_SDP_bprop_nestedtensor(
     int64_t b,
-    int64_t h,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
     int64_t s_q,
     int64_t s_kv,
     int64_t d_qk,
     int64_t d_v,
+
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
@@ -1424,7 +1427,9 @@ void run_cudnn_SDP_bprop(
 
 void run_cudnn_SDP_bprop_nestedtensor(
     int64_t b,
-    int64_t h,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
     int64_t s_q,
     int64_t s_kv,
     int64_t d_qk,
@@ -1446,11 +1451,93 @@ void run_cudnn_SDP_bprop_nestedtensor(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
-  cudnnHandle_t handle = getCudnnHandle();
   // do nothing if we got 0-element tensors
-  if (!q.numel() || !k.numel() || !v.numel()) {
+  if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() ||
+      !softmaxstats.numel()) {
     return;
   }
+
+  auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
+  auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
+  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_qk);
+  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
+  auto rag_stats_off = cum_seqlen_q.mul(h_q);
+
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto _dropoutseed = dropoutseed;
+  auto _dropoutoffset = dropoutoffset;
+  // cuDNN dropout bug requires these to be in int64
+  if (dprops->major == 10 && dprops->minor == 0) {
+    _dropoutseed = dropoutseed.to(kLong);
+    _dropoutoffset = dropoutoffset.to(kLong);
+  }
+
+  cudnnHandle_t handle = getCudnnHandle();
+
+  auto mha_graph = build_graph_backward_nestedtensor(
+      b,
+      h_q,
+      h_k,
+      h_v,
+      s_q,
+      s_kv,
+      d_qk,
+      d_v,
+      scaling_factor,
+      is_causal,
+      dropout_probability,
+      cum_seqlen_q,
+      cum_seqlen_kv,
+      q,
+      k,
+      v,
+      attn_bias,
+      o,
+      dO,
+      softmaxstats,
+      dQ,
+      dK,
+      dV,
+      dropoutseed,
+      dropoutoffset,
+      handle);
+
+  std::unordered_map<int64_t, void*> variant_pack = {
+      // inputs
+      {Q, q.data_ptr()},
+      {K, k.data_ptr()},
+      {V, v.data_ptr()},
+      {O, o.data_ptr()},
+      {DO, dO.data_ptr()},
+      {LSE, softmaxstats.data_ptr()},
+      // outputs
+      {DQ, dQ.data_ptr()},
+      {DK, dK.data_ptr()},
+      {DV, dV.data_ptr()},
+      {SCALE, &scaling_factor},
+      {RAG_Q_OFF, rag_q_off.data_ptr()},
+      {RAG_O_OFF, rag_q_off.data_ptr()},
+      {RAG_K_OFF, rag_k_off.data_ptr()},
+      {RAG_V_OFF, rag_v_off.data_ptr()},
+      {RAG_LSE_OFF, rag_stats_off.data_ptr()},
+      {SEQ_LEN_Q, seqlen_q.data_ptr()},
+      {SEQ_LEN_KV, seqlen_kv.data_ptr()}
+  };
+  if (dropout_probability != 0.0f) {
+    variant_pack[SEED] = _dropoutseed.data_ptr();
+    variant_pack[OFFSET] = _dropoutoffset.data_ptr();
+  }
+  TORCH_CHECK(
+      !attn_bias.has_value(),
+      "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+
+  auto workspace_size = mha_graph->get_workspace_size();
+  auto workspace_ptr =
+      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  TORCH_CHECK(!workspace_size || workspace_ptr.get());
+  TORCH_CHECK(
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
 } // namespace native
