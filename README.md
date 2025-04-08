@@ -215,6 +215,7 @@ git submodule update --init --recursive
 
 **Common**
 ```bash
+conda install cmake ninja
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below.
 pip install -r requirements.txt
 ```
@@ -224,7 +225,7 @@ pip install -r requirements.txt
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed.
-
+conda install -c pytorch magma-cuda121 # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 # (optional) If using torch.compile with inductor/Triton, install the matching version of Triton.
 # Run from the PyTorch directory after cloning.
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
@@ -237,6 +238,7 @@ make triton
 # Add this package on Intel x86 processor machines only.
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
+conda install pkg-config libuv
 ```
 
 **On Windows**
@@ -245,6 +247,7 @@ pip install mkl-static mkl-include
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
+conda install -c conda-forge libuv=1.39
 ```
 
 #### Install PyTorch
