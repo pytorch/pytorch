@@ -19,7 +19,6 @@ from .collector import Collector, CantChunk
 from .partitioner import Partitioner
 from .old_propagator import Propagator
 from .collector import get_fake_tensor_from_node_arg, maybe_permuted, get_tangent_nodes
-from .old_applier import ChunkingApplier as OldChunkingApplier
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -45,7 +44,7 @@ class AutoChunker:
 
 
         log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
-        if os.getenv("NEW_API") == "1":
+        if os.getenv("NEW_API", "1") == "1":
             # test new API
             from .core import find_amplifier_node
             from .propagator import propagate
