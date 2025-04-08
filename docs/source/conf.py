@@ -193,7 +193,7 @@ html_context = {
     "language_bindings_links": theme_variables.get("language_bindings_links", []),
     "date_info": {
         "enabled": True,
-        "paths_to_skip": ["generated"],
+        "paths_to_skip": ["generated/"],
     },
 }
 
