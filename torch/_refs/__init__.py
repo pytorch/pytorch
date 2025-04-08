@@ -5583,7 +5583,7 @@ def full_like(
         requires_grad=requires_grad,
         memory_format=memory_format,
     )
-    return prims.fill(e, fill_value).to(dtype)
+    return prims.fill(e, fill_value)
 
 
 @register_decomposition(aten.zeros_like)
