@@ -5784,11 +5784,12 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.complex64)
     def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
-        a = torch.empty((2, 3), device=device, dtype=dtype, requires_grad=True)
-        b = torch.empty((3, 4), device=device, dtype=dtype, requires_grad=True)
-        c = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
-        d = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=False)
+        a = torch.empty((4, 2), device=device, dtype=dtype, requires_grad=True)
+        b = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
+        c = torch.empty((2, 2), device=device, dtype=dtype, requires_grad=True)
+        d = torch.empty((4, 4), device=device, dtype=dtype, requires_grad=False)
         err_msg = "the 'out' tensor was specified and requires gradients"
+
         with torch.set_grad_enabled(True), self.assertRaisesRegex(RuntimeError, err_msg):
             torch.tensordot(a, b, dims=([1], [0]), out=c)
 

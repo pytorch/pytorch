@@ -826,20 +826,20 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  if(result.defined()) {
-    TORCH_CHECK(
-      !(result.requires_grad() && at::GradMode::is_enabled()),
-      "tensordot(): the 'out' tensor was specified and requires gradients, but functions with 'out=...' arguments do not support automatic differentiation. "
-      "Either remove the 'out' argument or ensure the 'out' tensor does not require gradients."
-    );
-  }
-
   Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
   auto output_device = result.device();
   auto input1_device = input1.device();
   auto input2_device = input2.device();
+
+  if(result.defined()) {
+    TORCH_CHECK(
+      !(result.requires_grad() && at::GradMode::is_enabled() && result.sizes() != result_tmp.sizes()),
+      "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
+      "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output."
+    );
+  }
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
     (output_device == input1_device) && (input1_device == input2_device),
