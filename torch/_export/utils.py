@@ -58,6 +58,8 @@ placeholder_prefixes = {
     InputKind.TOKEN: "token",
 }
 
+_DISABLE_ATEN_TO_ASSERTION_PASS = False
+
 
 def _collect_and_set_constant_attrs(
     graph_signature, constants, mod
@@ -577,6 +579,59 @@ def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
+@contextmanager
+def _disable_aten_to_metadata_assertions():
+    global _DISABLE_ATEN_TO_ASSERTION_PASS
+    orig_val = _DISABLE_ATEN_TO_ASSERTION_PASS
+    _DISABLE_ATEN_TO_ASSERTION_PASS = True
+    try:
+        yield
+    finally:
+        _DISABLE_ATEN_TO_ASSERTION_PASS = orig_val
+
+
+def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    if _DISABLE_ATEN_TO_ASSERTION_PASS:
+        return
+
+    aten_to_variants = [
+        torch.ops.aten.to.device,
+        torch.ops.aten.to.dtype,
+        torch.ops.aten.to.dtype_layout,
+    ]
+    for node in gm.graph.nodes:
+        if node.target in aten_to_variants:
+            if (
+                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                and node.args[0] == node.prev.args[0]
+            ):
+                # skip if already guarded
+                continue
+
+            if (tensor_val := node.args[0].meta.get("val")) is not None:
+                with gm.graph.inserting_before(node), _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        stack_trace=node.meta.get("stack_trace"),
+                    ),
+                ):
+                    gm.graph.call_function(
+                        torch.ops.aten._assert_tensor_metadata.default,
+                        args=(node.args[0],),
+                        kwargs={
+                            "dtype": tensor_val.dtype,
+                            "device": tensor_val.device,
+                            "layout": tensor_val.layout,
+                        },
+                    )
+
+
 def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
@@ -600,6 +655,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
+
+        # insert runtime assertions for aten.to nodes
+        _insert_aten_to_metadata_assert_pass(gm)
+
     # update output specs
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)
@@ -844,6 +903,12 @@ def placeholder_naming_pass(
             These are named token, token_1, ...
     """
 
+    custom_meta: dict[str, Any] = {}
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if "custom" in node.meta:
+                custom_meta[node.name] = node.meta["custom"]
+
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
@@ -918,6 +983,8 @@ def placeholder_naming_pass(
         if node.op == "placeholder":
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
+            if node.name in custom_meta:
+                node.meta["custom"] = custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1111,16 +1178,16 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
 
 @functools.lru_cache(maxsize=1)
 def _collect_all_valid_cia_ops_for_aten_namespace() -> set["OperatorBase"]:
-    return _collect_all_valid_cia_ops_for_namespace("aten")
+    return _collect_all_valid_cia_ops_for_namespace(torch.ops.aten)
 
 
-def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_namespace(
+    op_namespace: torch._ops._OpNamespace,
+) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
 
     # Step 2: Query all ops from python dispatcher
-    assert hasattr(torch.ops, namespace)
-    op_namespace = getattr(torch.ops, namespace)
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
@@ -1150,7 +1217,10 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
         if op_namespace_name != "aten":
-            cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
+            assert hasattr(torch.ops, op_namespace_name)
+            op_namespace = getattr(torch.ops, op_namespace_name)
+            if isinstance(op_namespace, torch._ops._OpNamespace):
+                cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
         else:
             cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
     return cia_ops

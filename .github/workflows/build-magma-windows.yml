@@ -22,7 +22,7 @@ jobs:
     runs-on: windows-2019
     strategy:
       matrix:
-        cuda_version: ["128", "126", "124", "118"]
+        cuda_version: ["128", "126", "118"]
         config: ["Release", "Debug"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
@@ -54,7 +54,7 @@ jobs:
         uses: actions/download-artifact@v4
       - name: Configure AWS credentials(PyTorch account)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
           aws-region: us-east-1
