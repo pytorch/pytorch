@@ -302,10 +302,8 @@ static void cacheAllocatorRegisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& it : ncclCommDevIdxMap) {
-    auto& ncclComm = it.first;
-    auto& devIdx = it.second;
-    if (te.device_ == devIdx) {
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    if (te.device_ == ncclComm->getDeviceIndex()) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
     }
@@ -321,10 +319,8 @@ static void cacheAllocatorDeregisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& it : ncclCommDevIdxMap) {
-    auto& ncclComm = it.first;
-    auto& devIdx = it.second;
-    if (te.device_ == devIdx) {
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    if (te.device_ == ncclComm->getDeviceIndex()) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
     }
@@ -345,11 +341,12 @@ static std::
   std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
   // within the critical section, we don't want to dump while holding the lock
   // as dump might hang
-  ncclCommDevIdxMapMutex.lock();
-  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
-    allNCCLComms.push_back(ncclComm);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+      allNCCLComms.push_back(ncclComm);
+    }
   }
-  ncclCommDevIdxMapMutex.unlock();
   for (auto& ncclComm : allNCCLComms) {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
@@ -824,9 +821,10 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   // Abort all communicators of this work
   ncclComm_->abort();
 
-  ncclCommDevIdxMapMutex.lock();
-  ncclCommDevIdxMap.erase(ncclComm_);
-  ncclCommDevIdxMapMutex.unlock();
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    ncclCommDevIdxMap.erase(ncclComm_);
+  }
 }
 
 ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
@@ -1058,7 +1056,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {
-    desyncDebugger_.init(rank, size, store_);
+    desyncDebugger_.init(rank, size, globalRank(), getUid(), store_);
   }
 }
 
@@ -1353,6 +1351,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
     const std::optional<std::string>& abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
+  // NCCL expects Group abort when there are multiple communicators created in a
+  // device.
+  groupStart();
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
@@ -1373,6 +1374,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
             << " communicator on CUDA device: " << devName;
   }
+  groupEnd();
 }
 
 // Abort all communicators on this rank
@@ -1386,12 +1388,12 @@ bool ProcessGroupNCCL::abortComms(
   // communicators. Note that ncclCommDevIdxMap is a global container which may
   // contain other PG's communicators, thus we need to only erase communicators
   // for the current PG.
-  ncclCommDevIdxMapMutex.lock();
-  for (auto& it : devNCCLCommMap_) {
-    auto& ncclComm = it.second;
-    ncclCommDevIdxMap.erase(ncclComm);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    for (auto& [_, ncclComm] : devNCCLCommMap_) {
+      ncclCommDevIdxMap.erase(ncclComm);
+    }
   }
-  ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
@@ -1815,8 +1817,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     if (logger) {
       logger->log(debugLog);
     }
-    // Indicate to watchdog thread that we have finished dumping.
-    promiseFlightRecorderDump_.set_value();
   }
 
   // GIL deadlock check.
@@ -1943,9 +1943,13 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
 void ProcessGroupNCCL::DesyncDebugger::init(
     int rank,
     int size,
+    int globalRank,
+    int pgId,
     c10::intrusive_ptr<Store> store) {
   rank_ = rank;
   size_ = size;
+  globalRank_ = globalRank;
+  pgId_ = pgId;
   store_ = std::move(store);
   enabled_ = true;
   traceKeyStart_ = getTraceStartKey("NCCL", rank);
@@ -1957,20 +1961,37 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
   auto logPrefix = c10::str("Rank ", rank_);
+  ::c10d::C10dLoggingData log;
+  log.integers["pg_id"] = pgId_;
+  log.integers["rank"] = rank_;
+  log.integers["global_rank"] = globalRank_;
+  log.integers["world_size"] = size_;
+  // Use this to differentiate between flight recorder and desync debug report.
+  log.strings["flight_recorder_version"] = "-1";
+
   try {
     std::string desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+    log.strings["status"] = "SUCCESS";
     LOG(ERROR) << logPrefix << desyncMsg;
   } catch (const std::exception& e) {
+    log.strings["status"] = "EXCEPTION";
+    log.strings["exception_msg"] = e.what();
     enabled_ = false;
     LOG(ERROR) << logPrefix
                << " Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                << " Please file an issue. Error: " << e.what();
   } catch (...) {
     enabled_ = false;
+    log.strings["status"] = "EXCEPTION";
+    log.strings["exception_msg"] = "Unknown exception";
     LOG(ERROR)
         << logPrefix
         << " Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
         << " Please file an issue.";
+  }
+  auto logger = c10d::C10dLogger::getLogger();
+  if (logger) {
+    logger->log(log);
   }
 }
 
@@ -2120,27 +2141,10 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
-  if (shouldDump_.load()) {
-    // already signaled dump, skipping signal again and wait for the dump
-    // future.
-    return;
-  }
-  LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
-  // signal the monitor thread on PG0 to start dumping
-  shouldDump_.store(true);
-  // Give time for dumping before throwing exception
-  auto start = std::chrono::steady_clock::now();
-  auto status = promiseFlightRecorderDump_.get_future().wait_for(
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-  if (status == std::future_status::timeout) {
-    LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                 << waitTimeoutDumpInMilSec_ << "ms"
-                 << " flight recorder dumps to finish.";
-  } else if (status == std::future_status::ready) {
-    auto end = std::chrono::steady_clock::now();
-    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms"
-              << " giving time for flight recorder dumps to finish.";
+  if (!shouldDump_.load()) {
+    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+    // signal the monitor thread on PG0 to start dumping
+    shouldDump_.store(true);
   }
 }
 
@@ -2315,6 +2319,13 @@ void ProcessGroupNCCL::watchdogHandler() {
         // recorder behavior is independent of desync Debug.
         if (dumpOnTimeoutOrEx_) {
           broadcastDumpSignal();
+          // Give time for dumping before throwing exception for all ranks.
+          // It is hard to presume or control what the pattern of watchdog might
+          // look like, so it is better to let all ranks universally sleep for a
+          // short period of time, in this case, 60 seconds, which is also the
+          // maximum time we leave for FR dump.
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
@@ -2692,9 +2703,10 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   // Clear used device indices.
   usedDeviceIdxs_.clear();
 
-  ncclCommDevIdxMapMutex.lock();
-  ncclCommDevIdxMap.erase(ncclComm);
-  ncclCommDevIdxMapMutex.unlock();
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    ncclCommDevIdxMap.erase(ncclComm);
+  }
 }
 
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
@@ -2861,8 +2873,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
 #if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
-      ncclComm =
-          NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
+      ncclComm = NCCLComm::create_scalable(
+          numRanks, rank, ncclIDs, deviceIndex, options_->config);
 #else
       C10_THROW_ERROR(
           DistBackendError,
@@ -2972,9 +2984,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // on the same device.
     // NOTE: we need remove the communicator from this map when it is
     // destroyed, otherwise may register onto an invalid communicator.
-    ncclCommDevIdxMapMutex.lock();
-    ncclCommDevIdxMap.emplace(ncclComm, device.index());
-    ncclCommDevIdxMapMutex.unlock();
+    {
+      std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+      ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    }
   }
 
   it = devNCCLCommMap_.find(deviceKey);
