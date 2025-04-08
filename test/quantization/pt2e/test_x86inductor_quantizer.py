@@ -2858,3 +2858,55 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 lower=True,
             )
+
+    @skipIfNoX86
+    def test_annotate_mul_tensor(self):
+        class M1(torch.nn.Module):
+            def __init__(self, type):
+                super().__init__()
+                self.type = type
+
+            def forward(self, x, y):
+                if self.type == 0:
+                    return x * y
+                elif self.type == 1:
+                    return x * y.sum()
+                else:
+                    return x * y.sum().item()
+
+        for type in [0, 1, 2]:
+            with override_quantized_engine("x86"), torch.no_grad():
+                m = M1(type).eval()
+                example_inputs = (torch.randn(64, 64), torch.randn(64, 64))
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                quantizer.set_function_type_qconfig(
+                    torch.mul, quantizer.get_global_quantization_config()
+                )
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2
+                    if type == 0
+                    else 0,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2
+                    if type == 0
+                    else 0,
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+                }
+                node_list = [
+                    torch.ops.aten.mul.Tensor,
+                ]
+                if type == 0:
+                    node_list = [
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    ] + node_list
+
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
