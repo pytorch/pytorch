@@ -554,8 +554,7 @@ Multi-GPU collective functions
     please contact PyTorch Distributed's maintainers.
 
 
-.. _distributed-launch:
-
+.. _object_collectives:
 
 Object collectives
 ------------------
@@ -619,6 +618,7 @@ the new backend.
 .. warning::
     The support of third-party backend is experimental and subject to change.
 
+.. _distributed-launch:
 Launch utility
 --------------
 

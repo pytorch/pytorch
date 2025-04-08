@@ -3080,8 +3080,7 @@ def all_gather_object(object_list, obj, group=None):
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
@@ -3185,8 +3184,7 @@ def gather_object(
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -3311,8 +3309,7 @@ def send_object_list(
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
@@ -3414,8 +3411,7 @@ def recv_object_list(
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -3529,8 +3525,7 @@ def broadcast_object_list(
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -3653,8 +3648,7 @@ def scatter_object_list(
 
     .. warning::
         Object collectives have a number of serious performance and scalability
-        limitations.  Read the "Object collectives" section of `torch.distributed` docs
-        for more information.
+        limitations.  See :ref:`_object_collectives` for details.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
