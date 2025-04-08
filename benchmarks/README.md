@@ -8,7 +8,6 @@ It also provides mechanisms to compare PyTorch with other frameworks.
 Make sure you're on a machine with CUDA, torchvision, and pytorch installed. Install in the following order:
 ```
 # Install torchvision. It comes with the PyTorch stable release binary
-# TODO: update this
 conda install pytorch torchvision -c pytorch
 
 # Install the latest PyTorch master from source.

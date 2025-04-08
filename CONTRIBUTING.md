@@ -1047,7 +1047,8 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`. (this will avoid
+   blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior

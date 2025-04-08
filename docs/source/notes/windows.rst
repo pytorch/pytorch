@@ -134,9 +134,6 @@ we include almost all the essential files that PyTorch need for the conda
 package except VC2017 redistributable and some mkl libraries.
 You can resolve this by typing the following command.
 
-..
-    TODO update this
-
 .. code-block:: bat
 
     conda install -c peterjc123 vc vs2017_runtime

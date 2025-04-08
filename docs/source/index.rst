@@ -25,7 +25,7 @@ Features described in this documentation are classified by release status:
   We are not, however, committing to backwards compatibility.
 
   *Prototype:*  These features are typically not available as part of
-  binary distributions like PyPI, except sometimes behind run-time
+  binary distributions like PyPI or Conda, except sometimes behind run-time
   flags, and are at an early stage for feedback and testing.
 
 .. toctree::
