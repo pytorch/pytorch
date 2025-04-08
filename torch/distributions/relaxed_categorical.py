@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -46,7 +46,7 @@ class ExpRelaxedCategorical(Distribution):
 
     def __init__(
         self,
-        temperature: Tensor,
+        temperature: Union[Tensor, float],
         probs: Optional[Tensor] = None,
         logits: Optional[Tensor] = None,
         validate_args: Optional[bool] = None,
@@ -133,7 +133,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
 
     def __init__(
         self,
-        temperature: Tensor,
+        temperature: Union[Tensor, float],
         probs: Optional[Tensor] = None,
         logits: Optional[Tensor] = None,
         validate_args: Optional[bool] = None,

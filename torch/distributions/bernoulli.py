@@ -35,8 +35,8 @@ class Bernoulli(ExponentialFamily):
         tensor([ 0.])
 
     Args:
-        probs (Number, Tensor): the probability of sampling `1`
-        logits (Number, Tensor): the log-odds of sampling `1`
+        probs (float or Tensor): the probability of sampling `1`
+        logits (float or Tensor): the log-odds of sampling `1`
         validate_args (bool, optional): whether to validate arguments, None by default
     """
 
@@ -47,8 +47,8 @@ class Bernoulli(ExponentialFamily):
 
     def __init__(
         self,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
+        probs: Optional[Union[Tensor, float]] = None,
+        logits: Optional[Union[Tensor, float]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):
