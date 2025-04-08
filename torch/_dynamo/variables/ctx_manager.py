@@ -1369,6 +1369,8 @@ class EventVariable(VariableTracker):
 class DynamoConfigPatchVariable(ContextWrappingVariable):
     """represents torch._dynamo.patch_dynamo_config"""
 
+    # NOTE: no need to guard on dynamo config because dynamo config should not affect soundness
+    # (though it may affect tracing behavior)
     def __init__(self, target_values, **kwargs) -> None:
         target_values = tuple(target_values.items())
         super().__init__(target_values=(target_values,), initial_values=None, **kwargs)
@@ -1378,6 +1380,7 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         self.initial_values = (tuple(self.initial_values.items()),)
 
     def enter(self, tx):
+        # resets all config patches at the end of tracing
         self.set_cleanup_hook(tx)
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
@@ -1392,6 +1395,10 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         # manually patch dynamo config
         for key, val in value:
             torch._dynamo.config.__setattr__(key, val)
+        # No need to keep track of global side effects because
+        # dynamo will properly restore this context manager for
+        # unsupported instructions and continuation functions.
+        # Dynamo config also should not affect the semantics of the compiled graph.
 
     def module_name(self):
         return "torch._dynamo"

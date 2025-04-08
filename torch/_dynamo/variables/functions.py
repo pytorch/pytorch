@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import config, graph_break_hints, polyfills, variables
+from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -380,13 +380,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     *args_const, **kwargs_const
                 ).changes
                 return variables.DynamoConfigPatchVariable(changes)
-            except AsPythonConstantNotImplementedError:
-                unimplemented_v2(
-                    gb_type="Cannot convert patch_dynamo_config args/kwargs to constants",
-                    context=f"args: {args}, kwargs: {args}",
-                    explanation="patch_dynamo_config expects constant args/kwargs",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
+            except AsPythonConstantNotImplementedError as e:
+                raise RuntimeError(
+                    "Cannot convert patch_dynamo_config args/kwargs to constants. "
+                    "Please fix your call to patch_dynamo_config by using simpler inputs. "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
         if self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)

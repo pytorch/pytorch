@@ -1534,7 +1534,8 @@ If the above doesn't work, please subtmit an issue to GitHub.
         with torch.compiler.set_stance("default", force_backend=fail_backend):
             f(torch.randn(3, 3))
 
-    def test_dont_skip_tracing_recursive(self):
+    # also tests a lot of torch._dynamo.patch_dynamo_config functionality
+    def test_dont_skip_tracing(self):
         from torch._dynamo.test_dont_skip_tracing_functions import f1, f3, f4, f5, f6
 
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1598,16 +1599,69 @@ If the above doesn't work, please subtmit an issue to GitHub.
         # resulted in an unconditional skip
         torch._dynamo.reset()
         f4_unskip = torch._dynamo.dont_skip_tracing(f4)
-        cnts.clear()
         res = torch.compile(f4_unskip, backend=cnts)(inp)
         self.assertEqual(res, inp + 15)
 
         # test dont_skip_tracing that is activated outside torch.compile
-        torch._dynamo.reset()
         f4_unskip2 = torch._dynamo.dont_skip_tracing(torch.compile(f4, backend=cnts))
-        cnts.clear()
         res = f4_unskip2(inp)
         self.assertEqual(res, inp + 15)
+
+        # test context manager from inside
+        @torch.compile(backend=cnts)
+        def g5(x):
+            x = f5(x, 1)
+            with torch._dynamo.dont_skip_tracing():
+                x = f5(x, 2)
+                torch._dynamo.graph_break()
+                x = f5(x, 4)
+            x = f5(x, 8)
+            return x
+
+        res = g5(inp)
+        self.assertEqual(res, inp + 6)
+
+        # test context manager from outside
+        with torch._dynamo.dont_skip_tracing():
+            res = torch.compile(f4, backend=cnts)(inp)
+        self.assertEqual(res, inp + 15)
+
+    def test_patch_dynamo_config_errors(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            with torch._dynamo.patch_dynamo_config(nonexistent=False):
+                return x + 1
+
+        with self.assertRaisesRegex(Exception, "patch_dynamo_config does not support"):
+            f1(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            with torch._dynamo.patch_dynamo_config("verbose", {"a": 1}):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            Exception, "patch_dynamo_config does not support .* with non-safe-constant"
+        ):
+            f2(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f3(x):
+            with torch._dynamo.patch_dynamo_config({"recompile_limit": 1}):
+                return x + 1
+
+        with self.assertRaisesRegex(Exception, "patch_dynamo_config does not support"):
+            f3(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            with torch._dynamo.patch_dynamo_config(verbose=object()):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            Exception, "Cannot convert patch_dynamo_config args/kwargs to constants."
+        ):
+            f4(torch.randn(3))
 
 
 if __name__ == "__main__":
