@@ -178,12 +178,12 @@ def aot_dispatch_base_graph(
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
     context = Context(
+        meta=fw_metadata,
         aot_config=aot_config,
-        functionalized_inputs=None,
+        trace_joint=False,
         is_joint_structure=False,
         fw_only=flat_fn,
-        meta=fw_metadata,
-        trace_joint=False,
+        functionalized_inputs=None,
     )
     wrappers: Sequence[Wrapper] = (
         _fn_input_mutations_to_outputs,
@@ -339,12 +339,12 @@ def aot_dispatch_autograd_graph(
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
 
     context = Context(
-        aot_config=aot_config,
-        functionalized_inputs=[flat_args, fw_metadata.traced_tangents],
-        fw_only=flat_fn,
-        is_joint_structure=True,
         meta=fw_metadata,
+        aot_config=aot_config,
         trace_joint=True,
+        is_joint_structure=True,
+        fw_only=flat_fn,
+        functionalized_inputs=[flat_args, fw_metadata.traced_tangents],
     )
     wrappers: Sequence[Wrapper] = (
         _fn_prepped_for_autograd,
