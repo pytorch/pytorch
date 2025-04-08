@@ -1758,32 +1758,26 @@ namespace at::native {
       std::optional<std::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
 
+    std::vector<std::string> supported_postop = {
+      "none"
+    };
     if (act.dim() == 3) {
-      // Conv1D post op check
-      TORCH_CHECK(
-        attr == "none" || attr == "relu",
-        "quantized pointwise conv",
-        act.dim()-2,
-        "d doesn't support unary_post_op fusion. Got unary_post_op: ",
-        attr,
-        ".")
-    } else if (act.dim() == 5) {
-      // Conv3D post op check
-      TORCH_CHECK(
-        attr == "none",
-        "quantized pointwise conv",
-        act.dim()-2,
-        "d doesn't support unary_post_op fusion. Got unary_post_op: ",
-        attr,
-        ".")
-    } else {
-      // Conv2D post op check
-      TORCH_CHECK(
-        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish" || attr == "swish",
-        "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
-        attr,
-        ".")
+      // Conv1D post op
+      supported_postop.push_back("relu");
+    } else if (act.dim() == 4) {
+      // Conv2D post op
+      supported_postop.push_back("relu");
+      supported_postop.push_back("hardtanh");
+      supported_postop.push_back("hardswish");
+      supported_postop.push_back("swish");
     }
+    TORCH_CHECK(
+      std::find(supported_postop.begin(), supported_postop.end(), attr) != supported_postop.end(),
+      "Unsupported post op",
+      attr,
+      "for quantized pointwise conv",
+      act.dim()-2,
+      "d.")
     return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
