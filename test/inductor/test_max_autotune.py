@@ -29,7 +29,6 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplate,
     TritonTemplateCaller,
-    TritonTemplateKernel,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -79,6 +78,9 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @instantiate_parametrized_tests
+@unittest.mock.patch(
+    "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
+)
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(
@@ -1134,8 +1136,6 @@ class TestMaxAutotune(TestCase):
 
     @config.patch(max_autotune=True)
     def test_triton_template_generated_code_cache(self):
-        TritonTemplate.test_cache = True
-
         def reset_counters():
             TritonTemplate.generated_module_cache_hit = 0
             TritonTemplate.generated_module_cache_miss = 0
@@ -1152,21 +1152,15 @@ class TestMaxAutotune(TestCase):
         d = torch.rand(21, 30, device="cuda")
 
         # Test that the testing strategy works by overriding input_dependent_preserved_state.
-        original = TritonTemplateKernel.input_dependent_preserved_state
-        try:
+        with unittest.mock.patch(
+            "torch._inductor.select_algorithm.TritonTemplateKernel.input_dependent_preserved_state",
+            new=(lambda self: "same always"),
+        ), fresh_inductor_cache():
             with self.assertRaisesRegex(
                 torch._inductor.exc.InductorError,
                 ".*Generated code cache results in wrong output.*",
             ):
-                TritonTemplateKernel.input_dependent_preserved_state = (
-                    lambda self: "same always"
-                )
-                TritonTemplate.test_cache = True
-
-                with fresh_inductor_cache():
-                    torch.compile(func_test1, dynamic=True)(a, b, c, d)
-        finally:
-            TritonTemplateKernel.input_dependent_preserved_state = original
+                torch.compile(func_test1, dynamic=True)(a, b, c, d)
 
         # Test symbolic shapes with different symbols.
         with fresh_inductor_cache():
