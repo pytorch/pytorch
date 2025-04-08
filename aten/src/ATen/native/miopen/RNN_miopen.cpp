@@ -86,11 +86,11 @@ namespace {
                 c10::hip::HIPCachingAllocator::raw_delete(data);
             }
         }
-    
+
         size_t size;
         void* data;
     };
-    
+
 } // anonymous
 
 //RNNDescriptor.
