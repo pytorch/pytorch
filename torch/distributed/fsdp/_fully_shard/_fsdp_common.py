@@ -3,7 +3,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import torch
 import torch.distributed as dist
@@ -179,3 +179,25 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
     ):
         return x
     return x.to(dtype)
+
+
+class _Allocator(Protocol):
+    def __call__(
+        self, size: tuple[int, ...], *, dtype: torch.dtype, device: torch.device
+    ) -> torch.Tensor:
+        ...
+
+
+_fsdp_comm_allocator: Optional[_Allocator] = None
+
+
+def _set_fsdp_comm_allocator(allocator: _Allocator):
+    global _fsdp_comm_allocator
+    _fsdp_comm_allocator = allocator
+
+
+def _get_fsdp_comm_allocator() -> _Allocator:
+    if _fsdp_comm_allocator is not None:
+        return _fsdp_comm_allocator
+    else:
+        return torch.empty
