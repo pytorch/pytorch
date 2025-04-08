@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Final, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -122,8 +122,9 @@ class VonMises(Distribution):
         >>> m.sample()  # von Mises distributed with loc=1 and concentration=1
         tensor([1.9777])
 
-    :param torch.Tensor loc: an angle in radians.
-    :param torch.Tensor concentration: concentration parameter
+    Args:
+        loc (float or Tensor): an angle in radians.
+        concentration (float or Tensor): concentration parameter
     """
 
     arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
@@ -132,8 +133,8 @@ class VonMises(Distribution):
 
     def __init__(
         self,
-        loc: Tensor,
-        concentration: Tensor,
+        loc: Union[Tensor, float],
+        concentration: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         self.loc, self.concentration = broadcast_all(loc, concentration)

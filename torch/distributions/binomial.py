@@ -43,8 +43,8 @@ class Binomial(Distribution):
 
     Args:
         total_count (int or Tensor): number of Bernoulli trials
-        probs (Tensor): Event probabilities
-        logits (Tensor): Event log-odds
+        probs (float or Tensor): Event probabilities
+        logits (float or Tensor): Event log-odds
     """
 
     arg_constraints = {
@@ -57,8 +57,8 @@ class Binomial(Distribution):
     def __init__(
         self,
         total_count: Union[Tensor, int] = 1,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
+        probs: Optional[Union[Tensor, float]] = None,
+        logits: Optional[Union[Tensor, float]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):
@@ -66,10 +66,7 @@ class Binomial(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            (
-                self.total_count,
-                self.probs,
-            ) = broadcast_all(total_count, probs)
+            self.total_count, self.probs = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
             assert logits is not None  # helps mypy
