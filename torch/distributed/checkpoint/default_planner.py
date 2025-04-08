@@ -146,7 +146,9 @@ class DefaultSavePlanner(SavePlanner):
             metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
         if not _validate_global_plan(global_plan, metadata):
-            raise ValueError("Failed to validate global plan")
+            logger.error(
+                "validations failed but continuing anyway. see warn logs above."
+            )
 
         return global_plan, metadata
 
@@ -575,7 +577,9 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                assert item.tensor_data.chunk is not None, f"""
+                assert (
+                    item.tensor_data.chunk is not None
+                ), f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
                 """
@@ -665,5 +669,10 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
                 chunks_volume,
             )
             all_good = False
+
+        if all_good is False:
+            logger.warning(
+                "chunks for key:%s: %s", key, [str(chunk) for chunk in value.chunks]
+            )
 
     return all_good

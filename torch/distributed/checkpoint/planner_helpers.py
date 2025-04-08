@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import io
+import logging
 from typing import Any, Callable, cast
 
 import torch
@@ -31,6 +32,8 @@ from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
 )
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 __all__: list[str] = ["create_read_items_for_chunk_list"]
@@ -177,7 +180,7 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
 
-    return WriteItem(
+    write_item = WriteItem(
         index=MetadataIndex(fqn, offsets),
         type=WriteItemType.SHARD,
         tensor_data=TensorWriteData(
@@ -189,6 +192,8 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
             size=tensor.size(),
         ),
     )
+    logger.warning(f"creating {write_item=} for {fqn=} with {offsets=} and {sizes=}")
+    return write_item
 
 
 def _create_write_item_for_shard(
