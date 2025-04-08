@@ -382,6 +382,18 @@ Tensor& scaled_mm_out_xpu(
       mat2.sizes()[1],
       ")");
   TORCH_CHECK(
+      scale_a.is_contiguous() && scale_b.is_contiguous(),
+      "Both scale_a and scale_b must be contiguous for RowWise scaling.");
+  // For non-TensorWise scaling, enforce 2D input tensors
+  TORCH_CHECK(
+      (scale_a.numel() == 1 && scale_b.numel() == 1) ||
+          (scale_a.dim() == 2 && scale_b.dim() == 2),
+      "For non-TensorWise scaling, scale tensors must be 2-dimensional, ",
+      "but got scale_a.dim()=",
+      scale_a.dim(),
+      " and scale_b.dim()=",
+      scale_b.dim());
+  TORCH_CHECK(
       (scale_a.numel() == 1 || scale_a.numel() == mat1.sizes()[0]) &&
           (scale_b.numel() == 1 || scale_b.numel() == mat2.sizes()[1]),
       "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. ",

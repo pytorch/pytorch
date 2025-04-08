@@ -330,7 +330,18 @@ sycl::event scaled_matmul(
   }
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
-  op_attr.set_scales_mask(DNNL_ARG_SRC, scale_a.numel() == 1 ? 0 : 1 << 1);
+  if (scale_a.numel() == 1) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
+  } else {
+    // onednn 3.7 not support per token src scale, so use post mul work around
+    dnnl::post_ops po;
+    po.append_binary(
+        dnnl::algorithm::binary_mul,
+        {{scale_a.numel(), 1},
+         dnnl::memory::data_type::f32,
+         dnnl::memory::format_tag::ab});
+    op_attr.set_post_ops(po);
+  }
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, scale_b.numel() == 1 ? 0 : 1 << 1);
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   // TODO: Remove this try/catch when oneDNN provides API to notify
@@ -380,7 +391,11 @@ sycl::event scaled_matmul(
              dnnl::memory::format_tag::ab},
             engine,
             scale_a.data_ptr());
-  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  if (scale_a.numel() == 1)
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  else
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src_scales_t});
   dnnl::memory wei_scales_t = scale_b.numel() == 1
       ? at::native::onednn::make_onednn_memory(
             {{1}, dnnl::memory::data_type::f32, {1}},

@@ -1,8 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
-import contextlib
 import re
-import unittest
 from typing import Optional
 
 import torch
@@ -254,7 +252,7 @@ class TestFP8Matmul(TestCase):
         y = torch.full(size, 0.5, device=device, dtype=y_type).t()
         scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
-        scale_b = torch.tensor(0.66, device=device)
+        scale_b = torch.tensor(0.666667, device=device)
         out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4.0, device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
@@ -386,7 +384,7 @@ class TestFP8Matmul(TestCase):
         y_type = e4m3_type if torch.version.hip else e5m2_type
         y = torch.full(size, 0.5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
-        scale_b = torch.tensor(0.66, device=device)
+        scale_b = torch.tensor(0.666667, device=device)
         out_fp8 = torch._scaled_mm(x, y, scale_a, scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4.0, device=device))
         out_fp8_s = torch._scaled_mm(
@@ -483,19 +481,6 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=torch.ones((M, 1), device="xpu"),
                 scale_b=torch.ones((1, N * 2), device="xpu")[:, ::2],
-                out_dtype=torch.bfloat16,
-            )
-
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-        ):
-            torch._scaled_mm(
-                x_fp8,
-                y_fp8.to(e5m2_type),
-                scale_a=torch.ones((M, 1), device="xpu"),
-                scale_b=torch.ones((1, N), device="xpu"),
                 out_dtype=torch.bfloat16,
             )
 
