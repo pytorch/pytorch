@@ -366,9 +366,7 @@ class GraphLowering(torch.fx.Interpreter):
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
         self.extern_node_serializer: Callable[[list[ir.ExternKernelNode]], Any] = (
-            extern_node_serializer
-            if config.is_fbcode() and extern_node_serializer
-            else extern_node_json_serializer
+            extern_node_json_serializer
         )
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
