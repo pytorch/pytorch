@@ -239,7 +239,8 @@ void testReduceScatter(int iter = 10000) {
     auto outputs = std::vector<at::Tensor>({output});
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->reduce_scatter(outputs, tensors);
+    c10::intrusive_ptr<::c10d::Work> work =
+        pg->reduce_scatter(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -272,7 +273,8 @@ void testReduceScatterBase(int iter = 10000) {
     auto outputs = std::vector<at::Tensor>({output});
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->_reduce_scatter_base(output, tensor);
+    c10::intrusive_ptr<::c10d::Work> work =
+        pg->_reduce_scatter_base(output, tensor);
     works.push_back(std::move(work));
   }
 
