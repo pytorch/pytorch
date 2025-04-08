@@ -1604,6 +1604,11 @@ class GuardBuilder(GuardBuilderBase):
         hooks_ids = hooks_ids_fn(
             torch._C._autograd._top_saved_tensors_default_hooks(True)
         )
+
+        # Do not guard on non-inlineable saved tensors hooks
+        if not hooks_ids:
+            return
+
         code = ["torch._C._autograd._top_saved_tensors_default_hooks(True)"]
         self._set_guard_export_info(guard, code)
 

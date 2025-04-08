@@ -547,9 +547,12 @@ class OutputGraph:
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS)
-        )
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            self.guards.add(
+                GlobalStateSource().make_guard(
+                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
+                )
+            )
 
     def synthetic_graph_input(self, fn, args):
         """

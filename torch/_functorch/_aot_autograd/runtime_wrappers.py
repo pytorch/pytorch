@@ -295,7 +295,7 @@ def _create_runtime_wrapper(
     def runtime_wrapper(args: list[Any]):
         def _should_disable_saved_tensors_hooks():
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                return True
+                return False
 
             hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
             if torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable(
