@@ -126,6 +126,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
+    HAS_MPS,
     HAS_MULTIGPU,
     requires_gpu,
     RUN_CPU,
@@ -813,6 +814,10 @@ def xfail_if_mps(fn):
             return fn(self, *args, **kwargs)
 
     return wrapper
+
+
+# Just an alias to track failures due to the missing eager ops
+xfail_if_mps_unimplemented = xfail_if_mps
 
 
 def skip_if_triton(fn):
@@ -1693,6 +1698,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1024),))
 
     @xfailIfS390X
+    @xfail_if_mps
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1954,6 +1960,7 @@ class CommonTemplate:
         self.common(fn, (torch.rand((10, 10)),))
         self.common(fn, (torch.rand((1, 2050)),))
 
+    @xfail_if_mps
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -2002,6 +2009,7 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
+    @xfail_if_mps  # multistage reduction
     @skip_if_gpu_halide
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var(self):
@@ -2320,6 +2328,7 @@ class CommonTemplate:
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
 
+    @xfail_if_mps_unimplemented
     @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
     @skipIfXpu(msg="No _weight_int8pack_mm implementation on XPU")
     def test_int8_weight_only_quant(self):
@@ -2343,6 +2352,7 @@ class CommonTemplate:
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
 
+    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
@@ -2378,6 +2388,7 @@ class CommonTemplate:
 
         self.common(fn, (b, in_features, out_features))
 
+    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
@@ -4750,6 +4761,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 4, 4),),
         )
 
+    @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (3, 3), (2, 2), samples)
@@ -4758,6 +4770,7 @@ class CommonTemplate:
             fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
         )
 
+    @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d2(self):
         # fallback for larger kernel size
 
@@ -4772,6 +4785,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d3(self):
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (1, 1), (16, 16), samples)
@@ -4780,6 +4794,7 @@ class CommonTemplate:
             fn, (torch.randn(2, 4, 16, 16), torch.rand(2, 4, 2)), check_lowp=False
         )
 
+    @xfail_if_mps_unimplemented
     @config.patch(fallback_random=True)
     @skip_if_halide  # Can only unroll for loops over a constant extent
     def test_fractional_max_pool2d4(self):
@@ -4795,6 +4810,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
 
+    @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d5(self):
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (3, 3), (1, 1), samples)
@@ -5099,6 +5115,7 @@ class CommonTemplate:
             (torch.randn([2, 2, 3, 6]),),
         )
 
+    @xfail_if_mps
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -5237,6 +5254,7 @@ class CommonTemplate:
             atol=1e-4,
         )
 
+    @xfail_if_mps
     def test_tan(self):
         def fn(x):
             return aten.tan(x) + 2, aten.tan(x + 1)
@@ -6962,6 +6980,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
+    @xfail_if_mps_unimplemented
     def test_upsample_nearest3d(self):
         def fn(a):
             return (
@@ -6974,6 +6993,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
+    @xfail_if_mps_unimplemented
     def test_upsample_nearest2d_backward(self):
         func = torch.ops.aten.upsample_nearest2d_backward
 
@@ -9682,7 +9702,10 @@ class CommonTemplate:
 
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False, decorators=[xfail_if_mps]),
+            subtest(True, decorators=[skip_if_not_triton]),
+        ],
     )
     def test_tmp_not_defined_issue1(self, use_block_ptr):
         def forward(
@@ -9962,6 +9985,7 @@ class CommonTemplate:
 
         self.assertEqual(y, compiled_y)
 
+    @xfail_if_mps
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
             def __init__(self) -> None:
@@ -10004,6 +10028,9 @@ class CommonTemplate:
         ):
             # https://github.com/halide/Halide/issues/8318
             raise unittest.SkipTest("halide not supported")
+
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest("dtype {dtype} not supported for device {self.device}")
 
         def fn(x, y):
             return x + y, x * y, x / y
@@ -10107,6 +10134,7 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    @xfail_if_mps
     def test_vectorized_ops_masked_var_novec(self):
         def fn(x):
             index = torch.arange(10, device=x.device)
@@ -12251,7 +12279,30 @@ class CommonTemplate:
             def fn(x):
                 return op(x)
 
-        self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
+        ctx = (
+            contextlib.nullcontext()
+            if self.device != "mps"
+            or name
+            not in [
+                "airy_ai",
+                "erfc",
+                "erfcx",
+                "gammainc",
+                "gammaincc",
+                "hermite_polynomial_he",
+                "laguerre_polynomial_l",
+                "legendre_polynomial_p",
+                "log_ndtr",
+                "ndtri",
+                "shifted_chebyshev_polynomial_t",
+                "shifted_chebyshev_polynomial_u",
+                "shifted_chebyshev_polynomial_v",
+                "shifted_chebyshev_polynomial_w",
+            ]
+            else self.assertRaises(NotImplementedError)
+        )
+        with ctx:
+            self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
 
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic
@@ -12399,6 +12450,7 @@ class CommonTemplate:
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
+    @xfail_if_mps
     @config.patch(implicit_fallbacks=True)
     def test_weight_norm_bwd(self):
         """
@@ -12945,7 +12997,7 @@ if RUN_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if RUN_GPU:
+if RUN_GPU or HAS_MPS:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
