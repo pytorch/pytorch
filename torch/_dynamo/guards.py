@@ -2102,7 +2102,7 @@ class GuardBuilder(GuardBuilderBase):
                 clib = CppCodeCache.load(func_str)
                 cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
                 assert cguard
-            except Exception:
+            except torch._inductor.exc.InvalidCxxCompiler:
                 # No valid C++ compiler to compile the shape guard
                 pass
             else:
