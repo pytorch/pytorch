@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any, Callable, cast, IO, Optional, Union
@@ -49,7 +50,13 @@ from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
 
-__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
+__all__ = [
+    "FileSystemWriter",
+    "FileSystemReader",
+    "FileSystem",
+    "FileSystemBase",
+    "SerializationFormat",
+]
 
 _metadata_fn: str = ".metadata"
 
@@ -70,6 +77,11 @@ class _StorageInfo:
 @dataclass
 class _StoragePrefix:
     prefix: str
+
+
+class SerializationFormat(Enum):
+    TORCH_SAVE = "torch_save"
+    SAFETENSORS = "safetensors"
 
 
 DEFAULT_SUFFIX = ".distcp"
@@ -298,7 +310,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
-    safe_tensors: bool = False,
+    serialization_format: SerializationFormat,
 ) -> WriteResult:
     offset = stream.tell()
 
@@ -312,12 +324,14 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        if not safe_tensors:
+        if serialization_format == SerializationFormat.TORCH_SAVE:
             torch.save(data, transform_to)
 
     transform_to.close()
 
-    if not safe_tensors or isinstance(data, io.BytesIO):
+    if serialization_format == SerializationFormat.TORCH_SAVE or isinstance(
+        data, io.BytesIO
+    ):
         length = stream.tell() - offset
     else:
         length = data.numel() * data.element_size()
@@ -349,7 +363,7 @@ def _write_files_from_queue(
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
-    safe_tensors: bool,
+    serialization_format: SerializationFormat,
 ) -> None:
     try:
         while True:
@@ -397,7 +411,7 @@ def _write_files_from_queue(
                             data,
                             write_item,
                             storage_key,
-                            safe_tensors,
+                            serialization_format,
                         )
                     )
 
@@ -411,12 +425,12 @@ def _write_files_from_queue(
                             tensor,
                             write_item,
                             storage_key,
-                            safe_tensors,
+                            serialization_format,
                         )
                     )
                     tensor_dict[write_item.index.fqn] = tensor
 
-                if safe_tensors:
+                if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
 
                     stream.write(save(tensor_dict))
@@ -464,6 +478,9 @@ class FileSystemBase(ABC):
 
     @abstractmethod
     def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
+
+    @abstractmethod
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]: ...
 
 
 class FileSystem(FileSystemBase):
@@ -525,6 +542,11 @@ class FileSystem(FileSystemBase):
             path = Path(path)
         path.unlink()
 
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return [str(p) for p in path.iterdir()]
+
 
 class _FileSystemWriter(StorageWriter):
     """
@@ -549,6 +571,7 @@ class _FileSystemWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -576,6 +599,7 @@ class _FileSystemWriter(StorageWriter):
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
         self.transforms = _StorageWriterTransforms(_extensions)
+        self.serialization_format = serialization_format
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
@@ -638,7 +662,6 @@ class _FileSystemWriter(StorageWriter):
         self,
         planner: SavePlanner,
         file_queue: queue.Queue,
-        safe_tensors: bool = False,
     ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
@@ -655,7 +678,7 @@ class _FileSystemWriter(StorageWriter):
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
-                    safe_tensors,
+                    self.serialization_format,
                 ),
             )
             t.start()
@@ -670,7 +693,7 @@ class _FileSystemWriter(StorageWriter):
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
-            safe_tensors=safe_tensors,
+            serialization_format=self.serialization_format,
         )
 
         for t in threads:
@@ -892,6 +915,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -919,6 +943,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead=per_thread_copy_ahead,
             overwrite=overwrite,
             _extensions=_extensions,
+            serialization_format=serialization_format,
         )
         BlockingAsyncStager.__init__(
             self,
