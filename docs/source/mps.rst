@@ -18,7 +18,6 @@ torch.mps
     current_allocated_memory
     driver_allocated_memory
     recommended_max_memory
-    compile_shader
 
 MPS Profiler
 ------------

@@ -87,7 +87,7 @@ class Library:
 
     Args:
         ns: library name
-        kind: "DEF", "IMPL", "FRAGMENT"
+        kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
 

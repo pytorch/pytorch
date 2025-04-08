@@ -43,12 +43,9 @@ def is_available() -> bool:
         bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
 
     .. note:: This API delegates to the device-specific version of `is_available`.
-        For example, if the current accelerator is CUDA, it will call
-        :func:`~torch.cuda.is_available`, which avoids poisoning when the environment
-        variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. This design ensures that
-        fork can safely be used after invoking this API, which is important for
-        multiprocessing-based components such as DataLoader and DistributedDataParallel (DDP).
-        See :ref:`multiprocessing-poison-fork-note` for more details.
+        On CUDA, when the environment variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set,
+        this function will not poison fork. Otherwise, it will. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
 
     Example::
 
@@ -82,6 +79,7 @@ def current_accelerator(check_available: bool = False) -> Optional[torch.device]
 
     .. note:: The index of the returned :class:`torch.device` will be ``None``, please use
         :func:`torch.accelerator.current_device_index` to know the current index being used.
+        This API does NOT poison fork. For more details, see :ref:`multiprocessing-poison-fork-note`.
 
     Example::
 

@@ -70,7 +70,6 @@ def all_gather_copy_in_meta(
 @torch.library.impl(lib, "all_gather_copy_in", "HPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
 @torch.library.impl(lib, "all_gather_copy_in", "MTIA")
-@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
     inp_split_sizes: list[int],
@@ -103,7 +102,6 @@ lib.define(
 @torch.library.impl(lib, "split_with_sizes_copy", "HPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "MTIA")
-@torch.library.impl(lib, "split_with_sizes_copy", "PrivateUse1")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
@@ -126,7 +124,6 @@ lib.define(
 @torch.library.impl(lib, "chunk_cat", "HPU")
 @torch.library.impl(lib, "chunk_cat", "CPU")
 @torch.library.impl(lib, "chunk_cat", "MTIA")
-@torch.library.impl(lib, "chunk_cat", "PrivateUse1")
 def chunk_cat(
     tensors: list[torch.Tensor],
     dim: int,
@@ -299,14 +296,7 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
 
     # only avoid VC bump if we are not in inference mode
-    if torch._dynamo.is_compiling():
-        # For torch.compile, we turn off inference_mode for fake tensor
-        # propagation, and therefore graph break on is_inference. For `compile`,
-        # we don't care about VCs, so just skip the optimization.
-        non_inference_outs = []
-    else:
-        non_inference_outs = [o for o in out if not o.is_inference()]
-
+    non_inference_outs = [o for o in out if not o.is_inference()]
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
             torch.ops.fsdp.split_with_sizes_copy(

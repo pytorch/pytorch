@@ -9,9 +9,6 @@ lib.define(
 
 
 @torch.library.impl(lib, "access_subclass_inner_tensor", "Autograd")
-# When running under torch.inference_mode(), we seem to skip AUtograd key
-# so we should desugar this op as soon as we start tracing to post-dispatch.
-@torch.library.impl(lib, "access_subclass_inner_tensor", "Python")
 def _access_subclass_inner_tensor(
     src_subclass_tensor: torch.Tensor, attr: str
 ) -> torch.Tensor:

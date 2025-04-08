@@ -410,7 +410,7 @@ def dynamo_timed_cudagraph(
         name,
         log_pt2_compile_event=True,
         compile_id=compile_id,
-        is_backward=mode == CompilationMode.BACKWARD,
+        is_forward=mode != CompilationMode.BACKWARD,
         dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us"
         if dynamo_compile
         else None,
@@ -1800,7 +1800,6 @@ def check_memory_pool(
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
     # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
     gc.collect()
-    torch.cuda.synchronize()
 
     segments = get_cudagraph_segments(pool_id)
 

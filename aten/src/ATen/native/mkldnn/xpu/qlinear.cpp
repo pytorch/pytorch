@@ -19,7 +19,7 @@ static inline c10::ScalarType qlinear_decide_out_dtype(
   return dst_dtype;
 }
 
-static Tensor q_linear_pointwise(
+Tensor q_linear_pointwise(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,
@@ -78,7 +78,7 @@ static Tensor q_linear_pointwise(
   return qout;
 }
 
-static Tensor q_linear_pointwise_tensor(
+Tensor q_linear_pointwise_tensor(
     Tensor act,
     Tensor act_scale,
     Tensor act_zero_point,
@@ -137,7 +137,7 @@ static Tensor q_linear_pointwise_tensor(
   return qout;
 }
 
-static Tensor q_linear_pointwise_binary(
+Tensor q_linear_pointwise_binary(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,
@@ -208,7 +208,7 @@ static Tensor q_linear_pointwise_binary(
   return dim == 3 ? qout.reshape({act.size(0), -1, N}) : qout;
 }
 
-static Tensor q_linear_pointwise_binary_tensor(
+Tensor q_linear_pointwise_binary_tensor(
     Tensor act,
     Tensor act_scale,
     Tensor act_zero_point,
@@ -248,7 +248,7 @@ static Tensor q_linear_pointwise_binary_tensor(
       unary_post_op_algorithm);
 }
 
-static at::Tensor q_linear_prepack_onednn(
+at::Tensor q_linear_prepack_onednn(
     at::Tensor weight,
     std::optional<torch::List<int64_t>> input_shape) {
   at::Tensor weight_transposed = weight.transpose(0, 1);

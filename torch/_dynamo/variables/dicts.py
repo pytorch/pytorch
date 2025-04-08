@@ -32,19 +32,12 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import (
-    cmp_name_to_op_mapping,
-    dict_items,
-    dict_keys,
-    dict_values,
-    specialize_symnode,
-)
+from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -264,7 +257,7 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -383,7 +376,7 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import BuiltinVariable, ConstantVariable
+        from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -405,7 +398,9 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-            return DictItemsVariable(self)
+            return TupleVariable(
+                [TupleVariable([k.vt, v]) for k, v in self.items.items()]
+            )
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
@@ -547,7 +542,7 @@ class MappingProxyVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen):
         # load types.MappingProxyType
         if self.source:
             unimplemented(
@@ -682,7 +677,7 @@ class SetVariable(ConstDictVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
@@ -787,7 +782,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -863,7 +858,7 @@ class DictViewVariable(VariableTracker):
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert self.kv in ("keys", "values", "items")
+        assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
 
@@ -878,9 +873,12 @@ class DictViewVariable(VariableTracker):
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
-        return self.view_items_vt
+        def unwrap(x):
+            return x.vt if self.kv == "keys" else x
 
-    def reconstruct(self, codegen: "PyCodegen"):
+        return [unwrap(x) for x in self.view_items]
+
+    def reconstruct(self, codegen):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
@@ -940,15 +938,3 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
-
-
-class DictItemsVariable(DictViewVariable):
-    kv = "items"
-
-    @property
-    def view_items_vt(self):
-        # Returns an iterable of the unpacked items
-        return [variables.TupleVariable([k.vt, v]) for k, v in self.view_items]
-
-    def python_type(self):
-        return dict_items

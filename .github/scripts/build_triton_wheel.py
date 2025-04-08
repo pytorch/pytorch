@@ -123,7 +123,7 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument(
-        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu", "aarch64"]
+        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu"]
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)

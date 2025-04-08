@@ -3,8 +3,6 @@ import gc
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
-from typing_extensions import Self
 
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
@@ -78,7 +76,7 @@ class BenchmarkBase(ABC):
         backend: str = "",
         mode: str = "",
         dynamic=None,
-    ) -> None:
+    ):
         # These individual attributes are used to support different filters on the
         # dashboard later
         self._category = category
@@ -87,51 +85,51 @@ class BenchmarkBase(ABC):
         self._mode = mode  # Training or inference
         self._dynamic = dynamic
 
-    def with_iterations(self, value: int) -> Self:
+    def with_iterations(self, value):
         self._num_iterations = value
         return self
 
-    def enable_instruction_count(self) -> Self:
+    def enable_instruction_count(self):
         self._enable_instruction_count = True
         return self
 
-    def enable_compile_time_instruction_count(self) -> Self:
+    def enable_compile_time_instruction_count(self):
         self._enable_compile_time_instruction_count = True
         return self
 
-    def name(self) -> str:
+    def name(self):
         return ""
 
-    def backend(self) -> str:
+    def backend(self):
         return self._backend
 
-    def mode(self) -> str:
+    def mode(self):
         return self._mode
 
-    def category(self) -> str:
+    def category(self):
         return self._category
 
-    def device(self) -> str:
+    def device(self):
         return self._device
 
-    def is_dynamic(self) -> Optional[bool]:
+    def is_dynamic(self):
         return self._dynamic
 
-    def description(self) -> str:
+    def description(self):
         return ""
 
     @abstractmethod
-    def _prepare(self) -> None:
+    def _prepare(self):
         pass
 
     @abstractmethod
-    def _work(self) -> None:
+    def _work(self):
         pass
 
-    def _prepare_once(self) -> None:  # noqa: B027
+    def _prepare_once(self):  # noqa: B027
         pass
 
-    def _count_instructions(self) -> int:
+    def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
         results = []
         for i in range(self._num_iterations):
@@ -143,7 +141,7 @@ class BenchmarkBase(ABC):
             results.append(count)
         return min(results)
 
-    def _count_compile_time_instructions(self) -> int:
+    def _count_compile_time_instructions(self):
         gc.disable()
 
         try:
@@ -171,7 +169,7 @@ class BenchmarkBase(ABC):
         finally:
             gc.enable()
 
-    def _write_to_json(self, output_dir: str) -> None:
+    def _write_to_json(self, output_dir: str):
         """
         Write the result into JSON format, so that it can be uploaded to the benchmark database
         to be displayed on OSS dashboard. The JSON format is defined at
@@ -211,7 +209,7 @@ class BenchmarkBase(ABC):
         with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
             json.dump(records, f)
 
-    def append_results(self, path: str) -> None:
+    def append_results(self, path):
         with open(path, "a", newline="") as csvfile:
             # Create a writer object
             writer = csv.writer(csvfile)
@@ -223,11 +221,11 @@ class BenchmarkBase(ABC):
         # as the CSV writer for now
         self._write_to_json(os.path.dirname(os.path.abspath(path)))
 
-    def print(self) -> None:
+    def print(self):
         for entry in self.results:
             print(f"{entry[0]},{entry[1]},{entry[2]}")
 
-    def collect_all(self) -> Self:
+    def collect_all(self):
         self._prepare_once()
         self.results = []
         if (

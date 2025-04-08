@@ -501,9 +501,7 @@
 - name: XPU
   patterns:
   - '**xpu**'
-  - '**XPU**'
   - '**sycl**'
-  - '**SYCL**'
   approved_by:
   - EikanWang
   - jgong5
@@ -540,7 +538,6 @@
   - bdhirsh
   - zou3519
   - isuruf
-  - Chillee
   mandatory_checks_name:
   - EasyCLA
   - Lint

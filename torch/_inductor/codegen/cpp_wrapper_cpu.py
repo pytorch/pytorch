@@ -24,6 +24,7 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
+from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -106,22 +107,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         kernel_name: str,
         call_args,
-        *,
-        device=None,
-        triton=True,
+        grid=None,
+        device_index=None,
+        gpu=False,
+        triton=False,
         arg_types=None,
-        raw_keys=None,
         raw_args=None,
+        grid_fn: str = "grid",
         triton_meta=None,
-        original_fxnode_name=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
+
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
+        assert not gpu, "CppWrapperCpu.generate_kernel_call does not support GPU"
         assert arg_types is not None and len(call_args) == len(arg_types), (
             "Mismatch call_args and arg_types in generate_kernel_call"
         )
@@ -314,9 +320,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_symbol(size, name, sizeof, dim)
             for dim, stride in enumerate(value.get_stride()):
                 codegen_symbol(stride, name, strideof, dim)
-        elif isinstance(value, ir.TorchBindObject):
-            # torchbind objects are loaded in proxy executor
-            pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
@@ -403,26 +406,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     """
                 )
 
-        # Create a separate function for each input check to avoid "too big to optimize" error
-        for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
-            self.prefix.splice(
-                f"""
-                AOTI_NOINLINE static void check_input_{idx}(
-                    AtenTensorHandle* input_handles
-                ) {{
-                """
-            )
-            with self.prefix.indent():
-                gen_check("input_handles", idx, name, tensor)
-            self.prefix.writeline("}")
-
         # force noinline to avoid any potential compilation slowdown due to aggressive
         # inline done by the host compiler
         self.prefix.splice(
             """
             bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
-                const static bool result = env_var_value != nullptr && env_var_value[0] != '0';
+                const static bool result = env_var_value != nullptr && env_var_value[0] != '\0';
                 return result;
             }
 
@@ -435,8 +425,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
         with self.prefix.indent():
-            for idx in range(len(V.graph.graph_inputs)):
-                self.prefix.writeline(f"check_input_{idx}(input_handles);")
+            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+                gen_check("input_handles", idx, name, tensor)
         self.prefix.writeline("}")
 
     def write_wrapper_decl(self):
@@ -476,7 +466,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = ""
+                if config.aot_inductor.compile_wrapper_with_O0:
+                    run_impl_proto += """
+                    #ifdef __clang__
+                    __attribute__((optnone))
+                    #else
+                    __attribute__((optimize("O0")))
+                    #endif
+                    """
+
+                run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -488,10 +488,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
-                        __check_inputs_outputs(input_handles, output_handles);
                     """
 
                 self.generate_input_output_runtime_checks()
+                run_impl_proto += """
+                    __check_inputs_outputs(input_handles, output_handles);
+                """
+
                 self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
@@ -881,32 +884,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate(self, is_inference):
         with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+            if V.graph.aot_mode and not V.graph.is_const_graph:
+                self.codegen_model_kernels()
+                self.codegen_model_constructor()
+                self.codegen_const_run_driver()
             self.write_wrapper_decl()
             return super().generate(is_inference)
 
     def finalize_prefix(self):
-        prior = self.prefix
-        self.prefix = aot_mode_decls = IndentedBuffer()
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            aot_mode_decls.writeline("namespace torch::aot_inductor {")
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-            aot_mode_decls.writeline("} // namespace torch::aot_inductor")
-            aot_mode_decls.writeline("using namespace torch::aot_inductor;")
-
-        self.prefix = cache_decls = IndentedBuffer()
+        cached_dtypes_buffer = IndentedBuffer()
         for dtype in self.used_cached_dtypes:
-            cache_decls.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
         for device in self.used_cached_devices:
-            cache_decls.writeline(f"CACHE_TORCH_DEVICE({device});")
+            cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
-            cache_decls.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+            cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         for memory_format in self.used_cached_memory_formats:
-            cache_decls.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
-
-        self.prefix.splice(aot_mode_decls)
-        self.prefix.splice(prior)
+            cached_dtypes_buffer.writeline(
+                f"CACHE_TORCH_MEMORY_FORMAT({memory_format});"
+            )
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
 
     def define_kernel(
         self,
@@ -1312,6 +1310,24 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
+
+    def prepare_triton_kernel_call(self, device_index, call_args):
+        def wrap_arg(arg):
+            if isinstance(arg, str):
+                # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+                return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
+            elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
+                return str(arg)
+            else:
+                return cexpr(V.graph.sizevars.simplify(arg))
+
+        call_args = [wrap_arg(arg) for arg in call_args]
+
+        if device_index is None:
+            current_device = V.graph.get_current_device_or_throw()
+            device_index = current_device.index
+
+        return device_index, call_args
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -1808,16 +1824,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
-        schema = None
-        if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
-            obj = raw_args[0]
-            method = raw_args[1]
-            schema = op_overload.schema(obj, method)
-        else:
-            schema = op_overload._schema
-        assert schema is not None
-        arg_types = [x.real_type for x in schema.arguments]
-        return_types = [x.type for x in schema.returns]
+        arg_types = [x.real_type for x in op_overload._schema.arguments]
+        return_types = [x.type for x in op_overload._schema.returns]
 
         new_tensor_args = []
         new_int_args = []
@@ -1851,9 +1859,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # Only treat int Scalar as dynamic
                 if isinstance(arg, int):
                     new_int_args.append(str(arg))
-            elif isinstance(arg, ir.TorchBindObject):
-                # torchbind objects are loaded in proxy executor
-                pass
             elif isinstance(arg_type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
 
@@ -1927,9 +1932,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 raise AssertionError(f"Unsupported return type found: {return_type}")
 
-        # TODO: Only support None and tensor(s) returns for now, SymInt is not implemented yet
+        # TODO: Only support tensor(s) returns for now, SymInt is not implemented yet
         for return_type in return_types:
-            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
+            if isinstance(return_type, (torch.TensorType)):
                 pass
             elif isinstance(return_type, torch.OptionalType):
                 assert isinstance(return_type.getElementType(), torch.TensorType)
@@ -1941,10 +1946,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
         for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
-            # None output is supported, but Optional return types are not yet supported
-            if output_arg is None:
-                continue
-            elif isinstance(output_arg, (list, tuple)):
+            assert output_arg is not None, "Optional return types are not yet supported"
+            if isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
                     fill_output_arg(
                         out,
@@ -1987,18 +1990,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-
-        return_schema = None
-        if op_overload:
-            if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
-                assert raw_args is not None
-                assert len(raw_args) > 1
-                obj = raw_args[0]
-                method = raw_args[1]
-                return_schema = op_overload.schema(obj, method).returns
-            else:
-                return_schema = op_overload._schema.returns
-        if op_overload and not return_schema:
+        if op_overload and not op_overload._schema.returns:
             # kernel does not return a value
             output_args = []
         elif outputs is None:
@@ -2051,11 +2043,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         lines = """
 RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache"));
-if (!codecache_module) {
+if (codecache_module.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache");
 }
 custom_op_wrapper = PyObject_GetAttrString(codecache_module, "custom_op_wrapper");
-if (!custom_op_wrapper) {
+if (custom_op_wrapper.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
 
@@ -2080,6 +2072,11 @@ if (!custom_op_wrapper) {
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
+            def add_py_newref():
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+
             def handle_scalar(scalar):
                 if isinstance(scalar, int):
                     return f"PyLong_FromLongLong({scalar})"
@@ -2140,13 +2137,24 @@ if (!custom_op_wrapper) {
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
+                # device
+                self.include_extra_header("torch/csrc/Device.h")
                 device_str, device_index = self.codegen_device(raw_arg).split(", ")
                 return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
             elif isinstance(raw_arg, torch.dtype):
+                # dtype
+                add_py_newref()
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             elif isinstance(raw_arg, torch.layout):
+                # memory layout
+                add_py_newref()
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
+                # memory_format
+                add_py_newref()
+                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
                 return (
                     "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
                     f"{self.codegen_memory_format(raw_arg)})))"
@@ -2198,7 +2206,7 @@ if (!custom_op_wrapper) {
         lines = textwrap.dedent(
             f"""
             RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
-            if (!{py_args_var}) {{
+            if ({py_args_var}.get() == NULL) {{
                 throw std::runtime_error("PyTuple_New {py_args_var} failed");
             }}
             PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
@@ -2218,7 +2226,7 @@ if (!custom_op_wrapper) {
             f"""
             // Call the custom op in Python
             RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
-            if (!py_{buf_name}) {{
+            if (py_{buf_name}.get() == NULL) {{
                 if (PyErr_Occurred()) {{
                     return;
                 }}

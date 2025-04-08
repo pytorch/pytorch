@@ -53,9 +53,7 @@ Tensor TensorMaker::make_tensor() {
     tensor_impl->set_storage_offset(*storage_offset_);
   }
 
-  tensor_impl->set_requires_grad(opts_.requires_grad());
-
-  return tensor;
+   return tensor;
  }
 
  std::size_t TensorMaker::computeStorageSize() const noexcept {

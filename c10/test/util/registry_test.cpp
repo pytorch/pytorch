@@ -16,7 +16,6 @@ class Foo {
   virtual ~Foo() = default;
 };
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
 C10_DEFINE_REGISTRY(FooRegistry, Foo, int);
 #define REGISTER_FOO(clsname) C10_REGISTER_CLASS(FooRegistry, clsname, clsname)
@@ -49,22 +48,22 @@ TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
 }
 
 // C10_REGISTER_CLASS_WITH_PRIORITY defines static variable
-static void RegisterFooDefault() {
+void RegisterFooDefault() {
   C10_REGISTER_CLASS_WITH_PRIORITY(
       FooRegistry, FooWithPriority, c10::REGISTRY_DEFAULT, Foo);
 }
 
-static void RegisterFooDefaultAgain() {
+void RegisterFooDefaultAgain() {
   C10_REGISTER_CLASS_WITH_PRIORITY(
       FooRegistry, FooWithPriority, c10::REGISTRY_DEFAULT, Foo);
 }
 
-static void RegisterFooBarFallback() {
+void RegisterFooBarFallback() {
   C10_REGISTER_CLASS_WITH_PRIORITY(
       FooRegistry, FooWithPriority, c10::REGISTRY_FALLBACK, Bar);
 }
 
-static void RegisterFooBarPreferred() {
+void RegisterFooBarPreferred() {
   C10_REGISTER_CLASS_WITH_PRIORITY(
       FooRegistry, FooWithPriority, c10::REGISTRY_PREFERRED, Bar);
 }

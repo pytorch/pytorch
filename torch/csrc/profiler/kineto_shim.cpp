@@ -1,6 +1,5 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
-#include <type_traits>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -67,7 +66,7 @@ const std::set<libkineto::ActivityType> kPrivateUse1Types = {
 #endif // USE_KINETO
 
 static_assert(
-    std::is_trivial_v<DeviceAndResource>,
+    c10::is_pod_v<DeviceAndResource>,
     "Kineto specific details should be in `kineto_ids`.");
 
 const DeviceAndResource kineto_ids() {

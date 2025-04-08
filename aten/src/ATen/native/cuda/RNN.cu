@@ -56,7 +56,7 @@ bool allContiguous(at::TensorList tensors) {
 
 void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
   c10::DeviceIndex curDevice = -1;
-  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  c10::cuda::GetDevice(&curDevice);
   *block = cuda::getApplyBlock();
   TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),
                         "Could not get grid size for pointwise apply.");

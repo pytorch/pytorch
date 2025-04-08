@@ -625,5 +625,8 @@ def get_nn_functional_top_list():
     return top_nn_functional_
 
 
-usage_count = dict(get_nn_functional_top_list())
-usage_count.update(top_torch)
+usage_count = {}
+for k, v in get_nn_functional_top_list():
+    usage_count[k] = v
+for k, v in top_torch:
+    usage_count[k] = v
