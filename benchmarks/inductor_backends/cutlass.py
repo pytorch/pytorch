@@ -316,12 +316,12 @@ def print_results(experiment_groups: list[ExperimentGroup]):
         print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
     if "aten" in edge_over_aten:
-        print("\nAverage edge over aten:")
+        print("\nAverage edge over aten (max(-edge, 0), higher is better):")
         for name in edge_over_aten:
             if name != "aten":
                 # calculate average edge over aten, but need to exclude inf
                 values = [
-                    max(v, 0.0)
+                    max(-v, 0.0)
                     for v in edge_over_aten[name]
                     if v != float("inf") and v != "NA"
                 ]
