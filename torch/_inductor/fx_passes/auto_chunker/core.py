@@ -77,20 +77,32 @@ def update_chunking_meta(node, **kwargs):
     Unlike set_chunking_mete, this function keeps the existing chunking
     metadata if it's not overriden.
     """
+    changed = False
     meta = get_chunking_meta(node)
     if meta is None:
         meta = ChunkingMeta()
+        changed = True
     for k, v in kwargs.items():
+        if getattr(meta, k, None) != v:
+            changed = True
         setattr(meta, k, v)
 
     node.meta["chunking"] = meta
+    return changed
 
-def set_chunking_meta_if_none(nodes, meta):
+def set_chunking_meta_if_none(nodes, meta, filter_for_nop=None):
+    """
+    If filter_fop_nop returns true for a node, we set the chunking
+    meta to nop instead.
+    """
     changed = False
     for node in nodes:
         if get_chunking_meta(node) is None:
             changed = True
-            set_chunking_meta(node, meta)
+            if filter_for_nop and filter_for_nop(node):
+                set_chunking_meta(node)
+            else:
+                set_chunking_meta(node, meta)
     return changed
             
 

@@ -87,6 +87,7 @@ def propagate_where(where_node):
     aten.sum.dim_IntList,
     aten.mm.default,
     aten.permute.default,
+    aten.expand.default,
 ])
 def propagate_general_copy(out_node):
     """
@@ -114,5 +115,19 @@ def propagate_add_sub(out_node):
     lhs_meta, rhs_meta = get_chunking_metas([lhs_node, rhs_node])
     if lhs_meta.scale_by is rhs_meta.scale_by:
         update_chunking_meta(out_node, scale_by=lhs_meta.scale_by)
+        return True
+    return False
+
+@register_propagate_rule([
+    prims.fma.default,
+])
+def propagate_fma(out_node):
+    mul_lhs, mul_rhs, add_rhs = out_node.args[:3] 
+    mul_lhs_meta, mul_rhs_meta, add_rhs_meta = get_chunking_metas([
+        mul_lhs, mul_rhs, add_rhs
+    ])
+    add_lhs_scale_by = get_scale_by_from_metas(mul_lhs_meta, mul_rhs_meta)
+    if add_lhs_scale_by is add_rhs_meta.scale_by:
+        update_chunking_meta(out_node, scale_by=add_lhs_scale_by)
         return True
     return False

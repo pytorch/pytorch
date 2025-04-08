@@ -59,13 +59,15 @@ class AutoChunkerTest(TestCase):
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
-        # Make sure AutoChunking is not skipped
-        self.assertEqual(metrics.num_auto_chunking, 1)
+        # When the model is too trivial without softmax, no chunking happens because chunking
+        # metadata propagation can not reach the backward.
+        # Check this joint graph for example: https://gist.github.com/shunting314/5b684d7179680e337d178dcc77ff1b91
+        self.assertEqual(metrics.num_auto_chunking, has_softmax)
 
         # Only assert peak memory saving for large input. For small input, the saving can
         # be largely distorted by other memory allocation such as the tensor used to clear L2
         # cache by triton perf benchmarking API.
-        if USE_LARGE_INPUT:
+        if USE_LARGE_INPUT and has_softmax:
             expected_bound = M * N * dtype.itemsize
             self.assertTrue(peak_memory < expected_bound, f"Actual peak_memory {peak_memory}, expected bound {expected_bound}")
 
@@ -79,7 +81,7 @@ class AutoChunkerTest(TestCase):
     # Due to not able to generate an inplace version of a softmax like
     # kernel, having 2 chunks does not have large enough savings.
     # Use at least 4 chunks here.
-    @config.patch("AutoChunker.num_chunk", 4)
+    @config.patch("AutoChunker.num_chunk", config.AutoChunker.num_chunk or 4)
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
 

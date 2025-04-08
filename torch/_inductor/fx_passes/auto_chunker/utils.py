@@ -1,4 +1,4 @@
-from torch.fx import Node
+from torch.fx import Node, GraphModule
 from typing import Sequence, Optional
 from torch.utils._pytree import tree_flatten
 import torch
@@ -118,7 +118,25 @@ def get_node_is_scalar(nodes):
         node_is_scalar[node] = ft.numel() == 1
     return node_is_scalar
 
+def get_node_ndim(nodes):
+    """
+    Returns a dict map a node to 'ndum'.
+    """
+    node_ndim = {}
+    for node in nodes:
+        ft = get_fake_tensor_from_node_arg(node)
+        node_ndim[node] = ft.ndim
+    return node_ndim
+
+
 def is_chunked_by_dim(node, dim):
     from .core import get_chunking_meta
     meta = get_chunking_meta(node)
     return meta and meta.chunk_by_dim(dim)
+
+def tangent_has_chunking_meta(gm: GraphModule) -> bool:
+    from .core import get_chunking_meta
+    return any(
+        node.op == "placeholder" and "tangent" in node.target and get_chunking_meta(node) is not None
+        for node in gm.graph.nodes
+    )

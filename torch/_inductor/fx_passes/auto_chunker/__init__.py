@@ -23,7 +23,7 @@ from .old_applier import ChunkingApplier as OldChunkingApplier
 
 aten = torch.ops.aten
 prims = torch.ops.prims
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 class AutoChunker:
     @staticmethod
@@ -43,8 +43,8 @@ class AutoChunker:
             # skip
             return gm
 
-        metrics.num_auto_chunking += 1
 
+        log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
         if os.getenv("NEW_API") == "1":
             # test new API
             from .core import find_amplifier_node
@@ -52,10 +52,13 @@ class AutoChunker:
             amplifier_node = find_amplifier_node(graph)
             propagate(amplifier_node)
             from .applier import ChunkingApplier
-            return ChunkingApplier(gm, config.AutoChunker.num_chunk or 8).apply()
+            from .utils import tangent_has_chunking_meta
+            if not tangent_has_chunking_meta(gm):
+                raise CantChunk("Skip chunking either because the graph is for inference only or because the chunking metadata does not propagate to the backward (e.g. due to too trivial loss function)")
+            out_gm = ChunkingApplier(gm, config.AutoChunker.num_chunk or 8).apply()
+            metrics.num_auto_chunking += 1
+            return out_gm
         else:
-            log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
-    
             chunking_subgraph_nodes = Collector.collect_chunking_subgraph_nodes(graph)
             print("Chunking subgraph nodes:")
             for node in chunking_subgraph_nodes:

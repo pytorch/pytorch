@@ -8,7 +8,9 @@ from torch.fx import Node, Graph
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.utils import detect_fake_mode
 from .core import reorder_nodes
+import logging
 
+log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 aten = torch.ops.aten
 prims = torch.ops.prims
 
@@ -388,4 +390,7 @@ class ChunkingApplier:
             self.gm, self.parent_graph,
         )
         fake_tensor_prop(newgm)
+        if log.isEnabledFor(logging.DEBUG):
+            print("Graph module after chunking:")
+            newgm.print_readable()
         return newgm
