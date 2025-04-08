@@ -461,13 +461,13 @@ def compiled_module_main(
         "--ncu-kernel-regex",
         type=str,
         default=None,
-        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'.",
+        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'. If None, NCU will use '--kernel-name-base function'.",
     )
     parser.add_argument(
         "--ncu-metrics",
         type=str,
         default=None,
-        help="Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). If not set, NCU will use '--set full'.",
+        help="Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). If None, NCU will use '--set full'.",
     )
     parser.add_argument(
         "--ncu-csv",
