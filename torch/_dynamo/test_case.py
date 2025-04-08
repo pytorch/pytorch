@@ -111,6 +111,41 @@ class CPythonTestCase(TestCase):
     _stack: contextlib.ExitStack
     dynamo_strict_nopython = True
 
+    assertEqual = unittest.TestCase.assertEqual  # type: ignore[assignment]
+    assertNotEqual = unittest.TestCase.assertNotEqual  # type: ignore[assignment]
+    assertTrue = unittest.TestCase.assertTrue
+    assertFalse = unittest.TestCase.assertFalse
+    assertIs = unittest.TestCase.assertIs
+    assertIsNot = unittest.TestCase.assertIsNot
+    assertIsNone = unittest.TestCase.assertIsNone
+    assertIsNotNone = unittest.TestCase.assertIsNotNone
+    assertIn = unittest.TestCase.assertIn
+    assertNotIn = unittest.TestCase.assertNotIn
+    assertIsInstance = unittest.TestCase.assertIsInstance
+    assertNotIsInstance = unittest.TestCase.assertNotIsInstance
+    assertAlmostEqual = unittest.TestCase.assertAlmostEqual
+    assertNotAlmostEqual = unittest.TestCase.assertNotAlmostEqual
+    assertGreater = unittest.TestCase.assertGreater
+    assertGreaterEqual = unittest.TestCase.assertGreaterEqual
+    assertLess = unittest.TestCase.assertLess
+    assertLessEqual = unittest.TestCase.assertLessEqual
+    assertRegex = unittest.TestCase.assertRegex
+    assertNotRegex = unittest.TestCase.assertNotRegex
+    assertCountEqual = unittest.TestCase.assertCountEqual
+    assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
+    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertListEqual = unittest.TestCase.assertListEqual
+    assertTupleEqual = unittest.TestCase.assertTupleEqual
+    assertSetEqual = unittest.TestCase.assertSetEqual
+    assertDictEqual = unittest.TestCase.assertDictEqual
+    assertRaises = unittest.TestCase.assertRaises
+    assertRaisesRegex = unittest.TestCase.assertRaisesRegex
+    assertWarns = unittest.TestCase.assertWarns
+    assertWarnsRegex = unittest.TestCase.assertWarnsRegex
+    assertLogs = unittest.TestCase.assertLogs
+    fail = unittest.TestCase.fail
+    failureException = unittest.TestCase.failureException
+
     def _dynamo_test_key(self):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
