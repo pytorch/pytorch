@@ -1200,6 +1200,15 @@ class TestCutlassBackend(TestCase):
 
             torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
 
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_import_cutlass(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+
+        import cutlass  # noqa: F401
+        import cutlass_library  # noqa: F401
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
