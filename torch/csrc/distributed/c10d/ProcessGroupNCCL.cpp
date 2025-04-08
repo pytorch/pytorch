@@ -1353,6 +1353,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
     const std::optional<std::string>& abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
+  // NCCL expects Group abort when there are multiple communicators created in a
+  // device.
+  groupStart();
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
@@ -1373,6 +1376,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
             << " communicator on CUDA device: " << devName;
   }
+  groupEnd();
 }
 
 // Abort all communicators on this rank
