@@ -303,9 +303,7 @@ class TestDraftExport(TestCase):
         report = ep._report
 
         self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.CONSTRAINT_VIOLATION_ERROR
-        )
+        self.assertEqual(report.failures[0].failure_type, FailureType.GUARD_ADDED)
 
         inp = (torch.randn(3, 3),)
         self.assertEqual(ep.module()(*inp), M()(*inp))
