@@ -3,7 +3,6 @@
 import functools
 import operator
 import pickle
-import sys
 import types
 from itertools import permutations
 from typing import Any

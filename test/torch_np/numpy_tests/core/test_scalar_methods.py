@@ -5,7 +5,6 @@ Test the scalar constructors, which also do type-coercion
 """
 import fractions
 import functools
-import sys
 import types
 from typing import Any
 from unittest import skipIf as skipif, SkipTest
