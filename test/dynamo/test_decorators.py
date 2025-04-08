@@ -204,12 +204,629 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
+    def test_allow_in_graph_no_id_reuse(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def do_allow_in_graph(x):
+            return x + 1
+
+        torch._dynamo.allow_in_graph(do_allow_in_graph)
+        del do_allow_in_graph
+
+        # `id(dont_allow_in_graph)` would likely match `id(do_allow_in_graph)`
+        # We want to make sure Dynamo always trace through
+        # `dont_allow_in_graph`, by checking for the explicit graph break.
+        def dont_allow_in_graph(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend=cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = dont_allow_in_graph(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        fn(torch.randn(10))
+
+        # Check for graph break
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
                 return x.cos()
+
+    def test_nonstrict_trace_tensor_args(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, y, z):
+            torch._dynamo.graph_break()
+            return x * y + z
+
+        def fn(x, y):
+            t0 = x + 1
+            t1 = trace_me(x, y, t0)
+            t2 = t1 + y
+            return t0 * t2
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_pre_existing_dict(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x, d):
+            t0 = trace_me(x, d)
+            return t0 + 1
+
+        x = torch.randn(10)
+        d = {"a": 2}
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_newly_constructed_dict_with_side_effects(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x):
+            d = {}
+            d["a"] = 2
+            t0 = trace_me(x, d)
+            return t0 + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_pre_existing_dict_with_side_effects(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x, d):
+            d["a"] = x + 1
+            t0 = trace_me(x, d)
+            return t0 + 2
+
+        x = torch.randn(10)
+        d0 = {"a": 0}
+        d1 = dict(d0)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, d0)
+        res = opt_fn(x, d1)
+        self.assertEqual(ref, res)
+        self.assertEqual(d0, d1)
+
+    def test_nonstrict_trace_pre_existing_custom_class(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        def fn(p):
+            res = trace_me(p)
+            return res, p.x, p.y
+
+        p = Point(torch.ones(10), torch.ones(1))
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(p)
+        res = opt_fn(p)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_pre_existing_custom_class_with_side_effects(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        def fn(p):
+            p.x = p.x + 1
+            p.y = p.y + 2
+            res = trace_me(p)
+            return res, p.x, p.y
+
+        p1 = Point(torch.ones(10), torch.ones(1))
+        p2 = Point(torch.ones(10), torch.ones(1))
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(p1)
+        res = opt_fn(p2)
+        self.assertEqual(ref, res)
+        self.assertEqual(p1.x, p2.x)
+        self.assertEqual(p1.y, p2.y)
+
+    def test_nonstrict_trace_newly_constructed_custom_class_with_side_effects(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        def fn(x, y):
+            p = Point(x, y)
+            p.x = p.x + 1
+            p.y = p.y + 2
+            res = trace_me(p)
+            return res, p.x, p.y
+
+        x, y = torch.ones(10), torch.ones(1)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_nested_custom_class(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class PointTensor:
+            p: Point
+            t: torch.Tensor
+
+            def __init__(self, p, t):
+                self.p = p
+                self.t = t
+
+        torch.utils._pytree.register_pytree_node(
+            PointTensor,
+            lambda pt: ((pt.p, pt.t), ()),
+            lambda pt, _: PointTensor(pt[0], pt[1]),
+        )
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        def trace_point(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        @torch._dynamo.nonstrict_trace
+        def trace_point_tensor(pt):
+            torch._dynamo.graph_break()
+            return pt.t + trace_point(pt.p)
+
+        def fn(x, y):
+            p = Point(x, y)
+            t = x + y
+            pt = PointTensor(p, t)
+            res = trace_point_tensor(pt)
+            return res
+
+        x, y = torch.ones(10), torch.ones(1)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
+        class State:
+            def __init__(self, n):
+                self.n = n
+
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(fullgraph=True, backend=cnts)
+        def fn(x, s):
+            res = trace_me(x, s)
+            return res
+
+        x = torch.ones(10)
+        # Make sure recompilation didn't happen.
+        self.assertEqual(cnts.frame_count, 0)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Make sure recompilation did happen.
+        fn(x, State(41))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_tuple_and_sym_int_output(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 1, x.size(0)
+
+        def fn(x):
+            t0, n = trace_me(x)
+            return t0 * n
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_inside_compiled_function(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        def fn(x):
+            res = torch._dynamo.nonstrict_trace(trace_me)(x)
+            return res + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_inside_compiled_function_kwarg(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        def fn(x):
+            res = torch._dynamo.nonstrict_trace(traceable_fn=trace_me)(x)
+            return res + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_on_method(self):
+        class Num:
+            def __init__(self, n):
+                self.n = n
+
+            @torch._dynamo.nonstrict_trace
+            def trace_me(self, t):
+                torch._dynamo.graph_break()
+                return t + self.n
+
+        torch.utils._pytree.register_pytree_node(
+            Num,
+            lambda num: ((num.n,), ()),
+            lambda n, _: Num(n[0]),
+        )
+
+        def fn(x, n):
+            num = Num(n)
+            return num.trace_me(x)
+
+        x, n = torch.randn(10), 42
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, n)
+        res = opt_fn(x, n)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_captured_external_tensor(self):
+        cst = torch.ones(1)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, y):
+            torch._dynamo.graph_break()
+            return x * y + cst
+
+        def fn(x, y):
+            return trace_me(x, y)
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_no_action_at_a_distance(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        # No effect on traceability of `trace_me`
+        torch._dynamo.nonstrict_trace(trace_me)
+
+        def fn(x):
+            res = trace_me(x)
+            return res + 1
+
+        x = torch.randn(10)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        # There should be 1 graph break
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_inside_compiled_function_error(self):
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x, y):
+            def trace_me(x, y):
+                torch._dynamo.graph_break()
+                return x * y
+
+            res = torch._dynamo.nonstrict_trace(trace_me)(x, y)
+            return res + 1
+
+        try:
+            fn(torch.ones(10), torch.ones(1))
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_nonstrict_trace_custom_class_error(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(p):
+            res = trace_me(p)
+            return res + 1
+
+        try:
+            p = Point(torch.ones(10), torch.ones(1))
+            fn(p)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_nonstrict_trace_nested_custom_class_error(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class PointTensor:
+            p: Point
+            t: torch.Tensor
+
+            def __init__(self, p, t):
+                self.p = p
+                self.t = t
+
+        torch.utils._pytree.register_pytree_node(
+            PointTensor,
+            lambda pt: ((pt.p, pt.t), ()),
+            lambda pt, _: PointTensor(pt[0], pt[1]),
+        )
+
+        def trace_point(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        @torch._dynamo.nonstrict_trace
+        def trace_point_tensor(pt):
+            torch._dynamo.graph_break()
+            return pt.t + trace_point(pt.p)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x, y):
+            p = Point(x, y)
+            t = x + y
+            pt = PointTensor(p, t)
+            res = trace_point_tensor(pt)
+            return res
+
+        try:
+            fn(torch.ones(10), torch.ones(1))
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
+        class State:
+            def __init__(self, n):
+                self.n = n
+
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            s = State(10)
+            res = trace_me(x, s)
+            return res
+
+        try:
+            x = torch.ones(10)
+            fn(x)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <DecoratorTests.test_nonstrict_newly_constructed_trace_register_constant_type_error.<locals>.State>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
+
+Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_nonstrict_trace_object_in_context_error(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class PointTensor:
+            p: Point
+            t: torch.Tensor
+
+            def __init__(self, p, t):
+                self.p = p
+                self.t = t
+
+        torch.utils._pytree.register_pytree_node(
+            PointTensor,
+            lambda pt: ((pt.t,), pt.p),
+            lambda ts, p: PointTensor(p, ts[0]),
+        )
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(pt):
+            torch._dynamo.graph_break()
+            return pt.t + pt.p.x * pt.p.y
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x, y):
+            p = Point(x, y)
+            t = x + y
+            pt = PointTensor(p, t)
+            res = trace_me(pt)
+            return res
+
+        try:
+            x, y = torch.ones(10), torch.ones(1)
+            fn(x, y)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point> into the context.
+
+Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point>
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+
+If the above doesn't work, please subtmit an issue to GitHub.
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -230,12 +847,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
-    def test_skip(self):
+    def test_disable_recursive_false(self):
         def fn2(x):
-            return x.sin()
+            return x + 1
 
         @torch._dynamo.disable(recursive=False)
         def fn1(x):
+            if torch.compiler.is_compiling():
+                raise RuntimeError("bad")
             x = x.sigmoid()
             return fn2(x.cos())
 
@@ -246,6 +865,79 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+        # test that applying disable nonrecursive doesn't modify the original function
+        def fn3(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return fn2(x) + 2
+
+        @torch.compile(backend=cnts)
+        def outer(f, x):
+            return f(x)
+
+        inp = torch.ones(3)
+        fn3_disabled = torch._dynamo.disable(fn3, recursive=False)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        # directly compiling a disabled function should result in a compile
+        torch._dynamo.reset()
+        cnts.clear()
+        res = torch.compile(fn3_disabled, backend=cnts)(inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+    def test_disable_recursive_false_weird(self):
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        # test the case where the next invocation of the function is
+        # manually skipped
+        def fn(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return x + 1
+
+        fn_disabled = torch._dynamo.disable(fn, recursive=False)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+        )
+
+        @torch.compile(backend="eager")
+        def outer(fn, x):
+            return fn(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(outer(fn_disabled, inp), inp + 1)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        )
+
+        self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
     def test_substitute_in_graph(self):
         counters.clear()
@@ -425,13 +1117,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.
-        # On 1st compile, we expect the input to be marked as static, with guarded
-        # set depending on the `guarded` flag.
-        # On 2nd compile, we expect the input to be unmarked
-        # if inlining NN modules, we expect metadata to be present on the tensor, indicating
-        # the static address type of the input
-        # if not inlining NN modules, we expect the tensor to be present in the buffers attribute
-        # of the graph.
+        # For both inline_inbuilt_nn_modules True and False, we expect the
+        # tensor to be present in the buffers attribute of the graph.
 
         compiles_with_buffers = 0
         compiles = 0
@@ -439,27 +1126,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
             nonlocal compiles
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                input_node = [
-                    n
-                    for n in gm.graph.nodes
-                    if n.op == "placeholder" and n.name == "l_x_"
-                ]
-                self.assertEqual(len(input_node), 1)
-                input_node = input_node[0]
-                if compiles == 0:
-                    self.assertEqual(
-                        input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
-                        "guarded" if guarded else "unguarded",
-                    )
-                elif compiles == 1:
-                    self.assertFalse(
-                        "_dynamo_static_input_type" in input_node.meta["tensor_dict"]
-                    )
-                else:
-                    raise RuntimeError(f"Unexpected number of compiles: {compiles}")
-            else:
-                compiles_with_buffers += len(gm._buffers) > 0
+            compiles_with_buffers += len(gm._buffers) > 0
             compiles += 1
             return gm
 
@@ -472,7 +1139,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+        if guarded:
             self.assertEqual(compiles_with_buffers, 1)
 
         inp2 = torch.ones(2)
@@ -482,7 +1149,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # should not be incremented
         fn(inp2)
 
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+        if guarded:
             self.assertEqual(compiles_with_buffers, 1)
 
         self.assertEqual(compiles, 2 if guarded else 1)
@@ -597,6 +1264,21 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
+    def test_set_stance_aot_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("aot_eager_then_compile"):
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+
+        # Would have been 4 without stance
+        self.assertEqual(cnts.op_count, 2)
+
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):
         @torch._dynamo.mark_static
@@ -623,6 +1305,38 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
+
+    def test_set_stance_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            fn(1, torch.randn(1), {0: torch.randn(1)})
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_set_stance_eager_then_compile_with_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            y = torch.sin(y)
+            torch._dynamo.graph_break()
+            y = torch.cos(y)
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            fn(1, torch.randn(1), {0: torch.randn(1)})
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+
+        # frame count 2 since we added a graph break
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")

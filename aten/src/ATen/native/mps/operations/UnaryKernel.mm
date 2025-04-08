@@ -34,9 +34,14 @@ static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   lib.exec_unary_kernel(iter, "round_decimals", decimals);
 }
 
+static void sqrt_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "sqrt");
+}
+
 REGISTER_DISPATCH(exp_stub, exp_kernel);
 REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
 REGISTER_DISPATCH(sinc_stub, sinc_kernel);
 REGISTER_DISPATCH(tanh_stub, tanh_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
+REGISTER_DISPATCH(sqrt_stub, sqrt_kernel_mps);
 } // namespace at::native

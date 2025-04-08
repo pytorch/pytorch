@@ -437,7 +437,7 @@ def _should_pad_bench(
             return False
 
         def realize_symbols(
-            ds: Union[torch.Size, tuple[torch.SymInt, ...]]
+            ds: Union[torch.Size, tuple[torch.SymInt, ...]],
         ) -> list[int]:
             return [d if isinstance(d, int) else d.node.hint for d in ds]
 

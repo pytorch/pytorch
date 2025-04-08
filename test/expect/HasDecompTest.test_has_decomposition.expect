@@ -75,6 +75,7 @@ aten::_ctc_loss.out
 aten::_ctc_loss_backward
 aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
+aten::_cudnn_attention_forward
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
@@ -382,6 +383,7 @@ aten::_fw_primal_copy
 aten::_fw_primal_copy.out
 aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
+aten::_grouped_mm
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
 aten::_histogramdd_bin_edges.out
@@ -517,6 +519,7 @@ aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
+aten::_scaled_grouped_mm
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -648,6 +651,7 @@ aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
 aten::_weight_int4pack_mm_for_cpu
+aten::_weight_int4pack_mm_with_scales_and_zeros
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out

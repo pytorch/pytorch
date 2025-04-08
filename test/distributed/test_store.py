@@ -289,7 +289,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         port = common.find_free_port()
 
         err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+        with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
@@ -521,6 +521,38 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
             dist.TCPStore("localhost", 0, world_size=0, is_master=False)
 
+    def test_agent_store(self) -> None:
+        store = self._create_store()
+
+        with self.assertRaisesRegex(
+            dist.DistNetworkError,
+            "The server socket has failed to listen on any local network address",
+        ):
+            dist.TCPStore(
+                host_name="localhost",
+                port=store.port,
+                world_size=1,
+                is_master=True,
+                use_libuv=self._use_libuv,
+            )
+
+        USE_AGENT_STORE = "TORCHELASTIC_USE_AGENT_STORE"
+        MASTER_PORT = "MASTER_PORT"
+
+        os.environ[USE_AGENT_STORE] = "1"
+        os.environ[MASTER_PORT] = str(store.port)
+        second_server = dist.TCPStore(
+            host_name="localhost",
+            port=store.port,
+            world_size=1,
+            is_master=True,
+            use_libuv=self._use_libuv,
+        )
+        del os.environ[USE_AGENT_STORE]
+        del os.environ[MASTER_PORT]
+
+        self.assertEqual(second_server.port, store.port)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True
@@ -534,33 +566,6 @@ class LibUvTCPStoreTest(TCPStoreTest):
         return create_tcp_store(
             addr, world_size, wait_for_workers=False, use_libuv=True
         )
-
-    def test_take_over_listen_socket(self):
-        """
-        override the take_over_listen_socket test in TCPStoreTest.
-        Reason: we have not thoroughly tested libuv TCPStore initialization using
-        open Socket so we decide to not support this use for now.
-        TODO (xilunwu): enable this use case
-        """
-        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen_sock.bind(("localhost", 0))
-        addr, port, *_ = listen_sock.getsockname()
-        listen_fd = listen_sock.detach()
-
-        err_msg_reg = (
-            "^The libuv TCPStore backend does not support "
-            "initialization with an listen fd"
-        )
-
-        with self.assertRaisesRegex(NotImplementedError, err_msg_reg):
-            dist.TCPStore(
-                addr,
-                port,
-                1,
-                is_master=True,
-                master_listen_fd=listen_fd,
-                use_libuv=self._use_libuv,
-            )
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
