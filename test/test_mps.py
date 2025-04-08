@@ -20,7 +20,7 @@ import itertools
 from collections import defaultdict
 from torch import inf
 from torch.nn import Buffer, Parameter
-from torch.testing._internal import opinfo
+from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
@@ -48,6 +48,7 @@ from itertools import product
 import operator
 
 test_consistency_op_db = copy.deepcopy(op_db)
+test_cow_inputs_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
 
 # Add bicubic2d_aa to test_consistency_op_db
@@ -12855,6 +12856,153 @@ class TestConsistency(TestCaseMPS):
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
+
+class TestCOWInputs(TestCase):
+    # Tests that MPS ops do not mutate the underlying data of COW inputs.
+    # Materialization is allowed, but the original data buffer should never be
+    # written to.
+    # TODO: When we enable the `test_cow_input` test from `test_ops.py` for MPS,
+    # we can remove this test.
+    @ops(test_cow_inputs_op_db, allowed_dtypes=(torch.float,))
+    def test_cow_input_not_mutated(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+
+        def is_strided_tensor(arg):
+            return torch.is_tensor(arg) and arg.layout == torch.strided
+
+        def check_cow_input(
+            arg_copy,
+            arg_raw,
+            idx_or_kw,
+            backward_or_forward="forward",
+        ):
+            arg_name = (
+                f"Argument {idx_or_kw}"
+                if isinstance(idx_or_kw, int)
+                else f"Keyword argument '{idx_or_kw}'"
+            ) + f" during {backward_or_forward} call"
+
+            if is_strided_tensor(arg_raw):
+                self.assertTrue(
+                    torch._C._is_cow_tensor(arg_raw),
+                    msg=(
+                        f"{arg_name} raw input should remain COW, but it "
+                        "unexpectedly materialized."
+                    ),
+                )
+                self.assertTrue(
+                    torch.allclose(
+                        arg_raw, arg_copy, rtol=0, atol=0, equal_nan=True
+                    ),
+                    msg=(
+                        f"{arg_name} COW input data was mutated."
+                    ),
+                )
+
+        for sample in samples:
+            args_raw = [sample.input] + list(sample.args)
+            kwargs_raw = sample.kwargs
+            args_copy = []
+            args = []
+            kwargs_copy = {}
+            kwargs = {}
+
+            # Convert strided tensor inputs to COW tensors and make copies of
+            # all inputs
+            for idx, arg in enumerate(args_raw):
+                if is_strided_tensor(arg):
+                    args_copy.append(arg.detach().clone())
+                    args.append(torch._lazy_clone(arg))
+                else:
+                    if torch.is_tensor(arg):
+                        args_copy.append(arg.detach().clone())
+                    else:
+                        args_copy.append(copy.deepcopy(arg))
+                    args.append(arg)
+
+            for kw, arg in kwargs_raw.items():
+                if is_strided_tensor(arg):
+                    kwargs_copy[kw] = arg.detach().clone()
+                    kwargs[kw] = torch._lazy_clone(arg)
+                else:
+                    if torch.is_tensor(arg):
+                        kwargs_copy[kw] = arg.detach().clone()
+                    else:
+                        kwargs_copy[kw] = copy.deepcopy(arg)
+                    kwargs[kw] = arg
+
+            leaf_tensors = composite_compliance.gather_leaf_tensors(args, kwargs)
+
+            # Call forward op
+            results_raw = op.get_op()(*args, **kwargs)
+
+            # Check that COW inputs remain COW after the forward op is executed
+            for idx, arg in enumerate(args):
+                check_cow_input(args_copy[idx], args_raw[idx], idx)
+
+            for kw, arg in kwargs.items():
+                check_cow_input(kwargs_copy[kw], kwargs_raw[kw], kw)
+
+            # Call backward op if it is supported. This part of the test is
+            # based on `composite_compliance.check_backward_formula`
+            if (
+                op.supports_autograd
+                and len(leaf_tensors) > 0
+                and not op.skip_cow_input_backward
+            ):
+                if sample.output_process_fn_grad is not None:
+                    results_raw = sample.output_process_fn_grad(results_raw)
+
+                leaf_results = pytree.tree_leaves(results_raw)
+                results = [
+                    r
+                    for r in leaf_results
+                    if isinstance(r, torch.Tensor) and r.requires_grad
+                ]
+
+                all_results_strided = all(
+                    is_strided_tensor(result) for result in results
+                )
+
+                # Only test backward if the results are strided tensors
+                if all_results_strided:
+                    output_grads_raw = [
+                        torch.ones(r.shape, device=r.device, dtype=r.dtype)
+                        for r in results
+                    ]
+                    output_grads_copy = []
+                    output_grads = []
+
+                    # Convert output grads to COW tensors and make copies
+                    for output_grad in output_grads_raw:
+                        output_grads_copy.append(output_grad.detach().clone())
+                        output_grads.append(torch._lazy_clone(output_grad))
+
+                    torch.autograd.grad(
+                        results,
+                        leaf_tensors,
+                        output_grads,
+                        allow_unused=True,
+                        retain_graph=True,
+                    )
+
+                    # Check that COW inputs remain COW after the backward op is executed
+                    for idx, arg in enumerate(args):
+                        check_cow_input(
+                            args_copy[idx],
+                            args_raw[idx],
+                            idx,
+                            backward_or_forward="backward",
+                        )
+
+                    # Check that COW inputs remain COW after the backward op is executed
+                    for idx, output_grad in enumerate(output_grads):
+                        check_cow_input(
+                            output_grads_copy[idx],
+                            output_grads_raw[idx],
+                            f"output grad {idx}",
+                            backward_or_forward="backward",
+                        )
 
 
 class TestErrorInputs(TestCase):
