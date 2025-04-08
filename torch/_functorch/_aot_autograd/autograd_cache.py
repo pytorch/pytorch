@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Un
 import torch
 from torch._dynamo.utils import counters, get_chromium_event_logger
 from torch._functorch import config
+from torch._higher_order_ops import wrap
 from torch._inductor.codecache import (
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
@@ -124,6 +125,10 @@ def check_node_safe(node: Node):
         "einops.einops.rearrange",
     )
 
+    SAFE_HOPS = {
+        wrap.tag_activation_checkpoint,
+    }
+
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
@@ -156,7 +161,7 @@ def check_node_safe(node: Node):
     if node.op == "call_function":
         # We support only torch.* functions for now
         # We can probably add an allowlist of safe non-torch implementations as well
-        if not is_torch_function(node.target):
+        if not is_torch_function(node.target) and node.target not in SAFE_HOPS:
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
             raise BypassAOTAutogradCache(
