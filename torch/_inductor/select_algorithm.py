@@ -425,8 +425,7 @@ class TritonTemplateKernel(TritonKernel):
             for key in dataclasses.fields(SubgraphInfo)
         }
 
-        if body_name not in self.subgraph_bodies:
-            assert body_name in self.subgraph_bodies, body_name
+        assert body_name in self.subgraph_bodies, body_name
 
         subgraph = self.subgraph_bodies[body_name]
         for key, value in subgraph.to_dict().items():
