@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 7)
+SCHEMA_VERSION = (8, 8)
 TREESPEC_VERSION = 1
 
 
@@ -484,3 +484,4 @@ class ExternKernelNode:
 @dataclass
 class ExternKernelNodes:
     nodes: Annotated[list[ExternKernelNode], 10]
+    protocol: Annotated[Optional[str], 20] = None
