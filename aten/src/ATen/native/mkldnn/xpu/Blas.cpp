@@ -366,7 +366,7 @@ Tensor& scaled_mm_out_xpu(
   TensorArg mat2_arg{mat2, "mat2", 2};
   TensorArg scale_a_arg{scale_a, "scale_a", 3};
   TensorArg scale_b_arg{scale_b, "scale_b", 4};
-  checkAllSameXPU(
+  checkAllSameGPU(
       "scaled_mm_out", {out_arg, scale_a_arg, scale_b_arg, mat1_arg, mat2_arg});
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
