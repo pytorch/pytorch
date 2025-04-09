@@ -242,6 +242,19 @@ class TestDistWrapper(DTensorTestBase):
         expected_objects = rank
         assert scattered_objects == expected_objects
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_barrier(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        # No exception should be raised.
+        dist_wrapper.barrier()
+
 
 if __name__ == "__main__":
     run_tests()
