@@ -443,6 +443,21 @@ def _del_library(
     op_defs,
     registration_handles,
 ):
+    import torch.fx
+
+    for op_def in op_defs:
+        name = op_def
+        overload_name = ""
+        if "." in op_def:
+            name, overload_name = op_def.split(".")
+        if (
+            name,
+            overload_name,
+        ) in torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE:
+            del torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE[
+                (name, overload_name)
+            ]
+
     captured_impls -= op_impls
     captured_defs -= op_defs
     for handle in registration_handles:

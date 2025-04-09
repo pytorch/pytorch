@@ -821,4 +821,10 @@ class FunctionalizeCtxWrapper:
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        if isinstance(self.subgraph, torch.fx.GraphModule):
+            # Running graph with interpreter is needed for propagating the stack_trace
+            with fx_traceback.preserve_node_meta():
+                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
+                    *args, **kwargs
+                )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
