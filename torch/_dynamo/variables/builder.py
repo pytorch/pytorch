@@ -1731,8 +1731,9 @@ class VariableBuilder:
             config.install_params_as_graph_attr
             and not (isinstance(source, LocalSource) and source.is_input)
             and (
-                isinstance(value, torch.nn.parameter.Parameter)
-                or isinstance(value, torch.nn.parameter.Buffer)
+                isinstance(
+                    value, (torch.nn.parameter.Parameter, torch.nn.parameter.Buffer)
+                )
             )
         ):
             # Install params/bufs which are not directly inputs when explicitly asked
