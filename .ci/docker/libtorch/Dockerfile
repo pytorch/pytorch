@@ -49,6 +49,8 @@ RUN bash ./install_mkl.sh && rm install_mkl.sh
 FROM cpu as cuda
 ADD ./common/install_cuda.sh install_cuda.sh
 ADD ./common/install_magma.sh install_magma.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 ENV CUDA_HOME /usr/local/cuda
 
 FROM cuda as cuda11.8

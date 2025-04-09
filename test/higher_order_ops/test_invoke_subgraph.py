@@ -559,22 +559,26 @@ class GraphModule(torch.nn.Module):
 
         @mark_compile_region
         def gn(x):
-            return mod(x)
+            return torch.cos(x), mod(x)
 
         def fn(x):
-            return gn(x)
+            out = gn(x)
+            return out[0] + out[1]
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         # requires_grad is False deliberately to force None the joint_graph
         # outputs
         x = torch.randn(8, 8, requires_grad=False)
+        x_clone = x.detach().clone().requires_grad_(False)
 
-        ref = mod(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        ref = fn(x)
+        res = opt_fn(x_clone)
 
         ref.sum().backward()
         res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
@@ -917,6 +921,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
             mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3)
             mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+
             add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
             return (add,)
 """,
@@ -1026,7 +1031,9 @@ class GraphModule(torch.nn.Module):
     class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[8, 8]", primals_1: "f32[8, 8]"):
             mm: "f32[8, 8]" = torch.ops.aten.mm.default(primals_0, primals_1)
+
             sin: "f32[8, 8]" = torch.ops.aten.sin.default(mm)
+
             t: "f32[8, 8]" = torch.ops.aten.t.default(primals_0);  primals_0 = None
             t_1: "f32[8, 8]" = torch.ops.aten.t.default(primals_1);  primals_1 = None
             return (sin, mm, t, t_1)
@@ -1051,11 +1058,28 @@ class GraphModule(torch.nn.Module):
         def forward(self, mm: "f32[8, 8]", t: "f32[8, 8]", t_1: "f32[8, 8]", tangents_0: "f32[8, 8]"):
             cos: "f32[8, 8]" = torch.ops.aten.cos.default(mm);  mm = None
             mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_0, cos);  tangents_0 = cos = None
+
             mm_1: "f32[8, 8]" = torch.ops.aten.mm.default(t, mul);  t = None
             mm_2: "f32[8, 8]" = torch.ops.aten.mm.default(mul, t_1);  mul = t_1 = None
             return (mm_2, mm_1)
 """,
             )
+
+    def test_const_tensor(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.tensor(64, dtype=torch.float32) * x
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(64, requires_grad=True)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 @parameterized_class(
