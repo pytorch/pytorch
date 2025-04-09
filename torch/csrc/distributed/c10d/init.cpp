@@ -274,6 +274,10 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
+  c10::intrusive_ptr<Store> clone() override {
+    PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
+  }
+
   // Note: this function manually calls the Python-side overload
   // for this function instead of using the PYBIND11_OVERLOAD_XYZ
   // macros. This is done so that we can call the Python-side
@@ -1208,6 +1212,16 @@ and :class:`~torch.distributed.HashStore`).
 )")
           // Default constructor.
           .def(py::init<>())
+          .def(
+              "clone",
+              &::c10d::Store::clone,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Clones the store and returns a new object that points to the same underlying
+store. The returned store can be used concurrently with the original object.
+This is intended to provide a safe way to use a store from multiple threads by
+cloning one store per thread.
+)")
           // Convert from std::string to std::vector<uint8>.
           .def(
               "set",
@@ -3572,6 +3586,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         if (get("key3") != "15") {
           TORCH_CHECK(false, "assertion failed");
         }
+
+        auto cloned = store->clone();
+        store->set("foo", "bar");
+
+        auto ret = cloned->get("foo");
+        TORCH_CHECK(
+            std::string(ret.begin(), ret.end()) == "bar",
+            "checked clone behavior");
       },
       py::call_guard<py::gil_scoped_release>());
 
