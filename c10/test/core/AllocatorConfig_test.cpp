@@ -5,12 +5,13 @@
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   auto env_orig = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+  constexpr size_t kMB = 1024 * 1024ul;
 
   std::string env =
       "max_split_size_mb:40,"
       "max_non_split_rounding_mb:30,"
       "garbage_collection_threshold:0.5,"
-      "roundup_power2_divisions:[64:8,128:2,256:2,512:2,1024:1,>:1],"
+      "roundup_power2_divisions:[64:8,128:2,256:4,512:2,1024:4,>:1],"
       "backend:async,"
       "expandable_segments:True,"
       "release_lock_on_device_malloc:True,"
@@ -20,18 +21,18 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
   auto& config = c10::CachingAllocator::getAllocatorConfig();
   EXPECT_EQ(config.last_allocator_settings(), env);
-  EXPECT_EQ(config.max_split_size(), 40 * 1024ul * 1024);
-  EXPECT_EQ(config.max_non_split_rounding_size(), 30 * 1024ul * 1024);
+  EXPECT_EQ(config.max_split_size(), 40 * kMB);
+  EXPECT_EQ(config.max_non_split_rounding_size(), 30 * kMB);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.5);
-  EXPECT_EQ(config.roundup_power2_divisions(32), 1);
-  EXPECT_EQ(config.roundup_power2_divisions(64), 8);
-  EXPECT_EQ(config.roundup_power2_divisions(128), 2);
-  EXPECT_EQ(config.roundup_power2_divisions(256), 2);
-  EXPECT_EQ(config.roundup_power2_divisions(512), 2);
-  EXPECT_EQ(config.roundup_power2_divisions(1024), 1);
-  EXPECT_EQ(config.roundup_power2_divisions(2048), 1);
-  EXPECT_EQ(config.roundup_power2_divisions(4096), 1);
-  EXPECT_EQ(config.roundup_power2_divisions(8192), 1);
+  EXPECT_EQ(config.roundup_power2_divisions(32 * kMB), 8);
+  EXPECT_EQ(config.roundup_power2_divisions(64 * kMB), 8);
+  EXPECT_EQ(config.roundup_power2_divisions(128 * kMB), 2);
+  EXPECT_EQ(config.roundup_power2_divisions(256 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(512 * kMB), 2);
+  EXPECT_EQ(config.roundup_power2_divisions(1024 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(2048 * kMB), 1);
+  EXPECT_EQ(config.roundup_power2_divisions(4096 * kMB), 1);
+  EXPECT_EQ(config.roundup_power2_divisions(8192 * kMB), 1);
   EXPECT_EQ(config.use_async_allocator(), true);
   EXPECT_EQ(config.use_expandable_segments(), true);
   EXPECT_EQ(config.use_release_lock_on_device_malloc(), true);
@@ -45,20 +46,20 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(config.last_allocator_settings(), env);
-  EXPECT_EQ(config.max_split_size(), 20 * 1024ul * 1024);
-  EXPECT_EQ(config.max_non_split_rounding_size(), 40 * 1024ul * 1024);
+  EXPECT_EQ(config.max_split_size(), 20 * kMB);
+  EXPECT_EQ(config.max_non_split_rounding_size(), 40 * kMB);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.8);
 
-  env = "roundup_power2_divisions:[128:8,256:6,512:4,2048:4>:2]";
+  env = "roundup_power2_divisions:[128:8,256:16,512:1,2048:8>:2]";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(config.last_allocator_settings(), env);
-  EXPECT_EQ(config.roundup_power2_divisions(64), 2);
-  EXPECT_EQ(config.roundup_power2_divisions(128), 8);
-  EXPECT_EQ(config.roundup_power2_divisions(256), 6);
-  EXPECT_EQ(config.roundup_power2_divisions(512), 4);
-  EXPECT_EQ(config.roundup_power2_divisions(1024), 2);
-  EXPECT_EQ(config.roundup_power2_divisions(2048), 4);
-  EXPECT_EQ(config.roundup_power2_divisions(4096), 2);
+  EXPECT_EQ(config.roundup_power2_divisions(64 * kMB), 8);
+  EXPECT_EQ(config.roundup_power2_divisions(128 * kMB), 8);
+  EXPECT_EQ(config.roundup_power2_divisions(256 * kMB), 16);
+  EXPECT_EQ(config.roundup_power2_divisions(512 * kMB), 1);
+  EXPECT_EQ(config.roundup_power2_divisions(1024 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(2048 * kMB), 8);
+  EXPECT_EQ(config.roundup_power2_divisions(4096 * kMB), 2);
 
   env =
       "backend:native,"
