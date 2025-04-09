@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -45,18 +45,20 @@ class MapImpl(HigherOrderOperator):
 
 map_impl = MapImpl()
 
-dummy_aot_config = AOTConfig(
-    fw_compiler=None,  # type: ignore[arg-type]
-    bw_compiler=None,  # type: ignore[arg-type]
-    partition_fn=None,  # type: ignore[arg-type]
-    decompositions={},
-    num_params_buffers=0,
-    aot_id=0,
-    keep_inference_input_mutations=False,
-)
-
 
 def create_fw_bw_graph(f, num_mapped_args, *args):
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
     mapped_xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
 
@@ -115,7 +117,51 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
         return fw_graph, joint_graph
 
 
-def map(f, xs, *args):
+def map(
+    f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
+    xs: Union[pytree.PyTree, torch.Tensor],
+    *args,
+):
+    r"""
+    Perfoms a map of f with xs. Intuitively, you can think of the semantic being:
+
+    out = []
+    for idx in len(xs.size(0)):
+        xs_sliced = xs.select(0, idx)
+        out.append(f(xs_sliced, *args))
+    torch.stack(out)
+
+    .. warning::
+        `torch.scan` is a prototype feature in PyTorch. It currently
+        does not support autograd and you may run into miscompiles.
+        Read more about feature classification at:
+        https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+
+
+    Args:
+        f (Callable): a callable that takes an input x, that could either be a single Tensor
+            or a nested dict, list of tensors and some additional inputs
+        xs: the inputs that're to be mapped over. We'll iterate over the first dim of each x
+            and perform f on each slice.
+
+        *args: additional arguments provided to each step of f. They could also be omitted and
+            map is able to automatically figure out the read dependency.
+
+    Return:
+        the stacked output for each step of f
+
+    Example:
+
+        def f(xs):
+            return xs[0] + xs[1] + const1 + const2
+
+        xs = [torch.randn(2, 3), torch.randn(2, 3)]
+        const1 = torch.randn(2, 3)
+        const2 = torch.randn(2, 3)
+        # returns a tensor of shape [2, 2, 3]
+        map(f, xs)
+
+    """
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     flat_args, args_spec = pytree.tree_flatten(args)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
