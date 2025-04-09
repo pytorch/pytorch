@@ -1103,7 +1103,7 @@ at::Tensor memset32_(
   C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
                                    val,
                                    count,
-                                   at::hip::getCurrentHIPStreamMasqueradingAsCUDA()));
+                                   at::cuda::getCurrentCUDAStream()));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -1158,7 +1158,8 @@ at::Tensor stream_write_value32_(
       val,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipStreamWriteValue32(at::hip::getCurrentHIPStreamMasqueradingAsCUDA(),
+  C10_HIP_CHECK(hipStreamWriteValue32(
+                                      at::cuda::getCurrentCUDAStream(),
                                       reinterpret_cast<void*>(addr),
                                       val,
                                       0));

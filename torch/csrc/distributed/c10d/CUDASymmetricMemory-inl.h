@@ -37,14 +37,8 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
 #elif defined(USE_ROCM)
-  if (Sem == std::memory_order_acquire || Sem == std::memory_order_acq_rel) {
-    __threadfence_system();
-  }
-  uint32_t old_val = atomicCAS_system(addr, compare, val);
-  if (Sem == std::memory_order_release || Sem == std::memory_order_acq_rel) {
-    __threadfence_system();
-  }
-  return old_val;
+  __atomic_compare_exchange_n(addr, &compare, val, false, Sem, Sem);
+  return compare;
 #else
   CUDA_KERNEL_ASSERT(false);
   return 0;

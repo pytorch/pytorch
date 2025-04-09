@@ -117,6 +117,7 @@ class IpcChannel {
     char cbuf[CMSG_SPACE(sizeof(int))];
     memset(cbuf, 0, sizeof(cbuf));
 
+    //Define socket address to receive on: family AF_UNIX means unix domain socket
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
