@@ -86,7 +86,7 @@ struct WelfordHelper {
   std::vector<Welford<T>> welford_stk;
   uint64_t depth; // depth of welford_stk.
   uint64_t num_chunks; // number of chunks stored in welford_stk.
-  WelfordHelper() {}
+  WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
