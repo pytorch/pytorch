@@ -4,7 +4,7 @@ import enum
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -23,6 +23,7 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
+from .cutlass_epilogue_visitor import CutlassEVTCodegen
 
 
 log = logging.getLogger(__name__)
@@ -484,6 +485,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     def _define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        render_evt_fn: Optional[
+            Callable[
+                [
+                    "cutlass_library.TileDescription",
+                    "cutlass_library.EpilogueScheduleType",
+                ],
+                str,
+            ]
+        ],  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, str]:
         raise NotImplementedError
 
@@ -926,6 +936,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
         template_buffer_node: Optional[CUDATemplateBuffer] = None,
+        epilogue_nodes: Optional[list[IRNode]] = None,
         **kwargs,
     ) -> str:
         """
@@ -952,9 +963,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        if epilogue_nodes:
+            breakpoint()
+
         assert isinstance(op, cutlass_gemm_op.GemmOperation), (
             "op argument is required and has to be an instance of GemmOperation"
         )
+
+        # if epilogue_nodes and not self._has_tma_epilogue(op):
+        #    raise NotImplementedError("Non-TMA epilogue visitor tree is not supported in Cutlass.")
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1000,7 +1017,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         argument_template, epilogue_template = self._get_template_args(op)
         should_swap_xw: bool = False
-        epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
         if Bias is not None and self._has_tma_epilogue(op):
             if (
                 op.epilogue_schedule
@@ -1011,7 +1027,44 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op = self.swap_XW(op)
                 should_swap_xw = True
 
-        instance_definition, instance_type = self._define_gemm_instance(op)
+        if epilogue_nodes:
+
+            def render_evt(tile_desc, epilogue_schedule) -> str:
+                from .cutlass_lib_extensions import (
+                    create_example_tensors,
+                    evt_extensions,
+                    TORCH_TO_CUTLASS_DTYPE,
+                )
+
+                read_names, write_names, buffer_renames, evt_py_code = (
+                    CutlassEVTCodegen.ir_to_evt_python_code(
+                        Y.get_name(), epilogue_nodes
+                    )
+                )
+                acc_dtype = TORCH_TO_CUTLASS_DTYPE[W.get_layout().dtype]
+                output_dtype = TORCH_TO_CUTLASS_DTYPE[Y.get_layout().dtype]
+                output = evt_extensions.trace(
+                    evt_py_code,
+                    create_example_tensors(
+                        read_names,
+                        write_names,
+                        buffer_renames,
+                        V.graph.name_to_buffer,
+                        V.graph.graph_inputs,
+                    ),
+                    acc_dtype,
+                    output_dtype,
+                    tile_desc,
+                    epilogue_schedule,
+                )
+                breakpoint()
+                return output
+        else:
+            render_evt = None
+
+        instance_definition, instance_type = self._define_gemm_instance(
+            op, render_evt_fn=render_evt
+        )
 
         options = dict(
             alpha=self.alpha,
@@ -1029,7 +1082,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             instance_definition=instance_definition,
             instance_type=instance_type,
             input_reorder=self.input_reorder,
-            epilogue_args=epilogue_args,
+            epilogue_args=self._render_evt_args(),
             test_call_statement=test_call_statement,
             op_conf_name=op.configuration_name(),
         )
@@ -1065,6 +1118,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
         return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+
+    def _render_evt_args(self):
+        return f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1198,6 +1254,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         return True
 
+    def _render_evt_args(self):
+        return f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
+
     def _shape_match(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -1242,6 +1301,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     def _define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        render_evt_fn: Optional[
+            Callable[
+                [
+                    "cutlass_library.TileDescription",
+                    "cutlass_library.EpilogueScheduleType",
+                ],
+                str,
+            ]
+        ],  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
@@ -1257,15 +1325,20 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                              code (render) and the second part is the string that specifies the operation type.
         """
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
+        from .cutlass_lib_extensions import gemm_operation_extensions as gemm_extensions
+
+        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(
+            render_evt_fn=render_evt_fn
+        )
+
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
         ):
             op = copy.deepcopy(op)
             op.epilogue_functor = cutlass_lib.EpilogueFunctor.LinearCombination
+
         op_def = emitter.emit(op)
         pattern = re.compile(r"\s*struct\s(.*?)\s:")
         decl = [line for line in op_def.split("\n") if "struct " in line][-1]
@@ -1277,6 +1350,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             op_def += f"\n  using {op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{op_type}>;\n"
             op_type = f"{op_type}_device_type"
+
         return op_def, op_type
 
     def _get_extra_inputs_and_names(
