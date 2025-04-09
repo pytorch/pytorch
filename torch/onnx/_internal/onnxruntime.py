@@ -8,7 +8,7 @@ import importlib.util
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Final, Optional, TYPE_CHECKING, Union
+from typing import Any, Final, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -727,7 +727,7 @@ class OrtBackendOptions:
     # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
     # TODO(wschin): Make it to inference session level flag.
     # See https://github.com/pytorch/pytorch/issues/106869.
-    preallocate_output: bool = False
+    preallocate_output: bool = True
     """If ``True``, allocate memory for ONNX Runtime's outputs on the PyTorch side."""
 
     use_aot_autograd: bool = True
