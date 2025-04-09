@@ -406,23 +406,21 @@ class CppPrinter(ExprPrinter):
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         args = [self._print(a) for a in expr.args]
-        casted_args = [f"static_cast<{INDEX_TYPE}>({a})" for a in args]
         if len(args) == 2:
-            return f"std::min({casted_args[0]}, {casted_args[1]})"
+            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
-            il = "{" + ", ".join(casted_args) + "}"
-            return f"std::min({il})"
+            il = "{" + ", ".join(args) + "}"
+            return f"std::min<{INDEX_TYPE}>({il})"
 
     def _print_Max(self, expr: sympy.Expr) -> str:
         args = [self._print(a) for a in expr.args]
-        casted_args = [f"static_cast<{INDEX_TYPE}>({a})" for a in args]
         if len(args) == 2:
-            return f"std::max({casted_args[0]}, {casted_args[1]})"
+            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
-            il = "{" + ", ".join(casted_args) + "}"
-            return f"std::max({il})"
+            il = "{" + ", ".join(args) + "}"
+            return f"std::max<{INDEX_TYPE}>({il})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
