@@ -183,7 +183,7 @@ else:
         raise RuntimeError(
             "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
             "C++ pytree support is disabled. "
-            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`."
+            "Please upgrade optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`."
         )
 
     del Version
