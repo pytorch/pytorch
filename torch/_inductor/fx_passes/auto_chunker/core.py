@@ -6,7 +6,9 @@ from .utils import use_tangent, compute_tensor_size, get_args_of_node_type, get_
 from torch._inductor import config
 from torch.utils._ordered_set import OrderedSet
 
+
 aten = torch.ops.aten
+log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 class CantChunk(RuntimeError):
     pass
@@ -236,3 +238,5 @@ def reorder_nodes(graph):
             meta.scale_by = env[meta.scale_by]
 
     return new_graph
+
+

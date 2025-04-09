@@ -562,10 +562,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     # Make sure AutoChunker happens before pad_mm so we don't need
     # to handle padding when searching for chunking patterns.
     if config.AutoChunker.enable:
-        from .auto_chunker import AutoChunker, CantChunk
+        from .auto_chunker import chunk, CantChunk
 
         try:
-            graph = AutoChunker.chunk(graph)
+            graph = chunk(graph)
         except CantChunk as e:
             auto_chunker_log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
             auto_chunker_log.debug(f"AutoChunker fail with error: {str(e)}")
