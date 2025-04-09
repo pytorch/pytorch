@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import dataclasses
 import importlib
 import logging
@@ -8,11 +10,8 @@ from typing import Any, Callable, Final, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
-import torch._C
-import torch._ops
 import torch._prims.executor
 import torch.fx
-import torch.onnx._internal._lazy_import
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -24,14 +23,7 @@ from torch.utils import _pytree
 if TYPE_CHECKING:
     import onnx
     import onnxruntime
-    from onnxruntime.capi import _pybind_state as ORTC
-
-    import torch.onnx
-    import torch.onnx._internal
-    import torch.onnx._internal._exporter_legacy
-    import torch.onnx._internal.fx.decomposition_table
-    import torch.onnx._internal.fx.passes  # noqa: TCH004
-
+    from onnxruntime.capi import _pybind_state as ort_c
 
 _SUPPORT_ONNXRT: Optional[bool] = None
 
@@ -145,15 +137,15 @@ def _nvtx_range_pop():
 
 
 def _get_ort_device_type(device_type: str):
-    from onnxruntime.capi import _pybind_state as ORTC
+    from onnxruntime.capi import _pybind_state as ort_c
 
     if device_type == "cuda":
-        return ORTC.OrtDevice.cuda()
+        return ort_c.OrtDevice.cuda()
     if device_type == "cpu":
-        return ORTC.OrtDevice.cpu()
+        return ort_c.OrtDevice.cpu()
     # ort pytorch device is mapped to NPU OrtDevice type
     if device_type == "maia":
-        return ORTC.OrtDevice.npu()
+        return ort_c.OrtDevice.npu()
     raise ValueError("Unsupported device type: " + device_type)
 
 
@@ -308,8 +300,8 @@ def _get_onnx_devices(
         ],
         ...,
     ],
-) -> tuple["ORTC.OrtDevice", ...]:
-    from onnxruntime.capi import _pybind_state as ORTC
+) -> tuple["ort_c.OrtDevice", ...]:
+    from onnxruntime.capi import _pybind_state as ort_c
 
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
@@ -320,16 +312,16 @@ def _get_onnx_devices(
         ],
     ) -> int:
         if isinstance(value, torch.Tensor):
-            return ORTC.OrtDevice(
+            return ort_c.OrtDevice(
                 _get_ort_device_type(value.device.type),
-                ORTC.OrtDevice.default_memory(),
+                ort_c.OrtDevice.default_memory(),
                 _device_id_or_zero(value.device.index),
             )
         elif isinstance(
             value, (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool)
         ):
-            return ORTC.OrtDevice(
-                _get_ort_device_type("cpu"), ORTC.OrtDevice.default_memory(), 0
+            return ort_c.OrtDevice(
+                _get_ort_device_type("cpu"), ort_c.OrtDevice.default_memory(), 0
             )
         else:
             raise ValueError("Unsupported value type: " + str(type(value)))
@@ -342,11 +334,11 @@ def _get_onnx_devices(
 
 
 def _get_ortvalues_from_torch_tensors(
-    tensors: tuple[torch.Tensor, ...], devices: tuple["ORTC.OrtDevice", ...]
+    tensors: tuple[torch.Tensor, ...], devices: tuple["ort_c.OrtDevice", ...]
 ) -> tuple[torch.Tensor, ...]:
     # TODO(justinchuby): Refactor this function
     import numpy as np
-    from onnxruntime.capi import _pybind_state as ORTC
+    from onnxruntime.capi import _pybind_state as ort_c
 
     torch_dtype_to_numpy_dtype = {
         torch.float16: np.float16,
@@ -359,7 +351,7 @@ def _get_ortvalues_from_torch_tensors(
         torch.int64: np.longlong,
         torch.bool: np.bool_,
     }
-    ortvalues = ORTC.OrtValueVector()
+    ortvalues = ort_c.OrtValueVector()
     ortvalues.reserve(len(tensors))
     dtypes = []
     shapes = []
@@ -440,14 +432,54 @@ def _adjust_scalar_from_onnx_to_fx(
     return tensor
 
 
+def _ortvalues_to_torch_tensor(
+    ortvalues: ort_c.OrtValueVector, device: torch.device | None = None
+) -> tuple[torch.Tensor, ...]:
+    if len(ortvalues) == 0:
+        return ()
+
+    if device is not None and device.type == "ort":
+        if not hasattr(ort_c, "to_aten_ort_device_tensor"):
+            raise AttributeError(
+                "onnxruntime is missing to_aten_ort_device_tensor needed to support device == 'ort'."
+            )
+        return tuple(ort_c.to_aten_ort_device_tensor(ov) for ov in ortvalues)
+
+    if not isinstance(ortvalues, ort_c.OrtValueVector):
+        raise TypeError(
+            f"ortvalues must be an instance of OrtValueVector not {type(ortvalues)!r}."
+        )
+
+    res: list[torch.Tensor] = ortvalues.to_dlpacks(torch.from_dlpack)
+    bool_indices = ortvalues.bool_tensor_indices()
+    if len(bool_indices):
+        # DLPack structure does not know for sure if it stores boolean
+        # or uint8. Method to_dlpacks cannot be used in that case.
+        # Signature of *dl_packs* is `to_dlpacks(dlp, fct) -> list[torch.Tensor]`.
+        # And fct is a function with signature `fct(dlp) -> torch.Tensor`.
+        # Boolean tensors are converted into uint8 tensor with the DLPack protocol.
+        # Therefore, the function `fct` does not know if the dlpack structure
+        # is a boolean tensor or a uint8 tensor.
+        # We could either consider another function as an input in
+        # `to_dlpacks` or add an argument to `fct(dlp, ortvalue)`.
+        # Second option makes it impossible to directly use `_from_dlpack` or
+        # or `from_dlpack` from torch.
+        # The best option would be to add boolean type in DLDataTypeCode.
+        for i in range(len(bool_indices)):
+            j = bool_indices[i]
+            res[j] = res[j].to(torch.bool)
+
+    return tuple(res)
+
+
 def _run_onnx_session_with_ortvaluevector(
     sess: "onnxruntime.InferenceSession",
     input_names: tuple[str, ...],
     inputs: tuple[torch.Tensor, ...],
-    input_devices: tuple["ORTC.OrtDevice", ...],
+    input_devices: tuple["ort_c.OrtDevice", ...],
     output_names: tuple[str, ...],
     outputs: tuple[torch.Tensor, ...],
-    output_devices: tuple["ORTC.OrtDevice", ...],
+    output_devices: tuple["ort_c.OrtDevice", ...],
     preallocate_output: bool,
     input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
     normalized_prim_outputs: tuple[
@@ -458,7 +490,7 @@ def _run_onnx_session_with_ortvaluevector(
     ],
 ) -> tuple[Union[torch.Tensor, int, float, bool], ...]:
     import onnxruntime
-    from onnxruntime.capi import _pybind_state as ORTC
+    from onnxruntime.capi import _pybind_state as ort_c
 
     _nvtx_range_push("contiguous")
     inputs = tuple(
@@ -479,7 +511,7 @@ def _run_onnx_session_with_ortvaluevector(
         )
         ort_outputs = _get_ortvalues_from_torch_tensors(pth_outputs, output_devices)
     else:
-        ort_outputs = ORTC.OrtValueVector()
+        ort_outputs = ort_c.OrtValueVector()
     _nvtx_range_pop()
 
     _nvtx_range_push("run_with_ortvaluevector")
@@ -527,10 +559,10 @@ def _run_onnx_session_with_fetch(
     sess: "onnxruntime.InferenceSession",
     input_names: tuple[str, ...],
     inputs: tuple[torch.Tensor, ...],
-    input_devices: tuple["ORTC.OrtDevice", ...],
+    input_devices: tuple["ort_c.OrtDevice", ...],
     output_names: tuple[str, ...],
     outputs: tuple[torch.Tensor, ...],
-    output_devices: tuple["ORTC.OrtDevice", ...],
+    output_devices: tuple["ort_c.OrtDevice", ...],
     preallocate_output: bool,
     input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
     normalized_prim_outputs: tuple[
@@ -594,8 +626,8 @@ class OrtExecutionInfoPerSession:
         input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
         output_names: tuple[str, ...],
         output_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
-        input_devices: tuple["ORTC.OrtDevice", ...],
-        output_devices: tuple["ORTC.OrtDevice", ...],
+        input_devices: tuple["ort_c.OrtDevice", ...],
+        output_devices: tuple["ort_c.OrtDevice", ...],
         example_outputs: Union[tuple[torch.Tensor, ...], torch.Tensor],
     ):
         # Carrier of ONNX model and its executor.
@@ -611,9 +643,9 @@ class OrtExecutionInfoPerSession:
         self.output_value_infos: tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
-        self.input_devices: tuple[ORTC.OrtDevice, ...] = input_devices
+        self.input_devices: tuple[ort_c.OrtDevice, ...] = input_devices
         # Similar to self.input_devices, but for outputs.
-        self.output_devices: tuple[ORTC.OrtDevice, ...] = output_devices
+        self.output_devices: tuple[ort_c.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
         self.example_outputs: Union[tuple[torch.Tensor, ...], torch.Tensor] = (
@@ -799,7 +831,7 @@ class OrtBackend:
     """
 
     def __init__(self, options: Optional[OrtBackendOptions] = None):
-        from onnxruntime.capi import _pybind_state as ORTC
+        from onnxruntime.capi import _pybind_state as ort_c
 
         import torch.onnx
         import torch.onnx._internal._exporter_legacy
@@ -878,7 +910,7 @@ class OrtBackend:
         # Function which invokes ORT do to the real computation.
         self.run = (
             _run_onnx_session_with_ortvaluevector
-            if hasattr(ORTC.OrtValueVector, "push_back_batch")
+            if hasattr(ort_c.OrtValueVector, "push_back_batch")
             else _run_onnx_session_with_fetch
         )
 
