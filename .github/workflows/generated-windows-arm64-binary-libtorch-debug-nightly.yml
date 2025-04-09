@@ -77,23 +77,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: "pytorch"
+          submodules: recursive
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch - recursive
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-          submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
