@@ -30,7 +30,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
-    from ..symbolic_convert import InstructionTranslator, InstructionTranslatorBase
+    from ..symbolic_convert import InstructionTranslatorBase
 
 
 class SourceType(Enum):
@@ -365,11 +365,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -404,12 +406,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list["VariableTracker"]:
         raise NotImplementedError
 
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
@@ -419,7 +421,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # it should only be called once.
         return self.unpack_var_sequence(tx)
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
@@ -427,7 +429,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return False
 
     # NB: don't call force_unpack_var_sequence, especially if it mutates!
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return self.has_unpack_var_sequence(tx)
 
     # Forces unpacking the var sequence while also applying a function to each element.
@@ -447,7 +449,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         )
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         unimplemented_v2(
             gb_type="Unsupported hasattr call",
@@ -461,7 +463,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
@@ -477,7 +479,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -566,7 +568,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx: "InstructionTranslator"):
+    def next_variable(self, tx: "InstructionTranslatorBase"):
         unimplemented_v2(
             gb_type="Unsupported next() call",
             context=f"next({self})",
@@ -574,7 +576,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.USER_ERROR],
         )
 
-    def is_strict_mode(self, tx: "InstructionTranslator"):
+    def is_strict_mode(self, tx: "InstructionTranslatorBase"):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
     def is_mutable(self):
