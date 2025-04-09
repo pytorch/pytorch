@@ -127,7 +127,7 @@ class TestFP8Types(TestCase):
 
         We should not pick a XBLOCK larger than xnumel
         """
-        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
 
@@ -147,7 +147,7 @@ class TestFP8Types(TestCase):
         weight_shape = (32, 16)
 
         e4m3_type = torch.float8_e4m3fn
-        e4m3_type = _fix_fp8_dtype_for_rocm(e4m3_type, device="cuda")
+        e4m3_type = _fix_fp8_dtype_for_rocm(e4m3_type, device=device)
 
         def fp8_matmul_unwrapped(x):
             a_scale = torch.Tensor([1.0]).to(device=device)
@@ -191,8 +191,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        if device == "cuda":
-            dst_types = _fix_fp8_dtype_for_rocm(dst_types, device="cuda")
+        dst_types = _fix_fp8_dtype_for_rocm(dst_types, device=device)
         e4m3, e5m2 = dst_types
 
         def fp8_cast(x):
@@ -245,8 +244,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        if device == "cuda":
-            dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device="cuda")
+        dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device=device)
 
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
@@ -267,6 +265,7 @@ class TestFP8Types(TestCase):
     def test_amax_fp8_quant(
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(
                 "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
@@ -299,8 +298,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        if device == "cuda":
-            float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -341,6 +339,7 @@ class TestFP8Types(TestCase):
             raise unittest.SkipTest(
                 "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
             )
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
