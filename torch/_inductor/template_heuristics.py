@@ -38,11 +38,6 @@ class GemmConfig(BaseConfig):
     Gemm configuration used for most backends (CPU, CUDA)
     """
 
-    block_m: int
-    block_n: int
-    block_k: int
-    num_stages: int
-    num_warps: int
     group_m: int = 8
 
 
@@ -52,8 +47,7 @@ ConvConfig = BaseConfig
 @dataclasses.dataclass
 class ROCmGemmConfig(GemmConfig):
     """
-    ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs and
-    group_m tuning support
+    ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs
     """
 
     matrix_instr_nonkdim: int = 16
@@ -64,8 +58,7 @@ class ROCmGemmConfig(GemmConfig):
 @dataclasses.dataclass
 class ROCmConvConfig(ConvConfig):
     """
-    ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs and
-    group_m tuning support
+    ROCm subclass for Conv, with AMD backend specific tuneable kernargs
     """
 
     matrix_instr_nonkdim: int = 16
@@ -582,6 +575,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _filter_configs(
         self, configs: list[BaseConfig], new_num_stages: int
     ) -> list[BaseConfig]:
+        # TODO: _filter_configs can be removed once backend specific configs are added
+        # for all methods
         for c in configs:
             c.num_stages = self.default_num_stages
         return configs
