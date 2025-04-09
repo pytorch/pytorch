@@ -20,9 +20,7 @@
 # See https://github.com/pytorch/pytorch/issues/79992.
 
 import os
-import sys
 import textwrap
-
 
 # sys.path.insert(0, os.path.abspath('.'))
 import pytorch_sphinx_theme2
