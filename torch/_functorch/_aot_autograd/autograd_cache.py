@@ -359,7 +359,7 @@ def autograd_cache_key(
 
 @dataclass
 class FXGraphCacheLoadable:
-    fx_graph_cache_key: tuple[str, list[str]]
+    fx_graph_cache_info: tuple[str, list[str]]
 
     def is_backward(self) -> bool:
         return False
@@ -384,7 +384,7 @@ class FXGraphCacheLoadable:
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
-        (cache_key, debug_lines) = self.fx_graph_cache_key
+        (cache_key, debug_lines) = self.fx_graph_cache_info
         result, cache_info = FxGraphCache.load_with_key(
             cache_key,
             debug_lines,
