@@ -7,6 +7,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
@@ -57,11 +58,11 @@ struct static_unroll<func, end, end> {
 template<int arg_index>
 struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
-  static __device__ void apply(policy_t &self, args_t *args, int idx) {
+  static __device__ void apply(policy_t &self, args_t *args, int idx, int block_work_size) {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size() * idx;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
     auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
   }
@@ -220,6 +221,7 @@ struct unroll_base {
   out_calc_t output_offset_calculator;
   loader_t loader;
   storer_t storer;
+  static constexpr int tws = thread_work_size;
 
   __device__ unroll_base(
       data_t data,
@@ -272,6 +274,9 @@ struct unroll_base {
 
 // Same as unroll_base, but uses configuration from current context.
 template <
+    int num_threads,
+    int thread_work_size,
+    int block_work_size,
     typename data_t,
     typename inp_calc_t,
     typename out_calc_t,
@@ -279,9 +284,9 @@ template <
     typename storer_t,
     int num_outputs = 1>
 using unroll = unroll_base<
-    num_threads(),
-    thread_work_size(),
-    block_work_size(),
+    num_threads,
+    thread_work_size,
+    block_work_size,
     data_t,
     inp_calc_t,
     out_calc_t,
@@ -294,11 +299,12 @@ using unroll = unroll_base<
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
 // has its job to do. So the reminders should be handled by the caller manually.
-template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
+template <int vec_size, typename data_t, int thread_work_size>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
-  static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
-  static constexpr int loop_size = thread_work_size() / vec_size;
+  static_assert(thread_work_size % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  static constexpr int loop_size = thread_work_size / vec_size;
+  static constexpr int tws = thread_work_size;
 
   data_t data;
 
@@ -325,13 +331,14 @@ struct vectorized {
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx,
+	thread_work_size * num_threads());
   }
 
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + thread_work_size * num_threads() * idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
@@ -436,6 +443,7 @@ struct multi_outputs_unroll {
   out_calc_t output_offset_calculator;
   LoadWithoutCast loader;
   StoreWithoutCast storer;
+  static constexpr int tws = thread_work_size();
 
   __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
@@ -528,6 +536,22 @@ inline int can_vectorize_up_to(array_t pointers) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   constexpr int arity = traits::arity;
+#ifdef USE_ROCM
+#ifdef __HIP_DEVICE_COMPILE__
+#ifdef __gfx942__
+  // In-place elementwise operation is slower on MI300 series with bigger vector size
+  if (pointers[0] == pointers[1])
+    return 4;
+#endif
+#else
+  c10::DeviceIndex curDevice = -1;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  if (at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"})) {
+    if (pointers[0] == pointers[1])
+      return 4;
+  }
+#endif
+#endif
   int result = can_vectorize_up_to<return_t>(pointers[0]);
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.

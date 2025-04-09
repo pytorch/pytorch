@@ -71,15 +71,25 @@ template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
-  int remaining = N - block_work_size() * blockIdx.x;
+#ifdef USE_ROCM
+    constexpr int tws = (vec_size <= 4) ? 4 : thread_work_size();
+    constexpr int bws = tws * num_threads();
+#else
+    constexpr int tws = thread_work_size();
+    constexpr int bws = tws * num_threads();
+#endif
+  int remaining = N - bws * blockIdx.x;
 
-  if (remaining < block_work_size()) { // if this block handles the reminder,
+  if (remaining < bws) { // if this block handles the reminder,
                                        // just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
     auto policy = memory::policies::unroll<
+	num_threads(),
+	tws,
+	bws,
         array_t,
         decltype(input_calc),
         decltype(output_calc),
@@ -90,13 +100,14 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t>(data));
+        f, memory::policies::vectorized<vec_size, array_t, tws>(data));
   }
 }
 
 template <
     typename func_t,
     typename array_t,
+    int thread_work_size = thread_work_size(),
     typename inp_calc_t,
     typename out_calc_t,
     typename loader_t,
@@ -110,9 +121,10 @@ __global__ void unrolled_elementwise_kernel(
     out_calc_t oc,
     loader_t l,
     storer_t s) {
-  int remaining = N - block_work_size() * blockIdx.x;
+  constexpr int block_work_size = thread_work_size * num_threads();
+  int remaining = N - block_work_size * blockIdx.x;
   auto policy = memory::policies::
-      unroll<array_t, inp_calc_t, out_calc_t, loader_t, storer_t>(
+      unroll<num_threads(), thread_work_size, block_work_size, array_t, inp_calc_t, out_calc_t, loader_t, storer_t>(
           data, remaining, ic, oc, l, s);
   elementwise_kernel_helper(f, policy);
 }
@@ -125,9 +137,11 @@ static inline void launch_vectorized_kernel(
     array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   using traits = function_traits<func_t>;
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
-  auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  int tws = (vec_size <= 4) ? 4 : thread_work_size();
+  int bws = tws * num_threads();
+  int64_t grid = (N + bws - 1) / bws;
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   switch (vec_size) {
     case 8:
@@ -150,7 +164,7 @@ static inline void launch_vectorized_kernel(
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      unrolled_elementwise_kernel<func_t, array_t>
+      unrolled_elementwise_kernel<func_t, array_t, 4>
           <<<grid, num_threads(), 0, stream>>>(
               N, f, data, input_calc, output_calc, loader, storer);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
