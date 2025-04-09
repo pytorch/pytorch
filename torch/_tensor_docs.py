@@ -5198,8 +5198,8 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     :class:`torch.dtype` and :class:`torch.device`.
     If ``self`` requires gradients (``requires_grad=True``) but the target
     ``dtype`` specified is an integer type, the returned tensor will implicitly
-    set ``requires_grad=False``. This is because only Tensors of floating
-    point and complex dtype can require gradients.
+    set ``requires_grad=False``. This is because only tensors with
+    floating-point or complex dtype can require gradients.
 
 Here are the ways to call ``to``:
 
