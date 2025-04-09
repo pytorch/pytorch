@@ -214,9 +214,14 @@ kernel void binary_dense_cast(
   out[tid] = f(a, b);
 }
 
-#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)                               \
-  template [[host_name(#NAME "_strided_" #DTYPE)]] kernel void ::c10::metal::  \
-      binary_strided<DTYPE, NAME##_functor>(                                   \
+#define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO)                               \
+  static_assert(                                                               \
+      ::metal::is_same_v<                                                      \
+          DTYPEO,                                                              \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI>>,            \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+      c10::metal::binary_strided<DTYPEI, NAME##_functor>(                      \
           device void* out,                                                    \
           constant void* input,                                                \
           constant void* other,                                                \
@@ -226,8 +231,8 @@ kernel void binary_dense_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim,                                                \
           uint tid);                                                           \
-  template [[host_name(#NAME "_strided_cast_" #DTYPE)]] kernel void ::c10::    \
-      metal::binary_strided_cast<DTYPE, NAME##_functor>(                       \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
+      metal::binary_strided_cast<DTYPEI, NAME##_functor>(                      \
           device void* out,                                                    \
           constant void* input,                                                \
           constant void* other,                                                \
@@ -237,15 +242,17 @@ kernel void binary_dense_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim_types,                                          \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void ::c10::metal::    \
-      binary_dense<DTYPE, NAME##_functor>(                                     \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
-          constant DTYPE * input_,                                             \
-          constant DTYPE * other_,                                             \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+      c10::metal::binary_dense<DTYPEI, NAME##_functor>(                        \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_cast_" #DTYPE)]] kernel void ::c10::      \
-      metal::binary_dense_cast<DTYPE, NAME##_functor>(                         \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
+      metal::binary_dense_cast<DTYPEI, NAME##_functor>(                        \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
           constant void* input,                                                \
           constant void* other,                                                \
           constant uint4& sizes_types,                                         \
