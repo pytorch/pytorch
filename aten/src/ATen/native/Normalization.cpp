@@ -549,7 +549,10 @@ BatchNormBackend _select_batch_norm_backend(
       && detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
       && (input.suggest_memory_format() == MemoryFormat::Contiguous
-        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM))
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60500)
+        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
+#endif
+        )
   ) {
     return BatchNormBackend::Miopen;
   }
