@@ -26,10 +26,18 @@ def get_gomp_thread():
         python_path.parent.parent
     )  # Typically goes to the Python installation root
 
+    # Get the additional ABI flags (if any); it may be an empty string.
+    abiflags = getattr(sys, "abiflags", "")
+
+    # Construct the Python directory name correctly (e.g., "python3.13t").
+    python_version = (
+        f"python{sys.version_info.major}.{sys.version_info.minor}{abiflags}"
+    )
+
     libtorch_cpu_path = (
         python_prefix
         / "lib"
-        / "python{}.{}".format(*sys.version_info)
+        / python_version
         / "site-packages"
         / "torch"
         / "lib"
