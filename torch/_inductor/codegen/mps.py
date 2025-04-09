@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
@@ -12,7 +13,7 @@ import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from ..utils import get_bounds_index_expr, get_kernel_metadata
+from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
@@ -298,6 +299,12 @@ class MetalOverrides(OpOverrides):
         return f"metal::sqrt({x})"
 
     @staticmethod
+    def neg(x: CSEVariable) -> str:
+        # TODO: Does it rely on undefined behavior?
+        # If so, add special logic for unsigned types
+        return f"static_cast<decltype({x})>(-{x})"
+
+    @staticmethod
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::rsqrt({x})"
 
@@ -442,6 +449,10 @@ class MetalOverrides(OpOverrides):
     def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
         return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
 
+    @staticmethod
+    def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -451,6 +462,7 @@ class MetalKernel(SIMDKernel):
     suffix = ";"
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
+    simd_group_size = 32
     pexpr = PythonPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
@@ -486,22 +498,33 @@ class MetalKernel(SIMDKernel):
         else:
             self.stores.writeline(DeferredLine(name, line))
 
-    def _new_accvar(
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        var = self.args.output(name)
+        index = self.prepare_indexing(index)
+        dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
+        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+        # Only one thread in the reduction group needs to store the results
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
+        line = f"if ({reduction_dim.name} == 0) {line}"
+        self.stores.writeline(DeferredLine(name, line))
+
+    def _new_idxvar(
         self,
         dtype: torch.dtype,
         elem_count: Optional[int] = None,
+        default_value: Optional[Any] = None,
+        is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        var_def = "threadgroup " if is_threadgroup else ""
+        var_def += f"{self.dtype_to_str(dtype)} {var_name}"
         if elem_count:
-            self.indexing_code.writeline(
-                f"threadgroup {self.dtype_to_str(dtype)} {var_name}[{elem_count}];"
-            )
-        else:
-            self.indexing_code.writeline(
-                f"threadgroup {self.dtype_to_str(dtype)} {var_name};"
-            )
+            var_def += f"[{elem_count}]"
+        if default_value is not None:
+            var_def += f" = {default_value}"
+        self.indexing_code.writeline(var_def + self.suffix)
         return var
 
     def reduction(
@@ -512,10 +535,20 @@ class MetalKernel(SIMDKernel):
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         """Codegen a reduction operation"""
-        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
-        acc_buf_size = min(reduction_dim.numel, self.max_threadgroup_size)
+        # Establish reduction buffer size and index expression
+        reduction_idx = ""
+        acc_buf_size = 1
+        for rd in self.range_trees:
+            if not rd.is_reduction:
+                continue
+            if reduction_idx:
+                reduction_idx += " + "
+            reduction_idx += f"{rd.name} * {acc_buf_size}"
+            acc_buf_size *= rd.numel
+        acc_buf_size = min(acc_buf_size, self.max_threadgroup_size)
+
         if reduction_type == "any":
-            acc = self._new_accvar(dtype)
+            acc = self._new_idxvar(dtype)
             self.indexing_code.writeline(f"{acc} = false;")
             self.indexing_code.writeline(
                 "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
@@ -532,27 +565,28 @@ class MetalKernel(SIMDKernel):
             )
             return acc
         if reduction_type in ["prod", "sum"]:
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
-            if self.multistage_reduction:
+            acc_dtype = DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
+            acc_buf = self._new_idxvar(
+                acc_dtype, ceildiv(acc_buf_size, self.simd_group_size)
+            )
+            if not self.multistage_reduction:
+                val = value
+            else:
                 default_val, reduction_op = (
                     (0, "+") if reduction_type == "sum" else (1, "*")
                 )
-                self.indexing_code.writeline(
-                    f"{acc_buf}[{reduction_dim.name}] = {default_val};"
+                val = self._new_idxvar(
+                    acc_dtype, default_value=default_val, is_threadgroup=False
                 )
-                self.compute.splice(
-                    f"{acc_buf}[{reduction_dim.name}] {reduction_op}= {value};"
-                )
-            else:
-                self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+                self.compute.splice(f"{val} {reduction_op}= {value};")
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmin", "argmax"]:
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
-            acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
+            acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
+            acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             if not self.multistage_reduction:
                 self.compute.splice(
@@ -571,9 +605,9 @@ class MetalKernel(SIMDKernel):
                 idx_var = next(
                     t for t in self.range_tree_nodes.values() if t.is_reduction
                 )
-                idx_acc_buf = self._new_accvar(torch.long, acc_buf_size)
+                idx_acc_buf = self._new_idxvar(torch.long, acc_buf_size)
                 cmp_op = ">" if reduction_type == "argmax" else "<"
-                idx_thread_var = f"{idx_acc_buf}[{reduction_dim.name}]"
+                idx_thread_var = f"{idx_acc_buf}[{reduction_idx}]"
                 self.indexing_code.splice(f"{idx_thread_var} = -1;")
                 self.compute.splice(f"""
                 if ({value} {cmp_op} {acc_thread_var}) {{
@@ -598,8 +632,8 @@ class MetalKernel(SIMDKernel):
             assert not self.multistage_reduction, (
                 f"Multistage reduction not yet supported for {reduction_type}"
             )
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
-            self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
+            self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
             wf_res = self.cse.generate(
                 self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
@@ -677,6 +711,14 @@ class MetalKernel(SIMDKernel):
             )
             if self.inside_reduction:
                 code.writeline("#include <c10/metal/reduction_utils.h>")
+            if self.inside_reduction:
+                total_reduction_size = math.prod(
+                    t.numel for t in self.range_trees if t.is_reduction
+                )
+                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                code.writeline(
+                    f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
+                )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
