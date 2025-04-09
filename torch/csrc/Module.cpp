@@ -506,6 +506,40 @@ static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_allocateTensors(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* sizes_obj = nullptr;
+  PyObject* device_obj = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &sizes_obj, &device_obj)) {
+    return nullptr;
+  }
+
+  THPObjectPtr sizes_seq(PySequence_Fast(sizes_obj, "sizes must be a sequence"));
+  if (!sizes_seq) {
+    return nullptr;
+  }
+  Py_ssize_t n = PySequence_Fast_GET_SIZE(sizes_seq.get());
+
+  at::Device device = torch::toDevice(device_obj);
+  auto options = at::TensorOptions().device(device).layout(at::kStrided);
+  std::optional<at::MemoryFormat> memory_format = at::MemoryFormat::Contiguous;
+
+  THPObjectPtr result(PyList_New(n));
+  if (!result) {
+    return nullptr;
+  }
+
+  for (Py_ssize_t i = 0; i < n; ++i) {
+    PyObject* size_obj = PySequence_Fast_GET_ITEM(sizes_seq.get(), i);
+    auto dims = THPUtils_unpackLongs(size_obj);
+    at::Tensor tensor = at::empty(dims, options, memory_format);
+    PyList_SET_ITEM(result.get(), i, THPVariable_Wrap(tensor));
+  }
+
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setBackcompatBroadcastWarn(
     PyObject* module,
     PyObject* arg) {
@@ -1496,6 +1530,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
+    {"_allocate_tensors", THPModule_allocateTensors, METH_VARARGS, nullptr},
     {"_abort", THPModule_abort, METH_NOARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
@@ -1539,6 +1574,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_userEnabledFlashSDP,
      METH_NOARGS,
      nullptr},
+    // hooray!
     {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
     {"_get_sdp_priority_order",
      THPModule_sDPPriorityOrder,

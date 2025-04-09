@@ -968,6 +968,11 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  _CUDAToolkit_find_and_add_import_lib(cufilt)
+  target_link_libraries(torch_cuda PRIVATE cufilt)
+
+  target_link_libraries(torch_cuda PRIVATE dwarf)  # libdwarf::dwarf-shared)
+
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUFILE)

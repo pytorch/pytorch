@@ -27,6 +27,7 @@
   _(cuMemMap, 12000)                       \
   _(cuMemAddressFree, 12000)               \
   _(cuMemSetAccess, 12000)                 \
+  _(cuMemRetainAllocationHandle, 12000)    \
   _(cuMemUnmap, 12000)                     \
   _(cuMemCreate, 12000)                    \
   _(cuMemGetAllocationGranularity, 12000)  \

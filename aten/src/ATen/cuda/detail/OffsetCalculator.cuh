@@ -34,6 +34,11 @@ struct OffsetCalculator {
   // the strides will be in # of elements.
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
+    // sizes_ and strides_ are passed to various Cuda kernels
+    // if we didn't memset here, they would contain uninitialized memory
+    // that would cause nondeterministic false positives while doing graph capture and comparison
+    std::memset(sizes_, 0, sizeof(sizes_));
+    std::memset(strides_, 0, sizeof(strides_));
     for (int i=0; i < dims; i++){
       sizes_[i] = at::cuda::detail::IntDivider<index_t>(sizes[i]);
       for (int arg = 0; arg < NARGS; arg++) {

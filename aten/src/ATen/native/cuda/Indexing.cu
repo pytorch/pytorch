@@ -546,6 +546,7 @@ static ReduceMaximum reduce_maximum;
 
 }
 
+// this assertion is triggering
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {

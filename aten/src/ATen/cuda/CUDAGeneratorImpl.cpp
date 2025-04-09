@@ -140,6 +140,8 @@ void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
     auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
     seed_extragraph_ = at::empty({1}, options);
     offset_extragraph_ = at::empty({1}, options);
+    // std::cout << "GALVEZ: seed_extragraph_=" << (uint64_t)seed_extragraph_.data_ptr() << std::endl;
+    // std::cout << "GALVEZ: offset_extragraph_=" << (uint64_t)offset_extragraph_.data_ptr() << std::endl;
   }
 
   // Insert the graph into the set of registered graphs if it's not already
@@ -216,6 +218,7 @@ void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
   at::cuda::assertNotCapturing(
       "Cannot prepare for replay during capturing stage.");
   if (wholegraph_increment) {
+      // why is there a seed_ and a philox_offset_per_thread_?
       seed_extragraph_.fill_(int64_t(seed_));
       offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
       // Applies the total increment achieved during previous captures to update the

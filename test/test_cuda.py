@@ -5201,6 +5201,7 @@ class TestMemPool(TestCase):
         pre_reserved = torch.cuda.memory_reserved(device)
         total_allowed = additional_allowed_memory_in_mb * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
+        # How does this work?
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed, device)
 
         dtype = torch.int8

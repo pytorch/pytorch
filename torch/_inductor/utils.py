@@ -405,6 +405,7 @@ def ceildiv(
     return runtime_ceildiv(number, denom)
 
 
+# Can I grab types this way somehow?
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
@@ -949,6 +950,8 @@ def get_first_incompatible_cudagraph_node(
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
+    # TODO: Understand why precisely these ops are banned inside of
+    # cuda graphs.
     forbidden_set = OrderedSet(
         [
             "aten._fused_moving_avg_obs_fq_helper.default",
@@ -962,22 +965,22 @@ def get_first_incompatible_cudagraph_node(
             # assert_scalar with constant arguments can be validly run
             # with CUDA graphs, but the operator is also pointless with
             # constant arguments, so might as well ban
-            "aten._assert_scalar",
-        ]
+            "aten._assert_scalar", 
+       ]
     )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
             (
                 "aten._unsafe_index_put.default",
                 "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
+                # "aten.index_put.default",
+                # "aten.index_put_.default",
                 "aten.scatter.src",
                 "aten.scatter.reduce",
                 "aten.scatter.value_reduce",
                 "aten.scatter_add_",
-                "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
+                # "aten.scatter_add.default",
+                # "aten.scatter_reduce.two",
                 "aten.scatter_reduce_.two",
                 "aten.scatter_reduce.two_out",
             )
@@ -2482,6 +2485,9 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     Infers which inputs are static for a backwards graph
     """
 
+    # So why aren't parameters static for a backwards graph? I suppose
+    # that backwards graphs don't actually apply their changes. That's
+    # the responsibility of the optimizer.
     def is_saved_tensor(x: Node) -> bool:
         return (
             "tangents" not in x.name
@@ -2494,6 +2500,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
+            # It must be a saved tensor...
             if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
@@ -2656,6 +2663,9 @@ def should_assume_input_aligned(example_input: torch.Tensor) -> bool:
     # See Note: [Input Alignment handling in Inductor]
 
     # right now, we only care about alignment for cuda tensors.
+    
+    # Doesn't triton also have alignment constraints for cpu code as
+    # well? Wait,d oes triton even generate cpu code?
     if not is_gpu(example_input.device.type):
         return False
     return config.assume_aligned_inputs or tensor_is_aligned(example_input)
@@ -2737,6 +2747,7 @@ def align_inputs_from_check_idxs(
         )
         out = model(new_inputs)
 
+        # Yes, I need to do this same thing
         # If a mutated tensor was cloned to be aligned, we need to reflect back the mutation to the
         # original tensor.
         if len(old_tensors):
@@ -2759,6 +2770,7 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
+# So there is always a copy if we are misaligned. This is due to triton IIRC
 def copy_misaligned_inputs(
     new_inputs: list[InputType],
     check_inputs_idxs: Sequence[int],
@@ -2780,6 +2792,7 @@ def copy_misaligned_inputs(
             f"Expected tensors only, but got: {type(_inp)}"
         )
         if _inp.data_ptr() % ALIGNMENT:
+            assert False, "GALVEZ: Input is not appropriately aligned! We cannot handle input mutations in this case :("
             new_inputs[i] = clone_preserve_strides(_inp)
 
             if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
@@ -2794,7 +2807,7 @@ def remove_unaligned_input_idxs(
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
-    We require all inputs to be aligned, so introduce a copy for any
+    We require all inputs to be aligned for the sake of triton, so introduce a copy for any
     that aren't.
     """
     aligned_static_input_idxs = []

@@ -924,6 +924,7 @@ struct PrivatePool {
   PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
       : id(std::move(id)),
         allocator_(allocator),
+        // PrivatePool is assigned here.
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -999,6 +1000,7 @@ struct MempoolIdHash {
   }
 };
 
+// so this gets called if we have a private pool with an allocator
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
@@ -1087,6 +1089,9 @@ class RingBuffer {
 };
 } // anonymous namespace
 } // namespace Native
+
+ska::flat_hash_map<MempoolId_t, CUDACachingAllocator::CUDAAllocator*, Native::MempoolIdHash> allocator_for_mempool;
+std::mutex allocator_for_mempool_mutex;
 
 static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
@@ -1349,12 +1354,16 @@ class DeviceCachingAllocator {
         // Search pool
         get_free_block(params)
         // Trigger callbacks and retry search
+        // how do I set these callbacks? Why might I want to do that? This is used for CUDA IPC only right now apparently.
         || (trigger_free_memory_callbacks(params) && get_free_block(params));
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
       // Do garbage collection if the flag is set.
+
+      // why doesn't garbage collection garbage collect for mempools?
       if (C10_UNLIKELY(
+              // set to 0.0 apparently
               set_fraction &&
               CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks(context);
@@ -1386,9 +1395,12 @@ class DeviceCachingAllocator {
             return std::this_thread::get_id() == tid;
           };
           beginAllocateToPool(mempool_id, filter);
+          // there are apparently two different pools for each
+          // PrivatePool, one for small and large blocks.
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
               device, size, stream, &mempool, alloc_size, stats);
+          // what is this for?
           mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
@@ -1736,6 +1748,7 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    // if any stream capturing is happening at all, then we use this variable.
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
@@ -1759,6 +1772,7 @@ class DeviceCachingAllocator {
     size_t device_free = 0;
     size_t device_total = 0;
     C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    // managed by the CUDACachingAllocator itself.
     allowed_memory_maximum =
         static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
@@ -2118,6 +2132,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
+      // where is the segmetns' sized held?
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
@@ -2218,6 +2233,8 @@ class DeviceCachingAllocator {
     }
   }
 
+  // okay, so the allocator is passed here... I need a subtype of
+  // CUDAAllocator, I suppose...
   void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
@@ -2699,11 +2716,14 @@ class DeviceCachingAllocator {
     if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
+      // very confusing condition
       return (size < CUDAAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
 
+  // how we get our allocation sizes. So all allocation sizes are
+  // 2097152, 10485760, or some multiple of 2097152 above 10485760
   static size_t get_allocation_size(size_t size) {
     if (size <= kSmallSize) {
       return kSmallBuffer;
@@ -2847,7 +2867,7 @@ class DeviceCachingAllocator {
   // can be expensive while holding the lock. Hence, we pass-in the lock to the
   // function to temporarily release the lock before cudaMalloc call and acquire
   // it back again after the call so that other threads dont get blocked.
-  bool alloc_block(
+  bool alloc_block( // DeviceCachingAllocator::alloc_block
       AllocParams& p,
       bool isRetry,
       const std::shared_ptr<GatheredContext>& ctx,
@@ -2933,6 +2953,8 @@ class DeviceCachingAllocator {
     }
 
     total_allocated_memory += size;
+    // so initially, the block will have the entire size and ptr. Hmm...
+    // How is requested_size set?
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
@@ -2962,8 +2984,7 @@ class DeviceCachingAllocator {
   }
 
   /** Free one or more oversize blocks to the system allocator.  But only enough
-   * **/
-  /** to satisfy the target size **/
+   *  to satisfy the target size **/
   bool release_available_cached_blocks(
       const AllocParams& p,
       const std::shared_ptr<GatheredContext>& context) {
@@ -3027,8 +3048,12 @@ class DeviceCachingAllocator {
       release_blocks(small_blocks, context);
     }
 
+    // std::cout << "GALVEZ:graph_pools_freeable.size()=" << graph_pools_freeable.size() << std::endl;
+
     for (auto it = graph_pools_freeable.begin();
          it != graph_pools_freeable.end();) {
+      // std::cout << "GALVEZ:graph_pool: " << it->first.first << ", " << it->first.second << std::endl;
+      // std::cout << "GALVEZ:mempool_id: " << mempool_id.first << ", " << mempool_id.second << std::endl;
       if (mempool_id.first != 0 || mempool_id.second != 0) {
         if (it->first == mempool_id) {
           // If there is an active mempool, we sync only the events
@@ -3040,10 +3065,12 @@ class DeviceCachingAllocator {
           continue;
         }
       }
+
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
       release_blocks(it->second->small_blocks, context);
       release_blocks(it->second->large_blocks, context);
+      // std::cout << "GALVEZ:cudaMalloc_count=" << it->second->cudaMalloc_count << std::endl;
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -3072,6 +3099,7 @@ class DeviceCachingAllocator {
     delete block;
   }
 
+  // when is release_block called?
   void release_block(
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
@@ -3086,12 +3114,15 @@ class DeviceCachingAllocator {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_segment_allocated);
 
+    // when is release_block called?
     auto* pool = block->pool;
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
       // If there is an active mempool with a given allocator,
       // we use the given allocator's delete function.
       pool->owner_PrivatePool->allocator()->raw_delete((void*)block->ptr);
     } else {
+      // lol, does cudaFree() on memory allocated by cuMemCreate actually work? Fishy...
+      // std::cout << "GALVEZ:cudaFree() fallback" << std::endl;
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
     total_allocated_memory -= block->size;
@@ -3275,6 +3306,8 @@ class DeviceCachingAllocator {
             block_to_cudagraph_stream_uses.end())) {
       stream_set streams(std::move(block->stream_uses));
       AT_ASSERT(block->stream_uses.empty());
+      // return only the streams that were not used during a stream
+      // capture.
       for (auto& stream : streams) {
         if (block_to_cudagraph_stream_uses[block].find(stream) ==
             block_to_cudagraph_stream_uses[block].end()) {
@@ -4173,6 +4206,7 @@ struct BackendStaticInitializer {
         }
       }
     }
+    // we want this one, right?
     return &Native::allocator;
   }
 
@@ -4182,8 +4216,10 @@ struct BackendStaticInitializer {
   }
 };
 
+// here it is!
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
+
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
 
@@ -4215,6 +4251,8 @@ MemPool::MemPool(
   } else {
     id_ = {uuid_++, 0};
   }
+  // lol, so the allocator is associated with a device here in a
+  // way...
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
@@ -4222,8 +4260,16 @@ MemPool::MemPool(
   }
 }
 
+// this looks like a huge problem to me, ugh.
 MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
+  // Problem: this isn't necessarily true if a torch.cuda.CUDAGraph()
+  // is around and hasn't been deleted/reset. We need to figure out a
+  // solution here. We want to call emptyCache() only if use_count()
+  // == 1...
+  // to be fair, we don't *need* to call emptyCache() at this time. 
+  // But I suppose it is reasonable to do that.
+  // TORCH_INTERNAL_ASSERT(use_count() >= 1);
+  // std::cout << "GALVEZ: mempool destructor" << id_.first << ", " <<id_.second << std::endl;
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
 }

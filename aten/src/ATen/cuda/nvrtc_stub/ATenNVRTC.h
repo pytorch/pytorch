@@ -64,8 +64,11 @@ namespace at::cuda {
   _(cuPointerGetAttribute)                       \
   _(cuFuncSetCacheConfig)                        \
   _(cuDeviceGetAttribute)                        \
-  _(cuDeviceGet)                        \
-
+  _(cuDeviceGet)                                 \
+  _(cuFuncGetParamInfo)                          \
+  _(cuFuncGetName)                               \
+  _(cuGraphKernelNodeGetParams)                  \
+  _(cuFuncGetModule)
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 #define AT_FORALL_NVRTC_EXTENDED(_)              \
