@@ -192,11 +192,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: "pytorch"
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
 {%- else %}
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-{%- endif %}
       !{{ set_runner_specific_vars() }}
+{%- endif %}
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
