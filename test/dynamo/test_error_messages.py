@@ -36,6 +36,14 @@ make sure that there is a test for it.
 """
 
 
+class GenericCtxMgr:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+
 class GraphBreakMessagesTest(LoggingTestCase):
     def test_dynamic_shape_operator(self):
         def fn():
@@ -299,7 +307,7 @@ Attempted to inline function marked as skipped
   Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup SKIP_DIRS
+  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
 
 
 from user code:
@@ -569,19 +577,12 @@ from user code:
         )
 
     def test_generic_ctx_mgr_graph_break(self):
-        class CtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
-
         def fn():
-            with CtxMgr():
-                with CtxMgr():
+            with GenericCtxMgr():
+                with GenericCtxMgr():
                     pass
-                with CtxMgr():
-                    with CtxMgr():
+                with GenericCtxMgr():
+                    with GenericCtxMgr():
                         pass
                     torch._dynamo.graph_break()
 
@@ -596,7 +597,7 @@ Graph break under GenericContextWrappingVariable
   Hint: Move the offending context manager(s) to outside the compiled region.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
 
-  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr), GenericContextWrappingVariable(GenericCtxMgr)]
 
 
 from user code:
@@ -689,9 +690,9 @@ from user code:
             """\
 Reconstruction failure
   Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
-  Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
+  Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
-  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't havereconstruction rules may be fundamentally unreconstructable.
+  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
@@ -743,9 +744,9 @@ User code traceback:
             """\
 Reconstruction failure
   Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
-  Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
+  Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
-  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't havereconstruction rules may be fundamentally unreconstructable.
+  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
@@ -832,6 +833,44 @@ User code traceback:
   File "test_error_messages.py", line N, in fn
     if x.sum() > 0:
 """,
+        )
+
+    @unittest.skipIf(IS_FBCODE, "assert gets patched in internal pytest")
+    @make_logging_test(graph_breaks=True)
+    def test_assert_failure_in_generic_ctx_mgr(self, records):
+        def fn(x):
+            with GenericCtxMgr():
+                assert x is None
+
+        with self.assertRaises(AssertionError):
+            torch.compile(fn, backend="eager")(torch.randn(3))
+
+        # only 1 graph break message
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: skip: from user code at:
+  File "test_error_messages.py", line N, in fn
+    assert x is None
+""",
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].exc_info[1], suppress_suffix=True, skip=0),
+            """\
+Data-dependent assertion failed (cannot compile partial graph)
+  Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Remove the assert statement.
+  Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
+
+  Developer debug context: value: ConstantVariable(bool: False)
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    assert x is None""",
         )
 
     def test_no_internal_compiler_stacktrace(self):
