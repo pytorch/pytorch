@@ -343,12 +343,6 @@ std::tuple<Tensor, Tensor, Tensor> rms_norm_cpu(
   // Use a default epsilon if not provided
   double eps = eps_opt.has_value() ? eps_opt.value() : 1e-6;
 
-  // Calculate the number of elements in the normalized dimensions.
-  int64_t norm_numel = 1;
-  for (auto dim : normalized_shape) {
-    norm_numel *= dim;
-  }
-
   // Square the input.
   auto squared = input.pow(2);
 
