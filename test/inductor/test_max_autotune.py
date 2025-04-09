@@ -1207,10 +1207,8 @@ class TestMaxAutotune(TestCase):
                 cleanup(
                     """[
                   ('def_kernel', ['A', 'B'], {}), ('size', ['A', 0], {}),
-                  ('size', ['B', 1], {}), ('size', ['A', 1], {}),
-                  ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                  ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                  """
+                  ('size', ['B', 1], {}), ('size', ['A', 1], {})]
+                """
                 ),
             )
 
