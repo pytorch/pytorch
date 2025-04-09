@@ -1515,16 +1515,15 @@ class FakeTensorMode(TorchDispatchMode):
                 for node in subgraph_mod.graph.nodes:
                     if node.op == "call_function":
                         op = node.target
-                        # Dynamo graphs can have operator.add type of operations. For these operations, it is safe to cache.
-                        if (
-                            callable(op)
-                            and getattr(op, "__module__", None)
-                            in {"_operator", "operator"}
-                            and not op.__name__.startswith("i")
-                        ):
-                            continue
-                        if op in (torch._check, torch._check_is_size):
-                            continue
+
+                        # AOTDispatcher first pass does not run make_fx on
+                        # dynamo graphs. As a result, it can have non OpOverload
+                        # ops.
+                        if not isinstance(op, torch._ops.OpOverload):
+                            raise _BypassDispatchCache(
+                                f"{func.name()} hop with a non OpOverload input"
+                            )
+
                         try:
                             self._validate_cache_key(op, [], {})
                         except _BypassDispatchCache as e:
@@ -2309,10 +2308,9 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             self.propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
-            # TODO: Handle SymFloat/SymBool
             and not any(
                 (
-                    isinstance(a, SymInt)
+                    isinstance(a, py_sym_types)
                     and (syms := free_unbacked_symbols(a))
                     and self.shape_env is not None
                     and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
