@@ -274,10 +274,13 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     // __shfl is limited in the dtypes it accepts
     // That's why, we need these if/else to correctly do the addition on the CU
     if constexpr(sizeof(scalar_t) <= sizeof(int)) {
-     union punner { int l; scalar_t s; } pnr = { .s = value };
+     union punner { int l; scalar_t s; }; 
+     punner pnr = {};
+     pnr.s = value;
      while (crnt_msk != 0) {
         if (crnt_msk & 1) {
-            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
             crnt_val += add_val.s;
         }
         crnt_idx++;
@@ -285,10 +288,13 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
      }
     }
     else if constexpr(sizeof(scalar_t) <= sizeof(long)) {
-     union punner { long l; scalar_t s; } pnr = { .s = value };
+     union punner { long l; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
      while (crnt_msk != 0) {
         if (crnt_msk & 1) {
-            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
             crnt_val += add_val.s;
         }
         crnt_idx++;
@@ -296,10 +302,13 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
      }
     }
     else if constexpr(sizeof(scalar_t) <= sizeof(long long)) {
-     union punner { long long l; scalar_t s; } pnr = { .s = value };
+     union punner { long long l; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
      while (crnt_msk != 0) {
         if (crnt_msk & 1) {
-            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
             crnt_val += add_val.s;
         }
         crnt_idx++;
@@ -307,10 +316,13 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
      }
     }
     else {
-     union punner { long long l[2]; scalar_t s; } pnr = { .s = value };
+     union punner { long long l[2]; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
      while (crnt_msk != 0) {
         if (crnt_msk & 1) {
-            punner add_val = { .l[0] = __shfl(pnr.l[0] ,crnt_idx) };
+            punner add_val = {};
+            add_val.l[0] = __shfl(pnr.l[0] ,crnt_idx);
             add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
             crnt_val += add_val.s;
         }
