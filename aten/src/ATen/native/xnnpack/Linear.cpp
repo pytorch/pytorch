@@ -129,6 +129,7 @@ Tensor run(
 
   const IntArrayRef input_size = padded_input.sizes();
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   output_size.back() = context.output_channels;
 
   Tensor output = mobile::empty_with_tail_padding(
