@@ -66,14 +66,14 @@ def plot_function(scheduler):
     plt.clf()
     plt.grid(color="k", alpha=0.2, linestyle="--")
     lrs = []
-    optimizer.param_groups[0]["lr"] = 0.1
+    optimizer.param_groups[0]["lr"] = 0.05
     scheduler = scheduler(optimizer)
 
     plot_path = LR_SCHEDULER_IMAGE_PATH / f"{scheduler.__class__.__name__}.png"
     if plot_path.exists():
         return
 
-    for epoch in range(num_epochs):
+    for _ in range(num_epochs):
         lrs.append(optimizer.param_groups[0]["lr"])
         if isinstance(scheduler, ReduceLROnPlateau):
             val_loss = torch.randn(1).item()
