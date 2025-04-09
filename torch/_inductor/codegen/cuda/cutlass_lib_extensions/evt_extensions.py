@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+from torch._inductor.ir import ComputedBuffer, InputBuffer
+
 from ..cutlass_utils import try_import_cutlass
 
 
@@ -23,9 +25,85 @@ if try_import_cutlass():
     from cutlass.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
         Tensor as CutlassTensor,
     )
-    from cutlass_library import DataType, EpilogueScheduleType, TileDescription
+    from cutlass_library import (
+        DataType,
+        EpilogueScheduleType,
+        LayoutType,
+        TileDescription,
+    )
 
+    import torch
     from torch._inductor.utils import IndentedBuffer
+
+    TORCH_TO_CUTLASS_DTYPE = {
+        torch.float32: DataType.f32,
+        torch.float16: DataType.f16,
+        torch.bfloat16: DataType.bf16,
+    }
+
+    def create_example_tensors(
+        read_names: list[str],
+        write_names: list[str],
+        buffer_renames: dict[str, str],
+        name_to_buffer: dict[str, ComputedBuffer],
+        name_to_input: dict[str, InputBuffer],
+    ):
+        example_tensors = {}
+
+        def cutlass_tensor_from_buffer(buffer: ComputedBuffer):
+            shape = tuple(int(x) for x in buffer.get_layout().size)
+            stride = tuple(int(x) for x in buffer.get_layout().stride)
+
+            is_column_major = True
+            for i in range(1, len(shape)):
+                if shape[i] == 1:
+                    continue
+                if stride[i] != stride[i - 1] * shape[i - 1]:
+                    is_column_major = False
+
+            is_row_major = True
+            for i in range(len(shape) - 1):
+                if shape[i] == 1:
+                    continue
+
+                if stride[i] != stride[i + 1] * shape[i + 1]:
+                    is_row_major = False
+
+            if not is_row_major and not is_column_major:
+                raise RuntimeError(
+                    f"Cannot create example tensor for {buffer.get_name()} with non-contiguous layout, recieved stride: {stride} and shape: {shape}"
+                )
+
+            return CutlassTensor(
+                shape=shape,
+                layout_tag=LayoutType.RowMajor
+                if is_row_major
+                else LayoutType.ColumnMajor,
+                element=TORCH_TO_CUTLASS_DTYPE[buffer.get_layout().dtype],
+            )
+
+        def get_buffer(name):
+            if name in name_to_buffer:
+                return name_to_buffer[name]
+
+            if name in name_to_input:
+                return name_to_input[name]
+
+            raise RuntimeError(
+                f"Buffer {name} not found in name_to_buffer or name_to_input"
+            )
+
+        for name in read_names + write_names:
+            key = name
+
+            if name in buffer_renames:
+                key = buffer_renames[
+                    name
+                ]  # Need to rewrite some special args (e.g. acc is a required arg name)
+
+            example_tensors[key] = cutlass_tensor_from_buffer(get_buffer(name))
+
+        return example_tensors
 
     def trace(
         fn_src: str,
