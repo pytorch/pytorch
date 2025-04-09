@@ -327,7 +327,6 @@ def ncu_analyzer(
 
     kernel_regex = args.ncu_kernel_regex
     metrics = args.ncu_metrics
-    enable_csv_output = args.ncu_csv
 
     module_file = inspect.getfile(benchmark_compiled_module_fn)
     module_dir = os.path.dirname(module_file)
@@ -335,8 +334,7 @@ def ncu_analyzer(
 
     ncu_dir = tempfile.gettempdir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    ncu_rep_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}_{benchmark_name}.ncu-rep")
-    ncu_csv_output = os.path.join(ncu_dir, f"ncu_metrics_{timestamp}_{benchmark_name}.csv")
+    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}_{benchmark_name}.ncu-rep")
 
     python_cmd = (
         f"""import sys; sys.path.insert(0, '{module_dir}'); """
@@ -350,6 +348,8 @@ def ncu_analyzer(
         "all",
         "--replay-mode",
         "kernel",
+        "--kernel-name-base",
+        "function",
         "--print-units",
         "base",
         "--import-source",
@@ -359,13 +359,9 @@ def ncu_analyzer(
         ncu_rep_output,
     ]
 
-    # Add kernel regex filter if provided
     if kernel_regex:
         ncu_cmd.extend(["--kernel-name", f"regex:{kernel_regex}"])
-    else:
-        ncu_cmd.extend(["--kernel-name-base", "function"])
 
-    # Add metrics or set full
     if metrics:
         ncu_cmd.extend(["--metrics", metrics])
     else:
@@ -380,23 +376,7 @@ def ncu_analyzer(
     try:
         subprocess.run(ncu_cmd, check=True)
         print(f"\nNCU profiling results for benchmark {benchmark_name}:")
-        print(f"NCU report has been written to {ncu_rep_output}")
-
-        if enable_csv_output:
-            ncu_csv_cmd = [
-                "ncu",
-                "-i",
-                ncu_rep_output,
-                "--csv",
-                "--page",
-                "raw",
-            ]
-            if metrics:
-                ncu_csv_cmd.extend(["--metrics", metrics])
-
-            with open(ncu_csv_output, "w") as f_csv:
-                subprocess.run(ncu_csv_cmd, check=True, stdout=f_csv, stderr=subprocess.PIPE)
-            print(f"NCU report (CSV format) have been written to {ncu_csv_output}")
+        print(f"NCU report has been written to {ncu_output}")
 
     except subprocess.CalledProcessError as e:
         print(f"NCU profiling failed with error: {e}")
@@ -468,11 +448,6 @@ def compiled_module_main(
         type=str,
         default=None,
         help="Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). If None, NCU will use '--set full'.",
-    )
-    parser.add_argument(
-        "--ncu-csv",
-        action="store_true",
-        help="Save NCU metrics output to a CSV file.",
     )
     args = parser.parse_args()
 
