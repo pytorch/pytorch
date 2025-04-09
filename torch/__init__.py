@@ -2294,6 +2294,7 @@ class _TorchCompileInductorWrapper:
 
     def __init__(self, mode, options, dynamic):
         from torch._inductor.compiler_bisector import CompilerBisector
+        from torch.torch_version import TorchVersion
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
@@ -2301,7 +2302,12 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
-        if self.config.get("triton.cudagraphs", False):
+        if (
+            self.config.get("triton.cudagraphs", False)
+            and hasattr(torch.version, "cuda")
+            and torch.version.cuda
+            and TorchVersion(torch.version.cuda) < "12.6"
+        ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
             #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
