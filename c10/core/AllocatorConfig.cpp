@@ -111,7 +111,7 @@ size_t AllocatorConfig::parseMaxSplitSize(
   if (++i < config.size()) {
     size_t val_env = stoi(config[i]);
     TORCH_CHECK(
-        val_env > min_allowed_split_size_mb,
+        val_env >= min_allowed_split_size_mb,
         "CachingAllocator option max_split_size_mb too small, must be >= ",
         min_allowed_split_size_mb);
     val_env = std::min(val_env, max_allowed_split_size_mb);
