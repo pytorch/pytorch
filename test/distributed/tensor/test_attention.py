@@ -7,15 +7,14 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor.experimental import context_parallel, set_rotate_method
 from torch.distributed._tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _cp_options,
     _is_causal_behavior,
     _RotateMethod,
-    context_parallel,
     context_parallel_unshard,
-    set_rotate_method,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
