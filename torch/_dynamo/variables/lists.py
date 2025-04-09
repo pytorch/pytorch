@@ -373,9 +373,9 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items.extend(seq)
+            arg.force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "append", [item], {})
+            )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             assert not kwargs
@@ -614,9 +614,11 @@ class DequeVariable(CommonListMethodsVariable):
         ):
             assert len(args) == 1
             assert not kwargs
-            prefix = args[0].force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items[:] = [*reversed(prefix), *self.items]
+            # NOTE this is inefficient, but the alternative is to represent self.items
+            # as a deque, which is a more intrusive change.
+            args[0].force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
+            )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.is_mutable():
