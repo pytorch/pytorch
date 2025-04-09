@@ -1586,11 +1586,12 @@ class X86InductorQuantizer(Quantizer):
         filter_fn: Optional[FilterFn] = None,
     ):
         def _is_tensor(n: Node):
-            return (
-                isinstance(n, Node)
-                and isinstance(n.meta["val"], torch._subclasses.fake_tensor.FakeTensor)
-                and n.meta["val"].numel() > 1
+            return isinstance(n, Node) and isinstance(
+                n.meta["val"], torch._subclasses.fake_tensor.FakeTensor
             )
+
+        def _same_shape(n1: Node, n2: Node):
+            return n1.meta["val"].shape == n2.meta["val"].shape
 
         for node in model.graph.nodes:
             if node.target != torch.ops.aten.mul.Tensor:
@@ -1605,6 +1606,9 @@ class X86InductorQuantizer(Quantizer):
 
             assert len(node.args) == 2
             if not (_is_tensor(node.args[0]) and _is_tensor(node.args[1])):
+                continue
+
+            if not _same_shape(node.args[0], node.args[1]):
                 continue
 
             input_qspec_map = {}

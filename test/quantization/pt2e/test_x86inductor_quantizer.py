@@ -2870,11 +2870,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 if self.type == 0:
                     return x * y
                 elif self.type == 1:
+                    return x * y.sum(-1)
+                elif self.type == 2:
                     return x * y.sum()
                 else:
                     return x * y.sum().item()
 
-        for type in [0, 1, 2]:
+        for type in [0, 1, 2, 3]:
             with override_quantized_engine("x86"), torch.no_grad():
                 m = M1(type).eval()
                 example_inputs = (torch.randn(64, 64), torch.randn(64, 64))
