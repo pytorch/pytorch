@@ -1243,7 +1243,7 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
-        # When true, we know that each argument to def kernal will be called in a load_input
+        # When true, we know that each argument to def_kernal will be passed to a load_input.
         self.all_inputs_loaded = all_inputs_loaded
 
     # These class fields are used for testing _generated_code_cache.
