@@ -18,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
-class TestFlexAttention(TestCase):
+class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()
 
