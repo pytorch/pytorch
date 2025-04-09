@@ -129,6 +129,37 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_module_forward(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @mark_compile_region
+            def forward(self, x, y):
+                return torch.mul(x, y).sin() + self.c
+
+        mod = Mod()
+
+        def fn(x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
     def test_list(self):
         @mark_compile_region
         def gn(x, y):
@@ -933,7 +964,7 @@ class GraphModule(torch.nn.Module):
             return torch.sin(x)
 
         def fn(x):
-            return gn(x)
+            return gn(x) + gn(x)
 
         x = torch.randn(8, 8, requires_grad=True)
         torch._dynamo.mark_dynamic(x, 0)
@@ -1071,11 +1102,128 @@ class GraphModule(torch.nn.Module):
             return torch.tensor(64, dtype=torch.float32) * x
 
         def fn(x):
-            return gn(x)
+            return gn(x) + gn(x)
 
         x = torch.randn(64, requires_grad=True)
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_ac(self):
+        def fn1(x):
+            return torch.cos(x)
+
+        @mark_compile_region
+        def fn1_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
+
+        def fn2(x):
+            return torch.sin(x)
+
+        @mark_compile_region
+        def fn2_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn2, x, use_reentrant=False)
+
+        def fn(x):
+            return (
+                fn1_checkpoint(x)
+                # repeat the same fn1_checkpoint to see that we dedupe
+                + fn1_checkpoint(x)
+                # Check that a new fn2_checkpoint goes through a different HOP
+                + fn2_checkpoint(x)
+            )
+
+        x = torch.randn(8, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        # Check that the Dynamo and AOT graphs have just one subgraph module
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.count_unique_get_attr_nodes(backend.graphs[0], [], 2)
+        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 2)
+        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 2)
+
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
+        self.assertEqual(ref, res)
+
+    def test_fake_tensor_checking(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x, y):
+            # x and y are different shapes, so we should use different graph
+            return gn(x), gn(y)
+
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(16, 16, requires_grad=True)
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+
+        self.assertEqual(ref, res)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8, 8]", L_y_: "f32[16, 16]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_0 = l_x_ = None
+        getitem: "f32[8, 8]" = invoke_subgraph[0];  invoke_subgraph = None
+        invoke_subgraph_1 = self.invoke_subgraph_1
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_1, 'invoke_subgraph_1', (l_y_,));  invoke_subgraph_1 = l_y_ = None
+        getitem_1: "f32[16, 16]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        return (getitem, getitem_1)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8, 8]"):
+            sin: "f32[8, 8]" = torch.sin(l_x_);  l_x_ = None
+            return (sin,)
+
+    class invoke_subgraph_1(torch.nn.Module):
+        def forward(self, l_y_: "f32[16, 16]"):
+            sin: "f32[16, 16]" = torch.sin(l_y_);  l_y_ = None
+            return (sin,)
+""",
+            )
+
+    @unittest.skip("Repro for an issue which is not fixed yet")
+    def test_div(self):
+        @mark_compile_region
+        def gn(x):
+            div = torch.div(1024, 256, rounding_mode="trunc")
+            return div * torch.ones(64, div)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(64, 1, requires_grad=True)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
 
         ref = fn(x)
         res = opt_fn(x)
