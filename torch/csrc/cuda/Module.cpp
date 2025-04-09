@@ -1366,6 +1366,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         return true;
       });
 
+  // This may be very helpful for me. I could basically create tensors at arbitrary offsets.
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",
       [](py::dict& metadata, c10::Storage s) {

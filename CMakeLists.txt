@@ -890,7 +890,10 @@ if(USE_ROCM)
   endif()
 endif()
 
+string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -G")
+
 if(DEBUG_CUDA)
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -G")
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
   # CUDA-12.1 crashes when trying to compile with --source-in-ptx See
@@ -1243,6 +1246,20 @@ endif()
 if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
   add_definitions(-DUSE_MIMALLOC_ON_MKL)
 endif()
+
+include(FetchContent)
+
+FetchContent_Declare(
+            libdwarf-code
+            GIT_REPOSITORY https://github.com/davea42/libdwarf-code.git
+            GIT_TAG 623511122046fca0aefcfbd86f9e41338e95b083
+            CMAKE_ARGS -DBUILD_SHARED=YES -DBUILD_NON_SHARED=NO
+            EXCLUDE_FROM_ALL
+        )
+
+FetchContent_MakeAvailable(libdwarf-code)
+FetchContent_GetProperties(libdwarf-code)
+# Depend upon libdwarf::dwarf-shared
 
 # ---[ Main build
 add_subdirectory(c10)

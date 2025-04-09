@@ -172,7 +172,12 @@ CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *)
 CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int)
 CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction)
 CUDA_STUB3(cuPointerGetAttribute, void*, CUpointer_attribute, CUdeviceptr)
-
+CUDA_STUB2(cuGraphKernelNodeGetParams, CUgraphNode, CUDA_KERNEL_NODE_PARAMS*)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12040
+CUDA_STUB4(cuFuncGetParamInfo, CUfunction, size_t, size_t*, size_t*)
+CUDA_STUB2(cuFuncGetName, const char**, CUfunction)
+CUDA_STUB2(cuFuncGetModule, CUmodule*, CUfunction)
+#endif
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 CUresult CUDAAPI

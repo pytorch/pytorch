@@ -1731,6 +1731,7 @@ def cudagraphify_impl(
     static_input_idxs: OrderedSet[int] = OrderedSet(
         remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
+    # copy #1
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
     assert isinstance(inputs, list)
@@ -1746,8 +1747,9 @@ def cudagraphify_impl(
             x
             if not isinstance(x, torch.Tensor)
             else static_input(x)
+            # TODO: figure out how static_input_idxs is derived
             if idx not in static_input_idxs
-            else x.detach()
+            else x.detach() # Interesting to detatch these...
         )
         for idx, x in enumerate(inputs)
     ]
@@ -1755,6 +1757,9 @@ def cudagraphify_impl(
     # copy over input values for fresh allocations
     for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
+            # Okay, so it looks like we are creating new input and
+            # output addresses every single time.
+            # copy #2
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
     # warmup
@@ -1762,6 +1767,12 @@ def cudagraphify_impl(
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
     # copy static_inputs because it will be cleared in model
+
+    # This warm up can have side effects. I don't like that. It
+    # doesn't match the behavior of cuda graph trees IIUC. We can do
+    # better by using relaxed stream capture to do warmup.  CUDA Graph
+    # trees avoids the issues by not running a cuda graph for the very
+    # first run. (i.e., the first run is the warmup)
     with torch.cuda.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
@@ -1770,12 +1781,42 @@ def cudagraphify_impl(
 
     # record
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
+    dynamic_graph_arguments = (config.size_asserts and
+                               config.triton.cudagraphs_elide_input_output_copies)
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
+                          dynamic_graph=dynamic_graph_arguments):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
-    if config.size_asserts:
+    if config.size_asserts and config.triton.cudagraphs_elide_input_output_copies:
+        graph.become_dynamic(list(static_inputs) + list(static_outputs))
+        def run(new_inputs):
+            assert len(static_inputs) == len(new_inputs)
+
+            dynamic_tensors = []
+
+            for idx, (dst, src, expanded_dims) in enumerate(
+                zip(static_inputs, new_inputs, inps_expanded_dims)
+            ):
+                if not isinstance(dst, torch.Tensor):
+                    pass
+                elif idx in static_input_idxs:
+                    assert dst.data_ptr() == src.data_ptr()
+                else:
+                    # TODO: We should check that alignment
+                    # requirements are meant on the input tensors...
+                    # Investigate copy_misaligned_inputs()'s implementation.
+                    dynamic_tensors.append(src)
+
+            output_tensors = [torch.empty_like(static_output) for static_output in static_outputs]
+
+            dynamic_tensors.extend(output_tensors)
+            new_inputs.clear()
+            graph.replay_dynamic(dynamic_tensors)
+            return output_tensors
+
+    elif config.size_asserts:
 
         def run(new_inputs: list[InputType]) -> Callable[[list[InputType]], Any]:
             assert len(static_inputs) == len(new_inputs)
@@ -1791,12 +1832,14 @@ def cudagraphify_impl(
                     # TODO - could make one single op of multiple slices
                     # and avoid dispatch.
                     # Could also pre-index the `dst` tensors
+                    # That is what triton does already, as I understand it.
                     index_expanded_dims_and_copy_(dst, src, expanded_dims)
             new_inputs.clear()
             graph.replay()
             return static_outputs
 
     else:
+        assert not config.triton.cudagraphs_elide_input_output_copies, "Please set torch.config.size_asserts = True if torch.config.triton.cudagraphs_elide_input_output_copies is True"
         copy_indices = [
             idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
         ]

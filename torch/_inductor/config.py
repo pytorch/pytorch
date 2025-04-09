@@ -1118,6 +1118,10 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
+    # Elide input and output copies when using cudagraphs when
+    # possible. Simplifies a lot of things.
+    cudagraphs_elide_input_output_copies = True
+
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
 

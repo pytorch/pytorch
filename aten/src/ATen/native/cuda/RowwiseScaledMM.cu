@@ -15,7 +15,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
 // https://github.com/NVIDIA/cutlass/issues/1571
 #if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 
-#define BUILD_ROWWISE_FP8_KERNEL
+// #define BUILD_ROWWISE_FP8_KERNEL
 #endif
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)

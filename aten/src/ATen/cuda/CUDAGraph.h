@@ -18,6 +18,49 @@ namespace cuda {
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
+
+template<bool VOLTA_OR_LATER>
+struct KernelUpdateSOA {
+  // Even on Cuda 12.4, Torch supports compute capability down to sm_50
+  // However, large parameter support was only added in sm_70
+  // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
+  static constexpr size_t KERNEL_PARAM_LIMIT_BYTES = VOLTA_OR_LATER ? 32764 : 4096;
+  static constexpr size_t PER_UPDATE = sizeof(void*) + sizeof(size_t) + sizeof(cudaGraphDeviceNode_t);
+
+  static constexpr size_t MAX_NUM_UPDATES = (KERNEL_PARAM_LIMIT_BYTES - sizeof(size_t)) / PER_UPDATE;
+
+  size_t num_updates;
+  // struct-of-arrays pattern for global memory coalescing
+  cudaGraphDeviceNode_t device_nodes[MAX_NUM_UPDATES];
+  void* new_pointers[MAX_NUM_UPDATES];
+  size_t param_offsets[MAX_NUM_UPDATES];
+};
+
+template<bool VOLTA_OR_LATER>
+void dynamic_graph_updater(const KernelUpdateSOA<VOLTA_OR_LATER>& updates);
+
+struct DynamicGraphKernelParamUpdate {
+  // in other words:
+  // dev_node.params[param_offset] = allocations[alloc_idx] + offset
+
+  cudaGraphDeviceNode_t dev_node;
+  size_t param_offset; // which arg are we updating
+  size_t alloc_idx; // which allocation is it
+  size_t offset; // how deep into the allocation?
+};
+
+struct DynamicGraphOtherNodeUpdate {
+  // for the (rare) case where a cudaMemsetAsync or cudaMemcpyAsync involved a dynamic tensor
+  cudaGraphNode_t node;
+  std::function<cudaGraphNodeParams(std::vector<void*>)> compute_new_params;
+};
+
+struct DynamicGraphAllocation {
+  char* ptr; // device-side pointer to the allocation
+  size_t size; // size of the allocation
+  size_t alloc_idx; // which allocation was this originally
+};
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
@@ -27,7 +70,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
-      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
+      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal,
+      bool dynamic_graph = false);
   void capture_end();
   void instantiate();
   void replay();
@@ -36,8 +80,16 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
+  void become_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
+  void replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
+
+  TORCH_CUDA_CPP_API friend bool operator==(const CUDAGraph& left, const CUDAGraph& right);
+  TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
 
  protected:
+ void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);
+  template<bool VOLTA_OR_LATER>
+  void launch_dynamic_updaters(const std::vector<void*>& actualDataPtrs);
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
@@ -55,6 +107,15 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
   CaptureId_t capture_id_ = -1;
+
+  // Will this graph have dynamic input/output tensors?
+  bool dynamic_graph_;
+  // (if dynamic) Which allocations are dynamic?
+  std::vector<DynamicGraphAllocation> allocations_;
+  // (if dynamic) Which parameters of which kernels need to be updated to the input tensors or new allocations?
+  std::vector<DynamicGraphKernelParamUpdate> kernel_param_updates_;
+  // (if dynamic) Some Torch ops use cudaMemcpyAsync or cudaMemsetAsync, those also need to have their pointers updated
+  std::vector<DynamicGraphOtherNodeUpdate> graph_node_param_updates_;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.

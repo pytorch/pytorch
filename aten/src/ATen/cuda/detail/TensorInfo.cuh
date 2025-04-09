@@ -30,8 +30,8 @@ struct TensorInfo {
   }
 
   T* data;
-  IndexType sizes[MAX_TENSORINFO_DIMS];
-  IndexType strides[MAX_TENSORINFO_DIMS];
+  IndexType sizes[MAX_TENSORINFO_DIMS]{};
+  IndexType strides[MAX_TENSORINFO_DIMS]{};
   int dims;
 };
 

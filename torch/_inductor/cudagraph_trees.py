@@ -1913,6 +1913,7 @@ class CUDAGraphTreeManager:
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
 
+        # Good to know:
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -1924,7 +1925,7 @@ class CUDAGraphTreeManager:
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
 
-            # Keeps Memory Pool Alive
+            # Keeps Memory Pool Alive <- Clever
             self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 

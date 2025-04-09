@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/operators.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -31,7 +32,8 @@ void THCPGraph_init(PyObject* module) {
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
              std::optional<c10::cuda::MempoolId_t> pool_opt,
-             const std::string& capture_error_mode) {
+             const std::string& capture_error_mode,
+             bool dynamic_graph) {
             cudaStreamCaptureMode capture_mode{};
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
@@ -48,10 +50,11 @@ void THCPGraph_init(PyObject* module) {
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
             }
-            return self.capture_begin(pool, capture_mode);
+            return self.capture_begin(pool, capture_mode, dynamic_graph);
           },
           py::arg("pool"),
           py::arg("capture_error_mode"),
+          py::arg("dynamic_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
@@ -72,6 +75,22 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
+    .def("become_dynamic",
+         torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::become_dynamic))
+          // "become_dynamic",
+          // [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& dynamic_tensors, ::at::cuda::CUDAGraph& graph2) {
+          //   py::gil_scoped_release release;
+          //   self.become_dynamic(dynamic_tensors, graph2);
+          // },
+          // py::arg("dynamic_tensors"),
+          // py::arg("graph2"))
+      .def(
+          "replay_dynamic",
+          [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& dynamic_tensors) {
+            py::gil_scoped_release release;
+            self.replay_dynamic(dynamic_tensors);
+          },
+          py::arg("dynamic_tensors"))
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))
@@ -101,5 +120,7 @@ void THCPGraph_init(PyObject* module) {
             // compile error.
             return reinterpret_cast<uintptr_t>(graph);
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(py::self == py::self)
+      .def(py::self != py::self);
 }
