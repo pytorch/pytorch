@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+import os
 import threading
 from functools import reduce
 from itertools import chain
@@ -386,10 +387,14 @@ else:
         represented as a n-d dimension array, and each value of the n-d dimensional
         array is the global id of the default process group ranks.
 
-        DeviceMesh could be used to describe the layout of devices across the cluster,
-        and serves as a proxy for communication among the device lists within the cluster.
+        DeviceMesh could be used to setup the N dimensional device connections across the cluster,
+        and manage the ProcessGroups for N dimensional parallelisms. Communications could happen on
+        each dimension of the DeviceMesh separately. DeviceMesh respect the device that user select
+        already (i.e. if user call `torch.cuda.set_device` before the DeviceMesh initialization),
+        and will select/set the device for the current process if user does not set the device
+        beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
 
-        DeviceMesh can be used as a context manager.
+        DeviceMesh can also be used as a context manager when using together with most DTensor APIs.
 
         .. note::
             DeviceMesh follows SPMD programming model, which means the same PyTorch Python program
@@ -453,7 +458,7 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
-                    self._get_or_create_default_group()
+                    self._setup_world_group_and_device()
                     self._init_process_groups()
 
                 if is_initialized() and get_backend() == "threaded":
@@ -466,8 +471,10 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
-        def _get_or_create_default_group(self):
+        def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
+            # TODO: think about how to allow pg options to be passed to world group
+            # or mesh dimension groups
             if not default_initialized:
                 init_process_group()
 
@@ -477,21 +484,28 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
 
+            # ONLY set the device if the current device is not initialized, if user already
+            # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self.device_type)
-            # TODO: if user want to pass pg_options, offer a way to do it
-            if not default_initialized and device_handle:
-                # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogeneous hardware.
-                num_devices_per_host = device_handle.device_count()
-                if (
-                    world_size > num_devices_per_host
-                    and world_size % num_devices_per_host != 0
-                ):
-                    raise RuntimeError(
-                        f"DeviceMesh only support homogeneous hardware, but found "
-                        f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                    )
-                device_handle.set_device(get_rank() % num_devices_per_host)
+            if device_handle and not device_handle.is_initialized():
+                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
+                # env variable from launchers, we use it to set the device.
+                if "LOCAL_RANK" in os.environ:
+                    local_rank = int(os.environ["LOCAL_RANK"])
+                    device_handle.set_device(local_rank)
+                else:
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    if (
+                        world_size > num_devices_per_host
+                        and world_size % num_devices_per_host != 0
+                    ):
+                        raise RuntimeError(
+                            f"DeviceMesh only support homogeneous hardware, but found "
+                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                        )
+                    device_handle.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
