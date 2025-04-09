@@ -212,7 +212,7 @@ class Library:
             func_to_register = fn
 
         handle = entry.fake_impl.register(
-            func_to_register, source, allow_override=allow_override
+            func_to_register, source, lib=self, allow_override=allow_override
         )
         self._registration_handles.append(handle)
 

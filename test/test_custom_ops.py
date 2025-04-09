@@ -2220,6 +2220,21 @@ Dynamic shape operator
         torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+        # Use scoped_library to temporarily register Fake kernel to foo_impl1
+        with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
+            torch.library.register_fake(
+                op_name, foo_impl1, lib=lib2, allow_override=True
+            )
+            with torch._subclasses.FakeTensorMode():
+                self.assertEqual(op(torch.ones(3)).shape, [3])
+            self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        # Fake kernel should go back to foo_impl2
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [6])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
     def test_override_meta(self):
         lib = self.lib()
@@ -2242,6 +2257,14 @@ Dynamic shape operator
 
         # Override Meta kernel to foo_impl2
         lib.impl("foo", foo_impl2, "Meta", allow_override=True)
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+        # Use scoped_library to temporarily register Meta kernel to foo_impl1
+        with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
+            lib2.impl("foo", foo_impl1, "Meta", allow_override=True)
+            self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        # Meta kernel should go back to foo_impl2
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use register_fake to override Meta kernel to foo_impl1
