@@ -93,7 +93,7 @@ class LRScheduler:
         optimizer (Optimizer): Wrapped optimizer. (Find more about
             `optimizer <https://pytorch.org/docs/stable/optim.html#base-class>`_) .
         last_epoch (int, optional): The index of the last training epoch to resume.
-            Default: -1, starts from first epoch.
+            Default: -1, starts from the optimizer lr.
     """
 
     _get_lr_called_within_step: bool = False
@@ -277,7 +277,7 @@ class LambdaLR(LRScheduler):
     """Sets the initial learning rate.
 
     The learning rate of each parameter group is set to the initial lr
-    times a given function. When last_epoch=-1, sets initial lr as lr.
+    times a given function. When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -483,7 +483,7 @@ class StepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every step_size epochs.
 
     Notice that such decay can happen simultaneously with other changes to the learning rate
-    from outside this scheduler. When last_epoch=-1, sets initial lr as lr.
+    from outside this scheduler. When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -539,7 +539,7 @@ class MultiStepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma once the number of epoch reaches one of the milestones.
 
     Notice that such decay can happen simultaneously with other changes to the learning rate
-    from outside this scheduler. When last_epoch=-1, sets initial lr as lr.
+    from outside this scheduler. When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -600,7 +600,7 @@ class ConstantLR(LRScheduler):
     The multiplication is done until the number of epoch reaches a pre-defined milestone: total_iters.
     Notice that such multiplication of the small constant factor can
     happen simultaneously with other changes to the learning rate from outside this scheduler.
-    When last_epoch=-1, sets initial lr as lr.
+    When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -671,7 +671,7 @@ class LinearLR(LRScheduler):
 
     The multiplication is done until the number of epoch reaches a pre-defined milestone: total_iters.
     Notice that such decay can happen simultaneously with other changes to the learning rate
-    from outside this scheduler. When last_epoch=-1, sets initial lr as lr.
+    from outside this scheduler. When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -767,7 +767,7 @@ class LinearLR(LRScheduler):
 class ExponentialLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
 
-    When last_epoch=-1, sets initial lr as lr.
+    When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -959,7 +959,7 @@ class SequentialLR(LRScheduler):
 class PolynomialLR(LRScheduler):
     """Decays the learning rate of each parameter group using a polynomial function in the given total_iters.
 
-    When last_epoch=-1, sets initial lr as lr.
+    When last_epoch=-1, use optimizer's lr as inital lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -1035,7 +1035,7 @@ class CosineAnnealingLR(LRScheduler):
             & T_{cur} = (2k+1)T_{max}.
         \end{aligned}
 
-    When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
+    When last_epoch=-1, use optimizer's lr as inital lr. Notice that because the schedule
     is defined recursively, the learning rate can be simultaneously modified
     outside this scheduler by other operators. If the learning rate is set
     solely by this scheduler, the learning rate at each step becomes:
