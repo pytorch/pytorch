@@ -176,6 +176,12 @@ class TestNCCL(TestCase):
         ):
             nccl.reduce_scatter(t, t)
 
+        with self.assertRaisesRegex(ValueError, "is invalid, please refer to ReduceOp"):
+            nccl.reduce([t], op=0xAA)
+
+        with self.assertRaisesRegex(TypeError, "op should be int or ReduceOp"):
+            nccl.reduce([t], op="SUM")  # type: ignore[misc]
+
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
     )

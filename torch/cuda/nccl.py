@@ -1,15 +1,24 @@
 # mypy: allow-untyped-defs
 import collections
+import enum
 import warnings
 from collections.abc import Sequence
 from typing import Optional, Union
 
-import torch.cuda
+import torch
+
+from .streams import Stream
 
 
 __all__ = ["all_reduce", "reduce", "broadcast", "all_gather", "reduce_scatter"]
 
-SUM = 0  # ncclRedOp_t
+
+class ReduceOp(enum.IntEnum):
+    SUM = 0  # ncclSum
+    PROD = 1  # ncclProd
+    MIN = 2  # ncclMin
+    MAX = 3  # ncclMax
+    AVG = 4  # ncclAvg
 
 
 def is_available(tensors):
@@ -69,7 +78,16 @@ def _check_sequence_type(inputs: Union[torch.Tensor, Sequence[torch.Tensor]]) ->
         raise TypeError("Inputs should be a collection of tensors")
 
 
-def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
+def _check_op_type(op: Union[int, ReduceOp]):
+    if isinstance(op, (int, ReduceOp)):
+        if op not in {member.value for member in ReduceOp}:
+            raise ValueError(f"op: {op} is invalid, please refer to ReduceOp")
+    else:
+        raise TypeError("op should be int or ReduceOp")
+
+
+def all_reduce(inputs, outputs=None, op=ReduceOp.SUM, streams=None, comms=None):
+    _check_op_type(op)
     _check_sequence_type(inputs)
     if outputs is None:
         outputs = inputs
@@ -83,12 +101,13 @@ def reduce(
     inputs: Sequence[torch.Tensor],
     output: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
     root: int = 0,
-    op: int = SUM,
-    streams: Optional[Sequence[torch.cuda.Stream]] = None,
+    op: int = ReduceOp.SUM,
+    streams: Optional[Sequence[Stream]] = None,
     comms=None,
     *,
     outputs: Optional[Sequence[torch.Tensor]] = None,
 ) -> None:
+    _check_op_type(op)
     _check_sequence_type(inputs)
     _output: torch.Tensor
     if outputs is not None:
@@ -96,7 +115,7 @@ def reduce(
             raise ValueError(
                 "'output' and 'outputs' can not be both specified. 'outputs' is deprecated in "
                 "favor of 'output', taking in a single output tensor. The signature of reduce is: "
-                "reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None)."
+                "reduce(inputs, output=None, root=0, op=ReduceOp.SUM, streams=None, comms=None)."
             )
         else:
             warnings.warn(
@@ -143,10 +162,11 @@ def all_gather(
 def reduce_scatter(
     inputs: Sequence[torch.Tensor],
     outputs: Sequence[torch.Tensor],
-    op: int = SUM,
+    op: int = ReduceOp.SUM,
     streams=None,
     comms=None,
 ) -> None:
+    _check_op_type(op)
     _check_sequence_type(inputs)
     _check_sequence_type(outputs)
     torch._C._nccl_reduce_scatter(inputs, outputs, op, streams, comms)

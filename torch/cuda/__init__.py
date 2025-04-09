@@ -1682,7 +1682,7 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse, tunable
+from . import amp, jiterator, nvtx, profiler, sparse, tunable, nccl
 
 
 __all__ = [
