@@ -1,97 +1,130 @@
 import logging
-from typing import Any, Callable, Dict
+
+from typing import Any, Callable
 
 import torch
+
+from torch._dynamo.testing import rand_strided
+from torch._dynamo.utils import preserve_rng_state
+
 from torch._inductor import ir
-from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import Buffer, Layout
-from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
 
+from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.runtime.benchmarking import benchmarker
 
 log = logging.getLogger(__name__)
 
+def generate_inputs(node) -> torch.Tensor:
+    size = V.graph.sizevars.size_hints(
+        node.get_size(),
+    )
+    stride = V.graph.sizevars.size_hints(
+        node.get_stride(),
+    )
+    device = node.get_device()
+    dtype = node.get_dtype()
+    extra_size = node.layout.offset
+    allocation_size = V.graph.sizevars.size_hints(
+        V.graph.get_allocation_size(node),
+    )
+
+    with preserve_rng_state():
+        if allocation_size is None or allocation_size == size:
+            return rand_strided(
+                size,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=extra_size,
+            )
+        else:
+            return rand_strided(
+                allocation_size,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=extra_size,
+            ).as_strided(size, stride)
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
-    def __init__(
-        self,
-        name: str,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        description: str,
-        gm: torch.fx.GraphModule,
-        example_inputs: list[Any],
-    ) -> None:
+    """
+    Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary
+    GraphModule. Compiles the Subgraph down to a module for benchmarking.
+    """
+    def __init__(self, name, input_nodes, layout, description, gm, example_inputs):
         super().__init__(name, input_nodes, layout, description)
-        self.gm: torch.fx.GraphModule = gm
-        self.example_inputs: list[Any] = example_inputs
+        self.gm = gm
+        self.example_inputs = example_inputs
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor):
+    def benchmark(self, *args, out):
+        # Codegen Subgraph for benchmarking
+        # Need GraphLowering instead of SubgraphLowering to generate
+        # fully callable module
+        from torch._inductor.graph import GraphLowering
         import torch._inductor.config as inductor_config
-        from torch._inductor.compile_fx import compile_fx_inner
 
-        # Call the subgraph function with the inputs and output
-        with V.fake_mode as fake_mode:
-            fake_inputs = []
+        bm_graph_lowering = GraphLowering(
+            gm=self.gm,
+            example_inputs=self.example_inputs,
+            shape_env=V.graph._shape_env,
+            cpp_wrapper=V.graph.cpp_wrapper,
+            aot_mode=V.graph.aot_mode,
+            extern_node_serializer=V.graph.extern_node_serializer,
+            is_inference=V.graph.is_inference,
+            is_backward=V.graph.is_backward,
+            name=f"benchmark_{self.name}",
+        )
 
-            for arg in self.example_inputs:
-                if isinstance(arg, torch.Tensor):
-                    fake_inputs.append(fake_mode.from_tensor(arg))
-                else:
-                    fake_inputs.append(arg)
+        with V.set_graph_handler(bm_graph_lowering):
+            # Don't bother autotuning on Triton here
+            with inductor_config.patch(
+                max_autotune=False,
+                max_autotune_gemm=False,
+                max_autotune_gemm_backends="ATEN",
+            ):
+                bm_graph_lowering.run(*self.example_inputs)
+                mod = bm_graph_lowering.compile_to_module()
+                bm_func = mod.call
+                bm_func([*args])
 
-        # Don't bother autotuning on Triton here
-        with inductor_config.patch(
-            max_autotune=False,
-            max_autotune_gemm=False,
-            max_autotune_gemm_backends="ATEN",
-        ):
-            benchmark_gm = compile_fx_inner(self.gm, fake_inputs)
-            context = torch._guards.TracingContext.try_get()
+        out.copy_(bm_func([*args])[0])
 
-            if context:
-                # Reset output strides with nested compilation
-                context.output_strides = []
+        return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
 
-        out.copy_(benchmark_gm([*args])[0])
-
-        return benchmarker.benchmark_gpu(lambda: benchmark_gm([*args]))
-
-    def hash_key(self) -> str:
+    def hash_key(self):
         return "-".join(
             [
                 self.name,
-                *[
-                    str(arg.shape)
-                    for arg in self.example_inputs
-                    if isinstance(arg, torch.Tensor)
-                ],
+                *[str(arg.shape) for arg in self.example_inputs if isinstance(arg, torch.Tensor)],
+                str(self.gm.graph)
             ]
         )
 
-    def output_node(self) -> ir.TensorBox:
+    
+    def output_node(self):
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
                 input_nodes=self.input_nodes,
                 gm=self.gm,
                 example_inputs=self.example_inputs,
+                subgraph_name=self.name,
             )
         )
 
-    def info_dict(self) -> Dict[str, Any]:
+    def info_dict(self):
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "subgraph",
             "kernel_name": self.name,
         }
 
-    def autoheuristic_id(self) -> str:
+    def autoheuristic_id(self):
         return f"subgraph_{self.name}"
-
 
 class SubgraphTemplate(KernelTemplate):
     """
@@ -105,7 +138,7 @@ class SubgraphTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        make_fx_graph: Callable[..., Any],
+        make_fx_graph: Callable,
     ):
         """
         Initialize a subgraph template.
@@ -117,14 +150,21 @@ class SubgraphTemplate(KernelTemplate):
         self.name = name
         self.make_fx_graph = make_fx_graph
 
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        example_inputs: list[Any],
-        **kwargs: Any,
-    ) -> SubgraphChoiceCaller:
+    def generate(self, input_nodes, layout, example_inputs, **kwargs: Any) -> SubgraphChoiceCaller:
+        """
+        Generate a SubgraphChoiceCaller instance for autotuning.
+
+        Args:
+            input_nodes: List of input nodes to the subgraph
+            layout: Memory layout information for the output
+            example_inputs: Example tensor inputs used to trace and benchmark the subgraph
+            **kwargs: Additional keyword arguments
+
+        Returns:
+            SubgraphChoiceCaller: A callable object that can be used for autotuning
+        """
         gm = self.make_fx_graph(*example_inputs)
+
 
         return SubgraphChoiceCaller(
             name=self.name,
