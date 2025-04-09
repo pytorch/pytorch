@@ -4768,7 +4768,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(graph.code).strip(),
             """\
-def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
+def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
@@ -6649,6 +6649,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch.manual_seed(54321)
         torch.cuda.manual_seed_all(54321)
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+
+        # https://github.com/pytorch/pytorch/issues/147171
+        torch._inductor.config.fallback_random = True
 
         for backend in ["eager", "aot_eager"]:
             torch.manual_seed(54321)
