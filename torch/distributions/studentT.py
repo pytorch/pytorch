@@ -39,6 +39,9 @@ class StudentT(Distribution):
     }
     support = constraints.real
     has_rsample: bool = True
+    df: Tensor
+    loc: Tensor
+    scale: Tensor
 
     @property
     def mean(self) -> Tensor:

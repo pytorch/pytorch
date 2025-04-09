@@ -34,6 +34,9 @@ class Pareto(TransformedDistribution):
         "alpha": constraints.positive,
         "scale": constraints.positive,
     }
+    alpha: Tensor
+    scale: Tensor
+    base_distribution: Exponential
 
     def __init__(
         self,

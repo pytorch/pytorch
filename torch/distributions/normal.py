@@ -39,6 +39,8 @@ class Normal(ExponentialFamily):
     support = constraints.real
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+    loc: Tensor
+    scale: Tensor
 
     @property
     def mean(self) -> Tensor:

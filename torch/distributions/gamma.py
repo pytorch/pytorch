@@ -42,6 +42,8 @@ class Gamma(ExponentialFamily):
     support = constraints.nonnegative
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+    concentration: Tensor
+    rate: Tensor
 
     @property
     def mean(self) -> Tensor:

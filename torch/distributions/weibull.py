@@ -37,6 +37,9 @@ class Weibull(TransformedDistribution):
         "concentration": constraints.positive,
     }
     support = constraints.positive  # type: ignore[assignment]
+    scale: Tensor
+    concentration: Tensor
+    concentration_reciprocal: Tensor
 
     def __init__(
         self,

@@ -48,6 +48,8 @@ class Kumaraswamy(TransformedDistribution):
     }
     support = constraints.unit_interval  # type: ignore[assignment]
     has_rsample: bool = True
+    concentration0: Tensor
+    concentration1: Tensor
 
     def __init__(
         self,

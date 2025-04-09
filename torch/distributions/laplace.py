@@ -35,6 +35,8 @@ class Laplace(Distribution):
     }
     support = constraints.real
     has_rsample: bool = True
+    loc: Tensor
+    scale: Tensor
 
     @property
     def mean(self) -> Tensor:

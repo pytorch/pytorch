@@ -96,6 +96,9 @@ class LowRankMultivariateNormal(Distribution):
     }
     support = constraints.real_vector
     has_rsample: bool = True
+    loc: Tensor
+    cov_factor: Tensor
+    cov_diag: Tensor
 
     def __init__(
         self,

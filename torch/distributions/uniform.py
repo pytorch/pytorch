@@ -36,6 +36,8 @@ class Uniform(Distribution):
         "high": constraints.dependent(is_discrete=False, event_dim=0),
     }
     has_rsample: bool = True
+    low: Tensor
+    high: Tensor
 
     @property
     def mean(self) -> Tensor:

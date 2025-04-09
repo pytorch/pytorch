@@ -74,6 +74,7 @@ class Wishart(ExponentialFamily):
     support = constraints.positive_definite
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+    df: Tensor
 
     def __init__(
         self,

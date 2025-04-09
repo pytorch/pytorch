@@ -36,6 +36,8 @@ class FisherSnedecor(Distribution):
     }
     support = constraints.positive
     has_rsample: bool = True
+    df1: Tensor
+    df2: Tensor
 
     def __init__(
         self,

@@ -32,6 +32,7 @@ class Exponential(ExponentialFamily):
     support = constraints.nonnegative
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+    rate: Tensor
 
     @property
     def mean(self) -> Tensor:

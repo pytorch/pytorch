@@ -64,6 +64,8 @@ class LKJCholesky(Distribution):
 
     arg_constraints: dict[str, Constraint] = {"concentration": constraints.positive}
     support = constraints.corr_cholesky
+    dim: int
+    concentration: Tensor
 
     def __init__(
         self,

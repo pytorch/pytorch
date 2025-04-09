@@ -134,6 +134,8 @@ class VonMises(Distribution):
     }
     support = constraints.real
     has_rsample: bool = False
+    loc: Tensor
+    concentration: Tensor
 
     def __init__(
         self,
