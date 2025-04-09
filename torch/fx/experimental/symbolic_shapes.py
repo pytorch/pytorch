@@ -1196,12 +1196,7 @@ def guard_or_false(a: BoolLikeType) -> bool:
     Try to guard a, if data dependent error encountered just return false.
     """
     if torch.fx.experimental._config.backed_size_oblivious:
-        result = _static_eval(a)
-
-        if result is not None:
-            return result
-        else:
-            return False
+        return statically_known_true(a)
     else:
         try:
             return bool(guard_bool(a))
