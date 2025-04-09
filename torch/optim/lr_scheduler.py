@@ -571,6 +571,13 @@ class ConstantLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.025   if epoch == 0
+        >>> # lr = 0.025   if epoch == 1
+        >>> # lr = 0.025   if epoch == 2
+        >>> # lr = 0.025   if epoch == 3
+        >>> # ...
+        >>> # lr = 0.05    if epoch >= 40
         >>> scheduler = ConstantLR(optimizer, factor=0.5, total_iters=40)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -638,6 +645,13 @@ class LinearLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.003687  if epoch == 0
+        >>> # lr = 0.004875  if epoch == 1
+        >>> # lr = 0.006062  if epoch == 2
+        >>> # lr = 0.00725   if epoch == 3
+        >>> # ...
+        >>> # lr = 0.05      if epoch >= 40
         >>> scheduler = LinearLR(optimizer, start_factor=0.05, total_iters=40)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -764,6 +778,14 @@ class SequentialLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.005     if epoch == 0
+        >>> # lr = 0.005     if epoch == 1
+        >>> # lr = 0.005     if epoch == 2
+        >>> # ...
+        >>> # lr = 0.05      if epoch == 20
+        >>> # lr = 0.045     if epoch == 21
+        >>> # lr = 0.0405    if epoch == 22
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[20])
@@ -901,6 +923,12 @@ class PolynomialLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP("undefined vars")
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.0490   if epoch == 0
+        >>> # lr = 0.0481   if epoch == 1
+        >>> # lr = 0.0472   if epoch == 2
+        >>> # ...
+        >>> # lr = 0.0      if epoch >= 50
         >>> scheduler = PolynomialLR(optimizer, total_iters=50, power=0.9)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -1056,6 +1084,14 @@ class ChainedScheduler(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.05      if epoch == 0
+        >>> # lr = 0.0450    if epoch == 1
+        >>> # lr = 0.0405    if epoch == 2
+        >>> # ...
+        >>> # lr = 0.00675   if epoch == 19
+        >>> # lr = 0.06078   if epoch == 20
+        >>> # lr = 0.05470   if epoch == 21
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2], optimizer=optimizer)
