@@ -373,8 +373,9 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            tx.output.side_effects.mutation(self)
-            arg.force_apply_to_var_sequence(tx, self.items.append)
+            arg.force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "append", [item], {})
+            )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             assert not kwargs
@@ -615,9 +616,8 @@ class DequeVariable(CommonListMethodsVariable):
             assert not kwargs
             # NOTE this is inefficient, but the alternative is to represent self.items
             # as a deque, which is a more intrusive change.
-            tx.output.side_effects.mutation(self)
             args[0].force_apply_to_var_sequence(
-                tx, lambda item: self.items.insert(0, item)
+                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
             )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
