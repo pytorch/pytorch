@@ -110,7 +110,7 @@ def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Nod
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
     matches_items_reversed: list[tuple[str, _MatchResult]] = list(
-        reversed(list(matches.items()))
+        reversed(matches.items())
     )
 
     # Note: the order is important.  `matches` currently provides the matches
