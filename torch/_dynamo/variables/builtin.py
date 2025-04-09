@@ -794,8 +794,8 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
-            # GeneratorExit doens't inherit from Exception
+            issubclass(fn, BaseException)
+            # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
             or fn is GeneratorExit
@@ -893,7 +893,9 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        unimplemented(f"constant fold exception: {repr(exc)}")
+                        raise_observed_exception(
+                            type(exc), tx, args=[ConstantVariable(a) for a in exc.args]
+                        )
                     return VariableTracker.build(tx, res)
 
             else:
@@ -909,7 +911,11 @@ class BuiltinVariable(VariableTracker):
                                 },
                             )
                         except Exception as exc:
-                            unimplemented(f"constant fold exception: {repr(exc)}")
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=[ConstantVariable(a) for a in exc.args],
+                            )
                         return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
@@ -1273,7 +1279,7 @@ class BuiltinVariable(VariableTracker):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
             else:
-                value = ", ".join(a.as_python_constant() for a in arg.args)
+                value = ", ".join(str(a.as_python_constant()) for a in arg.args)
             return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
