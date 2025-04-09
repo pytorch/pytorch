@@ -41,7 +41,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "at::BFloat16",
-    torch.complex32: "at::complex<half>",
+    torch.complex32: "at::complex<at::Half>",
     torch.complex64: "at::complex<float>",
     torch.complex128: "at::complex<double>",
     torch.float8_e4m3fn: "at::Float8_e4m3fn",
