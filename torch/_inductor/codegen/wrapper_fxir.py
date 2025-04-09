@@ -185,7 +185,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Removes the buffer from the symbol table.
         """
         name = buffer.get_name()
-        node = self.buffer_to_node[name]
         del self.buffer_to_node[name]
 
     def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -236,7 +235,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
                 # Use a WorkspaceArg for this.
                 buffer = self._get_buffer(node.data)
-                assert isinstance(buffer, BufferLike)
+                assert isinstance(buffer, (ir.Buffer, WorkspaceArg))
                 input_name = buffer.get_name()
                 unique_suffix = self._get_unique_symbol(input_name)
                 device = buffer.get_device()
