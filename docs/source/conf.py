@@ -116,10 +116,11 @@ if RELEASE:
     # Note: the release candidates should no longer have the aHASH suffix, but in any
     # case we wish to leave only major.minor, even for rc builds.
     version = ".".join(torch_version.split(".")[:2])
-    # html_title = " ".join((project, version, "documentation"))
+    html_title = " ".join((project, version, "documentation"))
     release = version
 
 switcher_version = "main" if not RELEASE else version
+
 html_static_path = ["_static"]
 html_theme_options = {
     "logo": {"text": "Home"},
@@ -167,6 +168,9 @@ html_theme_options = {
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
+    "version_info": {
+        "main": version,
+    },
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()

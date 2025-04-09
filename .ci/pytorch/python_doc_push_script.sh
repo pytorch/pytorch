@@ -119,11 +119,6 @@ popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
 
-# Prevent Google from indexing $install_path/_modules. This folder contains
-# generated source files.
-# NB: the following only works on gnu sed. The sed shipped with mac os is different.
-# One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
-
 git add "$install_path" || true
 git status
 git config user.email "soumith+bot@pytorch.org"
