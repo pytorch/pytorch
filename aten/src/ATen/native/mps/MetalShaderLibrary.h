@@ -24,7 +24,6 @@ typedef void* MTLComputeCommandEncoder_t;
 // Forward declaration of TensorBase and TensorIteratorBase
 namespace at {
 class TensorBase;
-class Tensor;
 struct TensorIteratorBase;
 } // namespace at
 
@@ -47,6 +46,9 @@ constexpr bool has_size_type_v = has_size_type<T>::value;
 
 } // namespace detail
 
+// Returns `gpuAddress` of respective `id<MTLBuffer>` plus storage offset
+void* get_tensor_gpu_address(const at::TensorBase&);
+
 class MetalKernelFunction {
  public:
   MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_);
@@ -61,7 +63,6 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
-  void setArgumentBuffer(unsigned idx, const std::vector<at::Tensor>& elemns);
   template <
       typename T,
       typename = std::enable_if_t<

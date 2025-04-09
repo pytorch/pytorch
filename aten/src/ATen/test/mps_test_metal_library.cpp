@@ -77,8 +77,10 @@ TEST(MPSTestMetalLibrary, ArgumentBuffers) {
   constexpr auto nbuffers = 64;
   const auto size = 32;
   std::vector<at::Tensor> ibuffers;
+  std::vector<void *> ibuffers_gpu_ptrs;
   for([[maybe_unused]] auto idx: c10::irange(nbuffers)) {
     ibuffers.push_back(torch::rand({size}, at::device(at::kMPS)));
+    ibuffers_gpu_ptrs.push_back(get_tensor_gpu_address(ibuffers.back()));
   }
   auto output = torch::empty({size}, at::device(at::kMPS));
   DynamicMetalShaderLibrary lib(R"MTL(
@@ -98,7 +100,7 @@ TEST(MPSTestMetalLibrary, ArgumentBuffers) {
   func->runCommandBlock([&] {
      func->startEncoding();
      func->setArg(0, output);
-     func->setArgumentBuffer(1, ibuffers);
+     func->setArg(1, ibuffers_gpu_ptrs);
      func->dispatch(size);
   });
   // Compute sum of all 64 input tensors

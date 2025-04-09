@@ -1155,12 +1155,8 @@ uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
   return [cps staticThreadgroupMemoryLength];
 }
 
-void MetalKernelFunction::setArgumentBuffer(unsigned idx, const std::vector<at::Tensor>& tv) {
-  auto arg_encoder = [func newArgumentEncoderWithBufferIndex:idx];
-  TORCH_CHECK(encoder, "Failed to create argument buffer encoder")
-  for (auto idx : c10::irange(tv.size())) {
-    mtl_setBuffer(arg_encoder, tv[idx], idx);
-  }
+void* get_tensor_gpu_address(const at::TensorBase& t) {
+  return reinterpret_cast<void*>(getMTLBufferStorage(t).gpuAddress + t.storage_offset() * t.element_size());
 }
 
 } // namespace at::native::mps
