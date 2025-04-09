@@ -13145,7 +13145,17 @@ class TestAutogradStreamSynchronization(TestCase):
         # Gradient 2: cuda:1    s2
         #
         # Accumulation stream: s2 since it is scheduled first
-        class Producer(torch.autograd.Function):
+        class ProducerFast(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                out = gO.clone()
+                return out * 2
+
+        class ProducerSlow(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
                 return x.clone()
@@ -13154,16 +13164,18 @@ class TestAutogradStreamSynchronization(TestCase):
             def backward(ctx, gO):
                 out = gO.clone()
                 torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
-                return out.add_(1)
+                return out.mul_(2)
 
         class Consumer(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
+                ctx.node_stream = torch.cuda.current_stream(x.device)
                 return x.clone(), x.to("cuda:1")
 
             @staticmethod
             def backward(ctx, gO_0, gO_1):
-                return gO_1.to("cuda:0")
+                torch.cuda.current_stream(gO_1.device).wait_stream(ctx.node_stream)
+                return (gO_1 * 2).to("cuda:0")
 
         def test():
             self.synchronize_all_devices()
@@ -13180,12 +13192,12 @@ class TestAutogradStreamSynchronization(TestCase):
             s1.wait_stream(default_stream_1)
 
             with torch.cuda.stream(s1):
-                out1 = Producer.apply(b)
+                out1 = ProducerFast.apply(b)
 
             s2.wait_stream(default_stream_1)
 
             with torch.cuda.stream(s2):
-                out2 = Producer.apply(b)
+                out2 = ProducerSlow.apply(b)
 
             default_stream_1.wait_stream(s1)
             default_stream_1.wait_stream(s2)
@@ -13195,8 +13207,13 @@ class TestAutogradStreamSynchronization(TestCase):
 
             self.synchronize_all_devices()
 
-            # Expected result: a.grad = grad_out + 1 + grad_out + 1 = 4
-            self.assertEqual(a.grad, torch.ones_like(a) * 4)
+            # If the accumulation stream does not wait for the slow producer stream
+            # the in-place mul-by-2 is performed on the accumulated buffer AFTER
+            # ProducerFast has already accumulated!
+            #
+            # Correct: (1.mul_(2) + 2) * 2 = 8
+            # Incorrect: (1 + 2).mul_(2) * 2 = 12
+            self.assertEqual(a.grad, torch.ones_like(a) * 8)
 
         for _ in range(2):
             test()
