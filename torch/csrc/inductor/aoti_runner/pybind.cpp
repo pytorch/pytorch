@@ -31,6 +31,9 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCpu::getConstantNamesToDtypes)
       .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerCpu::extract_constants_map)
+      .def(
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCpu::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
@@ -64,6 +67,9 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCuda::getConstantNamesToDtypes)
       .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerCuda::extract_constants_map)
+      .def(
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCuda::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
@@ -96,6 +102,9 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerXpu::getConstantNamesToDtypes)
+      .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerXpu::extract_constants_map)
       .def(
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerXpu::*)(
