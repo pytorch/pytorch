@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
 )
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -293,6 +294,10 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+            )
         return gm
 
 
@@ -816,4 +821,10 @@ class FunctionalizeCtxWrapper:
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        if isinstance(self.subgraph, torch.fx.GraphModule):
+            # Running graph with interpreter is needed for propagating the stack_trace
+            with fx_traceback.preserve_node_meta():
+                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
+                    *args, **kwargs
+                )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
