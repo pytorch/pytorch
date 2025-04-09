@@ -251,7 +251,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
-        torch.cuda.manual_seed(self.rank)
+        torch.manual_seed(self.rank)
         object_list = [torch.initial_seed()]
         broadcast_object_list(object_list)
         seed_from_rank_0 = int(object_list[0])
