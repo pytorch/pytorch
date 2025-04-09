@@ -2410,7 +2410,7 @@ class AOTInductorTestsTemplate:
                 out = torch.empty_like(a)
                 backed = a.size(0)
                 unbacked = int(ranks.max())
-                scaling_factor = minmax(100_000, backed, unbacked)
+                scaling_factor = minmax(backed, unbacked, 100)
                 add_kernel_with_scaling[(n_elements,)](
                     a,
                     b,
