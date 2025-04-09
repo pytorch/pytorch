@@ -395,7 +395,7 @@ class FXGraphCacheLoadable:
             constants=constants,
         )
         if result is None:
-            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_info)
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
