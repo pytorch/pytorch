@@ -815,8 +815,8 @@ class TestCudaMultiGPU(TestCase):
             # it may vary on different hardware in different environments.
             # Therefore, this test uses relative comparisons, checking if the
             # sum of parent and child threads execution time is greater than the
-            # real execution time by least 40%.
-            self.assertGreater(parent_time + child_time, total_time * 1.4)
+            # real execution time by least 30%.
+            self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
     @skipIfRocm

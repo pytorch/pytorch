@@ -55,13 +55,6 @@ RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
 RUN rm install_protobuf.sh
 ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
-# (optional) Install database packages like LMDB and LevelDB
-ARG DB
-COPY ./common/install_db.sh install_db.sh
-RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
-RUN rm install_db.sh
-ENV INSTALLED_DB ${DB}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
@@ -75,7 +68,7 @@ COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
 RUN rm install_rocm_magma.sh
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh

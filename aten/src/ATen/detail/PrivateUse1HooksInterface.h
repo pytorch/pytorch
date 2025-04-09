@@ -23,6 +23,14 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
 
   ~PrivateUse1HooksInterface() override = default;
 
+  bool isBuilt() const override {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  bool isAvailable() const override {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
   const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);

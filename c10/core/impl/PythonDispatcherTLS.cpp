@@ -4,7 +4,7 @@
 
 namespace c10::impl {
 
-thread_local PyInterpreter* pythonDispatcherState;
+thread_local static PyInterpreter* pythonDispatcherState;
 
 void PythonDispatcherTLS::set_state(PyInterpreter* state) {
   if (state) {

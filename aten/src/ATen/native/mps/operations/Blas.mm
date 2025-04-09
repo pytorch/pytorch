@@ -81,6 +81,12 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
         castSelf = selfTensor;
         castOther = otherTensor;
       }
+      if (self.is_conj()) {
+        castSelf = [mpsGraph conjugateWithTensor:selfTensor name:nil];
+      }
+      if (other.is_conj()) {
+        castOther = [mpsGraph conjugateWithTensor:otherTensor name:nil];
+      }
 
       MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
                                                       secondaryTensor:castOther

@@ -151,6 +151,22 @@ def vector_norm(
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if (dim is None and x.numel() == 1) or (
+            dim is not None and (x.ndim > 0 and all(x.shape[d] == 1 for d in dim))
+        ):
+            if x.ndim > 64:
+                raise RuntimeError(
+                    f"Received a tensor with {x.ndim} dimensions, but only tensors with up to 64 dims are supported!"
+                )
+            x = torch.abs(x)
+            if keepdim or x.ndim == 0:
+                return to_result_dtype(x).contiguous()
+            elif dim is None:
+                return x.flatten()[0]
+            else:
+                new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
+                return to_result_dtype(x.view(new_shape)).contiguous()
+
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]

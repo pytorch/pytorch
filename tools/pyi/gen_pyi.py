@@ -1378,6 +1378,7 @@ def gen_pyi(
             "float8_e5m2",
             "float8_e5m2fnuz",
             "float8_e8m0fnu",
+            "float4_e2m1fn_x2",
             "half",
             "uint8",
             "uint16",

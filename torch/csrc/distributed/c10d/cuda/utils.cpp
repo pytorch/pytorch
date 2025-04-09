@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)

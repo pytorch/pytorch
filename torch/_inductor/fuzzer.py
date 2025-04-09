@@ -174,6 +174,7 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
     "autoheuristic_collect": ["pad_mm", "mixed_mm"],
     "autoheuristic_use": ["pad_mm", "mixed_mm"],
     "traceable_tensor_subclasses": [OrderedSet()],
+    "nontraceable_tensor_subclasses": [OrderedSet()],
 }
 SamplingType = Callable[[str, type[Any], Any], Any]
 
@@ -499,6 +500,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
+        "nontraceable_tensor_subclasses": DEFAULT,  # Typing
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
         "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
         "suppress_errors": DEFAULT,
@@ -811,6 +813,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(

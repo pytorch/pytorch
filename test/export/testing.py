@@ -257,9 +257,9 @@ def expectedFailureTrainingIRToRunDecompNonStrict(fn):
     return fn
 
 
-# Controls tests generated in test/export/test_export_nonstrict.py
-def expectedFailureNonStrict(fn):
-    fn._expected_failure_non_strict = True
+# Controls tests generated in test/export/test_export_strict.py
+def expectedFailureStrict(fn):
+    fn._expected_failure_strict = True
     return fn
 
 
@@ -304,6 +304,11 @@ def expectedFailureCppSerDes(fn):
 
 def expectedFailureCppRuntime(fn):
     fn._expected_failure_cpp_runtime = True
+    return fn
+
+
+def expectedFailureCppRuntimeNonStrict(fn):
+    fn._expected_failure_cpp_runtime_non_strict = True
     return fn
 
 

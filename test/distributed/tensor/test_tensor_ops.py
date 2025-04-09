@@ -649,8 +649,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         global_out.backward(gradient=torch.ones_like(global_out))
         with comm_mode:
-            sharded_out_grad = torch.distributed._tensor.ones(
-                sharded_out.shape, device_mesh=mesh, placements=[Shard(1)]
+            sharded_out_grad = torch.distributed.tensor.ones(
+                sharded_out.shape, device_mesh=mesh, placements=shard_spec
             )
             sharded_out.backward(gradient=sharded_out_grad)
 

@@ -136,6 +136,9 @@ def complete_wheel(folder: str) -> str:
     """
     wheel_name = list_dir(f"/{folder}/dist")[0]
 
+    # Please note for cuda we don't run auditwheel since we use custom script to package
+    # the cuda dependencies to the wheel file using update_wheel() method.
+    # However we need to make sure filename reflects the correct Manylinux platform.
     if "pytorch" in folder and not enable_cuda:
         print("Repairing Wheel with AuditWheel")
         check_call(["auditwheel", "repair", f"dist/{wheel_name}"], cwd=folder)
@@ -147,7 +150,14 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/dist/{repaired_wheel_name}",
         )
     else:
-        repaired_wheel_name = wheel_name
+        repaired_wheel_name = wheel_name.replace(
+            "linux_aarch64", "manylinux_2_28_aarch64"
+        )
+        print(f"Renaming {wheel_name} wheel to {repaired_wheel_name}")
+        os.rename(
+            f"/{folder}/dist/{wheel_name}",
+            f"/{folder}/dist/{repaired_wheel_name}",
+        )
 
     print(f"Copying {repaired_wheel_name} to artifacts")
     shutil.copy2(

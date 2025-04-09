@@ -2694,20 +2694,16 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
 
   int64_t left_size_condition = left ? -2 : -1;
   TORCH_CHECK(
-      other.size(left_size_condition) >= tau.size(-1),
-      "torch.ormqr: other.shape[",
-      left_size_condition,
-      "] must be greater than or equal to tau.shape[-1]");
-
-  TORCH_CHECK(
       other.size(left_size_condition) == input.size(-2),
       "torch.ormqr: other.shape[",
       left_size_condition,
       "] must be equal to input.shape[-2]");
 
   TORCH_CHECK(
-      tau.size(-1) <= input.size(-1),
-      "torch.ormqr: tau.shape[-1] must be less than or equal to input.shape[-1]");
+      std::min(other.size(left_size_condition), input.size(-1)) == tau.size(-1),
+      "torch.ormqr: tau.shape[-1] must be equal to min(other.shape[",
+      left_size_condition,
+      "], input.shape[-1])");
 
   TORCH_CHECK(
       input.dim() - tau.dim() == 1,
@@ -2716,6 +2712,7 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
       tau.dim(),
       " and input.ndim is equal to ",
       input.dim());
+
   TORCH_CHECK(
       input.dim() == other.dim(),
       "torch.ormqr: ",

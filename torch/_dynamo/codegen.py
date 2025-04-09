@@ -18,7 +18,7 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -54,6 +54,10 @@ from .variables.tensor import (
 from .variables.torch_function import TensorWithTFOverrideVariable
 
 
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslatorBase
+
+
 @dataclasses.dataclass
 class GraphOutputEntry:
     index: int
@@ -67,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx=None,
+        tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
@@ -345,10 +349,10 @@ class PyCodegen:
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
                     hints=[
-                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
                         "that Dynamo cannot reconstruct, then remove it from the return statement.",
                         *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
                 )

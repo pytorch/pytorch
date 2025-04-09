@@ -2236,7 +2236,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
         deps = [
-            ":subgraph",
             ":tables",
             ":prod_ukernels",
             third_party("cpuinfo"),
@@ -2247,6 +2246,13 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         },
         header_namespace = "",
         headers = get_xnnpack_headers(),
+        exported_deps = [
+            ":subgraph",
+        ],
+        compiler_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
             "-DXNN_NO_Q8_OPERATORS",

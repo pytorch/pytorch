@@ -576,6 +576,14 @@ def getitem_on_dict_manager(
 
 def match_on_id_for_tensor(guard):
     source = guard.originating_source
+    # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
+    # to a new tensor everytime and therefore id differs.
+    if isinstance(source, NumpyTensorSource):
+        return False
+
+    if guard.is_specialized_nn_module():
+        return True
+
     return source.is_dict_key() and not isinstance(source, GradSource)
 
 
@@ -1456,6 +1464,35 @@ class GuardBuilder(GuardBuilderBase):
             not invert, key, get_verbose_code_parts(code, guard)
         )
 
+    def BOOL_MATCH(self, guard: Guard):
+        # checks val == True or val == False
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert istype(val, bool)
+        code = [f"{ref} == {val!r}"]
+        self._set_guard_export_info(guard, code)
+
+        if val:
+            self.get_guard_manager(guard).add_true_match_guard(
+                get_verbose_code_parts(code, guard)
+            )
+        else:
+            self.get_guard_manager(guard).add_false_match_guard(
+                get_verbose_code_parts(code, guard)
+            )
+
+    def NONE_MATCH(self, guard: Guard):
+        # checks `val is None`
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert val is None
+        code = [f"{ref} is None"]
+        self._set_guard_export_info(guard, code)
+
+        self.get_guard_manager(guard).add_none_match_guard(
+            get_verbose_code_parts(code, guard)
+        )
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
@@ -1674,7 +1711,11 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None), types.CodeType)):
+        if istype(val, bool):
+            self.BOOL_MATCH(guard)
+        elif val is None:
+            self.NONE_MATCH(guard)
+        elif istype(val, types.CodeType):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -1943,11 +1984,20 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         if config.enable_cpp_symbolic_shape_guards:
-            # For exporting we need the python code parts
-            python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
-                ("python", "verbose_python", "cpp")
-            )
+            try:
+                # For exporting we need the python code parts
+                python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
+                    ("python", "verbose_python", "cpp")
+                )
+                python_fallback = False
+            except OverflowError:
+                # Cannot use int64_t
+                python_fallback = True
+                python_code_parts, verbose_code_parts = _get_code_parts(
+                    ("python", "verbose_python")
+                )
         else:
+            python_fallback = True
             python_code_parts, verbose_code_parts = _get_code_parts(
                 ("python", "verbose_python")
             )
@@ -1963,11 +2013,10 @@ class GuardBuilder(GuardBuilderBase):
         if compile_context := CompileContext.try_get():
             compile_context.shape_env_guards.extend(verbose_code_parts.exprs)
 
-        if config.enable_cpp_symbolic_shape_guards:
-            import ctypes
+        int_source_to_symbol = []
+        float_source_to_symbol = []
 
-            from torch._inductor.codecache import CppCodeCache
-
+        if not python_fallback:
             assert cpp_code_parts  # type: ignore[possibly-undefined]
             code_parts, source_to_symbol = (
                 cpp_code_parts.exprs,
@@ -1977,10 +2026,6 @@ class GuardBuilder(GuardBuilderBase):
             if not code_parts:
                 return
 
-            int_source_to_symbol = []
-            float_source_to_symbol = []
-
-            python_fallback = False
             for source, symbol in source_to_symbol.items():
                 if isinstance(source, ConstantSource):
                     python_fallback = True
@@ -1998,62 +2043,78 @@ class GuardBuilder(GuardBuilderBase):
                         # int64_t/double in C++ guards for now.
                         python_fallback = True
 
-            if not python_fallback:
-                source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
-                try:
-                    guard_managers = [
-                        self.get_guard_manager_from_source(IndexedSource(source, i))
-                        for i, source in enumerate(source_to_symbol)
-                    ]
+        if not python_fallback:
+            import ctypes
 
-                    int_symbols_str = ", ".join(
-                        f"{symbol} = int_values[{i}]"
-                        for i, (_, symbol) in enumerate(int_source_to_symbol)
-                    )
-                    float_symbols_str = ", ".join(
-                        f"{symbol} = float_values[{i}]"
-                        for i, (_, symbol) in enumerate(float_source_to_symbol)
-                    )
+            from torch._inductor.codecache import CppCodeCache
 
-                    if int_symbols_str:
-                        int_symbols_str = f"int64_t {int_symbols_str};"
-                    if float_symbols_str:
-                        float_symbols_str = f"double {float_symbols_str};"
+            assert cpp_code_parts  # type: ignore[possibly-undefined]
+            code_parts, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
 
-                    func_str = textwrap.dedent(
-                        f"""
-                    #include <cstdint>
-                    #include <cmath>
-                    #include <c10/util/generic_math.h>
+            source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
+            try:
+                guard_managers = [
+                    self.get_guard_manager_from_source(IndexedSource(source, i))
+                    for i, source in enumerate(source_to_symbol)
+                ]
 
-                    extern "C" int8_t guard(int64_t *int_values, double *float_values) {{
-                      {int_symbols_str}
-                      {float_symbols_str}
-                      return ({") && (".join(code_parts)});
-                    }}
-                    """
-                    )
-                    guards_log.debug(
-                        "C++ shape guard function: %s %s",
-                        func_str,
-                        verbose_code_parts.exprs,
-                    )
-                    clib = CppCodeCache.load(func_str)
-                    cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
-                    assert cguard
-                except torch._inductor.exc.InvalidCxxCompiler:
-                    # No valid C++ compiler to compile the shape guard
-                    pass
-                else:
-                    install_symbolic_shape_guard(
-                        guard_managers,
-                        len(int_source_to_symbol),
-                        len(float_source_to_symbol),
-                        cguard,
-                        clib,
-                        verbose_code_parts.exprs,
-                    )
-                    return
+                int_symbols_str = ", ".join(
+                    f"{symbol} = int_values[{i}]"
+                    for i, (_, symbol) in enumerate(int_source_to_symbol)
+                )
+                float_symbols_str = ", ".join(
+                    f"{symbol} = float_values[{i}]"
+                    for i, (_, symbol) in enumerate(float_source_to_symbol)
+                )
+
+                if int_symbols_str:
+                    int_symbols_str = f"int64_t {int_symbols_str};"
+                if float_symbols_str:
+                    float_symbols_str = f"double {float_symbols_str};"
+
+                func_str = textwrap.dedent(
+                    f"""
+                #include <cstdint>
+                #include <cmath>
+                #include <c10/util/generic_math.h>
+
+                #if defined(_MSC_VER)
+                #  define EXTERN_DLL_EXPORT extern "C" __declspec(dllexport)
+                #else
+                #  define EXTERN_DLL_EXPORT extern "C"
+                #endif
+
+                EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {{
+                  {int_symbols_str}
+                  {float_symbols_str}
+                  return ({") && (".join(code_parts)});
+                }}
+                """
+                )
+                guards_log.debug(
+                    "C++ shape guard function: %s %s",
+                    func_str,
+                    verbose_code_parts.exprs,
+                )
+                clib = CppCodeCache.load(func_str)
+                cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
+                assert cguard
+            except torch._inductor.exc.InvalidCxxCompiler:
+                # No valid C++ compiler to compile the shape guard
+                pass
+            else:
+                install_symbolic_shape_guard(
+                    guard_managers,
+                    len(int_source_to_symbol),
+                    len(float_source_to_symbol),
+                    cguard,
+                    clib,
+                    verbose_code_parts.exprs,
+                )
+                return
 
         # Install all the symbolic guards in one python lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
@@ -2071,12 +2132,7 @@ class GuardBuilder(GuardBuilderBase):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
-        # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-        # to a new tensor everytime and therefore id differs.
-        if (
-            guard.is_specialized_nn_module()
-            and not isinstance(guard.originating_source, NumpyTensorSource)
-        ) or match_on_id_for_tensor(guard):
+        if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -2134,10 +2190,12 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
+                # For numpy tensors, since those are ephemeral, we dont have to
+                # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
                     and istype(value, torch.nn.Parameter)
-                ):
+                ) and not isinstance(guard.originating_source, NumpyTensorSource):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
@@ -2841,6 +2899,19 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
+def strip_local_scope(s: str) -> str:
+    """
+    Replace occurrences of L[...] with just the inner content.
+    Handles both single and double quotes.
+
+    This is to generate user friendly recompilation messages.
+    """
+    import re
+
+    pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
+    return re.sub(pattern, r"\1", s)
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
@@ -2905,7 +2976,7 @@ def get_guard_fail_reason_helper(
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return reason_str
+    return strip_local_scope(reason_str)
 
 
 def get_guard_fail_reason(

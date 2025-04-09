@@ -1615,7 +1615,7 @@ Arguments:
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
-    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
+    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
 Example::
     >>> import torch.distributed as dist
@@ -2512,6 +2512,10 @@ Arguments:
               "supports_coalescing",
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
+          .def_property_readonly(
+              "supports_time_estimate",
+              &::c10d::Backend::supportsTimeEstimation,
+              "(test whether the backend supports collective time estimation)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -3001,6 +3005,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
+              "_start_time_estimate",
+              &::c10d::ProcessGroupNCCL::startTimeEstimate)
+          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
+          .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def(
@@ -3236,10 +3244,11 @@ Example::
       .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
+
   auto work =
       py::class_<
           ::c10d::Work,
-          c10::intrusive_ptr<::c10d::Work>,
+          IntrusivePtrNoGilDestructor<::c10d::Work>,
           ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
 A `Work` object represents the handle to a pending asynchronous operation in
 PyTorch's distributed package. It is returned by non-blocking collective operations,

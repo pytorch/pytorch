@@ -212,9 +212,9 @@ def hardswish(self: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
-        self < -3,
+        self <= -3,
         0.0,
-        torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
+        torch.where(self < 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
 
@@ -1482,7 +1482,7 @@ def _addmm_activation(
 
 
 @register_decomposition(aten.addmv)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -4338,7 +4338,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def mv(self, vec):
     torch._check(
@@ -5031,7 +5031,7 @@ def register_inplace(aten_op, outplace_op):
 
 
 @register_decomposition([aten.baddbmm])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():

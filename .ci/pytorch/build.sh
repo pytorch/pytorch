@@ -35,7 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
     # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
@@ -277,10 +277,8 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install numpy==2.0.2
-      fi
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 

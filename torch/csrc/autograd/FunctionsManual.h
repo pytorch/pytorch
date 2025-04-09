@@ -306,6 +306,22 @@ at::Tensor mm_mat2_backward(
     at::SymIntArrayRef strides,
     c10::Layout layout,
     const at::Scalar& alpha);
+at::Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha);
+at::Tensor _grouped_mm_mat2_backward(
+    const at::Tensor& grad,
+    const at::Tensor& mat1,
+    at::SymIntArrayRef sizes,
+    at::SymIntArrayRef strides,
+    c10::Layout layout,
+    std::optional<Tensor> offs,
+    const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,
@@ -631,11 +647,18 @@ Tensor linalg_eig_backward(
     const Tensor& V,
     const bool is_hermitian,
     const bool symeig_eigenvectors = true);
-Tensor linalg_lstsq_jvp(
+Tensor linalg_lstsq_solution_jvp(
     const Tensor& A,
-    const Tensor& B,
+    const Tensor& B_,
     const Tensor& dA,
-    const Tensor& dB);
+    const Tensor& dB_);
+Tensor linalg_lstsq_residuals_jvp(
+    const Tensor& A,
+    const Tensor& B_,
+    const Tensor& dA,
+    const Tensor& dB_,
+    const Tensor& X_,
+    const Tensor& L);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor& grad_x,
     const Tensor& grad_m,
@@ -887,9 +910,11 @@ Tensor linalg_det_jvp(
     const Tensor& pivots,
     const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-    const Tensor& grad,
+    const Tensor& gX_,
+    const Tensor& gL,
     const Tensor& A,
     const Tensor& B_,
+    const Tensor& X_,
     const std::array<bool, 2>& grad_input_mask);
 Tensor linalg_lu_backward(
     const Tensor& L_grad,

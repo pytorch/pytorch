@@ -219,8 +219,8 @@ class UvTcpServer : public UvTcpSocket {
     res->handleReady();
     try {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
-      TORCH_CHECK_WITH(
-          DistStoreError,
+      C10D_CHECK_WITH(
+          SocketError,
           uv_res == 0,
           "Failed to open existing socket. ",
           "socket: ",
@@ -232,6 +232,18 @@ class UvTcpServer : public UvTcpSocket {
           ", message: ",
           uv_strerror(uv_res));
 
+      uv_res =
+          uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
+      C10D_CHECK_WITH(
+          SocketError,
+          uv_res == 0,
+          fmt::format(
+              "The server socket has failed to listen on provided socket. "
+              "socket: {}, code: {}, name: {}, message: {}",
+              socket,
+              uv_res,
+              uv_err_name(uv_res),
+              uv_strerror(uv_res)));
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();

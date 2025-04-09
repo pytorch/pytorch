@@ -1086,7 +1086,7 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key):
+    def __getattr__(self, key) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if key == "__file__":
             return "torch.ops"
@@ -1246,7 +1246,7 @@ class _OpNamespace(types.ModuleType):
     def __iter__(self):
         return iter(self._dir)
 
-    def __getattr__(self, op_name):
+    def __getattr__(self, op_name) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"

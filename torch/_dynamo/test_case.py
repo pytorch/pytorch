@@ -11,6 +11,7 @@ It includes:
 import contextlib
 import importlib
 import logging
+import os
 from typing import Union
 
 import torch
@@ -35,7 +36,11 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
-    if not torch.xpu.is_available() and IS_WINDOWS:
+    if (
+        not torch.xpu.is_available()
+        and IS_WINDOWS
+        and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
+    ):
         return
 
     if isinstance(needs, str):
@@ -90,3 +95,22 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+
+
+class CPythonTestCase(TestCase):
+    _stack: contextlib.ExitStack
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._stack.close()
+        super().tearDownClass()
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
+            config.patch(
+                enable_trace_unittest=True,
+            ),
+        )
