@@ -265,6 +265,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -1373,13 +1374,23 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128, 144))
-    @parametrize("out_features", (64, 65))
-    def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
-        # x will be reshaped from 3d to 2d
-        second_dim_size = 8
-
+    @parametrize(
+        "batch_size",
+        (
+            17,
+            32,
+        ),
+    )
+    @parametrize(
+        "mid_dim",
+        (
+            1,
+            8,
+        ),
+    )
+    @parametrize("in_features", (128, 144, 1024))
+    @parametrize("out_features", (64, 65, 1024))
+    def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
                 w.to(torch.float), torch.int8
@@ -1411,7 +1422,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, second_dim_size, in_features), dtype=dtype)
+        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype)
         w = torch.rand((out_features, in_features), dtype=dtype)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
@@ -1809,7 +1820,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2045,7 +2055,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2420,7 +2429,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(x, w)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x, w),
             )
@@ -2477,12 +2485,37 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 x,
             )
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+
+    @patches
+    @inductor_config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    def test_bmm_flexible_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, u, v):
+                view_3 = torch.ops.aten.reshape.default(u, [-1, 512, 64])
+                clone_1 = torch.ops.aten.clone.default(
+                    v, memory_format=torch.contiguous_format
+                )
+                view_7 = torch.ops.aten.reshape.default(clone_1, [-1, 512, 64])
+                permute_6 = torch.ops.aten.permute.default(view_7, [0, 2, 1])
+                div = torch.ops.aten.div.Tensor(permute_6, 8.0)
+                # view_3 is a ReinterpretView and div is a FlexibleLayout which will become FixedLayout
+                bmm = torch.ops.aten.bmm.default(view_3, div)
+                return bmm
+
+        mod = M().eval()
+        u = torch.randn(2, 24, 512, 64)
+        v = torch.randn(48, 512, 64)
+        with verify(u.dtype) as (atol, rtol):
+            self.common(mod, (u, v))
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

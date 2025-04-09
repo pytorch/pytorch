@@ -24,7 +24,7 @@ from typing_extensions import TypeAlias
 import torch
 import torch._ops
 from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
-from torch.onnx._internal.exporter import _schemas
+from torch.onnx._internal.exporter import _constants, _schemas
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
@@ -141,7 +141,7 @@ class ONNXRegistry:
 
     def __init__(self) -> None:
         """Initializes the registry"""
-        self._opset_version = onnxscript_apis.torchlib_opset_version()
+        self._opset_version = _constants.TORCHLIB_OPSET
         self.functions: dict[TorchOp | str, list[OnnxDecompMeta]] = {}
 
     @property
