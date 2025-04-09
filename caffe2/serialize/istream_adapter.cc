@@ -1,8 +1,7 @@
 #include "caffe2/serialize/istream_adapter.h"
 #include <c10/util/Exception.h>
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 
 IStreamAdapter::IStreamAdapter(std::istream* istream) : istream_(istream) {}
 
@@ -20,9 +19,9 @@ size_t IStreamAdapter::size() const {
 
 size_t IStreamAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
     const {
-  istream_->seekg(pos);
+  istream_->seekg(static_cast<int64_t>(pos));
   validate(what);
-  istream_->read(static_cast<char*>(buf), n);
+  istream_->read(static_cast<char*>(buf), static_cast<int64_t>(n));
   validate(what);
   return n;
 }
@@ -33,8 +32,4 @@ void IStreamAdapter::validate(const char* what) const {
   }
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-IStreamAdapter::~IStreamAdapter() {}
-
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

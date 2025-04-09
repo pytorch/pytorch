@@ -9,8 +9,7 @@
 #include "c10/util/irange.h"
 #include "caffe2/serialize/inline_container.h"
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 namespace {
 
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
@@ -19,23 +18,23 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 127> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1{};
   // Inplace memory buffer
   std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = data1.size() - i;
+    data1[i] = static_cast<char>(data1.size() - i);
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 64> data2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2{};
   for (auto i : c10::irange(data2.size())) {
-    data2[i] = data2.size() - i;
+    data2[i] = static_cast<char>(data2.size() - i);
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
@@ -51,7 +50,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
 
   std::istringstream iss(the_file);
@@ -61,10 +60,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_TRUE(reader.hasRecord("key1"));
   ASSERT_TRUE(reader.hasRecord("key2"));
   ASSERT_FALSE(reader.hasRecord("key2000"));
-  at::DataPtr data_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t size;
-  std::tie(data_ptr, size) = reader.getRecord("key1");
+  auto [data_ptr, size] = reader.getRecord("key1");
   size_t off1 = reader.getRecordOffset("key1");
   ASSERT_EQ(size, data1.size());
   ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
@@ -82,7 +78,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
       size,
       3,
       buf.data(),
-      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
+      [](void* dst, const void* src, size_t n) {
+        memcpy(dst, src, static_cast<std::streamsize>(n));
+      });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
 
@@ -105,7 +103,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
       size,
       3,
       buf.data(),
-      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
+      [](void* dst, const void* src, size_t n) {
+        memcpy(dst, src, static_cast<std::streamsize>(n));
+      });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
   // clean up
@@ -116,21 +116,21 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 127> data1;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 64> data2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1{};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2{};
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = data1.size() - i;
+    data1[i] = static_cast<char>(data1.size() - i);
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   for (auto i : c10::irange(data2.size())) {
-    data2[i] = data2.size() - i;
+    data2[i] = static_cast<char>(data2.size() - i);
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
@@ -146,7 +146,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
 
   // read records through pytorchStreamReader
@@ -154,9 +154,8 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   PyTorchStreamReader reader(&iss);
   reader.setAdditionalReaderSizeThreshold(0);
   // before testing, sanity check
-  int64_t size1, size2, ret;
-  at::DataPtr data_ptr;
-  std::tie(data_ptr, size1) = reader.getRecord("key1");
+  auto [data_ptr, size1] = reader.getRecord("key1");
+  size_t size2 = 0, ret = 0;
   std::tie(data_ptr, size2) = reader.getRecord("key2");
 
   // Test getRecord(name, additional_readers)
@@ -195,24 +194,24 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 127> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1{};
 
   // Inplace memory buffer
   std::vector<uint8_t> buf;
 
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = data1.size() - i;
+    data1[i] = static_cast<char>(data1.size() - i);
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 64> data2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2{};
   for (auto i : c10::irange(data2.size())) {
-    data2[i] = data2.size() - i;
+    data2[i] = static_cast<char>(data2.size() - i);
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
@@ -228,14 +227,13 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   std::string the_file = oss.str();
   const char* file_name = "output2.zip";
   std::ofstream foo(file_name);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
 
   std::istringstream iss(the_file);
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(reader.getRecord("key3"), c10::Error);
   std::vector<uint8_t> dst(data1.size());
   EXPECT_THROW(reader.getRecord("key3", dst.data(), data1.size()), c10::Error);
@@ -246,7 +244,9 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
           data1.size(),
           3,
           buf.data(),
-          [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); }),
+          [](void* dst, const void* src, size_t n) {
+            memcpy(dst, src, static_cast<std::streamsize>(n));
+          }),
       c10::Error);
 
   // Reader should still work after throwing
@@ -258,23 +258,23 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
 TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   std::ostringstream oss;
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 127> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1{};
   // Inplace memory buffer
   std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = data1.size() - i;
+    data1[i] = static_cast<char>(data1.size() - i);
   }
   writer.writeRecord("key1.debug_pkl", data1.data(), data1.size());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 64> data2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2{};
   for (auto i : c10::irange(data2.size())) {
-    data2[i] = data2.size() - i;
+    data2[i] = static_cast<char>(data2.size() - i);
   }
   writer.writeRecord("key2.debug_pkl", data2.data(), data2.size());
 
@@ -289,19 +289,17 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   std::string the_file = oss.str();
   const char* file_name = "output3.zip";
   std::ofstream foo(file_name);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
 
   std::istringstream iss(the_file);
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-
   reader.setShouldLoadDebugSymbol(false);
   EXPECT_FALSE(reader.hasRecord("key1.debug_pkl"));
   at::DataPtr ptr;
-  size_t size;
+  size_t size = 0;
   std::tie(ptr, size) = reader.getRecord("key1.debug_pkl");
   EXPECT_EQ(size, 0);
   std::vector<uint8_t> dst(data1.size());
@@ -313,7 +311,9 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
       data1.size(),
       3,
       buf.data(),
-      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
+      [](void* dst, const void* src, size_t n) {
+        memcpy(dst, src, static_cast<std::streamsize>(n));
+      });
   EXPECT_EQ(ret, 0);
   // clean up
   remove(file_name);
@@ -322,15 +322,15 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
 TEST(PytorchStreamWriterAndReader, ValidSerializationId) {
   std::ostringstream oss;
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
-  std::array<char, 127> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1{};
 
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = data1.size() - i;
+    data1[i] = static_cast<char>(data1.size() - i);
   }
   writer.writeRecord("key1.debug_pkl", data1.data(), data1.size());
   writer.writeEndOfFile();
@@ -342,13 +342,11 @@ TEST(PytorchStreamWriterAndReader, ValidSerializationId) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-
   EXPECT_EQ(reader.serializationId(), writer_serialization_id);
 
   // write a second time
   PyTorchStreamWriter writer2([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
   writer2.writeRecord("key1.debug_pkl", data1.data(), data1.size());
@@ -361,7 +359,7 @@ TEST(PytorchStreamWriterAndReader, ValidSerializationId) {
 TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   std::ostringstream oss;
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
 
@@ -381,15 +379,13 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   std::string the_file = oss.str();
   const char* file_name = "output4.zip";
   std::ofstream foo(file_name);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
 
   std::istringstream iss(the_file);
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-
   EXPECT_EQ(reader.serializationId(), writer_serialization_id);
   // clean up
   remove(file_name);
@@ -405,7 +401,7 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
       });
   std::ostringstream oss;
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
   writer.writeEndOfFile();
@@ -449,7 +445,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   // write records through writers
   std::ostringstream oss(std::ios::binary);
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), n);
+    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
     return oss ? n : 0;
   });
 
@@ -465,7 +461,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
 
   std::string the_file = oss.str();
   std::ofstream foo(fileName, std::ios::binary);
-  foo.write(the_file.c_str(), the_file.size());
+  foo.write(the_file.c_str(), static_cast<std::streamsize>(the_file.size()));
   foo.close();
   LOG(INFO) << "Finished saving tensor into zip file " << fileName;
 
@@ -487,5 +483,4 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
 }
 
 } // namespace
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize
