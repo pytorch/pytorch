@@ -334,7 +334,10 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
             if not check_all_kwargs(a_node.kwargs, b_node.kwargs):
                 return False
         elif a_node.op == "output":
-            if not check_all_args(a_node.args[0], b_node.args[0]):
+            if not check_all_args(
+                pytree.tree_flatten(a_node.args[0])[0],
+                pytree.tree_flatten(b_node.args[0])[0],
+            ):
                 return False
         elif a_node.op == "get_attr":
             a_attr = getattr(a_mod, a_node.target)
