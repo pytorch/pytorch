@@ -66,7 +66,7 @@ jobs:
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
@@ -140,7 +140,7 @@ jobs:
     needs:
       - !{{ config["build_name"] }}-build
       - get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     steps:
