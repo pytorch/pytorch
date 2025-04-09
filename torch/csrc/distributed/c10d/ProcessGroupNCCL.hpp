@@ -195,11 +195,15 @@ struct DumpPipe {
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
         "Error removing existing named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     TORCH_CHECK(
         mkfifo(filename.c_str(), 0666) != -1,
         "Error creating named pipe ",
-        filename);
+        filename,
+        ", Error: ",
+        std::strerror(errno));
     fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
     LOG(INFO) << "Pipe file " << filename
               << " has been opened, write to it to trigger NCCL Debug Dump.";
@@ -1169,9 +1173,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
 
-  // promise to coordinate flight recorder dump.
-  std::promise<void> promiseFlightRecorderDump_;
-
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.
   int coordCheckIntervalMilSec_;
@@ -1284,10 +1285,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
-
-  // Whether or not to hook the cache allocator to register all allocated
-  // tensors
-  bool useTensorRegisterAllocatorHook_ = false;
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
