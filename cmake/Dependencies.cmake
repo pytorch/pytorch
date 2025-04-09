@@ -737,6 +737,12 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # TODO: Remove next two lines after fbgemm pin is updated
+
+    # For more details see https://github.com/pytorch/pytorch/issues/150846
+    target_compile_options_if_supported(fbgemm_avx512 -Wno-maybe-uninitialized)
+    target_compile_options_if_supported(fbgemm_avx512 -Wno-uninitialized)
+
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
       target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
@@ -1215,15 +1221,7 @@ if(USE_GLOO)
         set(NCCL_EXTERNAL ON)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
-      if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-        # Remove me when https://github.com/facebookincubator/gloo/pull/424 is landed
-        message(WARNING "Downgrading cmake-policy-version for gloo build")
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-        unset(CMAKE_POLICY_VERSION_MINIMUM)
-      else()
-        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      endif()
+      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
       # gloo generates a new config.h in the binary diretory.
@@ -1723,7 +1721,7 @@ if(USE_KINETO)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO -DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
   endif()
