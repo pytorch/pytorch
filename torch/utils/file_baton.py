@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import os
 import time
+import warnings
 
 
 class FileBaton:
     """A primitive, file-based synchronization utility."""
 
-    def __init__(self, lock_file_path, wait_seconds=0.1):
+    def __init__(self, lock_file_path, wait_seconds=0.1, warn_after_seconds=None):
         """
         Create a new :class:`FileBaton`.
 
@@ -18,6 +19,7 @@ class FileBaton:
         self.lock_file_path = lock_file_path
         self.wait_seconds = wait_seconds
         self.fd = None
+        self.warn_after_seconds = warn_after_seconds
 
     def try_acquire(self):
         """
@@ -32,23 +34,26 @@ class FileBaton:
         except FileExistsError:
             return False
 
-    def wait(self, show_lock_path=False):
+    def wait(self):
         """
         Periodically sleeps for a certain amount until the baton is released.
 
         The amount of time slept depends on the ``wait_seconds`` parameter
         passed to the constructor.
         """
-        displayed_lock_path = False
+        has_warned = False
 
-        tik = time.time()
+        start_time = time.time()
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
-            if show_lock_path:
-                if time.time() - tik > 2000 and not displayed_lock_path:
-                    print(f"Waiting lock file: {self.lock_file_path}")
-                    displayed_lock_path = True
+            if self.warn_after_seconds != None:
+                waited_toolong = time.time() - start_time > self.warn_after_seconds
+                if waited_toolong and not has_warned:
+                    warnings.warn(f'Waited on "{self.lock_file_path}" '  \
+                            'for {self.warn_after_seconds} seconds. ' \
+                            'Maybe something gone wrong, you may want to delete it.')
+                    has_warned = True
 
     def release(self):
         """Release the baton and removes its file."""
