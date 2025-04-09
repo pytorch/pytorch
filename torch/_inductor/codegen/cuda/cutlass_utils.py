@@ -83,6 +83,16 @@ def try_import_cutlass() -> bool:
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
     cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+    torch_root = os.path.abspath(os.path.dirname(torch.__file__))
+    mock_cuda_src_path = os.path.join(
+        torch_root,
+        "_inductor",
+        "codegen",
+        "cuda",
+        "cutlass_lib_extensions",
+        "mock_cuda_bindings",
+        "cuda",
+    )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
     cutlass_src_path = path_join(cutlass_python_path, "cutlass")
@@ -92,8 +102,10 @@ def try_import_cutlass() -> bool:
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
     dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    # cuda bindings needed to import cutlass
     # pycute needed for EVT
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
+    dst_link_mock_cuda = path_join(tmp_cutlass_full_path, "cuda")
 
     if os.path.isdir(cutlass_python_path):
         if tmp_cutlass_full_path not in sys.path:
@@ -118,6 +130,9 @@ def try_import_cutlass() -> bool:
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
             link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(
+                dst_link_mock_cuda, mock_cuda_src_path, tmp_cutlass_full_path
+            )
 
         try:
             import cutlass  # noqa: F401
