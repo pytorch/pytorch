@@ -39,9 +39,8 @@ if not is_available():
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
-        _find_pg_by_ranks_and_tag,
         _get_default_group,
-        _get_group_tag,
+        _resolve_process_group,
         get_backend,
         get_process_group_ranks,
         get_rank,
@@ -104,7 +103,7 @@ else:
             mesh_tensor = device_mesh.mesh
             # slice_dim_idx could be differnt from submesh_dims, as we may need to flatten out some dims.
             slice_dim_idx = []
-            slice_dim_group_info = []
+            slice_dim_group_name = []
             # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
             # flattened mesh tensor.
             num_dims_flatten = 0
@@ -122,15 +121,15 @@ else:
                     # then the final slice_dim_idx should be [0, 1, 2].
                     slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
                     num_dims_flatten += len(mesh_dim_indices) - 1
-                    slice_dim_group_info.append(
+                    slice_dim_group_name.append(
                         self.root_to_flatten_mapping[device_mesh][
                             mesh_dim_name
-                        ]._dim_group_infos[0]
+                        ]._dim_group_names[0]
                     )
                 else:
                     slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
-                    slice_dim_group_info.append(
-                        device_mesh._dim_group_infos[mesh_dim_indices[0]]
+                    slice_dim_group_name.append(
+                        device_mesh._dim_group_names[mesh_dim_indices[0]]
                     )
 
             # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
@@ -156,7 +155,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = slice_dim_group_info  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined]
             self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
@@ -361,8 +360,8 @@ else:
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
                 )
-                submesh._dim_group_infos = (
-                    [device_mesh._dim_group_infos[mesh_dim]]
+                submesh._dim_group_names = (
+                    [device_mesh._dim_group_names[mesh_dim]]
                     if cur_rank in mesh_1d
                     else []
                 )
@@ -510,13 +509,10 @@ else:
             return _get_default_group()
 
         def _init_process_groups(self):
-            # tag/ranks/group_name associated with each mesh dimension, each
+            # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
             #
-            # TODO(yifu): remove tag and ranks once we fully migrate to native
-            # functional collectives. See details in:
-            # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: list[tuple[str, list[int], str]] = []
+            dim_group_names: list[str] = []
             default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
@@ -533,13 +529,7 @@ else:
                     and get_backend(default_group) == "gloo"
                     else default_group
                 )
-                dim_group_infos.append(
-                    (
-                        _get_group_tag(dim_group),
-                        ranks,
-                        dim_group.group_name,
-                    )
-                )
+                dim_group_names.append(dim_group.group_name)
             else:
                 # create sub pgs base on the mesh argument specified
                 for dim in range(self.mesh.ndim):
@@ -593,10 +583,9 @@ else:
                         has_split_group = True
 
                     # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-                    # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
-                    # the current rank is in the subgroup.
+                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
                     # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-                    # along with appending information to the `dim_group_infos` list whenever necessary.
+                    # along with appending information to the `dim_group_names` list whenever necessary.
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
@@ -613,19 +602,13 @@ else:
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
-                            if len(dim_group_infos) > dim:
+                            if len(dim_group_names) > dim:
                                 raise RuntimeError(
                                     f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
-                            dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    dim_group.group_name,
-                                )
-                            )
-            self._dim_group_infos = dim_group_infos
+                            dim_group_names.append(dim_group.group_name)
+            self._dim_group_names = dim_group_names
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
@@ -759,7 +742,7 @@ else:
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            if not hasattr(self, "_dim_group_infos"):
+            if not hasattr(self, "_dim_group_names"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.mesh.ndim > 1 and mesh_dim is None:
@@ -772,28 +755,24 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if self.mesh.ndim == 1 and mesh_dim is None:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])  # type: ignore[index]
-                )
+                return not_none(_resolve_process_group(self._dim_group_names[0]))
 
             root_mesh = _mesh_resources.get_root_mesh(self)
             root_to_flatten_mapping = _mesh_resources.root_to_flatten_mapping.get(
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[
+                dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
-                ]._dim_group_infos[0][:2]
-                return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
+                ]._dim_group_names[0]
+                return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
                     _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
-                )
+                return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -866,9 +845,7 @@ else:
                     mesh_dim_names=mesh_dim_names,
                     _init_backend=False,
                 )
-                device_mesh._dim_group_infos = [
-                    (_get_group_tag(group), group_ranks, group.group_name)
-                ]
+                device_mesh._dim_group_names = [group.group_name]
                 return device_mesh
 
             # nD scenario
@@ -894,14 +871,7 @@ else:
             device_mesh = DeviceMesh(
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
-            device_mesh._dim_group_infos = [
-                (
-                    _get_group_tag(group),
-                    get_process_group_ranks(group),
-                    group.group_name,
-                )
-                for group in groups
-            ]
+            device_mesh._dim_group_names = [group.group_name for group in groups]
             return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
