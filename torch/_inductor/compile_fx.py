@@ -787,8 +787,7 @@ def _compile_fx_inner(
             assert cache_info["cache_state"] == "hit"
             assert mb_compiled_graph is not None
             assert key_info is not None
-            cache_key = key_info[0]
-            mb_compiled_graph._fx_graph_cache_key = cache_key
+            mb_compiled_graph._fx_graph_cache_key = key_info
 
         assert mb_compiled_graph is not None
         compiled_graph = mb_compiled_graph
