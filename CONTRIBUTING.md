@@ -665,7 +665,7 @@ TODO: update this section. should it all be deleted?
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
-used.
+used).
 
 
 If you want to manage multiple builds of PyTorch, you can make use of

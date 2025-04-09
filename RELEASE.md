@@ -142,8 +142,11 @@ DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/releas
 ```
 
 ### Making release branch specific changes for PyTorch
+First you should cut a release branch for pytorch/test-infra:
+* Create a new branch using the naming convention `release/[major].[minor]`, e.g. `release/2.7`
+* On that release branch, update branch pointers for any pytorch-managed reusable actions or workflows to point to the new release's branch ([example](https://github.com/pytorch/test-infra/commit/749b9e36afa23298ad5498c9f5bcd96f5467baff#diff-d41015f3ac6cfa64b00e366bec416bb9487ac27493de7ebe7778fdfc7518b003R39)).
 
-These are examples of changes that should be made to release branches so that CI / tooling can function normally on
+Here are examples of changes that should be made to the pytorch/pytorch release branches so that CI / tooling can function normally on
 them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies.
@@ -164,8 +167,10 @@ Ecosystem libraries branch cut is done a few days after branch cut for the `pyto
 After the branch cut is performed, the PyTorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
-* torchvision : https://github.com/pytorch/vision/pull/5400
-* torchaudio: https://github.com/pytorch/audio/pull/2210
+* torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
+* torchaudio: [Update version.txt](https://github.com/pytorch/audio/commit/654fee8fd17784271be1637eac1293fd834b4e9a) and [change workflow branch references](https://github.com/pytorch/audio/pull/3890)
+
+The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in both pytorch/audio and pytorch/vision.
 
 ## Running Launch Execution team Core XFN sync
 
@@ -208,9 +213,7 @@ git tag -f  v1.12.0-rc2
 git push origin  v1.12.0-rc2
 ```
 
-Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
-
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
+Pushing a release candidate tag should trigger the `binary_build` workflows. This trigger functionality is configured in [`linux_binary_build_workflow.yml.j2]`][(https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml](https://github.com/pytorch/pytorch/blob/main/.github/templates/linux_binary_build_workflow.yml.j2#L19-L22)) and in the matching templates for the other OSes.
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). Make sure all binary builds are successful.
 ### Release Candidate Storage

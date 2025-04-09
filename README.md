@@ -169,7 +169,24 @@ Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
 
+An example of environment setup is shown below:
 
+* Linux:
+
+```bash
+$ source <CONDA_INSTALL_DIR>/bin/activate
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+```
+
+* Windows:
+
+```bash
+$ source <CONDA_INSTALL_DIR>\Scripts\activate.bat
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+$ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+```
 
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
@@ -204,7 +221,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone https://github.com/pytorch/pytorch
 cd pytorch
 # If you are updating an existing checkout
 git submodule sync
@@ -252,13 +269,6 @@ conda install -c conda-forge libuv=1.39
 
 #### Install PyTorch
 **On Linux**
-
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
 
 If you're compiling for AMD ROCm then first run this command:
 ```bash
@@ -341,6 +351,16 @@ Please make sure [the common prerequisites](#prerequisites) as well as [the prer
 Then PyTorch can be built with the command:
 
 ```cmd
+:: CMD Commands:
+:: Set the CMAKE_PREFIX_PATH to help find corresponding packages
+:: %CONDA_PREFIX% only works after `conda activate custom_env`
+
+if defined CMAKE_PREFIX_PATH (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
+) else (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
+)
+
 python setup.py develop
 ```
 
