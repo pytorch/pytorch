@@ -2,8 +2,6 @@
 
 :: environment variables
 set CMAKE_BUILD_TYPE=%BUILD_TYPE%
-set CMAKE_C_COMPILER_LAUNCHER=sccache
-set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
 set MSSdk=1
 if defined PYTORCH_BUILD_VERSION (
@@ -42,16 +40,8 @@ pip install -r requirements.txt
 :: DISTUTILS_USE_SDK should be set after psutil dependency
 set DISTUTILS_USE_SDK=1
 
-:: start sccache server and reset sccache stats
-sccache --start-server
-sccache --zero-stats
-sccache --show-stats
-
 :: Call PyTorch build script
 python setup.py bdist_wheel -d "%PYTORCH_FINAL_PACKAGE_DIR%"
-
-:: show sccache stats
-sccache --show-stats
 
 :: Check if installation was successful
 if %errorlevel% neq 0 (
