@@ -6,7 +6,6 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 from torch._library.custom_ops import _maybe_get_opdef
-from torch._library.utils import Kernel
 
 
 log = logging.getLogger(__name__)
@@ -107,7 +106,8 @@ def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
     """
 
     libs: list[torch.library.Library] = []
-    old_fake_impls: dict[str, Union[Callable, Kernel]] = {}
+    # Stores old fake impls from custom ops declared through @custom_op
+    old_fake_impls: dict[str, Callable] = {}
     for op_name, profiles in op_profiles.items():
         log.warning(
             "Registering fake profile for %s. This will override any existing "
@@ -126,14 +126,9 @@ def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
         if opdef := _maybe_get_opdef(op_str):
             if opdef._abstract_fn is not None:
                 old_fake_impls[op_str] = opdef._abstract_fn
-        elif fake_impl_holder := torch._library.simple_registry.singleton.find(
-            op_str
-        ).fake_impl:
-            if fake_impl_holder.kernel is not None:
-                old_fake_impls[op_str] = fake_impl_holder.kernel
 
         torch.library.register_fake(
-            op_str, fake_kernel, lib=newlib, _allow_override=True
+            op_str, fake_kernel, lib=newlib, allow_override=True
         )
         libs.append(newlib)
 
@@ -144,14 +139,4 @@ def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
             lib._destroy()
 
         for op_str, old_fake in old_fake_impls.items():
-            if isinstance(old_fake, Kernel):
-                torch.library.register_fake(op_str, old_fake.func, _allow_override=True)
-                fake_impl_holder = torch._library.simple_registry.singleton.find(
-                    op_str
-                ).fake_impl
-                assert fake_impl_holder.kernel is not None
-                fake_impl_holder.kernel.source = (
-                    old_fake.source
-                )  # Update the source information to be the original one
-            else:
-                torch.library.register_fake(op_str, old_fake, _allow_override=True)
+            torch.library.register_fake(op_str, old_fake, allow_override=True)
