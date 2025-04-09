@@ -671,6 +671,13 @@ class BaseSchedulerNode:
         ):
             # todo: Calculate this - it's kinda annoying.
             return {}
+        if (
+            isinstance(self, ExternKernelSchedulerNode)
+            and isinstance(self.node, ir.FallbackKernel)
+            and self.node.op_overload
+            is torch._prims.rng_prims.graphsafe_run_with_rng_state
+        ):
+            return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -3889,6 +3896,8 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
+                elif name.startswith(("fwd_rng_state", "bwd_rng_state")):
+                    continue
                 else:
                     storage = inp.data
                     assert (
