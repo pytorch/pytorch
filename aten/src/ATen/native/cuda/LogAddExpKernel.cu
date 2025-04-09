@@ -13,22 +13,45 @@
 namespace at::native {
 
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half,
-      iter.dtype(), "logaddexp_cuda",
-      [&]() {
-        using opmath_t = at::opmath_type<scalar_t>;
-        gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
-          const auto a = static_cast<opmath_t>(a_);
-          const auto b = static_cast<opmath_t>(b_);
-          if (::isinf(a) && a == b) {
-            return a;
-          } else {
-            const auto m = ::max(a, b);
-            return m + ::log1p(::exp(-::abs(a - b)));
-          }
+  auto dtype = iter.dtype();
+  if(isComplexType(dtype)) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(
+        ScalarType::ComplexHalf,
+        dtype, "logaddexp_cuda",
+        [&]() {
+          using opmath_t = at::opmath_type<scalar_t>;
+          gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+            const auto a = static_cast<opmath_t>(a_);
+            const auto b = static_cast<opmath_t>(b_);
+            if (::isinf(a.real()) && a == b) {
+              return a;
+            } else {
+              if (a.real() > b.real()) {
+                return a + ::log1p(::exp(b - a));
+              } else {
+                return b + ::log1p(::exp(a - b));
+              }
+            }
+          });
         });
-      });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::BFloat16, ScalarType::Half,
+        dtype, "logaddexp_cuda",
+        [&]() {
+          using opmath_t = at::opmath_type<scalar_t>;
+          gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+            const auto a = static_cast<opmath_t>(a_);
+            const auto b = static_cast<opmath_t>(b_);
+            if (::isinf(a) && a == b) {
+              return a;
+            } else {
+              const auto m = ::max(a, b);
+              return m + ::log1p(::exp(-::abs(a - b)));
+            }
+          });
+        });
+  }
 }
 
 void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
