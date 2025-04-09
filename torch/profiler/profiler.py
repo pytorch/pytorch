@@ -23,6 +23,7 @@ from torch._C._profiler import (
     _remove_execution_trace_observer,
 )
 from torch._environment import is_fbcode
+from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 from torch.torch_version import TorchVersion
@@ -224,10 +225,12 @@ class _KinetoProfile:
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
 
-                if (
-                    inductor_config.triton.cudagraphs
-                    and getattr(torch.version, "cuda", None)
-                    and TorchVersion(torch.version.cuda) < "12.6"
+                if inductor_config.triton.cudagraphs and (
+                    (
+                        getattr(torch.version, "cuda", None)
+                        and TorchVersion(torch.version.cuda) < "12.0"
+                    )
+                    or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
                 ):
                     os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
                     self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")

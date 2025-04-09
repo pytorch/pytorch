@@ -290,7 +290,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         fn_c = torch.compile(fn, mode="reduce-overhead")
 
-        with torch.profiler.profile() as prof:
+        with torch.profiler.profile():
             fn_c(x, y)
 
         if TorchVersion(torch.version.cuda) >= "12.6":
