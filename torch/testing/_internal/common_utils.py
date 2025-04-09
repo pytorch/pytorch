@@ -1732,22 +1732,25 @@ def make_dynamo_test(
     def standard_test(
         self: Any,
         fn: Callable[..., Any],
+        kwargs,
     ) -> None:
-        def dummy(fn: Callable[..., Any]) -> None:
-            fn(self)
+        def dummy() -> None:
+            fn(self, **kwargs)
 
         actual = CompileCounter()
 
-        dummy(fn)
+        dummy()
         reset()
         opt_fn = optimize_assert(actual)(dummy)
-        opt_fn(fn)
+        opt_fn()
         reset()
 
-    def test_fn(self: Any) -> None:
+    @functools.wraps(fn)
+    def test_fn(self: Any, **kwargs) -> None:
         return standard_test(
             self,
             fn=fn,
+            kwargs=kwargs,
         )
 
     return test_fn
@@ -2810,7 +2813,10 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
-            return super()._to_number(number_like, id=id)
+            number = super()._to_number(number_like, id=id)
+            if type(number) not in self._TYPE_TO_DTYPE.keys():
+                self._inputs_not_supported()
+            return number
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -3094,16 +3100,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
+        self, exc_type, callable, expect, *, skip=0, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
-            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=skip + 1)
             if post_munge:
                 munged = post_munge(munged)
             self.assertExpectedInline(
-                munged, expect, skip=1
+                munged, expect, skip=skip + 1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -5560,6 +5566,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*Set TORCHDYNAMO_VERBOSE=1.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
