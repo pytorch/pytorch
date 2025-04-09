@@ -177,6 +177,15 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
+def all_reduce_autograd(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+    """
+    Same as all_reduce but supports autograd.
+    """
+    group_name = _resolve_group_name(group, tag)
+    tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
+    return _FromTorchTensor.apply(tensor)
+
+
 def all_gather_tensor(
     self: torch.Tensor,
     gather_dim: int,
