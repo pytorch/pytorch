@@ -3162,6 +3162,10 @@ class TestCase(expecttest.TestCase):
     def _dynamo_test_key(self):
         return f"{self.__class__.__name__}.{self._testMethodName}"
 
+    def compile_fn(self, fn, backend, nopython):
+        # Allows subclasses to control compilation
+        return torch._dynamo.optimize(backend, nopython=nopython)(fn)
+
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
 
@@ -3236,19 +3240,15 @@ class TestCase(expecttest.TestCase):
         )
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
-            method = getattr(self, self._testMethodName)
             if TEST_WITH_AOT_EAGER:
-                method = torch._dynamo.optimize("aot_eager_decomp_partition")(method)
-                setattr(self, self._testMethodName, method)
+                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    method = torch._dynamo.optimize("inductor")(method)
-                    setattr(self, self._testMethodName, method)
+                    super_run = self.compile_fn(super_run, "inductor", nopython)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    method = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(method)
-                    setattr(self, self._testMethodName, method)
+                    super_run = self.compile_fn(super_run, "eager_noexcept", nopython)
 
                 key = self._dynamo_test_key()
 
