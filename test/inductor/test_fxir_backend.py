@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mut
 from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper_fxir import delete, WrapperFxCodegen
+from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
@@ -118,8 +118,8 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(length, device=self.device) for length in [517, 1029, 123]]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
 
-        # Check for frees
-        num_frees = self._count_ops(gm, delete)
+        # Check the generated code for frees
+        num_frees = gm.code.count("= None")
         self.assertGreater(num_frees, 0)
 
     def test_extern(self):

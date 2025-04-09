@@ -53,13 +53,6 @@ from .wrapper import (
 )
 
 
-def delete(x: torch.Tensor) -> None:
-    """
-    This function is used as an FX op to delete a tensor.
-    """
-    del x
-
-
 @dataclasses.dataclass
 class SymbolBuffer:
     """
@@ -189,12 +182,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _free(self, buffer: Union[CodegenBuffer, ir.TorchBindObject]) -> None:
         """
-        Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
         """
         name = buffer.get_name()
         node = self.buffer_to_node[name]
-        self.gm.graph.call_function(delete, args=(node,))
         del self.buffer_to_node[name]
 
     def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
