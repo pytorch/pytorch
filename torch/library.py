@@ -184,7 +184,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _register_fake(self, op_name, fn, _stacklevel=1, *, _allow_override=False):
+    def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
         if torch._running_with_deploy():
             _library.utils.warn_deploy()
@@ -212,7 +212,7 @@ class Library:
             func_to_register = fn
 
         handle = entry.fake_impl.register(
-            func_to_register, source, _allow_override=_allow_override
+            func_to_register, source, allow_override=allow_override
         )
         self._registration_handles.append(handle)
 
@@ -293,7 +293,7 @@ class Library:
         self._op_impls.add(key)
 
     def impl(
-        self, op_name, fn, dispatch_key="", *, with_keyset=False, _allow_override=False
+        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=False
     ):
         r"""Registers the function implementation for an operator defined in the library.
 
@@ -336,7 +336,7 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if (not _allow_override) and key in _impls:
+        if (not allow_override) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(
@@ -920,7 +920,7 @@ def register_fake(
     *,
     lib: Optional[Library] = None,
     _stacklevel: int = 1,
-    _allow_override: bool = False,
+    allow_override: bool = False,
 ):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
@@ -1026,7 +1026,7 @@ def register_fake(
         else:
             use_lib = lib
         use_lib._register_fake(
-            op_name, func, _stacklevel=stacklevel + 1, _allow_override=_allow_override
+            op_name, func, _stacklevel=stacklevel + 1, allow_override=allow_override
         )
         return func
 

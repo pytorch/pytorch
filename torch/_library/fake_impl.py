@@ -17,7 +17,7 @@ class FakeImplHolder:
         self.lib: Optional[torch.library.Library] = None
 
     def register(
-        self, func: Callable, source: str, *, _allow_override=False
+        self, func: Callable, source: str, *, allow_override=False
     ) -> RegistrationHandle:
         """Register an fake impl.
 
@@ -25,7 +25,7 @@ class FakeImplHolder:
         fake impl.
         """
 
-        if not _allow_override:
+        if not allow_override:
             if self.kernel is not None:
                 raise RuntimeError(
                     f"register_fake(...): the operator {self.qualname} "
@@ -64,9 +64,7 @@ class FakeImplHolder:
             ns = self.qualname.split("::")[0]
             self.lib = torch.library.Library(ns, "FRAGMENT")  # noqa: TOR901
         meta_kernel = construct_meta_kernel(self.qualname, self)
-        self.lib.impl(
-            self.qualname, meta_kernel, "Meta", _allow_override=_allow_override
-        )
+        self.lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
 
         def deregister_fake_class():
             if self.lib:
