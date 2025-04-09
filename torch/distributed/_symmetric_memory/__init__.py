@@ -1099,6 +1099,7 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials,
         group_name,
     )
+
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     return reduce_fn(
@@ -1313,7 +1314,13 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     stacked_partials_3D_leading_dims = [group.size()] + list(
         A_with_scatter_dim_0.shape[:-1]
     )
-    stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
+
+    # A [group_size] leading dim has been prepended to `stacked_partials_3D_leading_dims`,
+    # to capture the partial output from each rank. If the original scatter dim was 0, then
+    # it is now dim 1 in this tensor, since this new `[group_size]` dim was prepended.
+    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
+    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
+    
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
