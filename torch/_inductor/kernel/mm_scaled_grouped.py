@@ -345,19 +345,39 @@ aten__scaled_grouped_mm = ExternKernelChoice(
 
 
 def can_use_triton_kernel(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
     offs: Optional[TensorBox],
     bias: Optional[TensorBox],
-    m1_size: list[int],
-    m2_size: list[int],
 ) -> bool:
+    a_shape = mat_a.get_size()
+    b_shape = mat_b.get_size()
+    a_stride = mat_a.get_stride()
+    b_stride = mat_b.get_stride()
+
+    # A must be contiguous 2d
+    a_layout_ok = (
+        len(a_shape) == 2
+        and a_stride[1] == 1
+        and a_stride[0] == a_shape[1]
+        and a_shape[1] >= 32
+    )
+
+    # B must be contiguous 3d with transposed last dimension
+    b_layout_ok = (
+        len(b_shape) == 3
+        and b_stride[2] == b_shape[1]
+        and b_stride[1] == 1
+        and b_stride[0] == (b_shape[1] * b_shape[2])
+        and b_shape[1] >= 32
+    )
+
     return (
         offs is not None
         and bias is None
         and has_triton_tma_device()
-        and len(m1_size) == 2
-        and len(m2_size) == 3
-        and m1_size[-1] >= 32
-        and m2_size[-2] >= 32
+        and a_layout_ok
+        and b_layout_ok
     )
 
 
@@ -412,7 +432,7 @@ def tuned_scaled_grouped_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    if is_nonzero and can_use_triton_kernel(offs, bias, m1_size, m2_size):
+    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias):
         m, k1 = m1_size
         g, k2, n = m2_size
         k = V.graph.sizevars.guard_equals(k1, k2)
