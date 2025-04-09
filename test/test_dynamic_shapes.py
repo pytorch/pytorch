@@ -1008,7 +1008,6 @@ def forward(self, x_1):
         assert_not_optimized(b + a)
         assert_not_optimized(b + a + b)
 
-
     def test_max_of_unique_summation_opt(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
