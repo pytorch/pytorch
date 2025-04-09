@@ -335,7 +335,7 @@ class DTensorTestBase(MultiProcessTestCase):
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if any(x in self.backend for x in ("nccl", "xccl", "hccl")):
+        if self.backend in ("nccl", "xccl", "hccl"):
             # set device for nccl pg for collectives
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init

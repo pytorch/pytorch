@@ -91,7 +91,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # torch random generator keeps different seeds on ranks. This ensures
         # that Replicate DTensor will have the same initialized results
         # across ranks.
-        torch.manual_seed(self.rank)
+        torch.get_device_module(self.device_type).manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
