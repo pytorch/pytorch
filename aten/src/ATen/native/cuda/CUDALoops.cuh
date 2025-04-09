@@ -78,7 +78,7 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION < 12080)
+#ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
   if constexpr (io_sizes == 1) {
@@ -219,7 +219,7 @@ static inline void launch_vectorized_kernel(
   constexpr auto io_size = calc_io_size<func_t>();
   int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION < 12080)
+#ifdef USE_ROCM
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
 #else
   using cpp_type = typename function_traits<func_t>::result_type;
@@ -241,13 +241,11 @@ static inline void launch_vectorized_kernel(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
 #endif
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
     case 8:
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
-#endif
     case 4:
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
