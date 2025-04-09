@@ -157,37 +157,40 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         return None
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
-    # OpOverload with custom lowerings override tag-based layout constraints
-    if fn in lowerings:
-        _maybe_layout_constraints[fn] = None
-        return None
-    # We lazily register tag-based layout constraints.
-
-    def handle_layout_constraint_tag(tag):
-        if tag is torch._C.Tag.needs_fixed_stride_order:
-            _maybe_layout_constraints[fn] = constrain_to_fx_strides
-            return _maybe_layout_constraints[fn]
-        elif tag is torch._C.Tag.flexible_layout:
-            _maybe_layout_constraints[fn] = None
-            return None
-        else:
-            raise AssertionError(f"Unknown layout constraint tag: {tag}")
-
-    tag = get_layout_constraint_tag(fn)
-    return handle_layout_constraint_tag(tag)
+    return None
 
 
-def get_layout_constraint_tag(fn):
+tags_by_priority = [
+    torch._C.Tag.needs_exact_strides,
+    torch._C.Tag.needs_fixed_stride_order,
+    torch._C.Tag.flexible_layout,
+]
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
     tags_by_priority = [
+        torch._C.Tag.needs_exact_strides,
         torch._C.Tag.needs_fixed_stride_order,
         torch._C.Tag.flexible_layout,
     ]
     for tag in tags_by_priority:
         if tag in fn.tags:
             return tag
-    if torch._library.utils.is_builtin(fn):
-        return torch._C.Tag.flexible_layout
-    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    if with_default:
+        if torch._library.utils.is_builtin(fn):
+            return torch._C.Tag.flexible_layout
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None
+
+
+def tag_to_layout_constraint(tag):
+    if tag == torch._C.Tag.needs_exact_strides:
+        return constrain_to_fake_tensors
+    if tag == torch._C.Tag.needs_fixed_stride_order:
+        return constrain_to_fx_strides
+    if tag == torch._C.Tag.flexible_layout:
+        return None
+    raise AssertionError(f"Unknown layout constraint tag: {tag}")
 
 
 def assert_nyi(cond, msg):
