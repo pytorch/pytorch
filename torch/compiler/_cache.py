@@ -2,6 +2,8 @@ import copy
 import dataclasses
 import logging
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from enum import Enum
 from typing import Optional, Union
 
@@ -120,6 +122,26 @@ class CacheArtifactManager:
         cls._seen_artifacts.clear()
         cls._serializer.clear()
         cls._cache_info.clear()
+
+    @classmethod
+    @contextmanager
+    def with_fresh_cache(cls) -> Generator[None, None, None]:
+        original_new_cache_artifacts = cls._new_cache_artifacts
+        original_seen_artifacts = cls._seen_artifacts
+        original_serializer = cls._serializer
+        original_cache_info = cls._cache_info
+
+        cls._new_cache_artifacts = []
+        cls._seen_artifacts = OrderedSet()
+        cls._serializer = AppendingByteSerializer(serialize_fn=CacheArtifact.serialize)
+        cls._cache_info = CacheInfo()
+        try:
+            yield
+        finally:
+            cls._new_cache_artifacts = original_new_cache_artifacts
+            cls._seen_artifacts = original_seen_artifacts
+            cls._serializer = original_serializer
+            cls._cache_info = original_cache_info
 
     @classmethod
     def record_artifact(
