@@ -200,9 +200,17 @@ class NestedTensor(torch.Tensor):
     def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("max_seqlen", None)
 
+    @_max_seqlen_tensor.setter
+    def _max_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["max_seqlen"] = val
+
     @property
     def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("min_seqlen", None)
+
+    @_min_seqlen_tensor.setter
+    def _min_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["min_seqlen"] = val
 
     # These are old private @property accessors that are kept around for internal BC
     # reasons. TODO: Remove these!
