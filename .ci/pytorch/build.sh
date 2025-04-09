@@ -303,12 +303,14 @@ else
 
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
+      pushd dist/
       if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
         echo "XPU support is compiled in."
       else
         echo "XPU support is NOT compiled in."
         exit 1
       fi
+      popd
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
