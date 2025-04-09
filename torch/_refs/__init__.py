@@ -3451,10 +3451,12 @@ def stft(
         left = (n_fft - win_length_) // 2
         window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
 
-    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
     if not center and align_to_window:
         input_pad_amount = (n_fft - win_length_) // 2
         input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
+
+    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+
     if window is not None:
         input = input * window
 
@@ -6299,7 +6301,7 @@ def _dot_check_wrapper(fn):
 
 
 @register_decomposition(aten.dot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6319,7 +6321,7 @@ def dot(self, other):
 
 
 @register_decomposition(aten.vdot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
