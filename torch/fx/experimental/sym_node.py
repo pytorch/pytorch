@@ -885,7 +885,8 @@ def _optimized_add(
         new_args = list(lhs._args)
         for a in rhs._args:
             new_args = _binary_search_insert_arg(new_args, a)
-        return make_optimized(new_args)
+        if new_args is not None:
+            return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
