@@ -300,7 +300,7 @@ def _get_onnx_devices(
         ],
         ...,
     ],
-) -> tuple["ort_c.OrtDevice", ...]:
+) -> tuple[ort_c.OrtDevice, ...]:
     from onnxruntime.capi import _pybind_state as ort_c
 
     def _device_id_or_zero(device_id: int) -> int:
@@ -334,7 +334,7 @@ def _get_onnx_devices(
 
 
 def _get_ortvalues_from_torch_tensors(
-    tensors: tuple[torch.Tensor, ...], devices: tuple["ort_c.OrtDevice", ...]
+    tensors: tuple[torch.Tensor, ...], devices: tuple[ort_c.OrtDevice, ...]
 ) -> tuple[torch.Tensor, ...]:
     # TODO(justinchuby): Refactor this function
     import numpy as np
@@ -379,7 +379,7 @@ def _adjust_scalar_from_fx_to_onnx(
         float,
         bool,
     ],
-    value_info: "onnx.ValueInfoProto",  # type: ignore[name-defined]
+    value_info: onnx.ValueInfoProto,  # type: ignore[name-defined]
 ) -> torch.Tensor:
     """Helper function to wrap PyTorch variables as torch.Tensor"""
     if (
@@ -473,15 +473,15 @@ def _ortvalues_to_torch_tensor(
 
 
 def _run_onnx_session_with_ortvaluevector(
-    sess: "onnxruntime.InferenceSession",
+    sess: onnxruntime.InferenceSession,
     input_names: tuple[str, ...],
     inputs: tuple[torch.Tensor, ...],
-    input_devices: tuple["ort_c.OrtDevice", ...],
+    input_devices: tuple[ort_c.OrtDevice, ...],
     output_names: tuple[str, ...],
     outputs: tuple[torch.Tensor, ...],
-    output_devices: tuple["ort_c.OrtDevice", ...],
+    output_devices: tuple[ort_c.OrtDevice, ...],
     preallocate_output: bool,
-    input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+    input_value_infos: tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
     normalized_prim_outputs: tuple[
         Union[
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
@@ -556,15 +556,15 @@ def _run_onnx_session_with_ortvaluevector(
 
 
 def _run_onnx_session_with_fetch(
-    sess: "onnxruntime.InferenceSession",
+    sess: onnxruntime.InferenceSession,
     input_names: tuple[str, ...],
     inputs: tuple[torch.Tensor, ...],
-    input_devices: tuple["ort_c.OrtDevice", ...],
+    input_devices: tuple[ort_c.OrtDevice, ...],
     output_names: tuple[str, ...],
     outputs: tuple[torch.Tensor, ...],
-    output_devices: tuple["ort_c.OrtDevice", ...],
+    output_devices: tuple[ort_c.OrtDevice, ...],
     preallocate_output: bool,
-    input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+    input_value_infos: tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
     normalized_prim_outputs: tuple[
         Union[
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
@@ -621,13 +621,13 @@ class OrtExecutionInfoPerSession:
 
     def __init__(
         self,
-        session: "onnxruntime.InferenceSession",
+        session: onnxruntime.InferenceSession,
         input_names: tuple[str, ...],
-        input_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+        input_value_infos: tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
         output_names: tuple[str, ...],
-        output_value_infos: tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
-        input_devices: tuple["ort_c.OrtDevice", ...],
-        output_devices: tuple["ort_c.OrtDevice", ...],
+        output_value_infos: tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
+        input_devices: tuple[ort_c.OrtDevice, ...],
+        output_devices: tuple[ort_c.OrtDevice, ...],
         example_outputs: Union[tuple[torch.Tensor, ...], torch.Tensor],
     ):
         # Carrier of ONNX model and its executor.
@@ -809,11 +809,11 @@ class OrtBackendOptions:
     sub-graphs are compiled by ``OrtBackend``.
     """
 
-    ort_session_options: Optional["onnxruntime.SessionOptions"] = None
+    ort_session_options: Optional[onnxruntime.SessionOptions] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
     pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
-        Sequence[Callable[["onnx.ModelProto"], None]]
+        Sequence[Callable[[onnx.ModelProto], None]]
     ] = None
     """A list of graph transforms to be applied to the ONNX model before it
     is fed to ONNXRuntime's InferenceSession."""
@@ -1216,12 +1216,12 @@ class OrtBackend:
         return self.compile(graph_module, args)
 
     __instance_cache_max_count: Final = 8
-    __instance_cache: Final[list["OrtBackend"]] = []
+    __instance_cache: Final[list[OrtBackend]] = []
 
     @staticmethod
     def get_cached_instance_for_options(
         options: Optional[Union[OrtBackendOptions, Mapping[str, Any]]] = None,
-    ) -> "OrtBackend":
+    ) -> OrtBackend:
         """Returns a possibly cached instance of an ``OrtBackend``. If an existing
         backend was created previously through this function with the same options,
         it will be returned. Otherwise a new backend will be created, cached, and
