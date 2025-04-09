@@ -289,12 +289,12 @@ size_t AllocatorConfig::parseReleaseLockOnDeviceMalloc(
   if (++i < config.size()) {
     TORCH_CHECK(
         (config[i] == "True" || config[i] == "False"),
-        "Expected a single True/False argument for release_lock_on_device_malloc or release_lock_on_cudamalloc");
+        "Expected a single True/False argument for release_lock_on_device_malloc, release_lock_on_cudamalloc or release_lock_on_hipmalloc");
     use_release_lock_on_device_malloc_ = (config[i] == "True");
   } else {
     TORCH_CHECK(
         false,
-        "Error, expecting release_lock_on_device_malloc or release_lock_on_cudamalloc value");
+        "Error, expecting release_lock_on_device_malloc, release_lock_on_cudamalloc or release_lock_on_hipmalloc value");
   }
   return i;
 }
@@ -307,12 +307,12 @@ size_t AllocatorConfig::parsePinnedUseDeviceHostRegister(
   if (++i < config.size()) {
     TORCH_CHECK(
         (config[i] == "True" || config[i] == "False"),
-        "Expected a single True/False argument for pinned_used_device_host_register or pinned_used_cuda_host_register");
+        "Expected a single True/False argument for pinned_used_device_host_register, pinned_used_cuda_host_register or pinned_used_hip_host_register");
     pinned_use_device_host_register_ = (config[i] == "True");
   } else {
     TORCH_CHECK(
         false,
-        "Error, expecting pinned_used_device_host_register or pinned_used_cuda_host_register value");
+        "Error, expecting pinned_used_device_host_register, pinned_used_cuda_host_register or pinned_used_hip_host_register value");
   }
   return i;
 }
