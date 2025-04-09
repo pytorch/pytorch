@@ -6,8 +6,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.ir import Buffer, FixedLayout
-from torch._inductor.kernel.mm import aten_mm
-from torch._inductor.kernel.mm_common import mm_args
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
@@ -29,6 +27,9 @@ class TestSubgraphChoice(TestCase):
         )
 
     def test_subgraph_decompose_k(self):
+        from torch._inductor.kernel.mm import aten_mm
+        from torch._inductor.kernel.mm_common import mm_args
+
         @torch.library.custom_op("mylib::matmul_decompose", mutates_args={})
         def matmul_decompose(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             return a @ b
