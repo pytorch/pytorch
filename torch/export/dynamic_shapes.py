@@ -34,6 +34,7 @@ __all__ = [
     "Dim",
     "dims",
     "refine_dynamic_shapes_from_suggested_fixes",
+    "AdditionalInputs",
 ]
 
 
@@ -711,6 +712,84 @@ class ShapesCollection:
                 "Maybe such tensors are contained in classes that were not registered with pytree?"
             )
         return dynamic_shapes
+
+
+class AdditionalInputs:
+    """
+    Infers dynamic_shapes based on additional inputs.
+
+    This is useful particularly for deployment engineers who, on the one hand, may
+    have access to ample testing or profiling data that can provide a fair sense of
+    representative inputs for a model, but on the other hand, may not know enough
+    about the model to guess which input shapes should be dynamic.
+
+    Input shapes that are different than the original are considered dynamic; conversely,
+    those that are the same as the original are considered static. Moreover, we verify
+    that the additional inputs are valid for the exported program. This guarantees that
+    tracing with them instead of the original would have generated the same graph.
+
+    Example::
+
+        args0, kwargs0 = ... # example inputs for export
+
+        # other representative inputs that the exported program will run on
+        dynamic_shapes = torch.export.AdditionalInputs()
+        dynamic_shapes.add(args1, kwargs1)
+        ...
+        dynamic_shapes.add(argsN, kwargsN)
+
+        torch.export(..., args0, kwargs0, dynamic_shapes=dynamic_shapes)
+    """
+
+    def __init__(self):
+        self._examples = []
+
+    def add(self, args, kwargs=None):
+        """
+        Additional input :func:`args` and :func:`kwargs`.
+        """
+
+        assert type(args) is tuple, f"Representative args {args} must be a tuple"
+        assert (
+            kwargs is None or type(kwargs) is dict
+        ), f"Representative kwargs {kwargs} must be None or a dict"
+        self._examples.append((args, kwargs))
+
+    def dynamic_shapes(self, m, args, kwargs=None):
+        """
+        Infers a :func:`dynamic_shapes` pytree structure by merging shapes of the
+        original input :func:`args` and :func:`kwargs` and of each additional input
+        args and kwargs.
+        """
+
+        dynamic_shapes, *other_dynamic_shapes = [
+            _tree_map_with_path(
+                lambda path, t: tuple(t.shape), _combine_args(m, args, kwargs)
+            )
+            for args, kwargs in [(args, kwargs), *self._examples]
+        ]
+
+        return tree_map_with_path(
+            lambda path, dim, *other_dims: (
+                dim
+                if all(other_dim == dim for other_dim in other_dims)
+                else Dim.DYNAMIC
+            ),
+            dynamic_shapes,
+            *other_dynamic_shapes,
+            is_leaf=lambda i: type(i) is int,
+        )
+
+    def verify(self, ep):
+        """
+        Verifies that an exported program is valid for each additional input.
+        """
+
+        epm = ep.module()
+        for args, kwargs in self._examples:
+            torch.export._unlift._check_input_constraints_pre_hook(
+                epm, args, kwargs or {}
+            )
 
 
 def _warn_on_None_dynamic_shape_dimension():
