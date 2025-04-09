@@ -226,31 +226,42 @@ def build_collectives(
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
-                        assert op._src_g == curr, (op._src_g, curr)
+                        assert op._src_g == curr, (
+                            f"Send src error: {curr} expected but {op._src_g} is set"
+                        )
                         peer = op._dst_g
                     elif op.type == "recv":
-                        assert op._dst_g == curr, (op._dst_g, curr)
+                        assert op._dst_g == curr, (
+                            f"Recv dst error: {curr} expected but {op._dst_g} is set"
+                        )
                         peer = op._src_g
                     if peer and peer not in done_ranks:
                         expected_ranks.add(peer)
 
             match = match_coalesced_groups(
                 all_coalesced_entries,
-                group_size=_groups[pg_name].size,
-                groups=_groups,
+                pg_info=(pg_name, desc),
                 memberships=_memberships,
                 _pg_guids=_pg_guids,
+                mismatch=mismatch,
+                dumps_ranks=dumps_ranks,
+                version=version,
+                collectives=collectives,
+                nccl_calls=nccl_calls,
+                match_record=match_record,
             )
 
             if match and mismatch[pg_name] == 0:
-                collectives.append(entry_state.to_collective(len(collectives)))
+                collectives.append(
+                    match_record.entry_state.to_collective(len(collectives))
+                )
             else:
                 mismatch[pg_name] += 1
             for r in all_coalesced_entries:
                 idx_map = {r: i for i, _ in reversed(all_coalesced_entries[r])}  # noqa: B035
                 nccl_calls.extend(
                     reversed(
-                        entry_state.to_nccl_call(
+                        match_record.entry_state.to_nccl_call(
                             all_entries,
                             idx_map,
                             len(nccl_calls),
