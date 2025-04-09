@@ -114,12 +114,6 @@ class InductorChoices:
         mm_heuristics = self.get_config_heuristics(device_type)
         return mm_heuristics.get_scaled_persistent_mm_configs()
 
-    def get_scaled_grouped_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_scaled_grouped_mm_configs()
-
     def get_mm_plus_mm_configs(
         self, device_type: Optional[str] = "cuda"
     ) -> partial[Generator[TritonConfig, None, None]]:
