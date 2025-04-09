@@ -101,6 +101,7 @@ from ..source import (
     GradSource,
     is_constant_source,
     is_from_optimizer_source,
+    is_from_unspecialized_param_buffer_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -1724,19 +1725,20 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
-        # Only want to check if immediate is local source
-        # Assumption: LocalSource is the only way fn input passed
-        # NOTE: Should we also check is_from_unspecialized_param_buffer_source?
+        # Check to install params/bufs which are not explicit input when requested
+        # Assumption: LocalSource is the only way our input is passed
+        # NOTE: These semantics currently will install nested params/buffers, such as
+        # if a nn.Module is an input to a function
         if (
             config.install_params_as_graph_attr
             and not (isinstance(source, LocalSource) and source.is_input)
             and (
-                isinstance(
+                is_from_unspecialized_param_buffer_source(source)
+                or isinstance(
                     value, (torch.nn.parameter.Parameter, torch.nn.parameter.Buffer)
                 )
             )
         ):
-            # Install params/bufs which are not directly inputs when explicitly asked
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
             )
