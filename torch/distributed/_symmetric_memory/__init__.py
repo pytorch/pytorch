@@ -1320,7 +1320,6 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # it is now dim 1 in this tensor, since this new `[group_size]` dim was prepended.
     stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
     stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
-    
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
