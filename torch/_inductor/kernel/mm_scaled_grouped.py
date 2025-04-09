@@ -514,7 +514,9 @@ def tuned_scaled_grouped_mm(
                 kwargs["A_GLOBAL_OFF_M"] = -1  # offs are used for stepping along M mode
                 kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
                 kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
-                kwargs["B_GLOBAL_OFF_N"] = mat_b.layout.stride[0] // mat_b.layout.stride[2]
+                kwargs["B_GLOBAL_OFF_N"] = (
+                    mat_b.layout.stride[0] // mat_b.layout.stride[2]
+                )
         else:
             kwargs["A_GLOBAL_SIZE_M"] = mat_a.layout.stride[0]
             kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[1]
@@ -526,7 +528,9 @@ def tuned_scaled_grouped_mm(
             else:
                 kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
                 kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
-                kwargs["B_GLOBAL_OFF_N"] = mat_b.layout.stride[0] // mat_b.layout.stride[2]
+                kwargs["B_GLOBAL_OFF_N"] = (
+                    mat_b.layout.stride[0] // mat_b.layout.stride[2]
+                )
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(
