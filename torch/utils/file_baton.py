@@ -32,7 +32,7 @@ class FileBaton:
         except FileExistsError:
             return False
 
-    def wait(self):
+    def wait(self, show_lock_path=False):
         """
         Periodically sleeps for a certain amount until the baton is released.
 
@@ -45,9 +45,10 @@ class FileBaton:
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
-            if time.time() - tik > 2000 and not displayed_lock_path:
-                print(f"Waiting lock file: {self.lock_file_path}")
-                displayed_lock_path = True
+            if show_lock_path:
+                if time.time() - tik > 2000 and not displayed_lock_path:
+                    print(f"Waiting lock file: {self.lock_file_path}")
+                    displayed_lock_path = True
 
     def release(self):
         """Release the baton and removes its file."""
