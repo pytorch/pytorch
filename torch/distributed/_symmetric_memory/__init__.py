@@ -1252,7 +1252,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
 
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
-    A_with_scatter_dim_0 = A.flatten(0, -2)
+    A_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
     # Parition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_with_scatter_dim_0.chunk(group.size())
@@ -1326,9 +1326,8 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     )
 
     # Final 3D+ output shape must be scattered along original scatter dim as well.
-    final_out_shape = [*output_shape[:-1], B.shape[-1]]
-    final_out_shape[orig_scatter_dim] //= group.size()
-    out = reduced_out.view(*final_out_shape)
+    output_shape[orig_scatter_dim] //= group.size()
+    out = reduced_out.view(*output_shape)
     return out
 
 
