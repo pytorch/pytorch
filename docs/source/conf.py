@@ -168,9 +168,6 @@ html_theme_options = {
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
-    "version_info": {
-        "main": version,
-    },
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
