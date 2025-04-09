@@ -565,9 +565,10 @@ class TritonTemplateKernel(TritonKernel):
         for input_node in self.input_nodes[: self.prefix_args]:
             # get args in correct order
             self.args.input(input_node.get_name())
-            self.prologue_supported_inputs.add(input_node.get_name())
 
         for name, input_node in zip(argnames, named_args):
+            self.prologue_supported_inputs.add(input_node.get_name())
+
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
             if input_node.get_name() in V.graph.removed_buffers:
