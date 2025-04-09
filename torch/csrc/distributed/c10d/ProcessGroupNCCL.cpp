@@ -1354,8 +1354,10 @@ void ProcessGroupNCCL::abortCommsFromMap(
   // The process may control multiple devices, loop through the communicators on
   // each device
   // NCCL expects Group abort when there are multiple communicators created in a
-  // device.
-  groupStart();
+  // device. Group abort requires 2.22.0 release and up.
+  if (getNcclVersionNumber() >= NCCL_VERSION(2, 22, 0)) {
+    groupStart();
+  }
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
@@ -1376,7 +1378,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
             << " communicator on CUDA device: " << devName;
   }
-  groupEnd();
+  if (getNcclVersionNumber() >= NCCL_VERSION(2, 22, 0)) {
+    groupEnd();
+  }
 }
 
 // Abort all communicators on this rank
