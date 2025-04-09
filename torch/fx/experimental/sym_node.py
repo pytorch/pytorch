@@ -885,18 +885,21 @@ def _optimized_add(
         new_args = list(lhs._args)
         for a in rhs._args:
             new_args = _binary_search_insert_arg(new_args, a)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
         new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
     # a1 + (a0+a2)=> (a0+a1+a2)
     if rhs_is_optimized_summation and lhs.is_symbol:
         new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
