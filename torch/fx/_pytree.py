@@ -19,11 +19,11 @@ _V = TypeVar("_V")
 
 def register_pytree_flatten_spec(
     cls: type[Any],
-    flatten_fn_spec: FlattenFuncSpec,
-    flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
+    flatten_func_spec: FlattenFuncSpec,
+    flatten_func_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
 ) -> None:
-    SUPPORTED_NODES[cls] = flatten_fn_spec
-    SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec
+    SUPPORTED_NODES[cls] = flatten_func_spec
+    SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_func_exact_match_spec
 
 
 def _deregister_pytree_flatten_spec(
@@ -45,8 +45,8 @@ def tree_flatten_spec(
     # as export serializes the pytree seperately.
     # Will remove it in follow up PR.
     if spec.type in SUPPORTED_NODES:
-        flatten_fn_spec = SUPPORTED_NODES[spec.type]
-        child_pytrees = flatten_fn_spec(pytree, spec)
+        flatten_func_spec = SUPPORTED_NODES[spec.type]
+        child_pytrees = flatten_func_spec(pytree, spec)
         result = []
         for child, child_spec in zip(child_pytrees, spec.children_specs):
             flat = tree_flatten_spec(child, child_spec)
