@@ -50,7 +50,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(config.max_non_split_rounding_size(), 40 * kMB);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.8);
 
-  env = "roundup_power2_divisions:[128:8,256:16,512:1,2048:8>:2]";
+  env = "roundup_power2_divisions:[128:8,256:16,512:1,2048:8,>:2]";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(config.last_allocator_settings(), env);
   EXPECT_EQ(config.roundup_power2_divisions(64 * kMB), 8);
