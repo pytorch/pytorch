@@ -146,6 +146,12 @@ class CPythonTestCase(TestCase):
     fail = unittest.TestCase.fail
     failureException = unittest.TestCase.failureException
 
+    def compile_fn(self, fn, backend, nopython):
+        method = getattr(self, self._testMethodName)
+        method = torch._dynamo.optimize(backend, nopython=nopython)(method)
+        setattr(self, self._testMethodName, method)
+        return fn
+
     def _dynamo_test_key(self):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
