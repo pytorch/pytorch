@@ -128,6 +128,9 @@ class TestFullyShardCompile(FSDPTest):
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
         # the top of the class.
+        # XPU is not applicable in this function
+        if device_type == 'xpu':
+            return
         device = torch.device(device_type, self.rank % torch.accelerator.device_count())
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")

@@ -157,7 +157,7 @@ class TestFullyShardFrozen(FSDPTest):
             modules += [nn.Linear(lin_dim, lin_dim), nn.ReLU()]
         model = nn.Sequential(*modules)
         ref_model = replicate(
-            copy.deepcopy(model).cuda(),
+            copy.deepcopy(model).to(device_type),
             device_ids=[self.rank],
             find_unused_parameters=True,
         )
@@ -243,7 +243,7 @@ class TestFullyShardFrozen(FSDPTest):
 
         torch.manual_seed(42)
         model = MultiForwardModule(torch.device("cpu"))
-        ref_model = replicate(copy.deepcopy(model).cuda(), device_ids=[self.rank])
+        ref_model = replicate(copy.deepcopy(model).to(device_type), device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
             if isinstance(module, nn.Linear):

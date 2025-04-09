@@ -207,7 +207,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def test_reduce_scatter_fp32(self):
         param_sizes = self._get_param_sizes()
         default_stream = torch.accelerator.current_stream()
-        stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
+        stream = torch.xpu.Stream() if device_type == "xpu" else torch.get_device_module(device_type).Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -219,7 +219,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def test_reduce_scatter_fp16(self):
         param_sizes = self._get_param_sizes()
         default_stream = torch.accelerator.current_stream()
-        stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
+        stream = torch.xpu.Stream() if device_type == "xpu" else torch.get_device_module(device_type).Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -249,7 +249,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
-        all_reduce_stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
+        all_reduce_stream = torch.xpu.Stream() if device_type == "xpu" else torch.get_device_module(device_type).Stream()
         (
             _,
             _,

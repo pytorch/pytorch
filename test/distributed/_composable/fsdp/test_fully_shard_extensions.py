@@ -258,7 +258,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 ):
     @property
     def world_size(self) -> int:
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     @property
     def device(self) -> torch.device:
