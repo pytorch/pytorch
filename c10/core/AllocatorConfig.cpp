@@ -27,7 +27,18 @@ AllocatorConfig& AllocatorConfig::instance() {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead");
     instance.parseArgs(env_cuda);
+    return instance;
   }
+#ifdef USE_ROCM
+  // Keep this for backwards compatibility and convenience for ROCm users
+  const char* env_hip = std::getenv("PYTORCH_HIP_ALLOC_CONF");
+  if (env_hip) {
+    TORCH_WARN_ONCE(
+        "PYTORCH_HIP_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead");
+    instance.parseArgs(env_hip);
+    return instance;
+  }
+#endif
   return instance;
 }
 
