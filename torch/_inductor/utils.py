@@ -1377,7 +1377,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
             return False
 
         dtype = x.get_dtype()
-        if dtype not in (torch.float16, torch.bfloat16):
+        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
         layout = x.get_layout()
@@ -1388,6 +1388,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         inner_dim = layout.size[1]
         if transposed:
             inner_dim = layout.size[0]
+
+        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
+            inner_dim, 32
+        ):
+            return False
+
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
 
