@@ -291,7 +291,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -349,7 +349,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -420,7 +420,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -489,7 +489,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -567,7 +567,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -672,7 +672,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -782,7 +782,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -826,7 +826,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -879,7 +879,7 @@ class LinearBinary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -943,7 +943,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
         if isinstance(self.layout, Layout):
@@ -1027,7 +1027,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -1225,11 +1225,11 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         return output_ir
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         return super().codegen(wrapper)
 
 
-# Add this IR so that we can include shim_mkldnn.h for cpp_wrapper
+# Add this IR so that we can include shim_cpu.h for cpp_wrapper
 class WeightInt4PackMatmul(ExternKernelAlloc):
     def __init__(
         self,
@@ -1253,7 +1253,7 @@ class WeightInt4PackMatmul(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
         if isinstance(self.layout, Layout):
