@@ -73,6 +73,10 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
