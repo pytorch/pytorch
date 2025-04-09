@@ -112,7 +112,9 @@ class GraphModule(torch.nn.Module):
     class ___forward_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
             add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
             add_2: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
@@ -205,7 +207,9 @@ class GraphModule(torch.nn.Module):
     class ___forward_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[10, 10]"):
             mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(primals_0, 7);  primals_0 = None
+
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(mul, 1);  mul = None
+
             add_1: "f32[10, 10]" = torch.ops.aten.add.Tensor(add, 2);  add = None
             return (add_1,)
 """,
@@ -349,7 +353,9 @@ class GraphModule(torch.nn.Module):
     class ___forward_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
             add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
             add_2: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
@@ -358,7 +364,9 @@ class GraphModule(torch.nn.Module):
     class ___forward_subgraph_1_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 2)
+
             add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 3)
+
             cos: "f32[10, 20]" = torch.ops.aten.cos.default(add_1);  add_1 = None
             sum_1: "f32[]" = torch.ops.aten.sum.default(cos);  cos = None
             mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(add, sum_1);  add = None
@@ -416,6 +424,7 @@ class GraphModule(torch.nn.Module):
     class ___forward_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[]"):
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
             add_1: "f32[]" = torch.ops.aten.add.Tensor(sum_1, primals_1);  sum_1 = primals_1 = None
             return (add_1,)
@@ -564,7 +573,9 @@ class <lambda>(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
             mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+
             mul_1: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None
             add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
