@@ -156,18 +156,10 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Bootstrap Git
-        shell: cmd
+      - name: Enable long paths on Windows
+        shell: powershell
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
