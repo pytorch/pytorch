@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import functools
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -7,6 +9,7 @@ from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     reenter_make_fx,
     UnsupportedAliasMutationException,
@@ -32,16 +35,6 @@ from .utils import (
 )
 
 
-# TODO: We add this to prevent dymamo from tracing into map_wrapper,
-# remove the wrapper call when it's ready.
-class MapWrapper(HigherOrderOperator):
-    def __init__(self):
-        super().__init__("map")
-
-    def __call__(self, xs, *args):
-        return map_wrapper(xs, *args)
-
-
 class MapImpl(HigherOrderOperator):
     def __init__(self):
         super().__init__("map_impl")
@@ -49,8 +42,6 @@ class MapImpl(HigherOrderOperator):
     def __call__(self, *args, **kwargs):
         return super().__call__(*args, **kwargs)
 
-
-map = MapWrapper()
 
 map_impl = MapImpl()
 
@@ -124,12 +115,12 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
         return fw_graph, joint_graph
 
 
-def map_wrapper(f, xs, *args):
+def map(f, xs, *args):
     flat_xs, xs_spec = pytree.tree_flatten(xs)
+    flat_args, args_spec = pytree.tree_flatten(args)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
         raise RuntimeError(f"Mapped xs can only consist of tensors. Got xs {flat_xs}.")
 
-    num_mapped_args = len(flat_xs)
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
     if leading_dim_size == 0:
@@ -140,20 +131,22 @@ def map_wrapper(f, xs, *args):
             f"Leading dimensions of mapped xs must be consistent. Got shapes {shapes}."
         )
 
-    out_spec = None
+    def run_flattened_map(f, flat_xs, flat_args):
+        def wrapped_fn(*flat_args, f, xs_tree_spec, args_tree_spec, num_xs):
+            xs = pytree.tree_unflatten(flat_args[:num_xs], xs_tree_spec)
+            args = pytree.tree_unflatten(flat_args[num_xs:], args_tree_spec)
+            return f(xs, *args)
 
-    def flat_fn(*flat_args):
-        xs = pytree.tree_unflatten(list(flat_args[:num_mapped_args]), xs_spec)
-        unflattened_out = f(xs, *flat_args[num_mapped_args:])
-        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
+        inner_f = functools.partial(
+            wrapped_fn,
+            f=f,
+            xs_tree_spec=xs_spec,
+            args_tree_spec=args_spec,
+            num_xs=len(flat_xs),
+        )
+        return map_impl(inner_f, flat_xs, flat_args)
 
-        nonlocal out_spec
-        out_spec = tmp_out_spec
-        return flat_out
-
-    return pytree.tree_unflatten(
-        map_impl(flat_fn, flat_xs, args), out_spec  # type: ignore[arg-type]
-    )
+    return _maybe_compile_and_run_fn(run_flattened_map, f, flat_xs, flat_args)
 
 
 class MapAutogradOp(torch.autograd.Function):
