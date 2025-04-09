@@ -239,18 +239,11 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-{%- if os == "windows-arm64" %}
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "pytorch/.circleci/scripts/binary_windows_arm64_test.sh"
-{%- else %}
       - name: Test PyTorch binary
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
-{%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
   {%- endif %}
