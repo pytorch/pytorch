@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Callable, Optional
+from typing import Callable
 from typing_extensions import deprecated
 
 import torch
@@ -13,11 +13,26 @@ class FakeImplHolder:
 
     def __init__(self, qualname: str):
         self.qualname: str = qualname
-        self.kernel: Optional[Kernel] = None
-        self.lib: Optional[torch.library.Library] = None
+        # kernels stores all registered fake kernels, ordered by registration
+        # time ascendingly (newer registration after older registration). If an
+        # operator library gets loaded that overrides an existing fake kernel,
+        # both kernels will be in the list, but the newest one will be the one
+        # that is run. If the library is unloaded, we will remove the kernel
+        # from this list.
+        self.kernels: list[Kernel] = []
+
+    @property
+    def kernel(self):
+        if len(self.kernels) == 0:
+            return None
+        return self.kernels[-1]
+
+    @kernel.setter
+    def kernel(self, value):
+        raise RuntimeError("Unable to directly set kernel.")
 
     def register(
-        self, func: Callable, source: str, *, _allow_override=False
+        self, func: Callable, source: str, *, lib=None, allow_override=False
     ) -> RegistrationHandle:
         """Register an fake impl.
 
@@ -25,7 +40,7 @@ class FakeImplHolder:
         fake impl.
         """
 
-        if not _allow_override:
+        if not allow_override:
             if self.kernel is not None:
                 raise RuntimeError(
                     f"register_fake(...): the operator {self.qualname} "
@@ -57,24 +72,17 @@ class FakeImplHolder:
                 )
 
         # Store the kernel in this holder
-        self.kernel = Kernel(func, source)
-
-        # Also register the fake impl to Meta key
-        if self.lib is None:
-            ns = self.qualname.split("::")[0]
-            self.lib = torch.library.Library(ns, "FRAGMENT")  # noqa: TOR901
-        meta_kernel = construct_meta_kernel(self.qualname, self)
-        self.lib.impl(
-            self.qualname, meta_kernel, "Meta", _allow_override=_allow_override
-        )
+        kernel = Kernel(func, source)
+        self.kernels.append(kernel)
 
         def deregister_fake_class():
-            if self.lib:
-                self.lib._destroy()
-                self.lib = None
-            self.kernel = None
+            self.kernels.remove(kernel)
 
-        return RegistrationHandle(deregister_fake_class)
+        meta_kernel = construct_meta_kernel(self.qualname, self)
+        lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
+
+        handle = RegistrationHandle(deregister_fake_class)
+        return handle
 
 
 def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Callable:
