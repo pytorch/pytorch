@@ -732,11 +732,3 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
-
-
-def _inlineable_saved_tensors_hook():
-    def decorator(func):
-        func._dynamo_inlineable_saved_tensors_hooks = True
-        return func
-
-    return decorator

@@ -507,6 +507,8 @@ def top_saved_tensors_hooks_are_inlineable(hooks) -> bool:
         return False
 
     pack_hook, unpack_hook = hooks
-    return hasattr(pack_hook, "_dynamo_inlineable_saved_tensors_hooks") and hasattr(
-        unpack_hook, "_dynamo_inlineable_saved_tensors_hooks"
+
+    # Inlineable hooks must be torch.fx.GraphModule
+    return isinstance(pack_hook, torch.fx.GraphModule) and isinstance(
+        unpack_hook, torch.fx.GraphModule
     )

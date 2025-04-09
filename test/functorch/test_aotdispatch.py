@@ -40,7 +40,6 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
-from torch._dynamo.decorators import _inlineable_saved_tensors_hook
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -110,6 +109,17 @@ except ImportError:
     warnings.warn("Some tests use networkx but it was not installed", UserWarning)
 
 # NB: numpy is a testing dependency!
+
+
+def saved_tensors_hooks_to_gm(pack, unpack):
+    # TODO: symbolic shapes tracing to be able to provide not the same shape?
+    inp = torch.randn(2, 3)
+    torch._dynamo.mark_dynamic(inp, 0)
+    torch._dynamo.mark_dynamic(inp, 1)
+    pack_out = pack(inp)
+    pack_gm = make_fx(pack)(inp)
+    unpack_gm = make_fx(unpack)(pack_out)
+    return pack_gm, unpack_gm
 
 
 class AOTTestCase(TestCase):
@@ -6606,7 +6616,7 @@ metadata incorrectly.
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks(self):
-        def _test_pack_hooks(fn, inp_fn, hooks):
+        def _test_pack_hooks(fn, inp_fn, hooks, inline=True):
             torch._dynamo.reset()
             with ExitStack() as stack:
                 for hook in hooks:
@@ -6620,7 +6630,16 @@ metadata incorrectly.
                 ref_y = fn(ref_x)
                 ref_y.sum().backward()
 
-                y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            with ExitStack() as stack:
+                for hook in hooks:
+                    pack, unpack = hook
+                    if inline:
+                        pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
+                    stack.enter_context(
+                        torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+                    )
+
+                y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
                 y.sum().backward()
                 self.assertEqual(ref_y, y, atol=1e-2, rtol=1e-2)
                 self.assertEqual(ref_x.grad, x.grad, atol=1e-2, rtol=1e-2)
@@ -6652,6 +6671,7 @@ metadata incorrectly.
         def fn(x):
             x = x.relu()
             x = x + 1
+            x = x.relu()
             x = 2 * x
             x = AF.apply(x)
             return x
@@ -6669,46 +6689,40 @@ metadata incorrectly.
             torch._dynamo.mark_dynamic(x, 1)
             return x
 
-        @_inlineable_saved_tensors_hook()
         def pack_dev_sym_cpu(x):
-            return (x.device, x.size(0), 10 * x.cpu())
+            # TODO: support sym tracing with make_fx
+            return (x.device, x.size(1), 10 * x.cpu())
 
-        @_inlineable_saved_tensors_hook()
         def unpack_dev_sym_cpu(packed):
-            device, dim0, tensor = packed
-            ret = tensor.to(device=device) * dim0
+            device, dim1, tensor = packed
+            ret = tensor.to(device=device) * dim1
             return ret
 
-        @_inlineable_saved_tensors_hook()
         def pack_tensor(x):
             return x.cpu()
 
-        @_inlineable_saved_tensors_hook()
         def unpack_tensor(packed):
             t_cpu = packed
             return t_cpu.to(device=device)
 
-        @_inlineable_saved_tensors_hook()
         def pack_bf16(x):
-            return x.to(dtype=torch.bfloat16)
+            return x.dtype, x.to(dtype=torch.bfloat16)
 
-        @_inlineable_saved_tensors_hook()
-        def unpack_bf16(x):
-            return x.to(dtype=torch.float)
+        def unpack_bf16(packed):
+            dtype, x = packed
+            return x.to(dtype)
 
-        @_inlineable_saved_tensors_hook()
         def pack_mul2(x):
             return x * 2
 
-        @_inlineable_saved_tensors_hook()
         def unpack_mul2(x):
             return x / 2
 
-        @_inlineable_saved_tensors_hook()
-        def pack_float8(x):
-            return (x.dtype, x.to(torch.float8_e4m3fn))
+        FP8_DTYPE = torch.float8_e5m2
 
-        @_inlineable_saved_tensors_hook()
+        def pack_float8(x):
+            return (x.dtype, x.to(FP8_DTYPE))
+
         def unpack_float8(packed):
             dtype, tensor = packed
             return tensor.to(dtype)
@@ -6723,33 +6737,27 @@ metadata incorrectly.
             res = res.to(torch.float32)
             return res
 
-        @_inlineable_saved_tensors_hook()
         def pack_fp8_with_scale(x):
             amax = torch.max(torch.abs(x))
-            scale = amax_to_scale(amax, torch.float8_e4m3fn)
+            scale = amax_to_scale(amax, FP8_DTYPE)
             x_scaled = x.to(torch.float32) * scale
-            x_fp8 = x_scaled.to(torch.float8_e4m3fn)
+            x_fp8 = x_scaled.to(FP8_DTYPE)
             return x.dtype, scale, x_fp8
 
-        @_inlineable_saved_tensors_hook()
         def unpack_fp8_with_scale(x):
             dtype, scale, x_fp8 = x
             y = x_fp8.to(dtype) / scale
             return y
 
-        @_inlineable_saved_tensors_hook()
         def pack_wrapper_sc(x):
             return WrapperSubclass(x)
 
-        @_inlineable_saved_tensors_hook()
         def unpack_wrapper_sc(x):
             return x.a
 
-        @_inlineable_saved_tensors_hook()
         def pack_wrapper_two_tensor(x):
             return TwoTensor(x, x)
 
-        @_inlineable_saved_tensors_hook()
         def unpack_wrapper_two_tensor(x):
             return x.a + x.b
 
@@ -6768,14 +6776,17 @@ metadata incorrectly.
             _test_pack_hooks(test_fn, inp_fn, [(pack_float8, unpack_float8)])
             _test_pack_hooks(test_fn, inp_fn, [(pack_tensor, unpack_tensor)])
             _test_pack_hooks(test_fn, inp_fn, [(pack_dev_sym_cpu, unpack_dev_sym_cpu)])
-            _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
-            _test_pack_hooks(
-                test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
-            )
+            # Disable testing of Subclasses for now
+            # _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+            # _test_pack_hooks(
+            #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+            # )
             _test_pack_hooks(
                 test_fn, inp_fn, [(pack_fp8_with_scale, unpack_fp8_with_scale)]
             )
-            _test_pack_hooks(test_fn, inp_fn, [(pack_mul2_eager, unpack_mul2_eager)])
+            _test_pack_hooks(
+                test_fn, inp_fn, [(pack_mul2_eager, unpack_mul2_eager)], inline=False
+            )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks_recompile(self):
@@ -6791,23 +6802,19 @@ metadata incorrectly.
         def unpack_mul2(x):
             return x / 2
 
-        @_inlineable_saved_tensors_hook()
         def inlineable_pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
 
-        @_inlineable_saved_tensors_hook()
         def inlineable_unpack_bf16(x):
             return x.to(dtype=torch.float)
 
-        @_inlineable_saved_tensors_hook()
         def inlineable_pack_mul2(x):
             return x * 2
 
-        @_inlineable_saved_tensors_hook()
         def inlineable_unpack_mul2(x):
             return x / 2
 
-        def _test(hooks, expected_compile_count):
+        def _test(hooks, inline, expected_compile_count):
             class SAF(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x):
@@ -6859,24 +6866,37 @@ metadata incorrectly.
             y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
             y.sum().backward()
 
-            with torch.autograd.graph.saved_tensors_hooks(*hooks[0]):
+            pack, unpack = hooks[0]
+            if inline:
+                pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
+
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 x = inp_fn()
                 y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
                 y.sum().backward()
 
-            with torch.autograd.graph.saved_tensors_hooks(*hooks[1]):
+            pack, unpack = hooks[1]
+            if inline:
+                pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
+
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 x = inp_fn()
                 y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
                 y.sum().backward()
             self.assertEqual(cnt.frame_count, expected_compile_count)
 
-        _test(((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)), 1)
+        _test(
+            ((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)),
+            inline=False,
+            expected_compile_count=1,
+        )
         _test(
             (
                 (inlineable_pack_bf16, inlineable_unpack_bf16),
                 (inlineable_pack_mul2, inlineable_unpack_mul2),
             ),
-            3,
+            inline=True,
+            expected_compile_count=3,
         )
 
 

@@ -30,7 +30,7 @@ from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import is_sym_node, make_fx
+from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
@@ -69,12 +69,7 @@ from .runtime_wrappers import (
     RuntimeWrapper,
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
-from .subclass_utils import (
-    compute_inner_mutated_inp_indices_from_subclass_meta,
-    create_subclass_meta,
-    unwrap_tensor_subclasses,
-    wrap_tensor_subclasses,
-)
+from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     _get_symint_hints,
     contain_metadata_mutation_ops,
@@ -797,6 +792,37 @@ def maybe_log_graph(gm, graph_name, structured_log_tag, aot_config):
     )
 
 
+def create_wrap_fn(fn, args):
+    from functools import wraps
+
+    from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
+
+    from .functional_utils import from_fun, to_fun
+
+    @wraps(fn)
+    def _wrapper(*args):
+        with maybe_enable_thunkify():
+            disable_above = torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            )
+
+            with disable_above:
+                f_args = pytree.tree_map(to_fun, args)
+                f_outs = fn(*f_args)
+                return pytree.tree_map(from_fun, f_outs)
+
+    return _wrapper, args
+
+
+def prepare_hook_gm(aot_config, fn, args):
+    # TODO: Run full aot_autograd for inference?
+    from torch._functorch._aot_autograd.dispatch_and_compile_graph import _create_graph
+
+    fn, args = create_wrap_fn(fn, args)
+    gm = _create_graph(fn, args, aot_config=aot_config)
+    return gm
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
 # and prologue of backward graph.
 # This changes forward graph outputs and inputs.
@@ -813,12 +839,11 @@ def maybe_inline_saved_tensors_hooks(
     if not top_saved_tensors_hooks_are_inlineable(hooks):
         return
 
-    pack_hook, unpack_hook = hooks
+    pack_hook_gm, unpack_hook_gm = hooks
 
     fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
 
-    pack_hook, unpack_hook = hooks
     maybe_log_graph(
         fw_module,
         "Forward graph pre saved_tensors_hooks inlining",
@@ -836,6 +861,7 @@ def maybe_inline_saved_tensors_hooks(
     bw_g_inputs = bw_g.find_nodes(op="placeholder")
 
     fw_out_n = fw_g.output_node()
+    fw_outs_saved_tensors_unchanged = []
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
 
@@ -844,29 +870,35 @@ def maybe_inline_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        pack_out_val = pack_hook(val)
+        if val.dtype in [torch.bool]:
+            # fw_outs_packed_tensors.append(saved)
+            fw_outs_saved_tensors_unchanged.append(saved)
+            continue
 
-        requires_sc_handling = is_traceable_wrapper_subclass(val) or any(
+        pack_out_val = pack_hook_gm(val)
+
+        requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
         )
+        if requires_sc_handling:
+            raise NotImplementedError(
+                "Tensor subclasses in GraphModule saved tensors hooks are not supported"
+            )
 
         pack_out_val_flat, p_out_spec = pytree.tree_flatten(pack_out_val)
-        subclass_p_out_meta = create_subclass_meta(
-            pack_out_val_flat, count_symints=False
-        )
-        # TODO: Use installed by dynamo pack/unpack subgraphs.
-        pack_hook_fn_to_trace = pack_hook
-        if requires_sc_handling:
+        # subclass_p_out_meta = create_subclass_meta(
+        #     pack_out_val_flat, count_symints=False
+        # )
+        pack_hook_fn_to_trace = pack_hook_gm
+        # if requires_sc_handling:
+        #     def pack_hook_sc_wrapper(arg):
+        #         outs = pack_hook_gm(arg)
+        #         return unwrap_tensor_subclasses(
+        #             pytree.tree_leaves(outs), append_symints=False
+        #         )
+        #     pack_hook_fn_to_trace = pack_hook_sc_wrapper
 
-            def pack_hook_sc_wrapper(arg):
-                outs = pack_hook(arg)
-                return unwrap_tensor_subclasses(
-                    pytree.tree_leaves(outs), append_symints=False
-                )
-
-            pack_hook_fn_to_trace = pack_hook_sc_wrapper
-
-        pack_gm = make_fx(pack_hook_fn_to_trace)(val)
+        pack_gm = prepare_hook_gm(aot_config, pack_hook_fn_to_trace, (val,))
         pack_g = pack_gm.graph
         maybe_log_graph(
             pack_gm,
@@ -914,21 +946,21 @@ def maybe_inline_saved_tensors_hooks(
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
         # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-        unpack_hook_fn_to_trace = unpack_hook
-        if requires_sc_handling:
-
-            def unpack_hook_sc_wrapper(*args_unwrap):
-                args_flat = wrap_tensor_subclasses(
-                    pytree.tree_leaves(args_unwrap),
-                    subclass_metas=subclass_p_out_meta,
-                )
-                args_unflat = pytree.tree_unflatten(args_flat, p_out_spec)
-                return unwrap_tensor_subclasses(
-                    [unpack_hook(args_unflat)], append_symints=False
-                )
-
-            unpack_hook_fn_to_trace = unpack_hook_sc_wrapper
-        unpack_gm = make_fx(unpack_hook_fn_to_trace)(pack_out_val)
+        unpack_hook_fn_to_trace = unpack_hook_gm
+        # if requires_sc_handling:
+        #     def unpack_hook_sc_wrapper(*args_unwrap):
+        #         args_flat = wrap_tensor_subclasses(
+        #             pytree.tree_leaves(args_unwrap),
+        #             subclass_metas=subclass_p_out_meta,
+        #         )
+        #         args_unflat = pytree.tree_unflatten(args_flat, p_out_spec)
+        #         return unwrap_tensor_subclasses(
+        #             [unpack_hook_gm(args_unflat)], append_symints=False
+        #         )
+        #     unpack_hook_fn_to_trace = unpack_hook_sc_wrapper
+        unpack_gm = prepare_hook_gm(
+            aot_config, unpack_hook_fn_to_trace, (pack_out_val,)
+        )
         unpack_g = unpack_gm.graph
         maybe_log_graph(
             unpack_gm,
@@ -999,6 +1031,7 @@ def maybe_inline_saved_tensors_hooks(
             pytree.tree_leaves(
                 (
                     fw_outs[:num_inner_fwd_outputs],
+                    fw_outs_saved_tensors_unchanged,
                     fw_outs_packed_tensors,
                     fw_outs_packed_syms,
                     symint_outs_saved_for_bw,
