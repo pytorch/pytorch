@@ -189,8 +189,8 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
           std::fill(
               std::next(
                   roundup_power2_divisions_.begin(),
-                  static_cast<std::vector<unsigned long>::difference_type>(
-                      last_index)),
+                  static_cast<std::vector<size_t>::difference_type>(
+                      last_index + 1)),
               roundup_power2_divisions_.end(),
               val2);
         } else {
@@ -208,14 +208,11 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
                 roundup_power2_divisions_.begin(),
                 std::next(
                     roundup_power2_divisions_.begin(),
-                    static_cast<std::vector<unsigned long>::difference_type>(
-                        index)),
+                    static_cast<std::vector<size_t>::difference_type>(index)),
                 val2);
             first_value = false;
           }
-          if (index < roundup_power2_divisions_.size()) {
-            roundup_power2_divisions_[index] = val2;
-          }
+          roundup_power2_divisions_[index] = val2;
           last_index = index;
         }
 
