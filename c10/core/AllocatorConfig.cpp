@@ -29,7 +29,6 @@ AllocatorConfig& AllocatorConfig::instance() {
     instance.parseArgs(env_cuda);
     return instance;
   }
-#ifdef USE_ROCM
   // Keep this for backwards compatibility and convenience for ROCm users
   const char* env_hip = std::getenv("PYTORCH_HIP_ALLOC_CONF");
   if (env_hip) {
@@ -38,7 +37,6 @@ AllocatorConfig& AllocatorConfig::instance() {
     instance.parseArgs(env_hip);
     return instance;
   }
-#endif
   return instance;
 }
 
@@ -251,8 +249,8 @@ size_t AllocatorConfig::parseDeviceAllocatorBackend(
         (config[i] == "native" ||
          config[i] == "async"
          // Keep this for backwards compatibility
-         || config[i] == "cudaMallocAsync"),
-        "Unknown allocator backend, options are native, async or cudaMallocAsync");
+         || config[i] == "cudaMallocAsync" || config[i] == "hipMallocAsync"),
+        "Unknown allocator backend, options are native, async, cudaMallocAsync or hipMallocAsync");
     if (is_allocator_loaded_) {
       bool aync_allocator_at_runtime = (config[i] != "native");
       TORCH_CHECK(
@@ -389,31 +387,17 @@ void AllocatorConfig::parseArgs(const char* env) {
       i = parseExpandableSegments(config, i);
       used_native_specific_option = true;
     } else if (
-        config_item_view == "release_lock_on_device_malloc"
-    // Keep this for backwards compatibility
-    // ROCm build's hipify step will change "cuda" to "hip", but for
-    // ease of use, accept both. We must break up the string to
-    // prevent hipify here.
-#ifdef USE_ROCM
-        || config_item_view == "release_lock_on_hipmalloc"
-#endif
-        || config_item_view ==
-            "release_lock_on_c"
-            "udamalloc") {
+        config_item_view == "release_lock_on_device_malloc" ||
+        // Keep this for backwards compatibility
+        config_item_view == "release_lock_on_cudamalloc" ||
+        config_item_view == "release_lock_on_hipmalloc") {
       i = parseReleaseLockOnDeviceMalloc(config, i);
       used_native_specific_option = true;
     } else if (
-        config_item_view == "pinned_use_device_host_register"
-    // Keep this for backwards compatibility
-    // ROCm build's hipify step will change "cuda" to "hip", but for
-    // ease of use, accept both. We must break up the string to
-    // prevent hipify here.
-#ifdef USE_ROCM
-        || config_item_view == "pinned_use_hip_host_register"
-#endif
-        || config_item_view ==
-            "pinned_use_c"
-            "uda_host_register") {
+        config_item_view == "pinned_use_device_host_register" ||
+        // Keep this for backwards compatibility
+        config_item_view == "pinned_use_cuda_host_register" ||
+        config_item_view == "pinned_use_hip_host_register") {
       i = parsePinnedUseDeviceHostRegister(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "pinned_num_register_threads") {
