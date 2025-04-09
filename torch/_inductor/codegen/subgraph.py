@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 import torch
 from torch._inductor import ir
@@ -93,7 +93,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> Dict[str, Any]:
+    def info_dict(self) -> dict[str, Any]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "subgraph",
