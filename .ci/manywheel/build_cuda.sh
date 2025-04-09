@@ -54,7 +54,7 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
     12.8)
-        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX" #Ripping out 5.0 and 6.0 due to ld error
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8 and will be removed in future releases
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.6)

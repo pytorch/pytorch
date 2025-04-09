@@ -232,7 +232,7 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: FileLike) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -248,10 +248,13 @@ def aoti_load_package(path: FileLike) -> Any:  # type: ignore[type-arg]
 
     Args:
         path: Path to the .pt2 package
+        run_single_threaded (bool): Whether the model should be run without
+            thread synchronization logic. This is useful to avoid conflicts with
+            CUDAGraphs.
     """
     from torch._inductor.package import load_package
 
-    return load_package(path)
+    return load_package(path, run_single_threaded=run_single_threaded)
 
 
 def aot_compile(
@@ -280,12 +283,14 @@ def aot_compile(
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options
     )
+    from torch._export.utils import _compiling_state_context
 
-    return compile_fx_aot(
-        gm,
-        flat_example_inputs,  # type: ignore[arg-type]
-        config_patches=options,
-    )
+    with _compiling_state_context():
+        return compile_fx_aot(
+            gm,
+            flat_example_inputs,  # type: ignore[arg-type]
+            config_patches=options,
+        )
 
 
 def list_mode_options(
