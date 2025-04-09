@@ -505,6 +505,43 @@ class GraphModule(torch.nn.Module):
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, y)
 
+    def test_subgenerator_with_return(self):
+        def subgen(t):
+            yield t + 1
+            return t + 2
+
+        def whoo(t):
+            value = yield from subgen(t)
+            yield value
+            yield t + 3
+
+        def fn(t):
+            return zip(range(3), whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
+
+    def test_generator_with_return(self):
+        def inner(t):
+            yield t + 1
+            return t + 2
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            g = inner(t)
+            ans = []
+            while True:
+                try:
+                    ans.append(next(g))
+                except StopIteration as e:
+                    ans.append(e.value)
+                    break
+            return ans
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), [t + 1, t + 2])
+
     @parametrize("container", [list, tuple, dict, OrderedDict])
     def test_dict_tuple_list_generator(self, container):
         def whoo(t):
