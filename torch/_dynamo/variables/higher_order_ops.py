@@ -267,26 +267,16 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
                     return False
             elif isinstance(arg_a, slice):
                 if not isinstance(arg_b, slice):
-                    return check_all_args(
-                        (arg_a.start, arg_a.stop, arg_a.step),
-                        (arg_b.start, arg_b.stop, arg_b.step),
-                    )
-            elif arg_a != arg_b:
-                return False
-        return True
-
-    def check_all_kwargs(a_kwargs, b_kwargs):
-        # Assumes that the ordering is also same
-        for a_key, b_key in zip(a_kwargs, b_kwargs):
-            if a_key != b_key:
-                return False
-            a_value = a_kwargs[a_key]
-            b_value = b_kwargs[b_key]
-
-            if isinstance(a_value, torch.fx.Node):
-                if node_map[a_value] != b_value:
                     return False
-            elif a_value != b_value:
+                if not check_all_args(
+                    (arg_a.start, arg_a.stop, arg_a.step),
+                    (arg_b.start, arg_b.stop, arg_b.step),
+                ):
+                    return False
+            elif arg_a != arg_b:
+                # This is a catch-all for everything else. `slice` was a
+                # surprise but can there be other data structures that can
+                # contain fx.Nodes in them?
                 return False
         return True
 
@@ -294,7 +284,6 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
         if a_node.op != b_node.op:
             return False
 
-        # Check for all ops - placeholder|call_method|call_module|call_function|get_attr|output
         if a_node.op == "placeholder":
             a_value = a_node.meta["example_value"]
             b_value = b_node.meta["example_value"]
@@ -322,22 +311,24 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
         elif a_node.op == "call_function":
             if a_node.target is not b_node.target:
                 return False
-            if not check_all_args(a_node.args, b_node.args):
-                return False
-            if not check_all_kwargs(a_node.kwargs, b_node.kwargs):
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("call_function args failed")
                 return False
         elif a_node.op == "call_method":
             if a_node.target != b_node.target:
                 return False
-            if not check_all_args(a_node.args, b_node.args):
-                return False
-            if not check_all_kwargs(a_node.kwargs, b_node.kwargs):
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("call_method args failed")
                 return False
         elif a_node.op == "output":
-            if not check_all_args(
-                pytree.tree_flatten(a_node.args[0])[0],
-                pytree.tree_flatten(b_node.args[0])[0],
-            ):
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("output args failed")
                 return False
         elif a_node.op == "get_attr":
             a_attr = getattr(a_mod, a_node.target)
