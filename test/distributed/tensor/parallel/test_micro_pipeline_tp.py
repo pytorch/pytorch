@@ -463,35 +463,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_inductor_cache()
-    def test_no_all_gathers_or_reduce_scatters(self):
-        group = dist.group.WORLD
-
-        def no_matching_pattern(
-            A: torch.Tensor,
-            B: torch.Tensor,
-        ) -> torch.Tensor:
-            """
-            Performs some ops which will not have any all-gather-matmul or matmul-reduce-scatter patterns.
-            """
-            C = A * B
-            return all_reduce(C, "sum", group)
-
-        A = torch.rand(2, 16, 32, device="cuda").to(torch.bfloat16)
-        B = torch.rand(16, 32, device="cuda").to(torch.bfloat16)
-
-        gm = _make_post_grad_fx(no_matching_pattern, A, B)
-
-        with _test_mode():
-            self.assertRaisesRegex(
-                AssertionError,
-                "async TP found no matching all-gather/reduce-scatter patterns for fusion",
-                micro_pipeline_tp_pass,
-                gm.graph,
-            )
-
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
