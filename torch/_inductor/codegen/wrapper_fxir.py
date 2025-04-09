@@ -1,3 +1,4 @@
+import dataclasses
 import operator
 import random
 import textwrap
@@ -13,6 +14,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.utils._sympy.functions import FloorDiv
 
 
 aten = torch.ops.aten
@@ -23,7 +25,7 @@ from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.virtualized import V
 
 from .. import config, ir
-from ..utils import convert_to_symint, LineContext
+from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
 from .common import WorkspaceArg, WorkspaceZeroMode, WrapperGraphModule
 from .wrapper import (
     AllocateLine,
@@ -56,6 +58,18 @@ def delete(x: torch.Tensor) -> None:
     This function is used as an FX op to delete a tensor.
     """
     del x
+
+
+@dataclasses.dataclass
+class SymbolBuffer:
+    """
+    Wraps a sympy.Symbol to expose codegen functionality used for buffers.
+    """
+
+    symbol: sympy.Symbol
+
+    def get_name(self) -> str:
+        return str(self.symbol)
 
 
 class TritonKernel:
@@ -136,7 +150,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ) -> torch.Tensor:
         with V.fake_mode:
             return torch.empty_strided(
-                size,
+                convert_shape_to_symint(size),
                 stride,
                 dtype=dtype,
                 device=device,
@@ -187,6 +201,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             return node
         elif isinstance(node, (ir.BaseView, ir.MutableBox)):
             return self._get_buffer(node.data)
+        elif isinstance(node, sympy.Symbol):
+            return SymbolBuffer(node)
         else:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
@@ -196,9 +212,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         for ir_node in V.graph.graph_inputs.values():
             buffer = self._get_buffer(ir_node)
-            assert buffer.get_name()
             node = self.gm.graph.placeholder(buffer.get_name())
-            self._create_meta_from_buffer(node, buffer)
+
+            # Skip fake tensor creation for symbol inputs.
+            if not isinstance(buffer, SymbolBuffer):
+                self._create_meta_from_buffer(node, buffer)
+
             self._record_allocation(buffer, node)
 
     def _generate_buffer(self, node: ir.IRNode) -> Optional[torch.fx.Node]:
@@ -501,6 +520,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
         call_kwargs.update(config.kwargs)
 
+        # Convert floor(x/y) to FloorDiv. This prints to FX-friendly code.
+        grid = [FloorDiv.rewrite(x) if isinstance(x, sympy.Expr) else x for x in grid]
+
         # Convert sympy expressions to symints.
         for name, val in call_kwargs.items():
             if isinstance(val, sympy.Expr):
@@ -517,7 +539,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
                 "constant_args_idx": constant_args_idx,
-                "grid": [grid],
+                "grid": [convert_shape_to_symint(grid)],
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
             },

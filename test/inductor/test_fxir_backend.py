@@ -5,7 +5,7 @@ Test the FX IR backend.
 
 import operator
 import unittest
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch._inductor.codegen.common as common
@@ -57,8 +57,12 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
+        compile_kwargs: Optional[dict] = None,
     ):
-        opt = torch.compile(func)
+        if compile_kwargs is None:
+            compile_kwargs = {}
+
+        opt = torch.compile(func, **compile_kwargs)
 
         # Get the FX graph from the backend.
         gms = self._run_and_capture_graphs(opt, args)
@@ -308,6 +312,21 @@ class FxirTestCase(InductorTestCase):
         self.assertFalse(same(result, ref))
         self.assertNotEqual(offset, 0)
         self.assertTrue(same(result - offset, ref))
+
+    def test_dynamic_shapes(self):
+        static_numel = 8
+        func = torch.add
+        args = [torch.randn(static_numel, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        (symbolic_numel,) = empty_strided.meta["val"].shape
+        self.assertTrue(isinstance(symbolic_numel, torch.SymInt))
+
+        # TODO Check the size hint.
 
 
 if __name__ == "__main__":
