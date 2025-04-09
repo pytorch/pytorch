@@ -31,7 +31,7 @@ Features described in this documentation are classified by release status:
 ```{toctree}
 :glob:
 :maxdepth: 1
-:hidden:
+:caption: PyTorch API
 
 pytorch-api
 ```
@@ -39,12 +39,12 @@ pytorch-api
 ```{toctree}
 :glob:
 :maxdepth: 1
-:hidden:
+:caption: Developer Notes
 
 notes
 ```
 
 ## Indices and tables
 
-* :ref:`genindex`
-* :ref:`modindex`
+* {ref}`genindex`
+* {ref}`modindex`

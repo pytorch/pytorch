@@ -22,7 +22,6 @@ import os
 # import sys
 import pkgutil
 import re
-import sys
 from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
@@ -39,7 +38,6 @@ except ImportError:
 
 RELEASE = os.environ.get("RELEASE", False)
 
-sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
 
@@ -48,9 +46,6 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # -- General configuration ------------------------------------------------
 
-# If your documentation needs a minimal Sphinx version, state it here.
-#
-# needs_sphinx = "3.1.2"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
