@@ -71,6 +71,12 @@ class SymbolBuffer:
     def get_name(self) -> str:
         return str(self.symbol)
 
+    def get_hint(self) -> Any:
+        return V.graph.sizevars.size_hint(self.symbol)
+
+
+CodegenBuffer = Union[BufferLike, SymbolBuffer]
+
 
 class TritonKernel:
     """
@@ -156,18 +162,24 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 device=device,
             )
 
-    def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
+    def _create_meta_from_buffer(
+        self, node: torch.fx.Node, buffer: CodegenBuffer
+    ) -> None:
         name = buffer.get_name()
         assert name
         node.name = name
-        node.meta["val"] = self._fake_tensor(
-            tuple(buffer.get_size()),
-            tuple(buffer.get_stride()),
-            dtype=buffer.get_dtype(),
-            device=buffer.get_device(),
+        node.meta["val"] = (
+            buffer.get_hint()
+            if isinstance(buffer, SymbolBuffer)
+            else self._fake_tensor(
+                tuple(buffer.get_size()),
+                tuple(buffer.get_stride()),
+                dtype=buffer.get_dtype(),
+                device=buffer.get_device(),
+            )
         )
 
-    def _record_allocation(self, buffer: BufferLike, node: torch.fx.Node) -> None:
+    def _record_allocation(self, buffer: CodegenBuffer, node: torch.fx.Node) -> None:
         """
         Updates the symbol table to record that an Inductor buffer maps to the result of
         an FX node.
@@ -175,7 +187,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert node not in self.buffer_to_node
         self.buffer_to_node[buffer.get_name()] = node
 
-    def _free(self, buffer: Union[BufferLike, ir.TorchBindObject]) -> None:
+    def _free(self, buffer: Union[CodegenBuffer, ir.TorchBindObject]) -> None:
         """
         Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
@@ -193,7 +205,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self.buffer_to_node[arg] if isinstance(arg, str) else arg for arg in args
         )
 
-    def _get_buffer(self, node: ir.IRNode) -> BufferLike:
+    def _get_buffer(self, node: ir.IRNode) -> CodegenBuffer:
         """
         Extract buffer data from an IR node.
         """
@@ -213,11 +225,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         for ir_node in V.graph.graph_inputs.values():
             buffer = self._get_buffer(ir_node)
             node = self.gm.graph.placeholder(buffer.get_name())
-
-            # Skip fake tensor creation for symbol inputs.
-            if not isinstance(buffer, SymbolBuffer):
-                self._create_meta_from_buffer(node, buffer)
-
+            self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
     def _generate_buffer(self, node: ir.IRNode) -> Optional[torch.fx.Node]:
@@ -237,6 +245,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
                 # Use a WorkspaceArg for this.
                 buffer = self._get_buffer(node.data)
+                assert isinstance(buffer, BufferLike)
                 input_name = buffer.get_name()
                 unique_suffix = self._get_unique_symbol(input_name)
                 device = buffer.get_device()

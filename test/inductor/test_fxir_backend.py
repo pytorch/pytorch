@@ -326,7 +326,16 @@ class FxirTestCase(InductorTestCase):
         (symbolic_numel,) = empty_strided.meta["val"].shape
         self.assertTrue(isinstance(symbolic_numel, torch.SymInt))
 
-        # TODO Check the size hint.
+        # Find the size symbol, and check for a corresponding placeholder defining it.
+        symbol_name = str(symbolic_numel)
+        (placeholder,) = [
+            node
+            for node in gm.graph.find_nodes(op="placeholder")
+            if node.name == symbol_name
+        ]
+
+        # Check the size hint of the placeholder.
+        self.assertEqual(placeholder.meta["val"], static_numel)
 
 
 if __name__ == "__main__":
