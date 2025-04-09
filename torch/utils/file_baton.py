@@ -50,7 +50,7 @@ class FileBaton:
             if self.warn_after_seconds != None:
                 waited_toolong = time.time() - start_time > self.warn_after_seconds
                 if waited_toolong and not has_warned:
-                    warnings.warn(f'Waited on "{self.lock_file_path}" '  \
+                    warnings.warn(f'Waited on lock file "{self.lock_file_path}" '  \
                             'for {self.warn_after_seconds} seconds. ' \
                             'Maybe something gone wrong, you may want to delete it.')
                     has_warned = True
