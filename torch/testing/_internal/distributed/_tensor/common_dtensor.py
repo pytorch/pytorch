@@ -12,6 +12,7 @@ from typing import (
     cast,
     TypeVar,
     Union,
+    Optional,
 )
 from collections.abc import Iterator, Sequence
 
@@ -356,13 +357,15 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id=device_id,
         )
 
-    def destroy_pg(self) -> None:
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        dist.barrier()
+        if device_id is None:
+            device_id = torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+        dist.barrier(device_ids=[device_id])
         dist.destroy_process_group()
 
     def setUp(self) -> None:

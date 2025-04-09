@@ -83,7 +83,7 @@ class DeviceMeshTest(DTensorTestBase):
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
-        self.destroy_pg()
+        self.destroy_pg(self.rank)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
