@@ -16,7 +16,6 @@ from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_tensor,
-    all_reduce,
     reduce_scatter_tensor,
 )
 from torch.distributed._symmetric_memory import _test_mode
