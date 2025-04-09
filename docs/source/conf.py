@@ -186,6 +186,7 @@ html_context = {
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
     "language_bindings_links": theme_variables.get("language_bindings_links", []),
+    "version": version,
 }
 
 napoleon_use_ivar = True
