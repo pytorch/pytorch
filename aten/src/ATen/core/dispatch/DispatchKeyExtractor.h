@@ -225,8 +225,7 @@ struct TORCH_API DispatchKeyExtractor final {
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
       : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse),
-        nonFallthroughKeys_(DispatchKeySet::FULL),
-        requiresBitsetPerBackend_(false) {
+        nonFallthroughKeys_(DispatchKeySet::FULL) {
     for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
       nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
     }
@@ -252,7 +251,7 @@ struct TORCH_API DispatchKeyExtractor final {
   // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast
   // path), or if we need to fall back to the slower path and check
   // nonFallthroughKeysPerBackend_
-  bool requiresBitsetPerBackend_;
+  bool requiresBitsetPerBackend_{false};
 };
 
 } // namespace c10
