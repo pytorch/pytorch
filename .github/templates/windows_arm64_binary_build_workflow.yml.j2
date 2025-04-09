@@ -80,9 +80,10 @@ jobs:
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Enable long paths on Windows
-        shell: powershell
+        shell: cmd
         run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -143,9 +144,10 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Enable long paths on Windows
-        shell: powershell
+        shell: cmd
         run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
