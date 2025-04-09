@@ -17,7 +17,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
-from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes, _core
+from torch.onnx._internal.exporter import _core, _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
 
