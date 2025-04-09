@@ -3868,7 +3868,7 @@ class ShapeEnv:
                 input_guards.append((source, s))
                 constraint_violated = False
                 if isinstance(constraint, StrictMinMaxConstraint):
-                    if not (s == constraint.vr.lower == constraint.vr.upper):  # allow static constraints
+                    if not (s >= constraint.vr.lower and s <= constraint.vr.upper):  # allow static constraints
                         constraint_violated = True
                 elif isinstance(constraint, RelaxedUnspecConstraint):
                     # Don't complain about 0/1 specialization, we
