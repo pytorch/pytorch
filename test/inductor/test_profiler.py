@@ -293,7 +293,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         with torch.profiler.profile():
             fn_c(x, y)
 
-        if TorchVersion(torch.version.cuda) >= "12.6":
+        if TorchVersion(torch.version.cuda) >= "12.0":
             self.assertEqual("0", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
         else:
             self.assertEqual("1", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
