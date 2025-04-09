@@ -180,11 +180,10 @@ else:
 
     _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
     if not _cxx_pytree_dynamo_traceable:
-        warnings.warn(
+        raise RuntimeError(
             "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
             "C++ pytree support is disabled. "
-            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
-            FutureWarning,
+            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`."
         )
 
     del Version
