@@ -334,7 +334,7 @@ def ncu_analyzer(
 
     ncu_dir = tempfile.gettempdir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}_{benchmark_name}.ncu-rep")
+    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}.ncu-rep")
 
     python_cmd = (
         f"""import sys; sys.path.insert(0, '{module_dir}'); """
@@ -356,7 +356,7 @@ def ncu_analyzer(
         "yes",
         "--force-overwrite",
         "--export",
-        ncu_rep_output,
+        ncu_output,
     ]
 
     if kernel_regex:
