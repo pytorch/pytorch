@@ -1029,7 +1029,7 @@ def make_fast_binary_impl(
 def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
