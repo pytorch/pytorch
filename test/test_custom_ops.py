@@ -4332,6 +4332,135 @@ class TestTypeConversion(TestCase):
         self.assertEqual(result_type, list[typing.Union[int, float, str]])
 
 
+class TestOpProfiles(TestCase):
+    def get_sample_op_profile(self) -> dict[str, set[OpProfile]]:
+        return {
+            "mylib.foo12.default": {
+                OpProfile(
+                    args_profile=(
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                    ),
+                    out_profile=TensorMetadata(
+                        rank=2,
+                        dtype=torch.float32,
+                        device=torch.device("cpu"),
+                        layout=torch.strided,
+                    ),
+                )
+            }
+        }
+
+    def test_fake_registration(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo12",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo12", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                "mylib.foo12.default",
+            ), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo12"):
+                    torch.ops.mylib.foo12(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
+
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                "mylib.foo12.default",
+            ), fm:
+                torch.ops.mylib.foo12(t1, t2)
+
+    def test_duplicate_registration_impl(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo12",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo12", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            @torch.library.register_fake("mylib::foo12", lib=lib)
+            def foo_impl_fake(a, b):
+                return (a + b).to(dtype=torch.bfloat16)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.bfloat16)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles):
+                with fm:
+                    self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.float32)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo12(t1, t2).dtype, torch.bfloat16)
+
+    def test_duplicate_registration_custom_op(self):
+        fm = FakeTensorMode(shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True))
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        @torch.library.custom_op("mylib::foo13", mutates_args=())
+        def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @torch.library.register_fake("mylib::foo13")
+        def foo_impl_fake(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.bfloat16)
+
+        op_profiles = {
+            "mylib.foo13.default": self.get_sample_op_profile()["mylib.foo12.default"]
+        }
+
+        with torch._library.fake_profile.register_fake_profile(op_profiles):
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.float32)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo13(t1, t2).dtype, torch.bfloat16)
+
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
 instantiate_parametrized_tests(TestCustomOp)
