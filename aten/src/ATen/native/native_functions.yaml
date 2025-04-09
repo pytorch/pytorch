@@ -1375,12 +1375,12 @@
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
-- func: _bmm_dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
+- func: bmm.out_dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
   variants: function
   dispatch:
     CUDA: _bmm_dtype_cuda
 
-- func: _bmm_dtype.out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
+- func: bmm.out_dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _bmm_out_dtype_cuda
@@ -4154,6 +4154,14 @@
     XPU: mm_out_xpu
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm_out
+
+- func: mm.out_dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
+  dispatch:
+    CUDA: _mm_out_dtype
+
+- func: mm.out_dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: _mm_out_dtype_out
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:

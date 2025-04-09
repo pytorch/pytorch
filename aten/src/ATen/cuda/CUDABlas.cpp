@@ -737,7 +737,7 @@ void bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DT
                                   opa, opb, (int)m, (int)n, (int)k,
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
-                                  (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
+                                  (void*)&fbeta, c, CUDA_R_32F, (int)ldc, stridec,
                                   (int)num_batches,
                                   compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -878,8 +878,8 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 }
 
-template <typename DType>
-inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES(DType)) {
+template <typename DType, typename C_Dtype = DType>
+inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   tunable::GemmStridedBatchedParams<DType> params;
   params.transa = transa;
   params.transb = transb;
@@ -991,32 +991,22 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  // if (tuning_ctx->IsTunableOpEnabled()) {
-  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
-  // }
-  // else {
-    bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
-  // }
+  // TODO: Support tuning for Half inputs and FP32 output
+  bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
 }
 
 
 template <>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  // if (tuning_ctx->IsTunableOpEnabled()) {
-  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
-  // }
-  // else {
-    bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
-  // }
+  // TODO: Support tuning for BFloat16 inputs and FP32 output
+  bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
 }
 
 
 
-template <typename Dtype>
-inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
-  static_assert(false && sizeof(Dtype), "at::cuda::blas::gemm_internal_cublas: not implemented");
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
 template <>
@@ -1228,8 +1218,161 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 
-template <typename Dtype>
-inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+template <>
+void gemm_internal_cublas<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  float falpha = alpha;
+  float fbeta = beta;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+  auto compute_type = CUDA_R_32F;
+#endif
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  GEMM_CHECK_ARGVALUES(at::Half);
+#ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
+  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_ex(
+      (rocblas_handle)handle,
+      hipOperationToRocOperation(opa),
+      hipOperationToRocOperation(opb),
+      m,
+      n,
+      k,
+      alpha_ptr,
+      a,
+      rocblas_datatype_f16_r,
+      lda,
+      b,
+      rocblas_datatype_f16_r,
+      ldb,
+      beta_ptr,
+      c,
+      rocblas_datatype_f16_r,
+      ldc,
+      c,
+      rocblas_datatype_f16_r,
+      ldc,
+      rocblas_datatype_f32_r,
+      rocblas_gemm_algo_standard,
+      0,
+      flag)));
+#else
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    compute_type = CUDA_R_16F;
+    halpha = alpha;
+    hbeta = beta;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
+  if (prop->major >= 5) {
+    cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    }
+    // Disallow fp16 reductions that could lead to unexpected overflow issues.
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
+    TORCH_CUDABLAS_CHECK(cublasGemmEx(
+        handle,
+        opa,
+        opb,
+        m,
+        n,
+        k,
+        alpha_ptr,
+        a,
+        CUDA_R_16F,
+        lda,
+        b,
+        CUDA_R_16F,
+        ldb,
+        beta_ptr,
+        c,
+        CUDA_R_32F,
+        ldc,
+        compute_type,
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasSgemmEx(
+        handle,
+        opa,
+        opb,
+        m,
+        n,
+        k,
+        &falpha,
+        a,
+        CUDA_R_16F,
+        lda,
+        b,
+        CUDA_R_16F,
+        ldb,
+        &fbeta,
+        c,
+        CUDA_R_32F,
+        ldc));
+  }
+#endif
+}
+
+template <>
+void gemm_internal_cublas<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  float falpha = alpha;
+  float fbeta = beta;
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  GEMM_CHECK_ARGVALUES(at::BFloat16);
+#ifndef USE_ROCM
+  cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+  if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+    cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+  }
+#endif
+#if defined(USE_ROCM)
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &falpha,
+      a,
+      CUDA_R_16BF,
+      lda,
+      b,
+      CUDA_R_16BF,
+      ldb,
+      &fbeta,
+      c,
+      CUDA_R_32F,
+      ldc,
+      compute_type,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+}
+
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   // forward to bgemm implementation but set strides and batches to 0
   if (!bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0)) {
     gemm_internal_cublas(CUDABLAS_GEMM_ARGS(Dtype));
@@ -1344,17 +1487,37 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
 template<>
 void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
 {
-  return;
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+    gemm_internal_cublaslt<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+#if defined(USE_ROCM) && !defined(_MSC_VER)
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+#endif
+  else {
+    gemm_internal_cublas<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
 }
 
 template<>
 void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
-  return;
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+    gemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
+#if defined(USE_ROCM) && !defined(_MSC_VER)
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
+#endif
+  else {
+    gemm_internal_cublas<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
 }
 
-template <typename DType>
-inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
+template <typename DType, typename C_Dtype>
+inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   tunable::GemmParams<DType> params;
   params.transa = transa;
   params.transb = transb;
@@ -1462,30 +1625,26 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  // if (tuning_ctx->IsTunableOpEnabled()) {
-  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
-  // }
-  // else {
-    gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
-  // }
+  // TODO: Support Tuning for fp16-fp32 gemm
+  gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
 }
 
 
 template <>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  // if (tuning_ctx->IsTunableOpEnabled()) {
-  //   gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::Half));
-  // }
-  // else {
-    gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
-  // }
+  // TODO: Support Tuning for bf16-fp32 gemm
+  gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
 
+template<>
+void gemm<c10::complex<float>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float)) {}
+template<>
+void gemm<c10::complex<double>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float)) {}
+template<>
+void gemm<double, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(double, float)) {}
 
 
-template <typename Dtype>
+template <typename Dtype, typename C_Dtype = Dtype>
 bool gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -1498,13 +1657,14 @@ bool gemm_and_bias(
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
     const Dtype* bias,
-    Dtype* result_ptr,
+    C_Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
-  cudaDataType_t abcType = CUDA_R_32F;
+  cudaDataType_t abType = CUDA_R_32F;
+  cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   void * alpha_ptr = &alpha_val;
@@ -1514,14 +1674,14 @@ bool gemm_and_bias(
   at::Half hbeta_val;
 #endif
   if constexpr (std::is_same_v<Dtype, double>) {
-    abcType = CUDA_R_64F;
+    abType = CUDA_R_64F;
+    cType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
-    abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
@@ -1534,9 +1694,19 @@ bool gemm_and_bias(
       beta_ptr = &hbeta_val;
     }
 #endif
-    abcType = CUDA_R_16F;
+    abType = CUDA_R_16F;
+    if constexpr(std::is_same_v<C_Dtype, float>) {
+      cType = CUDA_R_32F;
+    } else {
+      cType = CUDA_R_16F;
+    }
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
-    abcType = CUDA_R_16BF;
+    abType = CUDA_R_16F;
+    if constexpr(std::is_same_v<C_Dtype, float>) {
+      cType = CUDA_R_32F;
+    } else {
+      cType = CUDA_R_16F;
+    }
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -1566,9 +1736,9 @@ bool gemm_and_bias(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
-  CuBlasLtMatrixLayout Adesc(abcType, m, k, mat1_ld, transpose_mat1);
-  CuBlasLtMatrixLayout Bdesc(abcType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
@@ -1646,8 +1816,10 @@ bool gemm_and_bias(
       mat2_ld,
       " result_ld ",
       result_ld,
-      " abcType ",
-      abcType,
+      " abType ",
+      abType,
+      " cType ",
+      cType,
       " computeType ",
       computeType,
       " scaleType ",
@@ -1712,6 +1884,22 @@ template bool gemm_and_bias(
     int64_t m,
     int64_t n,
     int64_t k,
+    at::opmath_type<at::Half> alpha_val,
+    const at::Half* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Half* mat2_ptr,
+    int64_t mat2_ld,
+    const at::Half* bias,
+    float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     at::opmath_type<at::BFloat16> alpha_val,
     const at::BFloat16* mat1_ptr,
     int64_t mat1_ld,
@@ -1719,6 +1907,38 @@ template bool gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::BFloat16> alpha_val,
+    const at::BFloat16* mat1_ptr,
+    int64_t mat1_ld,
+    const at::BFloat16* mat2_ptr,
+    int64_t mat2_ld,
+    const at::BFloat16* bias,
+    float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<double> alpha_val,
+    const double* mat1_ptr,
+    int64_t mat1_ld,
+    const double* mat2_ptr,
+    int64_t mat2_ld,
+    const double* bias,
+    float* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 

@@ -48,11 +48,16 @@ private:
 
 #define CUDABLAS_GEMM_ARGS(Dtype) transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc
 
+#define CUDABLAS_GEMM_DTYPE_IS_FLOAT_TYPE_AND_C_DTYPE_IS_FLOAT \
+    ((std::is_same<Dtype, at::Half>::value || std::is_same<Dtype, at::BFloat16>::value) && std::is_same<C_Dtype, float>::value)
 
-template <typename Dtype, typename C_Dtype=Dtype>
+template <typename Dtype, typename C_Dtype = Dtype, typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_FLOAT_TYPE_AND_C_DTYPE_IS_FLOAT, Dtype>::type* = nullptr>
 inline void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
+  static_assert(false&&sizeof(Dtype),"at::cuda::blas::gemm: not implemented");
 }
+
+template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_FLOAT_TYPE_AND_C_DTYPE_IS_FLOAT, Dtype>::type* = nullptr>
+void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
@@ -70,6 +75,12 @@ template<>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
+template<>
+void gemm<c10::complex<float>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float));
+template<>
+void gemm<c10::complex<double>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float));
+template<>
+void gemm<double, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(double, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void gemm_internal(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
@@ -101,7 +112,7 @@ enum GEMMAndBiasActivationEpilogue {
 
 // NOTE: GELU activation is not supported prior to CUDA 11.4 and will
 // do nothing if passed in that case.
-template <typename Dtype>
+template <typename Dtype, typename C_Dtype = Dtype>
 bool gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -114,7 +125,7 @@ bool gemm_and_bias(
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
     const Dtype* bias,
-    Dtype* result_ptr,
+    C_Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
 
@@ -167,10 +178,13 @@ void scaled_gemm(
 #define CUDABLAS_BGEMM_ARGS(Dtype) \
   transa, transb, m, n, k, alpha, a, lda, stridea, b, ldb, strideb, beta, c, ldc, stridec, num_batches
 
-template <typename Dtype, typename C_Dtype = Dtype>
+template <typename Dtype, typename C_Dtype = Dtype, typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_FLOAT_TYPE_AND_C_DTYPE_IS_FLOAT, Dtype>::type* = nullptr>
 inline void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
+  static_assert(false&&sizeof(Dtype),"at::cuda::blas::bgemm: not implemented");
 }
+
+template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_FLOAT_TYPE_AND_C_DTYPE_IS_FLOAT, Dtype>::type* = nullptr>
+void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
@@ -188,6 +202,12 @@ template<>
 void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
+template<>
+void bgemm<c10::complex<float>, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float));
+template<>
+void bgemm<c10::complex<double>, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float));
+template<>
+void bgemm<double, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(double, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
