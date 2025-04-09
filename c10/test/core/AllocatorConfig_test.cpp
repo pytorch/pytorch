@@ -15,7 +15,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "expandable_segments:True,"
       "release_lock_on_device_malloc:True,"
       "pinned_use_device_host_register:True,"
-      "parsePinnedNumRegisterThreads:8,"
+      "pinned_num_register_threads:8,"
       "pinned_use_background_threads:True";
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
   auto& config = c10::CachingAllocator::getAllocatorConfig();

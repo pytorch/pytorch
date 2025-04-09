@@ -9,6 +9,8 @@ namespace c10::cuda::CUDACachingAllocator {
 // Keep this for backwards compatibility
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
+  using c10::CachingAllocator::getAllocatorConfig;
+
   static size_t max_split_size() {
     return getAllocatorConfig().max_split_size();
   }
@@ -45,7 +47,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // More description below in function roundup_power2_next_division
   // As ane example, if we want 4 divisions between 2's power, this can be done
   // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
-  static size_t roundup_power2_divisions(size_t size);
+  static size_t roundup_power2_divisions(size_t size) {
+    return getAllocatorConfig().roundup_power2_divisions(size);
+  }
 
   static std::vector<size_t> roundup_power2_divisions() {
     return getAllocatorConfig().roundup_power2_divisions();
@@ -59,33 +63,15 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return getAllocatorConfig().last_allocator_settings();
   }
 
-  static CUDAAllocatorConfig& instance() {
-    static CUDAAllocatorConfig* s_instance = ([]() {
-      auto inst = new CUDAAllocatorConfig();
-      const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
-#ifdef USE_ROCM
-      // convenience for ROCm users, allow alternative HIP token
-      if (!env) {
-        env = getenv("PYTORCH_HIP_ALLOC_CONF");
-      }
-#endif
-      inst->parseArgs(env);
-      return inst;
-    })();
-    return *s_instance;
+  void parseArgs(const char* env) {
+    getAllocatorConfig().parseArgs(env);
   }
-
-  void parseArgs(const char* env);
 
  private:
   CUDAAllocatorConfig() = default;
-
-  c10::CachingAllocator::AllocatorConfig& getAllocatorConfig() {
-    return c10::CachingAllocator::getAllocatorConfig();
-  }
 };
 
 // Keep this for backwards compatibility
-C10_CUDA_API void setAllocatorSettings(const std::string& env);
+using setAllocatorSettings = c10::CachingAllocator::setAllocatorSettings;
 
 } // namespace c10::cuda::CUDACachingAllocator

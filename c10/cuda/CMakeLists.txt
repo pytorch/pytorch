@@ -26,7 +26,6 @@ endif()
 # torch/utils/hipify/cuda_to_hip_mappings.py for new files
 # and headers you add
 set(C10_CUDA_SRCS
-    CUDAAllocatorConfig.cpp
     CUDACachingAllocator.cpp
     CUDADeviceAssertionHost.cpp
     CUDAException.cpp
