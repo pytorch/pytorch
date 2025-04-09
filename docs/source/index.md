@@ -30,16 +30,14 @@ Features described in this documentation are classified by release status:
 
 ```{toctree}
 :glob:
-:maxdepth: 1
-:caption: PyTorch API
+:maxdepth: 2
 
 pytorch-api
 ```
 
 ```{toctree}
 :glob:
-:maxdepth: 1
-:caption: Developer Notes
+:maxdepth: 2
 
 notes
 ```
