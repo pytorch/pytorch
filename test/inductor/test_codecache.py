@@ -1330,8 +1330,9 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_standalone_compile(self, dynamic: bool):
+    def test_standalone_compile(self, format: str, dynamic: bool) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
         if dynamic:
@@ -1364,16 +1365,22 @@ class TestFxGraphCache(TestCase):
             return inner
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            file = os.path.join(temp_dir, "compiled_artifact.bin")
+            path = (
+                temp_dir
+                if format == "unpacked"
+                else os.path.join(temp_dir, "compiled_artifact.bin")
+            )
             with fresh_inductor_cache():
                 gm, args, kwargs = capture(f)(x)
                 assert not kwargs
 
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
-                compiled_artifact.save(file)
+                compiled_artifact.save(path=path, format=format)
 
             with fresh_inductor_cache():
-                loaded = torch._inductor.compile_fx.CompiledArtifact.load(file)
+                loaded = torch._inductor.compile_fx.CompiledArtifact.load(
+                    path=path, format=format
+                )
                 compiled_out = loaded(*args)
                 self.assertEqual(eager_out, compiled_out)
 

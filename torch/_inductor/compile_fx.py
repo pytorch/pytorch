@@ -13,10 +13,10 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from inspect import currentframe
 from itertools import count
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -70,7 +70,7 @@ from torch._inductor.output_code import (
     index_expanded_dims,
     OutputCode,
 )
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.cache_dir_utils import cache_dir, temporary_cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -2388,7 +2388,9 @@ class CompiledArtifact:
     def __call__(self, *args: Any) -> Any:
         return self._compiled_fn(*args)[0]
 
-    def save(self, filename: str) -> None:
+    def save(
+        self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> None:
         with dynamo_timed("CompiledArtifact.save"):
             if self._artifacts is None:
                 raise RuntimeError(
@@ -2398,52 +2400,82 @@ class CompiledArtifact:
             assert len(cache_info.aot_autograd_artifacts) == 1
             key = cache_info.aot_autograd_artifacts[0]
 
-            from torch.utils._appending_byte_serializer import BytesWriter
+            if format == "binary":
+                # cant assert that it is a file since it might not exist yet
+                assert not os.path.isdir(path)
 
-            writer = BytesWriter(0)
-            writer.write_uint64(_ENCODING_VERSION)
-            writer.write_str(key)
-            writer.write_bytes(artifact_bytes)
-            with open(filename, "wb") as file:
-                file.write(writer.to_bytes())
+                from torch.utils._appending_byte_serializer import BytesWriter
+
+                writer = BytesWriter(0)
+                writer.write_uint64(_ENCODING_VERSION)
+                writer.write_str(key)
+                writer.write_bytes(artifact_bytes)
+                with open(path, "wb") as file:
+                    file.write(writer.to_bytes())
+            else:
+                assert format == "unpacked"
+                assert os.path.isdir(path)
+
+                with temporary_cache_dir(path):
+                    # This function unpacks the cache artifacts to disk
+                    torch.compiler.load_cache_artifacts(artifact_bytes)
 
     @staticmethod
-    def load(filename: str) -> CompiledArtifact:
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact:
         with dynamo_timed("CompiledArtifact.load"):
-            with open(filename, "rb") as file:
-                artifacts = file.read()
-            from torch.utils._appending_byte_serializer import BytesReader
+            if format == "binary":
+                # cant assert that it is a file since it might not exist yet
+                assert not os.path.isdir(path)
+                with open(path, "rb") as file:
+                    artifacts = file.read()
+                from torch.utils._appending_byte_serializer import BytesReader
 
-            reader = BytesReader(artifacts)
-            assert reader.read_uint64() == _ENCODING_VERSION
-            key = reader.read_str()
-            artifact_bytes = reader.read_bytes()
-            assert reader.is_finished()
+                reader = BytesReader(artifacts)
+                assert reader.read_uint64() == _ENCODING_VERSION
+                key = reader.read_str()
+                artifact_bytes = reader.read_bytes()
+                assert reader.is_finished()
 
-            torch.compiler.load_cache_artifacts(artifact_bytes)
+                torch.compiler.load_cache_artifacts(artifact_bytes)
 
-            with torch._functorch.config.patch(strict_autograd_cache=True):
-                from torch._functorch._aot_autograd.autograd_cache import (
-                    AOTAutogradCache,
+                cache_dir_ctx: AbstractContextManager[None] = nullcontext()
+            else:
+                assert format == "unpacked"
+                assert os.path.isdir(path)
+                autograd_cache_dir = os.path.join(path, "aotautograd")
+                assert os.path.isdir(autograd_cache_dir)
+                files = list(os.listdir(autograd_cache_dir))
+                assert len(files) == 1
+                key = files[0]
+                cache_dir_ctx = temporary_cache_dir(path)
+
+            with cache_dir_ctx:
+                with torch._functorch.config.patch(strict_autograd_cache=True):
+                    from torch._functorch._aot_autograd.autograd_cache import (
+                        AOTAutogradCache,
+                    )
+
+                    entry = AOTAutogradCache._lookup(key, local=True, remote=False)
+
+                assert entry is not None
+
+                fx_config = _CompileFxKwargs(
+                    cudagraphs=BoxedBool(False),
+                    boxed_forward_device_index=BoxedDeviceIndex(0),
                 )
 
-                entry = AOTAutogradCache._lookup(key, local=True, remote=False)
-
-            assert entry is not None
-
-            fx_config = _CompileFxKwargs(
-                cudagraphs=BoxedBool(False),
-                boxed_forward_device_index=BoxedDeviceIndex(0),
-            )
-
-            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
-            with (
-                torch._guards.tracing(context),
-                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-            ):
-                compiled_fn = entry.wrap_post_compile(
-                    [], entry.sanitized_aot_config, fx_config
+                context = torch._guards.TracingContext(
+                    FakeTensorMode(shape_env=ShapeEnv())
                 )
+                with (
+                    torch._guards.tracing(context),
+                    config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+                ):
+                    compiled_fn = entry.wrap_post_compile(
+                        [], entry.sanitized_aot_config, fx_config
+                    )
             return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
