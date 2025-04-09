@@ -24,7 +24,7 @@ constexpr int64_t num_output_channels_index [[maybe_unused]] = 10;
 constexpr int64_t num_input_channels_index [[maybe_unused]] = 11;
 
 template <typename TENSOR_DTYPE, typename VEC_DTYPE>
-std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {
+std::vector<VEC_DTYPE> unwrap_vector(const at::Tensor& tensor) {
   std::vector<VEC_DTYPE> vec(tensor.numel());
   TENSOR_DTYPE* tensor_data_ptr = tensor.data_ptr<TENSOR_DTYPE>();
   std::copy(tensor_data_ptr, tensor_data_ptr + tensor.numel(), vec.data());
@@ -39,7 +39,7 @@ std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {
  */
 void unpack_bcsr(
     int8_t* dst,
-    ao::sparse::BCSR bcsr,
+    const ao::sparse::BCSR& bcsr,
     const int64_t R,
     const int64_t C,
     const int64_t RB,
