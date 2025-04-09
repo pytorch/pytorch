@@ -1331,7 +1331,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         dim=orig_scatter_dim,  # Reduce along the origal scatter dim (`group_size`)
     )
 
-    # Final 3D+ output shape must be scattered along original scatter dim as well.
+    # Output shape must be scattered along original scatter dim as well.
     output_shape[orig_scatter_dim] //= group.size()
     out = reduced_out.view(*output_shape)
     return out
