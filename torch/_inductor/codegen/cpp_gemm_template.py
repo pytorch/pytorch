@@ -1115,6 +1115,12 @@ class CppGemmTemplate(CppTemplate):
 
     @classmethod
     def pack_vnni_weight(cls, W, micro_gemm, new_size):
+        # WOQ INT4 weights are reordered in microkernel so do not pack them here
+        should_pack = (
+            micro_gemm.get_b_layout() != LayoutType.NORMAL
+            and not micro_gemm.is_woq_int4()
+        )
+
         # These are separated into two methods to allow subclasses to override them separately
         if isinstance(W, ir.IRNode):
             if isinstance(W, ir.Buffer) and W.get_name() in V.graph.constants:
@@ -1122,11 +1128,7 @@ class CppGemmTemplate(CppTemplate):
             k = new_size[-2]
             if not isinstance(W, ir.TensorBox):
                 W = ir.TensorBox(W)
-            # WOQ INT4 weights are reordered in microkernel
-            if (
-                micro_gemm.get_b_layout() != LayoutType.NORMAL
-                and not micro_gemm.is_woq_int4()
-            ):
+            if should_pack:
                 permute_dims = list(range(len(new_size) + 1))
                 permute_dims[-1], permute_dims[-2] = permute_dims[-2], permute_dims[-1]
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
@@ -1143,11 +1145,7 @@ class CppGemmTemplate(CppTemplate):
         else:
             k = new_size[-2]
             # Apply VNNI packing to the weight tensor
-            # WOQ INT4 weights are reordered in microkernel
-            if (
-                micro_gemm.get_b_layout() != LayoutType.NORMAL
-                and not micro_gemm.is_woq_int4()
-            ):
+            if should_pack:
                 # TODO: Move VNNI weight packing for non-constant tensors into the template,
                 # to improve cache locality and avoid full-tensor copy.
                 layout_str = (

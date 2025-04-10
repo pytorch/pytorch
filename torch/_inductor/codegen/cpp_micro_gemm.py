@@ -1816,7 +1816,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
         return (
             "AMXState& amx_state,\n"
             "    const int64_t q_group_size,\n"
-            "    const bfloat16* __restrict__ ScaleAndZeros,\n"
+            "    const c10::BFloat16* __restrict__ ScaleAndZeros,\n"
             "    const int64_t lds,\n"
             "    int64_t k_start,"
         )
