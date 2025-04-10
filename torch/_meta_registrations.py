@@ -2152,7 +2152,7 @@ def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) ->
 
 
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
@@ -2227,7 +2227,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 
 @register_meta(aten.mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
@@ -2508,7 +2508,8 @@ if torch._C._has_mkldnn:
     )
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
-    def meta_qconv2d_pointwise(
+    @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    def meta_qconv_pointwise(
         x,
         x_scale,
         x_zp,
@@ -2539,7 +2540,9 @@ if torch._C._has_mkldnn:
         )
         assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
-        out = out.to(memory_format=torch.channels_last)
+        assert len(shape_out) in [3, 4], "only conv1d/2d are supported"
+        format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
+        out = out.to(memory_format=format)
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
@@ -3460,7 +3463,7 @@ def meta_convolution_backward(
 
 
 @register_meta([aten.addbmm.default, aten.addbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
     dim2 = batch2.size(2)
@@ -3632,6 +3635,21 @@ def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
     torch._check(
         w.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm_with_scales_and_zeros])
+def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 

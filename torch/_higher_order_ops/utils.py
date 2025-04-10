@@ -703,6 +703,25 @@ def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
 ) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
+    (
+        mutated_inputs,
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+
+
+def check_input_alias_and_mutation_return_ouputs(
+    gm: torch.fx.GraphModule,
+    fake_args: list[FakeTensor],
+) -> tuple[
+    list[int],
+    dict[int, int],
+    dict[int, int],
+    dict[int, int],
+    Union[tuple[Any, ...], list[Any]],
+]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
@@ -765,7 +784,13 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+        return (
+            mutated_inputs,
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+            outputs,
+        )
 
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
@@ -821,4 +846,10 @@ class FunctionalizeCtxWrapper:
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        if isinstance(self.subgraph, torch.fx.GraphModule):
+            # Running graph with interpreter is needed for propagating the stack_trace
+            with fx_traceback.preserve_node_meta():
+                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
+                    *args, **kwargs
+                )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
