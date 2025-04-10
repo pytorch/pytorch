@@ -154,6 +154,12 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
