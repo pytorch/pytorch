@@ -1,4 +1,4 @@
-
+# mypy: allow-untyped-defs
 """Module for handling symbolic function registration."""
 
 import warnings
@@ -96,13 +96,13 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
 
-    def get(self, key: _K, default: Optional[_V] = None) -> Optional[_V]:
+    def get(self, key: _K, default: Optional[_V] = None):
         return self._merged.get(key, default)
 
     def __contains__(self, key: object) -> bool:
         return key in self._merged
 
-    def __iter__(self) -> Iterator[_K]:
+    def __iter__(self):
         return iter(self._merged)
 
     def __len__(self) -> int:
