@@ -243,6 +243,15 @@ class TestDraftExport(TestCase):
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
 
+        # the fake tensors on node.meta["val"] should have real_tensor
+        gm = ep.module()
+        tensors = [
+            node.meta.get("val").real_tensor
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertTrue(all(isinstance(t, torch.Tensor) for t in tensors))
+
     def test_complex_data_dependent_expr(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -303,9 +312,7 @@ class TestDraftExport(TestCase):
         report = ep._report
 
         self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.CONSTRAINT_VIOLATION_ERROR
-        )
+        self.assertEqual(report.failures[0].failure_type, FailureType.GUARD_ADDED)
 
         inp = (torch.randn(3, 3),)
         self.assertEqual(ep.module()(*inp), M()(*inp))
