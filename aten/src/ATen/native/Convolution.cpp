@@ -30,6 +30,10 @@
 #include <ATen/native/mkldnn/Utils.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -1419,7 +1423,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& input,
     const Tensor& weight,
     const ConvBackend backend) {
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
+  auto backend_memory_format = at::MemoryFormat::Contiguous;
 #if !defined(C10_MOBILE)
   auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
@@ -1455,6 +1459,17 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Overrideable:
       if (xpu_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Mps:
+    case ConvBackend::MpsTranspose:
+      if (mps_conv_use_channels_last(input, weight)) {
+#ifdef USE_MPS
+        if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
+          break;
+        }
+#endif
+        backend_memory_format = (k == 5) ? MemoryFormat::ChannelsLast3d : MemoryFormat::ChannelsLast;
       }
       break;
     default:
