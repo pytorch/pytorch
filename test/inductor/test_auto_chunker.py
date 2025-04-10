@@ -1,15 +1,18 @@
-import torch
-from torch._inductor import config, metrics
-from torch._inductor.test_case import TestCase
-from torch._dynamo.utils import same
-from torch import nn
+# Owner(s): ["module: inductor"]
 import os
+
 from triton.testing import do_bench
 
-# TODO: always test with large input. Skip the test if the GPU
-# does not have enough memory
+import torch
+from torch import nn
+from torch._dynamo.utils import same
+from torch._inductor import config, metrics
+from torch._inductor.test_case import TestCase
+
+
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
 
 @config.patch("AutoChunker.enable", True)
 class AutoChunkerTest(TestCase):
@@ -26,12 +29,8 @@ class AutoChunkerTest(TestCase):
             N = 1024 * 32
 
         dtype = torch.float32
-        _input = torch.randn(
-            M, K, dtype=dtype, requires_grad=True, device="cuda"
-        )
-        weight = torch.randn(
-            K, N, dtype=dtype, requires_grad=True, device="cuda"
-        )
+        _input = torch.randn(M, K, dtype=dtype, requires_grad=True, device="cuda")
+        weight = torch.randn(K, N, dtype=dtype, requires_grad=True, device="cuda")
         bias = torch.randn(N, dtype=dtype, requires_grad=True, device="cuda")
 
         def f(_input, weight, bias):
@@ -44,15 +43,25 @@ class AutoChunkerTest(TestCase):
             _sum.backward()
             return _sum
 
-        expect = (f(_input, weight, bias), _input.grad, weight.grad, bias.grad if use_bias else None)
+        expect = (
+            f(_input, weight, bias),
+            _input.grad,
+            weight.grad,
+            bias.grad if use_bias else None,
+        )
 
         _input.grad = None
-        weight.grad =None
+        weight.grad = None
         bias.grad = None
 
         torch.cuda.reset_peak_memory_stats()
         opt_f = torch.compile(f)
-        actual = (opt_f(_input, weight, bias), _input.grad, weight.grad, bias.grad if use_bias else None)
+        actual = (
+            opt_f(_input, weight, bias),
+            _input.grad,
+            weight.grad,
+            bias.grad if use_bias else None,
+        )
         peak_memory = torch.cuda.max_memory_allocated()
 
         print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
@@ -69,15 +78,17 @@ class AutoChunkerTest(TestCase):
         # cache by triton perf benchmarking API.
         if USE_LARGE_INPUT and has_softmax:
             expected_bound = M * N * dtype.itemsize
-            self.assertTrue(peak_memory < expected_bound, f"Actual peak_memory {peak_memory}, expected bound {expected_bound}")
-
+            self.assertTrue(
+                peak_memory < expected_bound,
+                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+            )
 
     def test_matmul_trivial(self):
         self.common_matmul_test(has_softmax=False)
 
     def test_linear_trivial(self):
         self.common_matmul_test(has_softmax=False, use_bias=True)
-   
+
     # Due to not able to generate an inplace version of a softmax like
     # kernel, having 2 chunks does not have large enough savings.
     # Use at least 4 chunks here.
@@ -97,18 +108,18 @@ class AutoChunkerTest(TestCase):
         V = 50257
 
         dtype = torch.bfloat16
-        
+
         class LinearAndCEL(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(C, V)
                 self.ce = nn.CrossEntropyLoss()
-        
+
             def forward(self, x, y):
                 return self.ce(self.linear(x).view(B * T, V), y.view(-1))
-        
+
         mod = LinearAndCEL().cuda().to(dtype)
-        
+
         def f(x, y):
             x.grad = None
             mod.linear.weight.grad = None
@@ -120,7 +131,7 @@ class AutoChunkerTest(TestCase):
             return loss
 
         opt_f = torch.compile(f)
-        
+
         x = torch.randn(B, T, C, dtype=dtype, requires_grad=True).cuda()
         x.retain_grad()
         y = torch.randint(0, V, (B, T)).cuda()
@@ -140,7 +151,10 @@ class AutoChunkerTest(TestCase):
 
         self.assertEqual(metrics.num_auto_chunking, 1)
         expected_bound = B * T * V * x.dtype.itemsize
-        self.assertTrue(peak_memory < expected_bound, f"Actual peak_memory {peak_memory}, expected bound {expected_bound}")
+        self.assertTrue(
+            peak_memory < expected_bound,
+            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+        )
 
 
 if __name__ == "__main__":

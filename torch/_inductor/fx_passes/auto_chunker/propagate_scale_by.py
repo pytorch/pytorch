@@ -1,14 +1,24 @@
+# mypy: allow-untyped-defs
+import functools
+import logging
+
 import torch
 
-from .core import get_chunking_meta, get_chunking_metas, CantChunk, update_chunking_meta
-from .utils import get_args_of_node_type, format_node_with_chunking_meta, get_scale_by_from_node, get_scale_by_from_metas
-import functools
+from .common import CantChunk
+from .core import get_chunking_meta, get_chunking_metas, log, update_chunking_meta
+from .utils import (
+    format_node_with_chunking_meta,
+    get_args_of_node_type,
+    get_scale_by_from_metas,
+    get_scale_by_from_node,
+)
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-propagate_rules = {
-}
+propagate_rules = {}  # type: ignore[var-annotated]
+
 
 def _register_propagate_rule(aten_op, handler):
     if not isinstance(aten_op, (list, tuple)):
@@ -18,8 +28,10 @@ def _register_propagate_rule(aten_op, handler):
         propagate_rules[op] = handler
     return handler
 
+
 def register_propagate_rule(aten_op):
     return functools.partial(_register_propagate_rule, aten_op)
+
 
 def propagate_scale_by(nodes_with_chunking_meta):
     """
@@ -27,8 +39,6 @@ def propagate_scale_by(nodes_with_chunking_meta):
     The nodes are already in topological order.
     """
     for node in nodes_with_chunking_meta:
-        meta = get_chunking_meta(node)
-    
         arg_nodes = get_args_of_node_type(node)
         arg_metas = get_chunking_metas(arg_nodes)
 
@@ -36,8 +46,10 @@ def propagate_scale_by(nodes_with_chunking_meta):
             # should be graph input of the chunking subgraph
             continue
 
-        print("Propagate scale_by:")
-        format_node_with_chunking_meta(node, True) # TODO remove me
+        if log.isEnabledFor(logging.DEBUG):
+            print("Propagate scale_by:")
+            format_node_with_chunking_meta(node, True)
+
         assert all(arg_meta is not None for arg_meta in arg_metas)
 
         # None of the input has scale_by set
@@ -46,14 +58,21 @@ def propagate_scale_by(nodes_with_chunking_meta):
 
         target = node.target
         if target not in propagate_rules:
-            raise CantChunk(f"Missing scale_by propagation rule for target {target}: {node.format_node()}")
+            raise CantChunk(
+                f"Missing scale_by propagation rule for target {target}: {node.format_node()}"
+            )
 
         if not propagate_rules[target](node):
-            raise CantChunk(f"scale_by propagate rule for {target} fail: {node.format_node()}")
+            raise CantChunk(
+                f"scale_by propagate rule for {target} fail: {node.format_node()}"
+            )
 
-@register_propagate_rule([
-    aten.div.Tensor,
-])
+
+@register_propagate_rule(
+    [
+        aten.div.Tensor,
+    ]
+)
 def propagate_div(div_node):
     lhs_node, rhs_node = div_node.args[:2]
     lhs_scale_by = get_scale_by_from_node(lhs_node)
@@ -63,12 +82,17 @@ def propagate_div(div_node):
         return True
     return False
 
-@register_propagate_rule([
-    aten.where.self,
-])
+
+@register_propagate_rule(
+    [
+        aten.where.self,
+    ]
+)
 def propagate_where(where_node):
     cond_node, true_node, false_node = where_node.args
-    cond_meta, true_meta, false_meta = get_chunking_metas([cond_node, true_node, false_node])
+    cond_meta, true_meta, false_meta = get_chunking_metas(
+        [cond_node, true_node, false_node]
+    )
     out_meta = get_chunking_meta(where_node)
 
     if true_meta.scale_by and not false_meta.scale_by:
@@ -81,14 +105,17 @@ def propagate_where(where_node):
         return True
     return False
 
-@register_propagate_rule([
-    aten.mul.Tensor,
-    prims.convert_element_type.default,
-    aten.sum.dim_IntList,
-    aten.mm.default,
-    aten.permute.default,
-    aten.expand.default,
-])
+
+@register_propagate_rule(
+    [
+        aten.mul.Tensor,
+        prims.convert_element_type.default,
+        aten.sum.dim_IntList,
+        aten.mm.default,
+        aten.permute.default,
+        aten.expand.default,
+    ]
+)
 def propagate_general_copy(out_node):
     """
     A rule that holds for multiple ops: the scale_by of the output is
@@ -103,10 +130,13 @@ def propagate_general_copy(out_node):
     out_meta.scale_by = scale_by
     return True
 
-@register_propagate_rule([
-    aten.add.Tensor,
-    aten.sub.Tensor,
-])
+
+@register_propagate_rule(
+    [
+        aten.add.Tensor,
+        aten.sub.Tensor,
+    ]
+)
 def propagate_add_sub(out_node):
     """
     The scale_by node of the two arguments must be the same.
@@ -118,14 +148,17 @@ def propagate_add_sub(out_node):
         return True
     return False
 
-@register_propagate_rule([
-    prims.fma.default,
-])
+
+@register_propagate_rule(
+    [
+        prims.fma.default,
+    ]
+)
 def propagate_fma(out_node):
-    mul_lhs, mul_rhs, add_rhs = out_node.args[:3] 
-    mul_lhs_meta, mul_rhs_meta, add_rhs_meta = get_chunking_metas([
-        mul_lhs, mul_rhs, add_rhs
-    ])
+    mul_lhs, mul_rhs, add_rhs = out_node.args[:3]
+    mul_lhs_meta, mul_rhs_meta, add_rhs_meta = get_chunking_metas(
+        [mul_lhs, mul_rhs, add_rhs]
+    )
     add_lhs_scale_by = get_scale_by_from_metas(mul_lhs_meta, mul_rhs_meta)
     if add_lhs_scale_by is add_rhs_meta.scale_by:
         update_chunking_meta(out_node, scale_by=add_lhs_scale_by)

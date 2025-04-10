@@ -28,7 +28,6 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    register_lowering_pattern,
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
@@ -562,13 +561,15 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     # Make sure AutoChunker happens before pad_mm so we don't need
     # to handle padding when searching for chunking patterns.
     if config.AutoChunker.enable:
-        from .auto_chunker import chunk, CantChunk
+        from .auto_chunker import CantChunk, chunk
 
         try:
             graph = chunk(graph)
         except CantChunk as e:
-            auto_chunker_log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
-            auto_chunker_log.debug(f"AutoChunker fail with error: {str(e)}")
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail with error: %s", str(e))
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
@@ -672,6 +673,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
         match.erase_nodes()
+
 
 def _is_identity_view_sizes(old_sizes, new_sizes):
     """

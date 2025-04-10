@@ -892,7 +892,11 @@ class AutoChunker:
     # Don't chunk from a node if it does not 'amplify' the inputs a lot
     amplify_ratio_threshold = 8
 
-    num_chunk = int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS")) if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None else  None  # If not None, use this to force number of chunks
+    num_chunk = (
+        int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
+        if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
+        else None
+    )  # If not None, use this to force number of chunks
 
 
 # config specific to codegen/cpp.py

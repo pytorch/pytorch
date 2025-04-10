@@ -1,24 +1,30 @@
-from .utils import get_args_of_node_type, format_node_with_chunking_meta, get_fake_tensor_from_node_arg
-from .core import get_chunking_meta, get_chunking_metas
-import torch
+# mypy: allow-untyped-defs
+# mypy: disable-error-code=union-attr
 import copy
-import operator
-from typing import List
-from torch.fx import Node, Graph
-from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch._dynamo.utils import detect_fake_mode
-from .core import reorder_nodes
 import logging
+import operator
+from typing import Optional
+
+import torch
+from torch._dynamo.utils import detect_fake_mode
+from torch.fx import Graph, Node
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+from .core import get_chunking_meta, reorder_nodes
+from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg
+
 
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 aten = torch.ops.aten
 prims = torch.ops.prims
+
 
 def _factory_args(fake_tensor):
     return {
         "device": fake_tensor.device,
         "dtype": fake_tensor.dtype,
     }
+
 
 def fake_tensor_prop(gm):
     inputs = []
@@ -32,6 +38,7 @@ def fake_tensor_prop(gm):
 
     fake_mode = detect_fake_mode(inputs)
     FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
+
 
 def is_chunking_subgraph_input(node):
     meta = get_chunking_meta(node)
@@ -56,19 +63,19 @@ class ChunkingApplier:
         # tangent node to the all-one tensor
         self.overriden_tangent = {}
 
-        self.subgraph_input = []
-        self.subgraph_body = []
-        self.subgraph_output = []
+        self.subgraph_input: list[Node] = []
+        self.subgraph_body: list[Node] = []
+        self.subgraph_output: list[Node] = []
         self._categorize_subgraph_nodes()
 
         self.chunk_sizes = None
 
         # First index is node index,
         # Second index is chunk index.
-        self.chunked_subgraph_input: List[List[Node]] = []
+        self.chunked_subgraph_input: list[list[Node]] = []
 
-        self.accumulators: Dict[Node, Node] = {}
-        self.chunks_for_recovering: Dict[Node, List[Node]] = {}
+        self.accumulators: dict[Node, Optional[Node]] = {}
+        self.chunks_for_recovering: dict[Node, list[Node]] = {}
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)
             assert meta
@@ -79,7 +86,6 @@ class ChunkingApplier:
                 self.accumulators[node] = None
 
         self.chunk_size_to_gm_attr = {}
-
 
     def _categorize_subgraph_nodes(self):
         """
@@ -113,7 +119,9 @@ class ChunkingApplier:
             # alternative 1.
 
             user_nodes = node.users
-            user_nodes_no_meta = [node for node in user_nodes if get_chunking_meta(node) is None]
+            user_nodes_no_meta = [
+                node for node in user_nodes if get_chunking_meta(node) is None
+            ]
 
             if is_chunking_subgraph_input(node):
                 # None of the node's arguments are chunked. It's a placeholder
@@ -132,9 +140,9 @@ class ChunkingApplier:
             assert node.op == "placeholder" and "tangent" in node.target
 
             fake_tensor = node.meta["val"]
-            one = self.parent_graph.call_function(aten.full.default,
-                (fake_tensor.shape, 1),
-                _factory_args(fake_tensor))
+            one = self.parent_graph.call_function(
+                aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
+            )
 
             name = "tangent_overriden_as_one"
             if idx > 0:
@@ -157,9 +165,12 @@ class ChunkingApplier:
             if meta.chunk_dim is None:
                 continue
 
-            chunk_node = self.parent_graph.call_function(aten.chunk.default, (subgraph_input, self. num_chunk, meta.chunk_dim))
+            chunk_node = self.parent_graph.call_function(
+                aten.chunk.default, (subgraph_input, self.num_chunk, meta.chunk_dim)
+            )
             chunks = [
-                self.parent_graph.call_function(operator.getitem, (chunk_node, i)) for i in range(self.num_chunk)
+                self.parent_graph.call_function(operator.getitem, (chunk_node, i))
+                for i in range(self.num_chunk)
             ]
 
             self.chunked_subgraph_input.append(chunks)
@@ -168,9 +179,7 @@ class ChunkingApplier:
             if self.chunk_sizes is None:
                 input_tensor = subgraph_input.meta["val"]
                 tensors = torch.chunk(input_tensor, self.num_chunk)
-                self.chunk_sizes = [
-                    t.size(0) for t in tensors
-                ]
+                self.chunk_sizes = [t.size(0) for t in tensors]
 
     def create_accumulators(self):
         for node in self.accumulators:
@@ -184,13 +193,12 @@ class ChunkingApplier:
                 override_dtype = torch.float32
             else:
                 override_dtype = fake_tensor.dtype
-                
+
             kwargs = _factory_args(fake_tensor)
             kwargs["dtype"] = override_dtype
             accum = self.parent_graph.call_function(
-                aten.full.default,
-                (fake_tensor.shape, 0),
-                kwargs)
+                aten.full.default, (fake_tensor.shape, 0), kwargs
+            )
             # reuse the meta['val']
             accum.meta = {"val": fake_tensor.to(override_dtype)}
             self.accumulators[node] = accum
@@ -204,50 +212,58 @@ class ChunkingApplier:
             fake_tensor = input_node.meta["val"]
             chunking_meta = get_chunking_meta(input_node)
             if chunking_meta is not None and chunking_meta.chunk_dim is not None:
-                # the node is chunked and we need update the 
+                # the node is chunked and we need update the
                 # fake tensor
                 # TODO any better way to do this?
-                new_tensor = aten.slice.Tensor(fake_tensor,
-                    chunking_meta.chunk_dim,
-                    0,
-                    chunk_size
+                new_tensor = aten.slice.Tensor(
+                    fake_tensor, chunking_meta.chunk_dim, 0, chunk_size
                 )
                 fake_tensor = new_tensor
-            new_node.meta = {
-                "val": fake_tensor
-            }
+            new_node.meta = {"val": fake_tensor}
             return new_node
 
         for node_idx, input_node in enumerate(self.subgraph_input):
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():
-            env[overriden_tangent_node] = _create_placeholder_node(overriden_tangent_node)
+            env[overriden_tangent_node] = _create_placeholder_node(
+                overriden_tangent_node
+            )
 
-        for _, accum in self.accumulators.items():
+        for accum in self.accumulators.values():
+            assert accum is not None
             env[accum] = _create_placeholder_node(accum)
 
         for original_node in self.subgraph_body + self.subgraph_output:
             assert original_node.op != "placeholder"
 
             # Chunk aten.full
-            if original_node.target == aten.full.default and (meta := get_chunking_meta(original_node)) is not None and meta.chunk_dim is not None:
-                shape = list(original_node.args[0])
+            if (
+                original_node.target == aten.full.default
+                and (meta := get_chunking_meta(original_node)) is not None
+                and meta.chunk_dim is not None
+            ):
+                shape = list(original_node.args[0])  # type: ignore[arg-type]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.full.default,
                     (shape, original_node.args[1]),
-                    original_node.kwargs
+                    original_node.kwargs,
                 )
                 continue
             # Chunk aten.expand a scalar
-            if original_node.target == aten.expand.default and original_node.args[0].meta["val"].numel() == 1 and (meta := get_chunking_meta(original_node)) is not None and meta.chunk_dim is not None:
-                shape = list(original_node.args[1])
+            if (
+                original_node.target == aten.expand.default
+                and original_node.args[0].meta["val"].numel() == 1
+                and (meta := get_chunking_meta(original_node)) is not None
+                and meta.chunk_dim is not None
+            ):
+                shape = list(original_node.args[1])  # type: ignore[arg-type]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.expand.default,
-                    (env.get(original_node.args[0], original_node.args[0]), shape),
-                    original_node.kwargs
+                    (env.get(original_node.args[0], original_node.args[0]), shape),  # type: ignore[arg-type]
+                    original_node.kwargs,
                 )
                 continue
 
@@ -257,12 +273,11 @@ class ChunkingApplier:
         # Do the accumulation inside this subgraph
         for node, accum in self.accumulators.items():
             lhs = env[node]
+            assert accum is not None
             rhs = env[accum]
 
             # add `addend` and `accum`
-            add_out = new_graph.call_function(
-                aten.add.Tensor, (lhs, rhs)
-            )
+            add_out = new_graph.call_function(aten.add.Tensor, (lhs, rhs))
 
             # override the chunk value
             env[node] = add_out
@@ -275,15 +290,12 @@ class ChunkingApplier:
         new_graph.eliminate_dead_code()
         new_graph.lint()
 
-        sub_gm = torch.fx._lazy_graph_module._make_graph_module(
-            self.gm, new_graph
-        )
+        sub_gm = torch.fx._lazy_graph_module._make_graph_module(self.gm, new_graph)
         fake_tensor_prop(sub_gm)
         return sub_gm
 
-
     def build_subgraphs(self):
-        assert self.chunk_sizes
+        assert self.chunk_sizes is not None
         for chunk_size in self.chunk_sizes:
             if chunk_size in self.chunk_size_to_gm_attr:
                 continue
@@ -299,6 +311,7 @@ class ChunkingApplier:
 
     def call_subgraph_for_each_chunk(self):
         for chunk_id in range(self.num_chunk):
+            assert self.chunk_sizes is not None
             chunk_size = self.chunk_sizes[chunk_id]
             sub_gm = self.parent_graph.get_attr(self.chunk_size_to_gm_attr[chunk_size])
 
@@ -310,23 +323,27 @@ class ChunkingApplier:
                 else:
                     # not chunked
                     args.append(node)
-            for node in self.overriden_tangent.values():
-                args.append(node)
 
-            for _, accum in self.accumulators.items():
+            args += list(self.overriden_tangent.values())
+
+            for accum in self.accumulators.values():
+                assert accum is not None
                 args.append(accum)
 
-            output_node = self.parent_graph.call_function(torch.ops.higher_order.invoke_subgraph,
-                    (sub_gm, None, args), {})
-    
+            output_node = self.parent_graph.call_function(
+                torch.ops.higher_order.invoke_subgraph, (sub_gm, None, args), {}
+            )
+
             output_node_dict = {}
             for i, orig_node in enumerate(self.subgraph_output):
-                output_node_dict[orig_node] = self.parent_graph.call_function(operator.getitem, (output_node, i))
-    
+                output_node_dict[orig_node] = self.parent_graph.call_function(
+                    operator.getitem, (output_node, i)
+                )
+
             for orig_node, node_list in self.chunks_for_recovering.items():
                 chunk = output_node_dict[orig_node]
                 node_list.append(chunk)
-    
+
             for orig_node in self.accumulators:
                 self.accumulators[orig_node] = output_node_dict[orig_node]
 
@@ -343,27 +360,26 @@ class ChunkingApplier:
             if meta.chunk_dim is not None:
                 chunks = self.chunks_for_recovering[node]
                 recovered = self.parent_graph.call_function(
-                    aten.cat.default,
-                    (chunks, meta.chunk_dim))
+                    aten.cat.default, (chunks, meta.chunk_dim)
+                )
             elif meta.need_sum:
-                recovered = self.accumulators[node]
-    
+                recovered = self.accumulators[node]  # type: ignore[assignment]
+
             # do scaling last
             if meta.scale_by is not None:
                 recovered = self.parent_graph.call_function(
                     aten.mul.Tensor, (recovered, meta.scale_by)
                 )
-    
+
             # convert back to the original dtype
             if meta.need_sum:
                 original_dtype = node.meta["val"].dtype
                 # TODO(shunting): do we always uses a fp32 accumulator?
                 if original_dtype != torch.float32:
                     recovered = self.parent_graph.call_function(
-                        prims.convert_element_type.default,
-                        (recovered, original_dtype)
+                        prims.convert_element_type.default, (recovered, original_dtype)
                     )
-    
+
             assert recovered is not node
             node.replace_all_uses_with(recovered)
 
@@ -374,7 +390,6 @@ class ChunkingApplier:
                 continue
 
             self.parent_graph.erase_node(node)
-
 
     def apply(self):
         with self.parent_graph.inserting_before(self.subgraph_body[0]):
@@ -387,7 +402,8 @@ class ChunkingApplier:
             self.erase_original_nodes()
 
         newgm = torch.fx._lazy_graph_module._make_graph_module(
-            self.gm, self.parent_graph,
+            self.gm,
+            self.parent_graph,
         )
         fake_tensor_prop(newgm)
         if log.isEnabledFor(logging.DEBUG):
