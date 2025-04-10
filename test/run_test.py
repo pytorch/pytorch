@@ -1223,6 +1223,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
+    "cpp_extensions/open_registration_extension/test/test_openreg": run_test_with_openreg,
 }
 
 
@@ -1512,10 +1513,14 @@ def get_selected_tests(options) -> list[str]:
 
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
-        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
 
     if options.cpp:
-        selected_tests = [tname for tname in selected_tests if tname in CPP_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPP_TESTS, selected_tests)
+        )
     else:
         # Exclude all C++ tests otherwise as they are still handled differently
         # than Python test at the moment

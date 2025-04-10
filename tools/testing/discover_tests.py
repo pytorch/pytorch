@@ -135,6 +135,7 @@ TESTS = discover_tests(
         "doctests",
         "test_autoload_enable",
         "test_autoload_disable",
+        "cpp_extensions/open_registration_extension/test/test_openreg"
     ],
 )
 
