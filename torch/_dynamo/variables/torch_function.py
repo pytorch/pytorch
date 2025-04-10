@@ -400,7 +400,6 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self,
             build_torch_function_fn(tx, self.value, self.source),
             fn,
             types,
@@ -500,37 +499,32 @@ def _is_attr_overidden(tx: "InstructionTranslator", var, name):
     return overridden
 
 
-def call_torch_function(
-    tx, torch_function_type, torch_function_var, fn, types, args, kwargs
-):
-    # signature:
-    # def __torch_function__(cls, func, types, args=(), kwargs=None):
-    tf_args = (
-        torch_function_type,
+def call_torch_function(tx, torch_function_var, fn, types, args, kwargs):
+    # This emulates calling __torch_function__, which has a signature
+    #   def __torch_function__(cls, func, types, args=(), kwargs=None):
+    #
+    # Also notice the `cls` is not explicitly passed in the reference
+    # implementations:
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
+    # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
+    tf_args = [
         fn,
         types,
         VariableTracker.build(tx, tuple(args)),
         VariableTracker.build(tx, kwargs),
-    )
-    return tx.inline_user_function_return(torch_function_var, tf_args, {})
+    ]
+    return torch_function_var.call_function(tx, tf_args, {})
 
 
 def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
-    from types import FunctionType
-
-    # If we reach here, the target `__torch_function__` should have been
-    # annotated with `@classmethod`, so accessing it always yield a bound
-    # method, and the actual `__torch_function__` impl is inside the bound
-    # `__func__`.
-    func = cls_or_obj.__torch_function__.__func__
-
-    if not isinstance(func, FunctionType):
-        unimplemented("Builtin/C++ torch function implementations NYI")
-
+    # TODO this could trigger user code via custom `__getattr__`, we might need
+    # to use `BuiltinVariable(getattr)` for more tracing soundness.
+    func = cls_or_obj.__torch_function__
     func_source = None
     if source:
-        func_source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.build(tx, func, func_source)
+        func_source = AttrSource(source, "__torch_function__")
+    func_vt = VariableTracker.build(tx, func, func_source)
+    return func_vt
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -691,7 +685,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self.class_type_var(tx),
             self.torch_function_fn,
             fn,
             types,
