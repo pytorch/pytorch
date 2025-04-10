@@ -1,4 +1,5 @@
 import types
+
 import torch
 
 # Create our python implementation dict so that the C++ module
@@ -6,8 +7,9 @@ import torch
 from ._aten_impl import impl_factory as impl_factory  # noqa: F401
 from ._device_daemon import driver
 
+
 # Load the C++ Module
-import pytorch_openreg._C  # type: ignore[misc]  # noqa: F401
+import pytorch_openreg._C  # isort:skip # type: ignore[import] # noqa: F401
 
 
 def _create_module():
