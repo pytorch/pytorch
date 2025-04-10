@@ -6066,11 +6066,11 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
-        # if self._dde_suppressed:
-        #     return GuardOnDataDependentSymNode(
-        #         expr,
-        #         "This data dependent error is suppressed and handled by the caller",
-        #     )
+        if self._dde_suppressed:
+            return GuardOnDataDependentSymNode(
+                expr,
+                "This data dependent error is suppressed and handled by the caller",
+            )
 
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
