@@ -5796,8 +5796,9 @@ class TestLinalg(TestCase):
         with torch.set_grad_enabled(True):
             torch.tensordot(a, b, dims=([1], [0]), out=d)
 
-        with torch.set_grad_enabled(False):
+        with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
             torch.tensordot(a, b, dims=([1], [0]), out=c)
+            self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
