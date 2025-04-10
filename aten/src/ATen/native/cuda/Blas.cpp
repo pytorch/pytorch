@@ -319,7 +319,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   }
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false, c10::optional<ScalarType> dtype_opt = c10::nullopt) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -348,7 +348,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // if lt path fails, we recurse back into this function here and force the lt path to off
   disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
   at::ScalarType scalar_type = mat1.scalar_type();
-  bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && dtype_opt.has_value() && dtype_opt.value() == at::ScalarType::Float;
+  bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
 #if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11040)) || defined(USE_ROCM)
@@ -646,7 +646,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, c10::optional<ScalarType> dtype_opt) {
+const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   // handle pathological cases that blas may not like
   if (result.numel() == 0) {
     return result;
@@ -775,7 +775,7 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
 TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha, c10::nullopt);
+    baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha);
   }
 }
 
@@ -784,7 +784,7 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha, c10::nullopt);
+    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
 }
 
@@ -1675,40 +1675,84 @@ std::optional<c10::ScalarType> out_dtype) {
 }
 
 Tensor _bmm_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype) {
-  Scalar beta(0.0);
-  Scalar alpha(1.0);
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
 
   Tensor out = at::empty({batch1_sizes[0], batch1_sizes[1], batch2_sizes[2]}, batch1.options().dtype(out_dtype));
-  {
-    NoNamesGuard guard;
-    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha, out_dtype);
-  }
-
-  return out;
+  return _bmm_out_dtype_cuda(batch1, batch2, out_dtype, out);
 }
 
 Tensor& _bmm_out_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha, out_dtype);
+    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
   }
 
   return out;
 }
 
-Tensor _mm_out_dtype(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype) {
-  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
-  addmm_out_cuda_impl(result, result, self, mat2, 0, 1, Activation::None, false, out_dtype);
+Tensor _baddbmm_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha) {
+  // We need to copy the tensor
+  Tensor out = self.clone().to(self.options().dtype(out_dtype));
 
-  return result;
+  return _baddbmm_out_dtype_cuda(out, batch1, batch2, out_dtype, beta, alpha, out);
 }
 
-Tensor& _mm_out_dtype_out(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype, Tensor &out) {
-  addmm_out_cuda_impl(const_cast<Tensor&>(out), out, self, mat2, 0, 1, Activation::None, false, out_dtype);
+Tensor& _baddbmm_out_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+
+  {
+    NoNamesGuard guard;
+    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
+  }
+
+  return out;
+}
+
+Tensor _mm_dtype_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _mm_dtype_out_cuda(self, mat2, out_dtype, result);
+}
+
+Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "input dtypes must be the same");
+  TORCH_CHECK(out_dtype == self.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+
+  addmm_out_cuda_impl(const_cast<Tensor&>(out), out, self, mat2, 0, 1);
+
+  return out;
+}
+
+Tensor _addmm_dtype_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha) {
+  Tensor result = at::empty(self.sizes(), self.options().dtype(out_dtype));
+  return _addmm_dtype_out_cuda(self, mat1, mat2, out_dtype, beta, alpha, result);
+}
+
+Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(out_dtype == self.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
 
   return out;
 }

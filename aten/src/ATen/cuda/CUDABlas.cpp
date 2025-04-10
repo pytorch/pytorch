@@ -674,7 +674,7 @@ void bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(
       alpha_ptr, a, CUDA_R_16F, lda, stridea,
       b, CUDA_R_16F, ldb, strideb, beta_ptr,
       c, CUDA_R_32F, ldc, stridec,
-      num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
       at::cuda::blas::gemm<at::Half, float>(
