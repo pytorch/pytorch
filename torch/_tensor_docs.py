@@ -5199,7 +5199,7 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     If ``self`` requires gradients (``requires_grad=True``) but the target
     ``dtype`` specified is an integer type, the returned tensor will implicitly
     set ``requires_grad=False``. This is because only tensors with
-    floating-point or complex dtype can require gradients.
+    floating-point or complex dtypes can require gradients.
 
 Here are the ways to call ``to``:
 
