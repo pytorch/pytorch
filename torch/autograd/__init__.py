@@ -327,11 +327,14 @@ def backward(
             )
 
     if inputs is None:
-        inputs = ()
+        inputs = cast(tuple, ())
     elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
-        inputs = (inputs,)
+        inputs = cast(Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (inputs,))
     else:
-        inputs = tuple(inputs)
+        inputs = cast(
+            Union[tuple[torch.Tensor, ...], tuple[graph.GradientEdge, ...]],
+            tuple(inputs),
+        )
         if len(inputs) == 0:
             raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
