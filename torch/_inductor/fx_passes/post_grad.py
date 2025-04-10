@@ -204,6 +204,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
         lower_scan_to_while_loop
     )
+    GraphTransformObserver(gm, "lower_map_to_while_loop").apply_gm_pass(
+        lower_map_to_while_loop
+    )
 
     gm.recompile()
     trace_structured(
@@ -249,6 +252,108 @@ def prepare_softmax_extra_check(match):
         and match.kwargs["x"].meta["val"].device.type == "cuda"
         and config.cuda_backend == "triton"
     )
+
+
+def lower_map_to_while_loop(gm: torch.fx.GraphModule):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.map_impl),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        assert len(kwargs) == 0, (
+            "kwargs of map are not merged into args before entering lower_map_to_while_loop_pass"
+        )
+        subgraph, fx_xs, fx_additional_inputs = args
+        sub_gm: torch.fx.GraphModule = getattr(gm, subgraph.target)
+        cur_node = match.nodes[0]
+        mapped_outputs = cur_node.meta["val"]
+
+        def lower_to_while_loop(*args, **kwargs):
+            assert len(kwargs) == 0
+            xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
+            assert isinstance(xs, (tuple, list)) and isinstance(
+                additional_inputs, (tuple, list)
+            ), (xs, additional_inputs)
+            map_length = xs[0].size(0)
+            loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
+
+            # Similar to NOTE [Pre-allocate scan's output buffer]
+            bound_symbols = {
+                arg.node.expr: arg
+                for arg in pytree.tree_leaves((args, map_length))
+                if isinstance(arg, torch.SymInt)
+            }
+            out_buffers = [
+                torch.empty_strided(
+                    resolve_shape_to_proxy(out.size(), bound_symbols),
+                    resolve_shape_to_proxy(out.stride(), bound_symbols),
+                    device=out.device,
+                    dtype=out.dtype,
+                    layout=out.layout,
+                    requires_grad=out.requires_grad,
+                )
+                for out in mapped_outputs
+            ]
+
+            while_loop_operands = (loop_idx, out_buffers, xs)
+            while_loop_flat_operands, operands_spec = pytree.tree_flatten(
+                while_loop_operands
+            )
+            while_loop_additional_inputs = additional_inputs
+            _, operands_and_additional_inputs_spec = pytree.tree_flatten(
+                (*while_loop_operands, additional_inputs)
+            )
+
+            def cond_fn(*flat_args):
+                loop_idx, _, _, _ = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,
+                )
+                return loop_idx < map_length
+
+            def body_fn(*flat_args):
+                loop_idx, out_bufs, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,
+                )
+
+                idx_int = loop_idx.item()
+                torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
+                torch.ops.aten._assert_scalar.default(idx_int < map_length, "")
+                sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
+                outs = sub_gm(*sub_xs, *additional_inputs)
+
+                for out, buffer in zip(outs, out_bufs):
+                    buffer_slice = torch.ops.aten.select.int(buffer, 0, idx_int)
+                    buffer_slice.copy_(out)
+                return loop_idx + 1, *out_bufs, *xs
+
+            _, final_out, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn,
+                    body_fn,
+                    tuple(while_loop_flat_operands),
+                    tuple(while_loop_additional_inputs),
+                ),
+                operands_spec,
+            )
+            return (final_out,)
+
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
+            (fx_xs, fx_additional_inputs)
+        )
+        match.replace_by_example(
+            lower_to_while_loop, lower_to_while_loop_args, run_functional_passes=False
+        )
+
+    graph_pass.apply(gm)
+
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.map_impl
+    ):
+        raise AssertionError("map is not lowered to while_loop")
 
 
 """
@@ -307,6 +412,36 @@ This pass will rewrite scan into:
 """
 
 
+def resolve_shape_to_proxy(
+    shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+):
+    """
+    Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
+    When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
+    computed from bound_symbols' values.
+
+    Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
+    (arg0 * arg1, arg0 + arg1).
+    """
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    ret = []
+    for s in shape:
+        if isinstance(s, torch.SymInt):
+            ret.append(
+                sympy_interp(
+                    PythonReferenceAnalysis,
+                    bound_symbols,
+                    s.node.expr,
+                ),
+            )
+        else:
+            assert isinstance(s, int)
+            ret.append(s)
+    return ret
+
+
 def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
     graph_pass = PatternMatcherPass()
 
@@ -333,35 +468,6 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             The traced graph of this function will be used to replace the original scan fx_node.
             """
             assert len(kwargs) == 0
-
-            def resolve_shape_to_proxy(
-                shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
-            ):
-                """
-                Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
-                When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
-                computed from bound_symbols' values.
-
-                Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
-                (arg0 * arg1, arg0 + arg1).
-                """
-                from torch.utils._sympy.interp import sympy_interp
-                from torch.utils._sympy.reference import PythonReferenceAnalysis
-
-                ret = []
-                for s in shape:
-                    if isinstance(s, torch.SymInt):
-                        ret.append(
-                            sympy_interp(
-                                PythonReferenceAnalysis,
-                                bound_symbols,
-                                s.node.expr,
-                            ),
-                        )
-                    else:
-                        assert isinstance(s, int)
-                        ret.append(s)
-                return ret
 
             # Step 1: construct necessary inputs to while_loop based on scan's input.
             (
