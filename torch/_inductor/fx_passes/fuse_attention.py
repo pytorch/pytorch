@@ -630,6 +630,8 @@ def _get_sfdp_patterns():
     if torch.cuda.is_available():
         # workaround https://github.com/pytorch/pytorch/issues/97894
         device = "cuda"
+    elif torch.xpu.is_available():
+        device = "xpu"
     else:
         device = "cpu"
 
