@@ -251,7 +251,6 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
             def retlog(r):
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
-
             shape_env = args[0]
 
             try:
