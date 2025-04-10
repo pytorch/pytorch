@@ -140,7 +140,6 @@ def try_import_cutlass() -> bool:
                     )
 
         try:
-            breakpoint()
             import cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
