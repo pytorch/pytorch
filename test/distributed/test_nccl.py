@@ -176,10 +176,10 @@ class TestNCCL(TestCase):
         ):
             nccl.reduce_scatter(t, t)
 
-        with self.assertRaisesRegex(ValueError, "is invalid, please refer to ReduceOp"):
-            nccl.reduce([t], op=0xAA)
+        with self.assertRaisesRegex(ValueError, "Invalid op: 10."):
+            nccl.reduce([t], op=10)
 
-        with self.assertRaisesRegex(TypeError, "op should be int or ReduceOp"):
+        with self.assertRaisesRegex(TypeError, "Expected op type int, got"):
             nccl.reduce([t], op="SUM")  # type: ignore[misc]
 
     @skip_but_pass_in_sandcastle_if(
