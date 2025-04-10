@@ -85,6 +85,7 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "not-support-multithread": TestSkip(90, "backend not support multithread."),
 }
 
 
@@ -92,17 +93,17 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
     backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -193,7 +194,7 @@ def import_transformers_or_skip():
 
 
 def at_least_x_gpu(x):
-    return torch.cuda.is_available() and torch.cuda.device_count() >= x
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
@@ -337,11 +338,37 @@ def requires_nccl_version(version, msg):
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
+def requires_nccl_version_or(version, msg, backends):
+    assert(isinstance(backends, list))
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle_if(
+            'xccl' not in backends if c10d.is_xccl_available() else True,
+            "c10d was not compiled with the NCCL backend and " + str(backends) + " backend.",
+        )
+    else:
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )
 
 def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
+    )
+
+def requires_nccl_or(backends):
+    assert(isinstance(backends, list))
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_nccl_available() and
+        ( not c10d.is_xccl_available() if 'xccl' in backends else True ),
+        "c10d was not compiled with the NCCL backend or " + str(backends) + " backend.",
+    )
+
+def requires_xccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_xccl_available(),
+        "c10d was not compiled with the XCCL backend",
     )
 
 def requires_ucc():
@@ -1370,7 +1397,9 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
                 store=store,
             )
         else:
-            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+            backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
+                torch.accelerator.current_accelerator().type)
+            c10d.init_process_group(backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1404,9 +1433,10 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+        device = torch.accelerator.current_accelerator().type
+        cls.device = f"{device}:{cls.rank}"
+        cls.device_ids = None if device in cls.device else [cls.rank]
+        c10d.init_process_group(c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -1437,7 +1467,7 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:

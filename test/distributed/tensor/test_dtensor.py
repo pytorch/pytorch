@@ -623,11 +623,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -676,7 +676,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -698,7 +698,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -936,10 +936,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
-        else:
-            return tensor
+        return tensor.to(self.device_type)
 
     @with_comms
     def test_split_tensor_1D(self) -> None:
@@ -995,7 +992,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
 
 class DTensorLogTest(LoggingTestCase):
     def test_dtensor_log(self):
-        if not torch.distributed.is_available() or not torch.cuda.is_available():
+        if not torch.distributed.is_available() or not torch.accelerator.is_available():
             return
 
         env = dict(os.environ)
@@ -1011,7 +1008,7 @@ import logging
 import torch
 from torch.distributed._tensor import  init_device_mesh, distribute_tensor, Shard
 
-mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
+mesh = init_device_mesh(torch.accelerator.current_accelerator().type, (1,), mesh_dim_names=("dp",))
 placements = [Shard(0)]
 tensor = torch.randn(12, 8, 8)
 dtensor = distribute_tensor(tensor, mesh, placements)
