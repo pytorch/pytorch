@@ -561,10 +561,9 @@ class OutputGraph:
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             return None
 
-        hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-        if not torch._functorch._aot_autograd.utils.top_saved_tensors_hooks_are_inlineable(
-            hooks
-        ):
+        get_hooks = torch._functorch._aot_autograd.utils.get_inline_saved_tensors_hooks_top
+        hooks = get_hooks()
+        if not hooks:
             return None
 
         pack_gm, unpack_gm = hooks

@@ -77,6 +77,7 @@ from .utils import (
     make_boxed_func,
     strict_zip,
     top_saved_tensors_hooks_are_inlineable,
+    get_inline_saved_tensors_hooks_top,
     unlift_tokens,
 )
 
@@ -835,8 +836,12 @@ def maybe_inline_saved_tensors_hooks(
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
 
-    hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-    if not top_saved_tensors_hooks_are_inlineable(hooks):
+    # hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+    # if not top_saved_tensors_hooks_are_inlineable(hooks):
+    #     return
+
+    hooks = get_inline_saved_tensors_hooks_top()
+    if not hooks:
         return
 
     pack_hook_gm, unpack_hook_gm = hooks

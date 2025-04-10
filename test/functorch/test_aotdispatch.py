@@ -112,6 +112,7 @@ except ImportError:
 
 
 def saved_tensors_hooks_to_gm(pack, unpack):
+    from torch.fx.experimental.proxy_tensor import make_fx
     # TODO: symbolic shapes tracing to be able to provide not the same shape?
     inp = torch.randn(2, 3)
     torch._dynamo.mark_dynamic(inp, 0)
@@ -6616,14 +6617,14 @@ metadata incorrectly.
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks(self):
+        inline_sth_context = torch._functorch.aot_autograd.saved_tensors_hooks
+        eager_sth_context = torch.autograd.graph.saved_tensors_hooks
         def _test_pack_hooks(fn, inp_fn, hooks, inline=True):
             torch._dynamo.reset()
             with ExitStack() as stack:
                 for hook in hooks:
                     pack, unpack = hook
-                    stack.enter_context(
-                        torch.autograd.graph.saved_tensors_hooks(pack, unpack)
-                    )
+                    stack.enter_context(eager_sth_context(pack, unpack))
                 ref_x = inp_fn()
                 x = ref_x.detach().clone().requires_grad_()
 
@@ -6634,10 +6635,13 @@ metadata incorrectly.
                 for hook in hooks:
                     pack, unpack = hook
                     if inline:
-                        pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
-                    stack.enter_context(
-                        torch.autograd.graph.saved_tensors_hooks(pack, unpack)
-                    )
+                        stack.enter_context(
+                            inline_sth_context(*saved_tensors_hooks_to_gm(pack, unpack))
+                        )
+                    else:
+                        stack.enter_context(
+                            eager_sth_context(pack, unpack)
+                        )
 
                 y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
                 y.sum().backward()
@@ -6790,6 +6794,8 @@ metadata incorrectly.
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_saved_tensors_hooks_recompile(self):
+        inline_sth_context = torch._functorch.aot_autograd.saved_tensors_hooks
+        eager_sth_context = torch.autograd.graph.saved_tensors_hooks
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
 
@@ -6800,18 +6806,6 @@ metadata incorrectly.
             return x * 2
 
         def unpack_mul2(x):
-            return x / 2
-
-        def inlineable_pack_bf16(x):
-            return x.to(dtype=torch.bfloat16)
-
-        def inlineable_unpack_bf16(x):
-            return x.to(dtype=torch.float)
-
-        def inlineable_pack_mul2(x):
-            return x * 2
-
-        def inlineable_unpack_mul2(x):
             return x / 2
 
         def _test(hooks, inline, expected_compile_count):
@@ -6866,23 +6860,19 @@ metadata incorrectly.
             y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
             y.sum().backward()
 
-            pack, unpack = hooks[0]
-            if inline:
-                pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
+            def _test_with_hooks(hooks):
+                with ExitStack() as stack:
+                    pack, unpack = hooks
+                    if inline:
+                        stack.enter_context(inline_sth_context(*saved_tensors_hooks_to_gm(pack, unpack)))
+                    else:
+                        stack.enter_context(eager_sth_context(pack, unpack))
 
-            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                x = inp_fn()
-                y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
-                y.sum().backward()
-
-            pack, unpack = hooks[1]
-            if inline:
-                pack, unpack = saved_tensors_hooks_to_gm(pack, unpack)
-
-            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                x = inp_fn()
-                y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
-                y.sum().backward()
+                    x = inp_fn()
+                    y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+                    y.sum().backward()
+            _test_with_hooks(hooks[0])
+            _test_with_hooks(hooks[1])
             self.assertEqual(cnt.frame_count, expected_compile_count)
 
         _test(
@@ -6891,10 +6881,7 @@ metadata incorrectly.
             expected_compile_count=1,
         )
         _test(
-            (
-                (inlineable_pack_bf16, inlineable_unpack_bf16),
-                (inlineable_pack_mul2, inlineable_unpack_mul2),
-            ),
+            ((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)),
             inline=True,
             expected_compile_count=3,
         )
