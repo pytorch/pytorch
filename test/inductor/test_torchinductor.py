@@ -7595,7 +7595,7 @@ class CommonTemplate:
         for string in [
             "xnumel = 16384",
             "xoffset = tl.program_id(0) * XBLOCK",
-            "xindex = xoffset + tl.arange(0, XBLOCK)[:, None]",
+            "xindex = xoffset + tl.arange(0, XBLOCK)[None, :]",
             "x1 = xindex",
             "tmp0 = tl.load(in_ptr0 + (x1), None,",
         ]:
