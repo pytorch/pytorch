@@ -2457,6 +2457,10 @@ def forward(self, x):
             def forward(self):
                 return self.a
 
+        # TODO: Tag with @unittest.expectedFailure
+        # A gets inlined but not installed; it is not a parameter/buffer
+        # so shouldn't be here; fix would be remove restriction on
+        # installing parameter/buffers (so this will fail)
         exported = torch._dynamo.export(M())()
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
@@ -4018,7 +4022,9 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
             "b": torch.randn(20, 16, 50, 100),
         }
-
+        # Should mark @unittest.expectedFailure
+        # Similar isue here - self.weight/self.bias will be inlined but not installed
+        # since they are user tensors
         gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
         gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
 
