@@ -442,11 +442,11 @@ if TEST_WITH_ROCM:
     TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 
-def create_device(interface=None, lazy_init: bool = False):
+def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
-        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1", lazy_init=lazy_init)
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
     else:
-        return c10d.ProcessGroupGloo.create_device(interface=interface, lazy_init=lazy_init)
+        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
 def get_timeout(test_id) -> int:

@@ -284,13 +284,6 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
-Improving initialization time
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-* ``TORCH_GLOO_LAZY_INIT`` - establishes connections on demand rather than
-  using a full mesh which can greatly improve initialization time for non all2all
-  operations.
-
 Post-Initialization
 -------------------
 
