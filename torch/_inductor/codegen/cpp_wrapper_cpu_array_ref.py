@@ -879,16 +879,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             data, size, stride, offset, writeline, dtype
         )
 
-    def val_to_arg_str(
-        self, val, type_=None, code: Optional[IndentedBuffer] = None
-    ) -> str:
+    def val_to_arg_str(self, val, type_=None) -> str:
         if (
             val is not None
             and isinstance(type_, torch.OptionalType)
             and isinstance(type_.getElementType(), torch.TensorType)
         ):
             # Handle optional tensors as a special case, as in the parent class.
-            base_handle = self.val_to_arg_str(val, torch.TensorType, code)
+            base_handle = self.val_to_arg_str(val, torch.TensorType)
             if config.aot_inductor.use_minimal_arrayref_interface:
                 if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
                     base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
@@ -896,7 +894,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
             return f"&temporary_reference({base_handle}.get())"
 
-        return super().val_to_arg_str(val, type_, code)
+        return super().val_to_arg_str(val, type_)
 
     def codegen_tensor_item(
         self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
