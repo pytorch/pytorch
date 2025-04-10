@@ -1720,7 +1720,9 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
     return source_codes[0]
 
 
-def run_and_get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
+def run_and_get_triton_code(
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (

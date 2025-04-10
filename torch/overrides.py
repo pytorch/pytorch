@@ -62,6 +62,7 @@ __all__ = [
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+
 def _disable_user_warnings(
     func: Callable[_P, _R],
     regex: str = ".*is deprecated, please use.*",

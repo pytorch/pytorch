@@ -451,7 +451,9 @@ def backwards_not_supported(prim):
 # TODO: when tracing this will add torch tensors and not TensorMeta objects
 # to the trace -- we should fix this by adding a tracing context and NumberMeta classes
 # TODO: this wrapper is currently untested
-def elementwise_unary_scalar_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T | NumberType]:
+def elementwise_unary_scalar_wrapper(
+    fn: Callable[_P, _T],
+) -> Callable[_P, _T | NumberType]:
     """
     Allows unary operators that accept tensors to work with Python numbers.
     """
