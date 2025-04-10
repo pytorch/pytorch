@@ -1275,13 +1275,6 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
-    if aot_mode:
-        if config.is_fbcode():
-            from torch._inductor.codecache import cpp_prefix_path
-
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
-
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
@@ -1632,14 +1625,9 @@ class CppBuilder:
     def build_fbcode_re(
         self,
     ) -> None:
-        from torch._inductor.codecache import cpp_prefix_path
-
         with dynamo_timed("compile_file"):
             command = self.get_command_line().split()
             try:
-                # Need to copy our header into the same folder as the sourcecode.
-                header_path = cpp_prefix_path()
-                header_name = os.path.basename(header_path)
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
@@ -1647,7 +1635,6 @@ class CppBuilder:
                 torch_includes_path = os.path.join(_TORCH_PATH, "include")
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     # Copy everything to tmp compilation folder
-                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                     shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                     for src in self._orig_source_paths:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
