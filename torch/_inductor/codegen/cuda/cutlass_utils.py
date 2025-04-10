@@ -192,7 +192,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
             arch,
             version,
         )
-        return []
+        return {}
     arch = _normalize_cuda_arch(arch)
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
