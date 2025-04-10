@@ -11517,7 +11517,7 @@ class TestNNDeviceType(NNTestCase):
         targets = torch.tensor([], device=device, dtype=torch.long)
         input_lengths = torch.tensor([], device=device, dtype=torch.long)
         target_lengths = torch.tensor([], device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "targets tensor must not be empty"):
+        with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
