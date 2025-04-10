@@ -2,7 +2,7 @@
 """Module for handling symbolic function registration."""
 
 import warnings
-from collections.abc import Collection, Sequence, Iterator
+from collections.abc import Collection, Sequence
 from typing import Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
