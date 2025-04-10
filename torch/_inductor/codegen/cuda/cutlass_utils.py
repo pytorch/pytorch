@@ -222,7 +222,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
             ) from e
 
     log.info(
-        "CUTLASS library generated %d operations in %.2f seconds",
+        "CUTLASS library generated a dict of %d operation kinds in %.2f seconds",
         len(manifest.operations),
         time.time() - start_time,
     )
