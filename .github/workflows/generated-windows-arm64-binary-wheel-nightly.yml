@@ -107,6 +107,10 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
