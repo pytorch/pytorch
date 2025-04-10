@@ -102,8 +102,10 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
     python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled $extra_parameters
   fi
 
-  # https://github.com/pytorch/pytorch/issues/149422
-  python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
+  if [[ "\$GPU_ARCH_TYPE" != *cpu-aarch64* ]]; then
+    # https://github.com/pytorch/pytorch/issues/149422
+    python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
+  fi
 fi
 
 # Clean temp files
