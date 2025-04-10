@@ -895,6 +895,41 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
+  /*
+   * Asserts that a given tensor meets certain alignment.
+   * This C++ version of torch._inductor.utils.tensor_is_aligned
+   */
+  PyObject* item = nullptr;
+  unsigned long alignment = 0;
+  if (!PyArg_ParseTuple(args, "Ok", &item, &alignment)) {
+    return nullptr;
+  }
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    return nullptr;
+  }
+  if (alignment == 0) {
+    PyErr_SetString(PyExc_AssertionError, "alignment can not be 0");
+    return nullptr;
+  }
+
+  at::Tensor tensor = THPVariable_Unpack(item);
+
+  int64_t storage_offset = tensor.storage_offset();
+  size_t itemsize = tensor.itemsize();
+  if (storage_offset * itemsize % alignment != 0) {
+    std::stringstream msg;
+    msg << "Expect the tensor to be " << alignment
+        << " bytes aligned. Fail due to storage_offset=" << storage_offset
+        << " itemsize=" << itemsize;
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    return nullptr;
+  }
+
+  Py_RETURN_TRUE;
+}
+
 template <typename T>
 static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
@@ -998,6 +1033,7 @@ static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
+    {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},

@@ -1043,14 +1043,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #    int8_mixed_bf16: [dequant_node, optional(convert_element_type_4),
             #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 3
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 3
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"],
                 18 if int8_mixed_bf16 else 12,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 3
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
             )
 
         self._test_common(
@@ -1104,7 +1104,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         device="cpu",
         int8_mixed_bf16=False,
         unary_op=torch.nn.ReLU(),
-        qconv2d_unary_matcher_nodes=None,
+        qconv_unary_matcher_nodes=None,
     ):
         class M(torch.nn.Module):
             def __init__(
@@ -1133,20 +1133,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
         def matcher_check_fn():
             # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 2
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_count"],
+                counters["inductor"]["qconv_unary_matcher_count"],
                 0 if TEST_ACL else 2,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 2
             )
-            if qconv2d_unary_matcher_nodes:
+            if qconv_unary_matcher_nodes:
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_unary_matcher_nodes"],
-                    0 if TEST_ACL else qconv2d_unary_matcher_nodes,
+                    counters["inductor"]["qconv_unary_matcher_nodes"],
+                    0 if TEST_ACL else qconv_unary_matcher_nodes,
                 )
 
         self._test_common(
@@ -1230,7 +1230,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qconv2d_unary_test_helper(
             unary_op=torch.nn.Hardtanh(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=11,
+            qconv_unary_matcher_nodes=11,
         )
 
     @skipIfNoDynamoSupport
@@ -1248,7 +1248,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             device="xpu",
             unary_op=torch.nn.Hardtanh(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=11,
+            qconv_unary_matcher_nodes=11,
         )
 
     @skipIfNoDynamoSupport
@@ -1282,7 +1282,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qconv2d_unary_test_helper(
             unary_op=torch.nn.Hardswish(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=17,
+            qconv_unary_matcher_nodes=17,
         )
 
     @skipIfNoDynamoSupport
@@ -1301,7 +1301,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             device="xpu",
             unary_op=torch.nn.Hardswish(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=17,
+            qconv_unary_matcher_nodes=17,
         )
 
     @skipIfNoDynamoSupport
@@ -1335,7 +1335,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qconv2d_unary_test_helper(
             unary_op=torch.nn.SiLU(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=11,
+            qconv_unary_matcher_nodes=11,
         )
 
     @skipIfNoDynamoSupport
@@ -1354,7 +1354,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             device="xpu",
             unary_op=torch.nn.SiLU(),
             int8_mixed_bf16=True,
-            qconv2d_unary_matcher_nodes=11,
+            qconv_unary_matcher_nodes=11,
         )
 
     def _qconv2d_add_test_helper(
@@ -1415,7 +1415,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 4
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 4
+                    counters["inductor"]["qconv_weight_prepack_matcher_count"], 4
                 )
                 # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 2
                 self.assertEqual(
@@ -1512,7 +1512,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                    counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
                 )
                 # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 2
                 self.assertEqual(
@@ -1611,7 +1611,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 1
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                    counters["inductor"]["qconv_weight_prepack_matcher_count"], 1
                 )
                 # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 0
                 self.assertEqual(
@@ -1667,14 +1667,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         def matcher_check_fn():
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 4
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 4
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_count"],
+                counters["inductor"]["qconv_unary_matcher_count"],
                 0 if TEST_ACL else 3,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 4
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 4
             )
 
         self._test_common(
@@ -1840,23 +1840,23 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Dequant-conv pattern matched in quantization weight prepack * 1
             #    [dequantize_per_tensor, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 1
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 4
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 4
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default, quantize_per_tensor]
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_count"],
+                counters["inductor"]["qconv_unary_matcher_count"],
                 0 if TEST_ACL else 1,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_nodes"],
+                counters["inductor"]["qconv_unary_matcher_nodes"],
                 0 if TEST_ACL else 2,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 1
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 1
             )
 
         self._test_common(
@@ -1895,16 +1895,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Dequant-conv pattern matched in quantization weight prepack * 1
             #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_count"],
+                counters["inductor"]["qconv_unary_matcher_count"],
                 0 if TEST_ACL else 2,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 2
             )
 
         self._test_common(
@@ -1994,10 +1994,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Dequant-conv pattern matched in quantization weight prepack * 2
             #    [dequantize_per_tensor, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 8
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 8
             )
             # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default_1, dequantize_per_tensor, add_3, quantize_per_tensor]
@@ -2063,10 +2063,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Dequant-conv pattern matched in quantization weight prepack * 2
             #    [dequantize_per_tensor, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 8
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 8
             )
             # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default_1, dequantize_per_tensor, add_3, relu, quantize_per_tensor]
@@ -2135,10 +2135,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 2. Dequant-conv pattern matched in quantization weight prepack * 3
             #    [dequantize_per_tensor, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 3
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 3
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 12
             )
             # 3. Qconv2d Binary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default_1, add_3]
@@ -2174,6 +2174,59 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qconv2d_dequant_promotion_xpu(self):
         self._test_qconv2d_dequant_promotion_helper(device="xpu")
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv1d_relu_cpu(self):
+        r"""
+        This testcase will quantize Conv1d->ReLU pattern.
+        """
+        device = "cpu"
+        unary_op = torch.nn.ReLU()
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv1d(3, 128, kernel_size=3, stride=1)
+                self.unary_fn = copy.deepcopy(unary_op)
+                self.conv2 = torch.nn.Conv1d(
+                    128, 128, kernel_size=3, stride=1, bias=False
+                )
+                self.unary_fn2 = copy.deepcopy(unary_op)
+
+            def forward(self, x):
+                tmp = self.unary_fn(self.conv(x))
+                return self.unary_fn2(self.conv2(tmp))
+
+        mod = M().eval().to(device=device)
+        v = (
+            torch.randn((1, 3, 8), dtype=torch.float32, requires_grad=False)
+            .add(1)
+            .to(device=device)
+        )
+
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
+            self.assertEqual(
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
+            )
+            # 2. QConv2D Unary fusion in post-grad fusion pass * 2
+            self.assertEqual(
+                counters["inductor"]["qconv_unary_matcher_count"],
+                0 if TEST_ACL else 2,
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 2
+            )
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
 
     def _qlinear_test_helper(
         self,
@@ -3211,14 +3264,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     0 if TEST_ACL else 1,
                 )
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                    counters["inductor"]["qconv_weight_prepack_matcher_count"], 1
                 )
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_unary_matcher_count"],
+                    counters["inductor"]["qconv_unary_matcher_count"],
                     0 if TEST_ACL else 1,
                 )
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_unary_lower_count"],
+                    counters["inductor"]["qconv_unary_lower_count"],
                     0 if TEST_ACL else 1,
                 )
 
@@ -3310,14 +3363,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qcat_matcher_count"], 0 if TEST_ACL else 1
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 2
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_matcher_count"],
+                counters["inductor"]["qconv_unary_matcher_count"],
                 0 if TEST_ACL else 2,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 2
             )
 
         self._test_common(
@@ -4296,7 +4349,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
         v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
         if include_ops is None:
             include_ops = [
-                "torch.ops.onednn.qconv2d_pointwise",
+                "torch.ops.onednn.qconv_pointwise",
                 "torch.ops.quantized.max_pool2d",
                 "torch.ops.onednn.qlinear_pointwise",
             ]
@@ -4335,7 +4388,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
         def matcher_check_fn():
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 1
             )
 
         self._test_common(

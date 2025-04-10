@@ -2793,7 +2793,6 @@ def get_dynamic_sources() -> set[str]:
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
-    # Is None when fake is SymInt
     symbolic_context: Optional[SymbolicContext]
 
     def __hash__(self) -> int:

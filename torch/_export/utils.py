@@ -282,25 +282,37 @@ def _rename_without_collisions(
     return name_map[orig_name]
 
 
-def _check_input_constraints_for_graph(
-    input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
+def get_keystr(key_path: KeyPath) -> str:
+    """For a given index into the flat_args, return a human readable string
+    describing how to access it, e.g. "*args["foo"][0].bar"
+    """
+    # Prefix the keypath with "*args" or "**kwargs" to make it clearer where
+    # the arguments come from. Ultimately we ought to serialize the
+    # original arg names for the best error message here.
+    args_kwargs_key_path = key_path[0]
+    assert isinstance(args_kwargs_key_path, SequenceKey)
+    if args_kwargs_key_path.idx == 0:
+        return f"*args{keystr(key_path[1:])}"
+    else:
+        kwarg_key = key_path[1]
+        assert isinstance(kwarg_key, MappingKey)
+        name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
+        return f"{name}{keystr(key_path[2:])}"
+
+
+def _check_symint(
+    symint: Union[int, torch.SymInt],
+    arg: int,
+    range_constraints,
+    unification_map,
+    keypath: KeyPath,
+    i: Optional[int] = None,
 ) -> None:
-    def get_keystr(key_path: KeyPath) -> str:
-        """For a given index into the flat_args, return a human readable string
-        describing how to access it, e.g. "*args["foo"][0].bar"
-        """
-        # Prefix the keypath with "*args" or "**kwargs" to make it clearer where
-        # the arguments come from. Ultimately we ought to serialize the
-        # original arg names for the best error message here.
-        args_kwargs_key_path = key_path[0]
-        assert isinstance(args_kwargs_key_path, SequenceKey)
-        if args_kwargs_key_path.idx == 0:
-            return f"*args{keystr(key_path[1:])}"
-        else:
-            kwarg_key = key_path[1]
-            assert isinstance(kwarg_key, MappingKey)
-            name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
-            return f"{name}{keystr(key_path[2:])}"
+    if isinstance(arg, torch.SymInt) and not arg.node.expr.is_number:
+        # This can happen when, say, arg is a fake tensor.
+        # We do not run checks on symbolic shapes of fake inputs as
+        # such checks can affect the shape env.
+        return
 
     import sympy
 
@@ -308,6 +320,76 @@ def _check_input_constraints_for_graph(
         _convert_range_to_int,
     )
     from torch.utils._sympy.solve import try_solve
+
+    if isinstance(symint, torch.SymInt) and len(symint.node.expr.free_symbols) == 1:
+        symbol = next(iter(symint.node.expr.free_symbols))
+        if symbol in unification_map:
+            existing_dim = symint.node.expr.subs(unification_map)
+            if arg != existing_dim:
+                path = get_keystr(keypath)
+                if i is not None:
+                    path += f".shape[{i}]"
+                raise RuntimeError(
+                    f"Expected input at {path} to be equal to {existing_dim}, but got {arg}",
+                )
+        else:
+            if isinstance(symint.node.expr, sympy.Symbol):
+                # Short cut for try_solve below. Also useful in cases where
+                # sympy.Eq(symint.node.expr, arg) would evaluate to False
+                # purely because symbol is constrained to be size-like,
+                # e.g., when symint.node.expr = symbol and arg = 0.
+                unification_map[symbol] = int(arg)
+            else:
+                solution = try_solve(sympy.Eq(symint.node.expr, arg), symbol)
+                if solution is None:
+                    path = get_keystr(keypath)
+                    if i is not None:
+                        path += f".shape[{i}]"
+                    raise RuntimeError(  # noqa: B904
+                        f"Expected input {path} = {arg} to be "
+                        f"of the form {symint.node.expr}, where {symbol} is an integer"
+                    )
+                else:
+                    unification_map[symbol] = int(solution[1])
+
+        if symint.node.expr in range_constraints:
+            min_val, max_val = _convert_range_to_int(
+                range_constraints[symint.node.expr]
+            )
+            # NOTE: we allow dimensions to be 0/1 at runtime
+            if min_val > 2:
+                if arg < min_val:
+                    path = get_keystr(keypath)
+                    if i is not None:
+                        path += f".shape[{i}]"
+                    raise RuntimeError(
+                        f"Expected input at {path} to be >= {min_val}, but got {arg}",
+                    )
+            if max_val < math.inf:
+                if arg > max_val:
+                    path = get_keystr(keypath)
+                    if i is not None:
+                        path += f".shape[{i}]"
+                    raise RuntimeError(
+                        f"Expected input at {path} to be <= {max_val}, but got {arg}",
+                    )
+    elif isinstance(symint, torch.SymInt) and not symint.node.expr.is_number:
+        # this means we deferred a guard from export analysis to runtime, let this pass
+        # we'll add a runtime assert checking equality to this replacement expression
+        pass
+    elif arg != symint:
+        path = get_keystr(keypath)
+        if i is not None:
+            path += f".shape[{i}]"
+        raise RuntimeError(
+            f"Expected input at {path} to be equal to {symint}, but got {arg}",
+        )
+
+
+def _check_input_constraints_for_graph(
+    input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
+) -> None:
+    import sympy  # noqa: TC002
 
     if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
@@ -333,79 +415,19 @@ def _check_input_constraints_for_graph(
                 )
 
             for j, (arg_dim, node_dim) in enumerate(zip(arg.shape, node_val.shape)):
-                if (
-                    isinstance(arg_dim, torch.SymInt)
-                    and not arg_dim.node.expr.is_number
-                ):
-                    # This can happen when, say, arg is a fake tensor.
-                    # We do not run checks on symbolic shapes of fake inputs as
-                    # such checks can affect the shape env.
-                    continue
-                if (
-                    isinstance(node_dim, torch.SymInt)
-                    and len(node_dim.node.expr.free_symbols) == 1
-                ):
-                    symbol = next(iter(node_dim.node.expr.free_symbols))
-                    if symbol in unification_map:
-                        existing_dim = node_dim.node.expr.subs(unification_map)
-                        if arg_dim != existing_dim:
-                            raise RuntimeError(
-                                f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
-                                f"{existing_dim}, but got {arg_dim}",
-                            )
-                    else:
-                        if isinstance(node_dim.node.expr, sympy.Symbol):
-                            # Short cut for try_solve below. Also useful in cases where
-                            # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
-                            # purely because symbol is constrained to be size-like,
-                            # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
-                            unification_map[symbol] = int(arg_dim)
-                        else:
-                            solution = try_solve(
-                                sympy.Eq(node_dim.node.expr, arg_dim), symbol
-                            )
-                            if solution is None:
-                                raise RuntimeError(  # noqa: B904
-                                    f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
-                                    f"of the form {node_dim.node.expr}, where {symbol} is an integer"
-                                )
-                            else:
-                                unification_map[symbol] = int(solution[1])
+                _check_symint(
+                    node_dim, arg_dim, range_constraints, unification_map, key_path, j
+                )
 
-                    if node_dim.node.expr in range_constraints:
-                        min_val, max_val = _convert_range_to_int(
-                            range_constraints[node_dim.node.expr]
-                        )
-                        # NOTE: we allow dimensions to be 0/1 at runtime
-                        if min_val > 2:
-                            if arg_dim < min_val:
-                                raise RuntimeError(
-                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
-                                    f"{min_val}, but got {arg_dim}",
-                                )
-                        if max_val < math.inf:
-                            if arg_dim > max_val:
-                                raise RuntimeError(
-                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be <= "
-                                    f"{max_val}, but got {arg_dim}",
-                                )
-                elif (
-                    isinstance(node_dim, torch.SymInt)
-                    and not node_dim.node.expr.is_number
-                ):
-                    # this means we deferred a guard from export analysis to runtime, let this pass
-                    # we'll add a runtime assert checking equality to this replacement expression
-                    continue
-                elif arg_dim != node_dim:
-                    raise RuntimeError(
-                        f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
-                        f"{node_dim}, but got {arg_dim}",
-                    )
         elif isinstance(node_val, (int, float, str)):
             if type(arg) != type(node_val) or arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )
+        elif isinstance(node_val, torch.SymInt):
+            _check_symint(
+                node_val, arg, range_constraints, unification_map, key_path, None
+            )
 
 
 def register_dataclass_as_pytree_node(

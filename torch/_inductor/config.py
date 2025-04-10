@@ -126,7 +126,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
 custom_op_default_layout_constraint: Literal[
-    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+    "needs_fixed_stride_order", "flexible_layout"
 ] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
@@ -156,6 +156,7 @@ static_weight_shapes = True
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
+alignment_asserts = os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True

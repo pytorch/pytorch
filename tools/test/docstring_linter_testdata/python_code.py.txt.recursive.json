@@ -1,0 +1,401 @@
+[
+  {
+    "category": "class",
+    "children": [],
+    "display_name": "class ShortWithDocstring",
+    "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
+    "full_name": "ShortWithDocstring",
+    "index": 0,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 4,
+    "parent": null,
+    "start_line": 2
+  },
+  {
+    "category": "class",
+    "children": [],
+    "display_name": "class Short",
+    "docstring": "",
+    "full_name": "Short",
+    "index": 1,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 3,
+    "parent": null,
+    "start_line": 7
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def LongWithDocstring.short1()",
+        "docstring": "",
+        "full_name": "LongWithDocstring.short1",
+        "index": 3,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 3,
+        "parent": 2,
+        "start_line": 14
+      }
+    ],
+    "display_name": "class LongWithDocstring",
+    "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
+    "full_name": "LongWithDocstring",
+    "index": 2,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 6,
+    "parent": null,
+    "start_line": 11
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def LongWithoutDocstring.short1()",
+        "docstring": "",
+        "full_name": "LongWithoutDocstring.short1",
+        "index": 5,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 3,
+        "parent": 4,
+        "start_line": 21
+      }
+    ],
+    "display_name": "class LongWithoutDocstring",
+    "docstring": "",
+    "full_name": "LongWithoutDocstring",
+    "index": 4,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 4,
+    "parent": null,
+    "start_line": 20
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def LongWithShortDocstring.short1()",
+        "docstring": "",
+        "full_name": "LongWithShortDocstring.short1",
+        "index": 7,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 3,
+        "parent": 6,
+        "start_line": 28
+      }
+    ],
+    "display_name": "class LongWithShortDocstring",
+    "docstring": "\"\"\"TODO\"\"\"",
+    "full_name": "LongWithShortDocstring",
+    "index": 6,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 6,
+    "parent": null,
+    "start_line": 25
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def _Protected.short1()",
+        "docstring": "",
+        "full_name": "_Protected.short1",
+        "index": 9,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 3,
+        "parent": 8,
+        "start_line": 35
+      }
+    ],
+    "display_name": "class _Protected",
+    "docstring": "\"\"\"TODO\"\"\"",
+    "full_name": "_Protected",
+    "index": 8,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 6,
+    "parent": null,
+    "start_line": 32
+  },
+  {
+    "category": "def",
+    "children": [],
+    "display_name": "def short()",
+    "docstring": "",
+    "full_name": "short",
+    "index": 10,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 3,
+    "parent": null,
+    "start_line": 42
+  },
+  {
+    "category": "def",
+    "children": [],
+    "display_name": "def long()",
+    "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
+    "full_name": "long",
+    "index": 11,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 8,
+    "parent": null,
+    "start_line": 46
+  },
+  {
+    "category": "def",
+    "children": [],
+    "display_name": "def long_without_docstring()",
+    "docstring": "",
+    "full_name": "long_without_docstring",
+    "index": 12,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 3,
+    "parent": null,
+    "start_line": 59
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [
+          {
+            "category": "def",
+            "children": [
+              {
+                "category": "class",
+                "children": [],
+                "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
+                "docstring": "",
+                "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
+                "index": 16,
+                "is_local": true,
+                "is_method": false,
+                "line_count": 6,
+                "parent": 15,
+                "start_line": 74
+              },
+              {
+                "category": "class",
+                "children": [],
+                "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
+                "docstring": "",
+                "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
+                "index": 17,
+                "is_local": true,
+                "is_method": false,
+                "line_count": 3,
+                "parent": 15,
+                "start_line": 81
+              }
+            ],
+            "display_name": "def ImpossibleCombo.needs_docs.not_short()",
+            "docstring": "",
+            "full_name": "ImpossibleCombo.needs_docs.not_short",
+            "index": 15,
+            "is_local": true,
+            "is_method": false,
+            "line_count": 11,
+            "parent": 14,
+            "start_line": 73
+          },
+          {
+            "category": "class",
+            "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
+            "docstring": "",
+            "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
+            "index": 16,
+            "is_local": true,
+            "is_method": false,
+            "line_count": 6,
+            "parent": 15,
+            "start_line": 74
+          },
+          {
+            "category": "class",
+            "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
+            "docstring": "",
+            "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
+            "index": 17,
+            "is_local": true,
+            "is_method": false,
+            "line_count": 3,
+            "parent": 15,
+            "start_line": 81
+          }
+        ],
+        "display_name": "def ImpossibleCombo.needs_docs()",
+        "docstring": "",
+        "full_name": "ImpossibleCombo.needs_docs",
+        "index": 14,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 12,
+        "parent": 13,
+        "start_line": 72
+      },
+      {
+        "category": "def",
+        "children": [
+          {
+            "category": "class",
+            "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
+            "docstring": "",
+            "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
+            "index": 16,
+            "is_local": true,
+            "is_method": false,
+            "line_count": 6,
+            "parent": 15,
+            "start_line": 74
+          },
+          {
+            "category": "class",
+            "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
+            "docstring": "",
+            "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
+            "index": 17,
+            "is_local": true,
+            "is_method": false,
+            "line_count": 3,
+            "parent": 15,
+            "start_line": 81
+          }
+        ],
+        "display_name": "def ImpossibleCombo.needs_docs.not_short()",
+        "docstring": "",
+        "full_name": "ImpossibleCombo.needs_docs.not_short",
+        "index": 15,
+        "is_local": true,
+        "is_method": false,
+        "line_count": 11,
+        "parent": 14,
+        "start_line": 73
+      },
+      {
+        "category": "class",
+        "children": [],
+        "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
+        "docstring": "",
+        "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
+        "index": 16,
+        "is_local": true,
+        "is_method": false,
+        "line_count": 6,
+        "parent": 15,
+        "start_line": 74
+      },
+      {
+        "category": "class",
+        "children": [],
+        "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
+        "docstring": "",
+        "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
+        "index": 17,
+        "is_local": true,
+        "is_method": false,
+        "line_count": 3,
+        "parent": 15,
+        "start_line": 81
+      }
+    ],
+    "display_name": "class ImpossibleCombo",
+    "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
+    "full_name": "ImpossibleCombo",
+    "index": 13,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 15,
+    "parent": null,
+    "start_line": 69
+  },
+  {
+    "category": "class",
+    "children": [
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def NotDocstring.short1()",
+        "docstring": "",
+        "full_name": "NotDocstring.short1",
+        "index": 19,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 2,
+        "parent": 18,
+        "start_line": 86
+      },
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def NotDocstring.short2()",
+        "docstring": "",
+        "full_name": "NotDocstring.short2",
+        "index": 20,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 2,
+        "parent": 18,
+        "start_line": 91
+      },
+      {
+        "category": "def",
+        "children": [],
+        "display_name": "def NotDocstring.short3()",
+        "docstring": "",
+        "full_name": "NotDocstring.short3",
+        "index": 21,
+        "is_local": false,
+        "is_method": true,
+        "line_count": 3,
+        "parent": 18,
+        "start_line": 94
+      }
+    ],
+    "display_name": "class NotDocstring",
+    "docstring": "",
+    "full_name": "NotDocstring",
+    "index": 18,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 12,
+    "parent": null,
+    "start_line": 85
+  },
+  {
+    "category": "def",
+    "children": [],
+    "display_name": "def long_with_omit()",
+    "docstring": "",
+    "full_name": "long_with_omit",
+    "index": 22,
+    "is_local": false,
+    "is_method": false,
+    "line_count": 1,
+    "parent": null,
+    "start_line": 102
+  }
+]

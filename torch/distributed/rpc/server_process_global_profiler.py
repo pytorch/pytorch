@@ -47,11 +47,11 @@ class _server_process_global_profile(profile):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
-    .. warning:
+    .. warning::
         Enabling memory profiling incurs additional profiler overhead
 
-    .. warning:
-        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+    .. warning::
+        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
         one cannot use the profiler with ``use_cuda = True`` to benchmark
         DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
         please use ``use_cuda = False`` or ``num_workers = 0``.

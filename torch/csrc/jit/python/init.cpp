@@ -1936,6 +1936,13 @@ void initJITBindings(PyObject* module) {
         self.addArgumentValues(value_map);
       });
   py::class_<FunctionSchema>(m, "FunctionSchema")
+      .def(py::init<
+           std::string,
+           std::string,
+           std::vector<Argument>,
+           std::vector<Argument>,
+           bool,
+           bool>())
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
@@ -1993,6 +2000,13 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
+      .def(py::init<
+           std::string,
+           const TypePtr&,
+           std::optional<int32_t>,
+           std::optional<IValue>,
+           bool,
+           std::optional<AliasInfo>>())
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
@@ -2032,6 +2046,7 @@ void initJITBindings(PyObject* module) {
         return self.kwarg_only();
       });
   py::class_<AliasInfo>(m, "_AliasInfo")
+      .def(py::init<bool, std::set<std::string>, std::set<std::string>>())
       .def_property_readonly(
           "is_write", [](AliasInfo& self) { return self.isWrite(); })
       .def_property_readonly(

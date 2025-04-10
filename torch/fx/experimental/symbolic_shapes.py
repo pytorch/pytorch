@@ -148,6 +148,7 @@ __all__ = [
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
     "SubclassSymbolicContext",
+    "SymIntSymbolicContext",
     "statically_known_true",
     "guard_size_oblivious",
     "check_consistent",
@@ -1195,20 +1196,30 @@ def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return False
+    if torch.fx.experimental._config.backed_size_oblivious:
+        return statically_known_true(a)
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return True
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval(a)
+        if result is not None:
+            return result
+        else:
+            return True
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1253,6 +1264,23 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
+def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+            else:
+                return None
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+            return None
+    assert isinstance(x, bool)
+    return x
+
+
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
@@ -1264,18 +1292,24 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    if isinstance(x, SymBool):
-        expr = x.node.expr
-        shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-        except Exception:
-            log.debug("Could not simplify %s", expr)
+    result = _static_eval(x)
+    if result is None:
         return False
-    assert isinstance(x, bool)
-    return x
+    else:
+        return result
+
+
+# When a or b is evaluated, a is evaluated eagerly first then b. This causes
+# a data dependent error for an expression “if u0==1 or True”. or over guarding for
+# “if s0==1 or True”.
+
+# On the other hand, when we use operator.or_, then dynamo will generate
+# a sympy expression Sympy.Or(u0==1, True) without evaluating the args first.
+
+# When the whole expression is passed to evaluation in that case, we do not throw a
+# data dependent error or guard because we can statically know the result is True
+# before unpacking the symbols.
+sym_or = operator.or_
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -1811,6 +1845,15 @@ class SymbolicContext:
     another version of this that says "use exactly these SymInts, don't
     allocate fresh symbols."
     """
+
+
+@dataclass(frozen=True)
+class SymIntSymbolicContext(SymbolicContext):
+    """
+    Data structure specifying any constraints on a SymInt input
+    """
+
+    constraint: DimConstraint
 
 
 @dataclass(frozen=True)
@@ -5099,7 +5142,10 @@ class ShapeEnv:
             if t is None:
                 continue
             if isinstance(t, (SymInt, int)):
-                track_symint(source, t)
+                constraint = (
+                    None if context is None else getattr(context, "constraint", None)
+                )
+                track_symint(source, t, constraint)
                 continue
             elif isinstance(t, (SymFloat, float)):
                 track_symfloat(source, t)

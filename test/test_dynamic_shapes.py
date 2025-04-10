@@ -1004,17 +1004,9 @@ def forward(self, x_1):
         b = s3 + s4 + s5
         assert_optimized(a)
         assert_optimized(b)
-        assert_optimized(a + b)
-        assert_optimized(b + a)
-
-        # same as above but b does not have ordered_summation_of_unique_symbols.
-        s6 = create_symint(shape_env, 11)
-        s7 = create_symint(shape_env, 21)
-        s8 = create_symint(shape_env, 31)
-        b = torch.sym_sum([s6, s7, s8])
-        assert_optimized(a)
-        assert_not_optimized(b)
         assert_not_optimized(a + b)
+        assert_not_optimized(b + a)
+        assert_not_optimized(b + a + b)
 
     def test_max_of_unique_summation_opt(self):
         shape_env = ShapeEnv()
@@ -2880,6 +2872,22 @@ class TestGuardsExpressions(TestCase):
             unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
         )
 
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_true(a.size()[0] != 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 20)
+            self.assertEqual(compiled(a, b), b * 10)
+
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_guard_or_false(self):
@@ -2928,6 +2936,22 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
         )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_false(a.size()[0] == 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 10)
+            self.assertEqual(compiled(a, b), b * 20)
 
     def test_guards_float_div(self):
         shape_env = ShapeEnv()

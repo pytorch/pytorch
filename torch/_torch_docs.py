@@ -11488,8 +11488,8 @@ Args:
         Default: if not provided, 0.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if ``None``, ``torch.long``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor,
+        only support ``torch.int``, ``torch.long``. Default: if ``None``, ``torch.long``.
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
@@ -11613,8 +11613,8 @@ Args:
         Default: if not provided, 0.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if ``None``, ``torch.long``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor,
+        only support ``torch.int``, ``torch.long``. Default: if ``None``, ``torch.long``.
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 

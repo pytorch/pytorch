@@ -130,7 +130,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._convolution_transpose_pointwise,
             torch.ops.mkldnn._linear_pointwise,
             aten.mkldnn_rnn_layer.default,
-            torch.ops.onednn.qconv2d_pointwise,
+            torch.ops.onednn.qconv_pointwise,
         ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
@@ -428,7 +428,7 @@ def register_onednn_fusion_ops():
                 ),
             )
 
-        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        @register_lowering(torch.ops.onednn.qconv_pointwise, type_promotion_kind=None)
         def qconvolution_unary(
             x: TensorBox,
             x_scale,

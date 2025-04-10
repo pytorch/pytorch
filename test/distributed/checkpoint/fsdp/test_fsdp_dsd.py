@@ -458,9 +458,16 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         """
         Test that we can save a model with FSDP2 + TP on 2d mesh and load it with TP.
         """
+        mlp_dim = 5
 
-        def _get_base_model(mlp_dim: int = 2):
-            base_model = nn.Sequential(MLP(mlp_dim), MLP(mlp_dim), MLP(mlp_dim))
+        def _get_base_model(mlp_dim):
+            # dim_multiplier=1 helps make it easier to hit corner cases in uneven sharding
+            # (e.g. in/out dim both=5 means unevenness is easier to hit depending on row/col sharding)
+            base_model = nn.Sequential(
+                MLP(mlp_dim, dim_multiplier=1),
+                MLP(mlp_dim, dim_multiplier=1),
+                MLP(mlp_dim, dim_multiplier=1),
+            )
             return base_model
 
         cm = (
@@ -468,13 +475,15 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             if allow_implicit_replication
             else contextlib.nullcontext()
         )
+        # Must set 'use_local_output=False' in order to test uneven-sharding case
+        # see https://github.com/pytorch/pytorch/issues/150336
         tp_parallelize_plan = {
-            "0.in_proj": ColwiseParallel(),
-            "0.out_proj": RowwiseParallel(),
-            "1.in_proj": ColwiseParallel(),
-            "1.out_proj": RowwiseParallel(),
-            "2.in_proj": ColwiseParallel(),
-            "2.out_proj": RowwiseParallel(),
+            "0.in_proj": ColwiseParallel(use_local_output=False),
+            "0.out_proj": RowwiseParallel(use_local_output=False),
+            "1.in_proj": ColwiseParallel(use_local_output=False),
+            "1.out_proj": RowwiseParallel(use_local_output=False),
+            "2.in_proj": ColwiseParallel(use_local_output=False),
+            "2.out_proj": RowwiseParallel(use_local_output=False),
         }
         if allow_implicit_replication:
             # intentionally pop the plans for some tp layers so that the model is not fully tensor parallelized
@@ -496,7 +505,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
 
             for save_full_state_dict in [True, False]:
                 # Save state dict with original model
-                base_model = _get_base_model().cuda()
+                base_model = _get_base_model(mlp_dim).cuda()
                 base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
                 # Save state dict with FSDP2 + TP model
@@ -512,7 +521,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
                 # one-step training to modify state dict
-                inp = torch.randn((2,), device=self.rank)
+                inp = torch.randn((mlp_dim,), device=self.rank)
                 base_model(inp).sum().backward()
                 base_optim.step()
                 fsdp2_tp_model(inp).sum().backward()
@@ -554,7 +563,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 )
 
                 # Load state dict into model with TP applied
-                tp_model = _get_base_model()
+                tp_model = _get_base_model(mlp_dim)
                 tp_model = parallelize_module(
                     tp_model,
                     device_mesh=global_mesh_1d,

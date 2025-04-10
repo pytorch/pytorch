@@ -87,6 +87,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    GPU_ALIGN_BYTES,
     ir_dataclass,
     is_dynamic,
     is_gpu,
@@ -5715,6 +5716,15 @@ class ExternKernel(InputsKernel):
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
 
+    def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if config.alignment_asserts and not V.graph.cpp_wrapper:
+            name = self.get_name()
+            aligned = name not in V.graph.unaligned_buffers
+            if aligned:
+                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+            else:
+                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
         get output sizes and strides, for template_codegen
@@ -6929,6 +6939,7 @@ class FallbackKernel(ExternKernelAlloc):
                 V.graph.wrapper_code.generate_fallback_kernel(self, args)
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
+                    self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -6955,6 +6966,12 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        # We need this extra check for input alignment since the example
+        # inputs we created are always aligned.
+        has_unaligned_input = any(
+            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
+        )
 
         device = cls.find_device(tensor_args, example_output)
 
@@ -7002,8 +7019,10 @@ class FallbackKernel(ExternKernelAlloc):
                     packed,
                     indices,
                 )
-                if config.assume_unaligned_fallback_output or not tensor_is_aligned(
-                    output
+                if (
+                    config.assume_unaligned_fallback_output
+                    or has_unaligned_input
+                    or not tensor_is_aligned(output)
                 ):
                     V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
                 return buf
@@ -7095,6 +7114,7 @@ class MultiOutput(ExternKernel):
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
         self.codegen_size_asserts(wrapper)
+        self.codegen_alignment_asserts(wrapper)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,

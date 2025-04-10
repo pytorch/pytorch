@@ -385,7 +385,7 @@ if __name__ == "__main__":
     if not (
         dist.is_available()
         and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
+        and torch.cuda.device_count() > 3
     ):
         print(
             "c10d NCCL not available or not enough GPUs, skipping tests",

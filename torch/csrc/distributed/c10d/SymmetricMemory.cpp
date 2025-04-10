@@ -250,6 +250,10 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> Tensor(b!)");
 
+  // note this implementation also modified the input tensor
+  m.def(
+      "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> Tensor(b!)");
+
   // An mm that supports consuming asynchronous input. It guarantees the
   // following rasterization order, and that the corresponding signal arrives
   // before an input chunk is consumed.
