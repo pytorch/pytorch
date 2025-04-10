@@ -324,6 +324,15 @@ void FlightRecorder::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
+void FlightRecorder::record_accelerator_version(
+    const std::string nccl_version) {
+  if (!enabled_) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  nccl_version_ = std::move(nccl_version);
+}
+
 void FlightRecorder::update_state(Entry& r) {
   if (r.start_ != nullptr) {
     bool started = r.start_->query();
@@ -591,6 +600,7 @@ std::string FlightRecorder::dump_json(
   using json = nlohmann::json;
   json result;
   result[version_key_str] = version_val_str;
+  result[nccl_version_key_str] = nccl_version_;
   result[pg_config_key_str] = getPgConfigJson();
   result[pg_status_key_str] = getPgStatusJson();
 
@@ -685,6 +695,7 @@ std::string FlightRecorder::dump(
   // common values
   result.insert(version_key, version_val);
   result.insert(pg_config_key, getPgConfig());
+  result.insert(nccl_version_key_str, nccl_version_);
   result.insert(pg_status_key, getPgStatus());
 
   // collective trace
