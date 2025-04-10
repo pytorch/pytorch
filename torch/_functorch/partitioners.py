@@ -17,9 +17,12 @@ import torch._inductor.inductor_prims
 import torch.distributed
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
+from torch._inductor import config as inductor_config
+from torch._logging import trace_structured
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -44,6 +47,13 @@ from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
+from .pattern_matcher import (
+    Match,
+    MULTIPLE,
+    PatternMatcherPass,
+    Placeholder,
+    register_graph_pattern,
+)
 
 
 if TYPE_CHECKING:
@@ -55,6 +65,22 @@ log: logging.Logger = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+AOT_QUANT_PATTERNS: dict[str, PatternMatcherPass] = {}
+quant_pass_names = [
+    "activation_quantization_fwd_aten_pass",
+    "activation_quantization_bwd_aten_pass",
+]
+
+for pass_name in quant_pass_names:
+    AOT_QUANT_PATTERNS[pass_name] = PatternMatcherPass(pass_name=pass_name)
+
+
+def construct_pattern_matcher_pass(pass_name: str):
+    """
+    Return the specific pattern_matcher_pass given the pass name.
+    """
+    return AOT_QUANT_PATTERNS[pass_name]
 
 
 @dataclass
@@ -296,12 +322,109 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
             break
 
 
+def enable_activation_quantization(
+    saved_values: list[fx.Node],
+    fwd_module: fx.GraphModule,
+    bwd_module: fx.GraphModule,
+    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+):
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="default_partition_passes",
+    )
+
+    if inductor_config.pattern_matcher:
+        for pass_name in inductor_config.post_grad_fusion_options:
+            if pass_name == "activation_quantization_aten_pass":
+                static_input_names = (
+                    [node.name for node in static_lifetime_input_nodes]
+                    if static_lifetime_input_nodes
+                    else []
+                )
+                saved_values_names = {node.name: node for node in saved_values}
+                fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
+                bwd_module_inputs = {
+                    node.name: node
+                    for node in bwd_module.graph.find_nodes(op="placeholder")
+                }
+                for node in fwd_module_outputs:
+                    if node.name in saved_values_names and should_quantize(node):
+                        if node.name in static_input_names:
+                            log.debug(
+                                "Skipping quantization of static input %s: ", node.name
+                            )
+                            continue
+                        node.meta["saved_for_quantization"] = True
+                        node.meta["dequant_type"] = node.meta["val"].dtype
+                        # some of the fwd outputs and bwd inputs are not share the same object
+                        bwd_module_inputs[node.name].meta[
+                            "saved_for_quantization"
+                        ] = True
+                        bwd_module_inputs[node.name].meta["dequant_type"] = node.meta[
+                            "val"
+                        ].dtype
+                pattern_matcher_fwd_pass = AOT_QUANT_PATTERNS[
+                    "activation_quantization_fwd_aten_pass"
+                ]
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "before activation_quantization_fwd_aten_pass",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: fwd_module.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+                GraphTransformObserver(
+                    fwd_module, "activation_quantization_fwd_aten_pass"
+                ).apply_graph_pass(pattern_matcher_fwd_pass.apply)
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after activation_quantization_fwd_aten_pass",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: fwd_module.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+
+                pattern_matcher_bwd_pass = AOT_QUANT_PATTERNS[
+                    "activation_quantization_bwd_aten_pass"
+                ]
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "before activation_quantization_bwd_aten_pass",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: bwd_module.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+                GraphTransformObserver(
+                    bwd_module, "activation_quantization_bwd_aten_pass"
+                ).apply_graph_pass(pattern_matcher_bwd_pass.apply)
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after activation_quantization_bwd_aten_pass",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: bwd_module.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+
+
 def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
     saved_values: list[fx.Node],
     saved_sym_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
+    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
@@ -405,6 +528,9 @@ def _extract_fwd_bwd_modules(
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
+    enable_activation_quantization(
+        saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
+    )
     return fwd_module, bwd_module
 
 
@@ -414,6 +540,7 @@ def default_partition(
     *,
     num_fwd_outputs,
     static_lifetime_input_indices: Optional[list[int]] = None,
+    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -440,7 +567,10 @@ def default_partition(
     """
     if has_recomputable_ops(joint_module):
         return min_cut_rematerialization_partition(
-            joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs
+            joint_module,
+            _joint_inputs,
+            num_fwd_outputs=num_fwd_outputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
         )
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
@@ -495,6 +625,7 @@ def default_partition(
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
+        static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
 
 
@@ -2036,7 +2167,11 @@ def min_cut_rematerialization_partition(
     # this case, send our graph over to the default partitioner.
     if len(node_info.required_bw_nodes) == 0:
         return default_partition(
-            joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs
+            joint_module,
+            _joint_inputs,
+            num_fwd_outputs=num_fwd_outputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
         )
 
     for node in reversed(joint_module.graph.nodes):
@@ -2069,6 +2204,7 @@ def min_cut_rematerialization_partition(
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
+        static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
     )
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
@@ -2141,3 +2277,95 @@ def draw_graph(
         write_method(fname)
     else:
         write_method(fname, prog=prog)
+
+
+def should_quantize(node: torch.fx.Node) -> bool:
+    allowed_dtypes = [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+        torch.float64,
+        torch.float,
+    ]
+    shape = node.meta["tensor_meta"].shape
+    return (
+        is_node_meta_valid(node)
+        and node.meta["val"].dtype in allowed_dtypes
+        and len(shape) > 1
+        and shape[0] >= 1024
+    )
+
+
+def get_quant_type() -> torch.dtype:
+    quant_type = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("quant_type", "torch.float8_e5m2")
+
+    return getattr(torch, quant_type.split(".")[-1])
+
+
+@register_graph_pattern(
+    Placeholder("*", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("activation_quantization_fwd_aten_pass"),
+)
+def quantize_activation_fw(match: Match, *args, **kwargs):
+    graph = match.graph
+    output = graph.find_nodes(op="output")[0]
+    fwd_outputs = output.args[0]
+    quant_type = get_quant_type()
+    node_to_quant = dict()
+    for node in fwd_outputs:
+        # check if the activation node is the node saved for quantization
+        if node.meta.get("saved_for_quantization", False):
+            with graph.inserting_after(node):
+                quant_node = graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=(node, quant_type),
+                )
+            quant_node.meta["val"] = node.meta["val"].detach().to(quant_type)
+            quant_node.meta["tensor_meta"] = node.meta["tensor_meta"]._replace(
+                dtype=quant_type
+            )
+            node_to_quant[node] = quant_node
+    # only update the return node args, and remain all other users unchanged
+    output_updated_args = tuple(
+        node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs  # type: ignore[union-attr]
+    )
+
+    output.update_arg(0, output_updated_args)
+    counters["inductor"]["activation_quantization_fwd_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    Placeholder("*", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("activation_quantization_bwd_aten_pass"),
+)
+def quantize_activation_bw(match: Match, *args, **kwargs):
+    graph = match.graph
+    quant_type = get_quant_type()
+    bw_inputs = [node for node in graph.nodes if node.op == "placeholder"]
+    for node in bw_inputs:
+        if is_node_meta_valid(node) and node.meta.get("saved_for_quantization", False):
+            node.meta.pop("saved_for_quantization")
+            dequant_type = node.meta.pop("dequant_type")
+            # dequantize the node
+            with graph.inserting_after(node):
+                dequant_node = graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=(node, dequant_type),
+                )
+                dequant_node.meta["val"] = (
+                    node.meta["val"].detach().clone().to(dequant_type)
+                )
+                dequant_node.meta["tensor_meta"] = copy.copy(
+                    node.meta["tensor_meta"]._replace(dtype=dequant_type)
+                )
+            # find the users of the node and replace them with the new node except the dequant_node
+            for user in list(node.users.keys()):
+                if user != dequant_node:
+                    user.replace_input_with(node, dequant_node)
+            node.meta["val"] = node.meta["val"].detach().clone().to(quant_type)
+            node.meta["tensor_meta"] = copy.copy(
+                node.meta["tensor_meta"]._replace(dtype=quant_type)
+            )
+    counters["inductor"]["activation_quantization_bwd_aten_pass"] += 1

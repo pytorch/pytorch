@@ -24,6 +24,10 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._functorch.pattern_matcher import (  # NOQA: F401  # NOQA: F401
+    fallback_node_due_to_unsupported_type,
+    unsupported_output_tensor,
+)
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -69,7 +73,6 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
-    is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
@@ -1905,94 +1908,6 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     handler._is_fallback_handler = True  # type: ignore[attr-defined]
 
     return handler
-
-
-@functools.lru_cache(None)
-def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    )
-
-
-# There are some types (CPU) which we accept as input but not as
-# output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
-    "Do not support reading or writing to this tensor"
-    if t.is_complex():
-        # Complex views are supported with IR ComplexView
-        if parent and parent.target in (
-            torch.ops.aten.view.dtype,
-            torch.ops.prims.convert_element_type.default,
-        ):
-            return False
-        _warn_complex_not_supported()
-        return True
-
-    if t.is_meta:
-        return True
-
-    if t.dtype == torch.float8_e8m0fnu:
-        if not node:
-            return True
-
-        # allow bitcast, views, memory movement, but not arithmetic
-        # TODO: delete once triton adds native support
-        return not (
-            isinstance(parent.target, torch._ops.OpOverload)
-            and parent.target
-            in (
-                aten.view.dtype,
-                aten.cat.default,
-                aten._scaled_mm.default,
-            )
-            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
-        )
-
-    return False
-
-
-def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
-    "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t, parent):
-        return True
-    return t.is_cpu and config.disable_cpp_codegen
-
-
-def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
-    # Custom fallback lowering
-    if node.target is aten.view_as_complex.default:
-        return False
-
-    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
-    if node.target is aten.lift_fresh_copy.default:
-        return False
-
-    def check_skip_condition(node, parent, is_output):
-        if not isinstance(node, torch.fx.Node):
-            return False
-
-        if "val" not in node.meta:
-            return False
-
-        for meta in pytree.tree_leaves(node.meta["val"]):
-            if not isinstance(meta, torch._subclasses.FakeTensor):
-                continue
-
-            if is_output:
-                if unsupported_output_tensor(meta, parent, node):
-                    return True
-            else:
-                if unsupported_input_tensor(meta, parent, node):
-                    return True
-
-        return False
-
-    # only skip codegen if there is a cpu output, not input
-    for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
-        if check_skip_condition(arg, node, is_output=False):
-            return True
-
-    return check_skip_condition(node, node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
