@@ -6,11 +6,15 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/mps/Module.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
+
+// pthread.h is included for tracking bad forks
+#ifndef WIN32
+#include <pthread.h>
+#endif
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSProfiler.h>
@@ -19,9 +23,27 @@
 
 namespace torch::mps {
 
+namespace {
+// True for children forked after mps init
+static bool in_bad_fork = false;
+
+// Called in the forked child if mps has already been initialized
+static void forked_mps_child() {
+  in_bad_fork = true;
+}
+
+// Should be called before the first mps call.
+static void track_bad_mps_fork() {
+#ifndef WIN32
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_mps_child);
+#endif
+}
+} // namespace
+
 static PyObject* MPSModule_isInBadFork(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kMPS));
+  return PyBool_FromLong(in_bad_fork);
   END_HANDLE_TH_ERRORS
 }
 
@@ -29,7 +51,7 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::register_fork_handler_for_device_init(at::kMPS);
+  track_bad_mps_fork();
   return THPGenerator_initDefaultGenerator(
       at::detail::getMPSHooks().getDefaultGenerator());
   END_HANDLE_TH_ERRORS
@@ -37,8 +59,8 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
 
 static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  track_bad_mps_fork();
   if (at::detail::getMPSHooks().hasMPS()) {
-    torch::utils::register_fork_handler_for_device_init(at::kMPS);
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
