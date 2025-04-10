@@ -3569,6 +3569,7 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @skipIfXpu(msg="Total size of kernel arguments exceeds driver limit on XPU")
     def test_runtime_checks_large(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4957,7 +4958,11 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
+            # The tuned best config on XPU is different with CUDA.
+            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            self.code_check_count(
+                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+            )
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
@@ -5001,7 +5006,11 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4095], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
+            # The tuned best config on XPU is different with CUDA.
+            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            self.code_check_count(
+                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+            )
 
     def test_composed_dynamic_size(self):
         class Model(torch.nn.Module):
