@@ -1195,20 +1195,30 @@ def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return False
+    if torch.fx.experimental._config.backed_size_oblivious:
+        return statically_known_true(a)
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return True
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval(a)
+        if result is not None:
+            return result
+        else:
+            return True
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1253,6 +1263,23 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
+def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+            else:
+                return None
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+            return None
+    assert isinstance(x, bool)
+    return x
+
+
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
@@ -1264,18 +1291,11 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    if isinstance(x, SymBool):
-        expr = x.node.expr
-        shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-        except Exception:
-            log.debug("Could not simplify %s", expr)
+    result = _static_eval(x)
+    if result is None:
         return False
-    assert isinstance(x, bool)
-    return x
+    else:
+        return result
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:

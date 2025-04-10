@@ -95,3 +95,22 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+
+
+class CPythonTestCase(TestCase):
+    _stack: contextlib.ExitStack
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._stack.close()
+        super().tearDownClass()
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
+            config.patch(
+                enable_trace_unittest=True,
+            ),
+        )
