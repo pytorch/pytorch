@@ -722,13 +722,17 @@ def check_input_alias_and_mutation_return_ouputs(
     dict[int, int],
     Union[tuple[Any, ...], list[Any]],
 ]:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    new_fake_mode = torch._subclasses.FakeTensorMode(
+        shape_env=ShapeEnv(), allow_non_fake_inputs=False
+    )
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
         changed after run gm once to detect mutation and checks tensor storage
         to detect alias.
         """
-        from torch._prims_common import clone_preserve_strides
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
@@ -740,16 +744,18 @@ def check_input_alias_and_mutation_return_ouputs(
             return StorageWeakRef(t._typed_storage())
 
         # Clone the fake args to avoid mutating the original fake args
-        with ExitStack() as ctx_stack:
+        with new_fake_mode, ExitStack() as ctx_stack:
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
             cloned = [
-                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                torch.as_strided(
+                    new_fake_mode.from_tensor(arg), arg.size(), arg.stride()
+                )
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
+            outputs = gm(*cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [

@@ -119,20 +119,12 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             return subgraph(*operands)
 
     def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
-        unwrapped_operands = ctx.unwrap_tensors(operands)
-        with ctx.redispatch_to_next():
-            # We assume the subgraph doesn't mutate inputs and there is no aliasing.
-            # In the PT2 stack, this is Dynamo's responsibility to figure out.
-            functionalized_subgraph = FunctionWithNoFreeVars(
-                ctx.functionalize(subgraph)
-            )
-            out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
-        return ctx.wrap_tensors(out)
+        from torch._higher_order_ops.auto_functionalize import do_auto_functionalize_v2
 
-    def gen_schema(self, *args, **kwargs):
+        return do_auto_functionalize_v2(ctx.mode, self, (subgraph, *operands), kwargs)
+
+    def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
-
-        subgraph, *operands = args
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
