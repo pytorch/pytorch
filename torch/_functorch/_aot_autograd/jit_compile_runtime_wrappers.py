@@ -76,8 +76,6 @@ from .utils import (
     get_cuda_generator_meta_val,
     make_boxed_func,
     strict_zip,
-    top_saved_tensors_hooks_are_inlineable,
-    get_inline_saved_tensors_hooks_top,
     unlift_tokens,
 )
 
@@ -830,24 +828,19 @@ def prepare_hook_gm(aot_config, fn, args):
 # Pack hook can return tensors, sym scalars, constants.
 # All tensors to save for backward will be grouped together at front.
 # Sym scalars grouped on another end. Constants are inlined in the graph.
-def maybe_inline_saved_tensors_hooks(
+def maybe_inline_graph_saved_tensors_hooks(
     fw_module, bw_module, num_inner_fwd_outputs, aot_config
 ):
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
 
-    # hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
-    # if not top_saved_tensors_hooks_are_inlineable(hooks):
-    #     return
+    from torch._functorch.aot_autograd import graph_saved_tensors_hooks_top
 
-    hooks = get_inline_saved_tensors_hooks_top()
+    hooks = graph_saved_tensors_hooks_top()
     if not hooks:
         return
 
     pack_hook_gm, unpack_hook_gm = hooks
-
-    fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
-    fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
 
     maybe_log_graph(
         fw_module,
@@ -866,6 +859,8 @@ def maybe_inline_saved_tensors_hooks(
     bw_g_inputs = bw_g.find_nodes(op="placeholder")
 
     fw_out_n = fw_g.output_node()
+    fw_outs = fw_out_n.args[0]
+    fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
     fw_outs_saved_tensors_unchanged = []
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
@@ -876,7 +871,6 @@ def maybe_inline_saved_tensors_hooks(
             continue
 
         if val.dtype in [torch.bool]:
-            # fw_outs_packed_tensors.append(saved)
             fw_outs_saved_tensors_unchanged.append(saved)
             continue
 
@@ -891,19 +885,7 @@ def maybe_inline_saved_tensors_hooks(
             )
 
         pack_out_val_flat, p_out_spec = pytree.tree_flatten(pack_out_val)
-        # subclass_p_out_meta = create_subclass_meta(
-        #     pack_out_val_flat, count_symints=False
-        # )
-        pack_hook_fn_to_trace = pack_hook_gm
-        # if requires_sc_handling:
-        #     def pack_hook_sc_wrapper(arg):
-        #         outs = pack_hook_gm(arg)
-        #         return unwrap_tensor_subclasses(
-        #             pytree.tree_leaves(outs), append_symints=False
-        #         )
-        #     pack_hook_fn_to_trace = pack_hook_sc_wrapper
-
-        pack_gm = prepare_hook_gm(aot_config, pack_hook_fn_to_trace, (val,))
+        pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
         pack_g = pack_gm.graph
         maybe_log_graph(
             pack_gm,
@@ -926,7 +908,7 @@ def maybe_inline_saved_tensors_hooks(
         assert len(pack_g_inputs) == 1
         env = {pack_g_inputs[0]: saved}
         fw_pack_out_n = None
-        with fw_g.inserting_before(saved.next):
+        with fw_g.inserting_before(fw_out_n):
             for node in pack_g.nodes:
                 if node.op == "placeholder":
                     continue
@@ -951,21 +933,7 @@ def maybe_inline_saved_tensors_hooks(
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
         # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-        unpack_hook_fn_to_trace = unpack_hook_gm
-        # if requires_sc_handling:
-        #     def unpack_hook_sc_wrapper(*args_unwrap):
-        #         args_flat = wrap_tensor_subclasses(
-        #             pytree.tree_leaves(args_unwrap),
-        #             subclass_metas=subclass_p_out_meta,
-        #         )
-        #         args_unflat = pytree.tree_unflatten(args_flat, p_out_spec)
-        #         return unwrap_tensor_subclasses(
-        #             [unpack_hook_gm(args_unflat)], append_symints=False
-        #         )
-        #     unpack_hook_fn_to_trace = unpack_hook_sc_wrapper
-        unpack_gm = prepare_hook_gm(
-            aot_config, unpack_hook_fn_to_trace, (pack_out_val,)
-        )
+        unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
         unpack_g = unpack_gm.graph
         maybe_log_graph(
             unpack_gm,
@@ -1156,7 +1124,7 @@ def aot_dispatch_autograd(
                     joint_inputs[1],
                 )
 
-            maybe_inline_saved_tensors_hooks(
+            maybe_inline_graph_saved_tensors_hooks(
                 fw_module, bw_module, num_inner_fwd_outputs, aot_config
             )
 

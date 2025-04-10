@@ -1704,19 +1704,22 @@ compiled_module = aot_module
 
 from collections import deque
 
+
 _TLS = threading.local()
 _TLS.saved_tensors_hooks_stack = deque()
 
 
-def saved_tensors_hooks_top() -> Optional[tuple[torch.fx.GraphModule, torch.fx.GraphModule]]:
+def graph_saved_tensors_hooks_top() -> (
+    Optional[tuple[torch.fx.GraphModule, torch.fx.GraphModule]]
+):
     stack = _TLS.saved_tensors_hooks_stack
     if not stack:
         return None
 
     return stack[-1]
-    
 
-class saved_tensors_hooks:
+
+class graph_saved_tensors_hooks:
     def __init__(
         self,
         pack_hook: torch.fx.GraphModule,

@@ -54,6 +54,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -113,6 +114,7 @@ except ImportError:
 
 def saved_tensors_hooks_to_gm(pack, unpack):
     from torch.fx.experimental.proxy_tensor import make_fx
+
     # TODO: symbolic shapes tracing to be able to provide not the same shape?
     inp = torch.randn(2, 3)
     torch._dynamo.mark_dynamic(inp, 0)
@@ -6616,13 +6618,16 @@ metadata incorrectly.
             self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks(self):
-        inline_sth_context = torch._functorch.aot_autograd.saved_tensors_hooks
+        inline_sth_context = torch._functorch.aot_autograd.graph_saved_tensors_hooks
         eager_sth_context = torch.autograd.graph.saved_tensors_hooks
-        def _test_pack_hooks(fn, inp_fn, hooks, inline=True):
+
+        def _test_pack_hooks(fn, inp_fn, hooks):
             torch._dynamo.reset()
             with ExitStack() as stack:
-                for hook in hooks:
+                # All hooks in eager to get ref
+                for hook, _ in hooks:
                     pack, unpack = hook
                     stack.enter_context(eager_sth_context(pack, unpack))
                 ref_x = inp_fn()
@@ -6632,16 +6637,14 @@ metadata incorrectly.
                 ref_y.sum().backward()
 
             with ExitStack() as stack:
-                for hook in hooks:
+                for hook, inline in hooks:
                     pack, unpack = hook
                     if inline:
                         stack.enter_context(
                             inline_sth_context(*saved_tensors_hooks_to_gm(pack, unpack))
                         )
                     else:
-                        stack.enter_context(
-                            eager_sth_context(pack, unpack)
-                        )
+                        stack.enter_context(eager_sth_context(pack, unpack))
 
                 y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
                 y.sum().backward()
@@ -6772,30 +6775,36 @@ metadata incorrectly.
             return x / 2
 
         for test_fn in [simple_fn, fn]:
-            _test_pack_hooks(test_fn, inp_fn, [(pack_bf16, unpack_bf16)])
-            _test_pack_hooks(test_fn, inp_fn, [(pack_mul2, unpack_mul2)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_bf16, unpack_bf16), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_mul2, unpack_mul2), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_float8, unpack_float8), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_tensor, unpack_tensor), True)])
             _test_pack_hooks(
-                test_fn, inp_fn, [(pack_mul2, unpack_mul2), (pack_bf16, unpack_bf16)]
+                test_fn, inp_fn, [((pack_dev_sym_cpu, unpack_dev_sym_cpu), True)]
             )
-            _test_pack_hooks(test_fn, inp_fn, [(pack_float8, unpack_float8)])
-            _test_pack_hooks(test_fn, inp_fn, [(pack_tensor, unpack_tensor)])
-            _test_pack_hooks(test_fn, inp_fn, [(pack_dev_sym_cpu, unpack_dev_sym_cpu)])
+            _test_pack_hooks(
+                test_fn,
+                inp_fn,
+                [((pack_mul2, unpack_mul2), False), ((pack_bf16, unpack_bf16), True)],
+            )
+            _test_pack_hooks(
+                test_fn, inp_fn, [((pack_fp8_with_scale, unpack_fp8_with_scale), True)]
+            )
+            _test_pack_hooks(
+                test_fn, inp_fn, [((pack_mul2_eager, unpack_mul2_eager), False)]
+            )
             # Disable testing of Subclasses for now
             # _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
             # _test_pack_hooks(
             #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
             # )
-            _test_pack_hooks(
-                test_fn, inp_fn, [(pack_fp8_with_scale, unpack_fp8_with_scale)]
-            )
-            _test_pack_hooks(
-                test_fn, inp_fn, [(pack_mul2_eager, unpack_mul2_eager)], inline=False
-            )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_recompile(self):
-        inline_sth_context = torch._functorch.aot_autograd.saved_tensors_hooks
+        inline_sth_context = torch._functorch.aot_autograd.graph_saved_tensors_hooks
         eager_sth_context = torch.autograd.graph.saved_tensors_hooks
+
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
 
@@ -6864,13 +6873,16 @@ metadata incorrectly.
                 with ExitStack() as stack:
                     pack, unpack = hooks
                     if inline:
-                        stack.enter_context(inline_sth_context(*saved_tensors_hooks_to_gm(pack, unpack)))
+                        stack.enter_context(
+                            inline_sth_context(*saved_tensors_hooks_to_gm(pack, unpack))
+                        )
                     else:
                         stack.enter_context(eager_sth_context(pack, unpack))
 
                     x = inp_fn()
                     y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
                     y.sum().backward()
+
             _test_with_hooks(hooks[0])
             _test_with_hooks(hooks[1])
             self.assertEqual(cnt.frame_count, expected_compile_count)

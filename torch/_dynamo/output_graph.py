@@ -561,7 +561,7 @@ class OutputGraph:
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             return None
 
-        get_hooks = torch._functorch._aot_autograd.utils.get_inline_saved_tensors_hooks_top
+        get_hooks = torch._functorch.aot_autograd.graph_saved_tensors_hooks_top
         hooks = get_hooks()
         if not hooks:
             return None

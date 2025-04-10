@@ -948,6 +948,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(len(CompiledTritonKernels._cache), 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1021,7 +1022,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-        with torch._functorch.aot_autograd.saved_tensors_hooks(
+        with torch._functorch.aot_autograd.graph_saved_tensors_hooks(
             *saved_tensors_hooks_to_gm(pack_mul2, unpack_mul2)
         ):
             x = inp_fn()
@@ -1030,7 +1031,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
-        with torch._functorch.aot_autograd.saved_tensors_hooks(
+        with torch._functorch.aot_autograd.graph_saved_tensors_hooks(
             *saved_tensors_hooks_to_gm(pack_mul2_2, unpack_mul2_2)
         ):
             x = inp_fn()
@@ -1040,7 +1041,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
-        with torch._functorch.aot_autograd.saved_tensors_hooks(
+        with torch._functorch.aot_autograd.graph_saved_tensors_hooks(
             *saved_tensors_hooks_to_gm(pack_fp8_with_scale, unpack_fp8_with_scale)
         ):
             x = inp_fn()

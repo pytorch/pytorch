@@ -500,19 +500,3 @@ def get_cuda_generator_meta_val(device_idx: int):
     it is fine to use in the meta.
     """
     return torch.cuda.default_generators[device_idx].clone_state()
-
-
-def get_inline_saved_tensors_hooks_top() -> Optional[tuple[torch.fx.GraphModule, torch.fx.GraphModule]]:
-    return torch._functorch.aot_autograd.saved_tensors_hooks_top()
-
-
-def top_saved_tensors_hooks_are_inlineable(hooks) -> bool:
-    if not hooks:
-        return False
-
-    pack_hook, unpack_hook = hooks
-
-    # Inlineable hooks must be torch.fx.GraphModule
-    return isinstance(pack_hook, torch.fx.GraphModule) and isinstance(
-        unpack_hook, torch.fx.GraphModule
-    )
