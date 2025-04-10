@@ -239,7 +239,7 @@ def aot_dispatch_base(
             debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward((fw_key, debug_lines)),
+                compiled_fw=CompiledForward((fw_key, debug_lines)),  # type: ignore[arg-type]
                 compiled_bw=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
