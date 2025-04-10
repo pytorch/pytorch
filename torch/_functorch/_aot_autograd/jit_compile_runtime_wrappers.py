@@ -1289,9 +1289,9 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_info),
+                    CompiledForward(fw_info),  # type: ignore[arg-type]
                     CompiledBackward(
-                        bw_info,
+                        bw_info,  # type: ignore[arg-type]
                         backward_state_indices,
                         num_symints_saved_for_bw,
                     ),
