@@ -1663,6 +1663,17 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
+    def test_unused_symbol_y(self):
+        def foo(x, y):
+            return x @ y.expand([y.shape[0], 256])
+
+        M = 256
+        K = 256
+        N = 1
+        x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
+        self.assertEqual(torch.compile(foo)(x, y), foo(x, y), atol=0.03, rtol=0.01)
+
     def test_preserves_zero_analysis(self):
         fns = (
             (lambda x: x.relu(), False),  # preserves zero
