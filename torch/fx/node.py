@@ -5,7 +5,8 @@ import logging
 import operator
 import types
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union, ParamSpec
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase

@@ -58,7 +58,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar, ParamSpec
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 

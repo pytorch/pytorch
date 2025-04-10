@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import Callable, NamedTuple, Optional, overload, TypeVar, Any
+from typing import Callable, NamedTuple, Optional, overload, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

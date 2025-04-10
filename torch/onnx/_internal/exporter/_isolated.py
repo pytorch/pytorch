@@ -5,7 +5,8 @@ from __future__ import annotations
 import multiprocessing
 import os
 import warnings
-from typing import Callable, ParamSpec, TypeVar, Any
+from typing import Callable, TypeVar, TypeVarTuple, Unpack, Any
+from typing_extensions import ParamSpec
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
