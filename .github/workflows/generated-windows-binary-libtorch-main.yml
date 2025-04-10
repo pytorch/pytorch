@@ -132,7 +132,7 @@ jobs:
           name: libtorch-cpu-shared-with-deps-debug
           retention-days: 14
           if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"   
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch

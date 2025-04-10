@@ -101,7 +101,7 @@ jobs:
         shell: cmd
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"   
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -163,7 +163,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-{%- if os != "windows-arm64" %}   
+{%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
 {% endif %}
   !{{ config["build_name"] }}-test:  # Testing
