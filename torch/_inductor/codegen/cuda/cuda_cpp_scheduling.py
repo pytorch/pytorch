@@ -107,11 +107,7 @@ class CUDACPPScheduling(BaseScheduling):
         _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
-            V.graph.wrapper_code.writeline,
-            call_args,
-            kernel_name,
-            arg_signatures,
-            kernel,
+            call_args, kernel_name, arg_signatures, kernel
         )
         with debug_printer_manager:
             kernel.call_kernel(kernel_name, ctb)

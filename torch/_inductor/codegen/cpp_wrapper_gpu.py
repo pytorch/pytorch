@@ -527,11 +527,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 call_args.append("this->cubin_dir_")
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
-                code.writeline,
-                call_args[: len(arg_types)],
-                kernel_name,
-                arg_types,
-                None,
+                call_args[: len(arg_types)], kernel_name, arg_types, None
             )
             with debug_printer_manager:
                 code.writeline(f"{wrapper_name}({', '.join(call_args)});")

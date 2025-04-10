@@ -137,7 +137,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
-            code.writeline,
             call_args,
             kernel_name,
             None,
@@ -1119,12 +1118,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
-            code.writeline,
-            debug_args if debug_args is not None else args,
-            kernel,
-            None,
-            None,
-            "extern",
+            debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
