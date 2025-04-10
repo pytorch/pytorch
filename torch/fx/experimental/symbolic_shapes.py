@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from torch._subclasses.fake_tensor import DataDependentOutputException
-
 
 """
 ``torch.fx.experimental.symbolic_shapes`` provides interfaces for interacting with
@@ -6060,7 +6058,6 @@ class ShapeEnv:
             or self._maybe_evaluate_static(result_expr) is not None
         )
 
-  
     def _make_data_dependent_error(
         self,
         expr: sympy.Basic,
@@ -6070,7 +6067,10 @@ class ShapeEnv:
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
         if self._dde_suppressed:
-            return GuardOnDataDependentSymNode(expr, "This data dependent error is suppressed and handled by the caller")
+            return GuardOnDataDependentSymNode(
+                expr,
+                "This data dependent error is suppressed and handled by the caller",
+            )
 
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -6123,7 +6123,6 @@ class ShapeEnv:
             },
         )
         return GuardOnDataDependentSymNode(expr, msg)
-
 
     def _update_var_to_range(
         self,
