@@ -12957,6 +12957,31 @@ class CommonTemplate:
         x = torch.randn(1024, 1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
+    @config.patch(implicit_fallbacks=True)
+    @skip_if_cpp_wrapper(
+        "Inductor does not generate alignment assertion for cpp_wrapper right now"
+    )
+    def test_incorrect_meta_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        define_custom_op_for_test("slice2d_incorrect_meta", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d_incorrect_meta(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+
+        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
+        with self.assertRaisesRegex(AssertionError, expected_error):
+            self.common(fn, (x,), check_lowp=False)
+
 
 @dataclasses.dataclass
 class TestFailure:
