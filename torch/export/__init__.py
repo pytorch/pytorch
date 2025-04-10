@@ -260,8 +260,8 @@ def export(
       ``OrderedDict`` containing all above types.
 
     """
-    from ._trace import _export
     from ._draft_export import draft_export
+    from ._trace import _export
 
     if not isinstance(mod, torch.nn.Module):
         raise ValueError(
