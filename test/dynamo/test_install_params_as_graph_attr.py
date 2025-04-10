@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable
+from collections.abc import Sequence
+from typing import Any, Callable, Union
 
 import torch
 import torch._dynamo
@@ -52,29 +53,47 @@ class SimpleLinearModule(torch.nn.Module):
 
 class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
     def check_num_inputs_and_equality(
-        self, original_fn, example_input, expected_num_inputs: int
+        self,
+        fn_to_compile: Union[torch.nn.Module, Callable],
+        expected_num_inline_inputs: int,
+        expected_num_installed_inputs: int,
+        example_inputs: Sequence[Any],
     ) -> None:
         """Compiles the original fn, then:
         * Checks that the number of inputs in the graph is expected_num_inputs
         * Checks that the compiled fn and original fn are equal
+        * Checks the number of inputs when installed is consistent with original_fn
+        # Checks that the compiled fn when installed and original fn are equal
         """
-        # Setup config
         torch._dynamo.config.inline_inbuilt_nn_modules = True
-        # Currently a no-op
-        torch._dynamo.config.install_params_as_graph_attr = True
+        torch._dynamo.config.install_params_as_graph_attr = False
 
-        opt_fn, graphs = compile_and_extract_graph(original_fn, example_input)
+        # inlined ex
+        opt_fn, graphs = compile_and_extract_graph(fn_to_compile, *example_inputs)
         self.assertEqual(len(graphs), 1, msg="Expected 1 graph (no breaks)")
         actual_num_inputs = get_num_input_nodes(graphs[0])
-        self.assertEqual(actual_num_inputs, expected_num_inputs)
-        self.assertEqual(opt_fn(example_input), original_fn(example_input))
+        self.assertEqual(actual_num_inputs, expected_num_inline_inputs)
+        self.assertEqual(opt_fn(*example_inputs), fn_to_compile(*example_inputs))
+
+        # inline and installed ex
+        torch._dynamo.config.install_params_as_graph_attr = True
+
+        opt_installed_fn, graphs = compile_and_extract_graph(
+            fn_to_compile, *example_inputs
+        )
+        self.assertEqual(len(graphs), 1, msg="Expected 1 graph (no breaks)")
+        actual_num_inputs = get_num_input_nodes(graphs[0])
+        self.assertEqual(actual_num_inputs, expected_num_installed_inputs)
+        self.assertEqual(
+            opt_installed_fn(*example_inputs), fn_to_compile(*example_inputs)
+        )
 
     # ==================== Test Params and Buffer from NN Module ====================
     def test_optimizing_linear(self) -> None:
         net = SimpleLinearModule()
         input1 = torch.randn((1, 5))
         # Expected: 1 + 1 * 2 = 3
-        self.check_num_inputs_and_equality(net, input1, 3)
+        self.check_num_inputs_and_equality(net, 3, 1, (input1,))
 
     def test_breadth_linear(self) -> None:
         class BreadthModel(torch.nn.Module):
@@ -98,7 +117,7 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         net = BreadthModel()
         input1 = torch.randn((1, 1))
         # Expected: 1 + 5 * 2 = 11
-        self.check_num_inputs_and_equality(net, input1, 11)
+        self.check_num_inputs_and_equality(net, 11, 1, (input1,))
 
     def test_nested_linear(self) -> None:
         class NestedModel(torch.nn.Module):
@@ -116,9 +135,91 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         for _ in range(kDepth):
             net = NestedModel(net)
         input1 = torch.randn((1, 5))
-        self.check_num_inputs_and_equality(net, input1, 1 + 2 * (kDepth + 1))
+        self.check_num_inputs_and_equality(net, 1 + 2 * (kDepth + 1), 1, (input1,))
 
-    # TODO[@lucaskabela]: Test nontrivial such as resnet, ffn, or transformer
+    def test_simple_batchnorm(self) -> None:
+        net = torch.nn.BatchNorm2d(3)
+        tensor = torch.randn((1, 3, 3, 3))
+        # BatchNorm2d has 2 params, and 3 buffers
+        self.check_num_inputs_and_equality(net, 6, 1, (tensor,))
+
+    def test_nets_as_input(self) -> None:
+        """
+        Tests when the nn.Module is an input to the fn we are optimizing
+
+        In this case, we should treat it as regular input, which means we
+        can lift parameters/buffers, but should not install them
+        """
+        # Test nn model as input
+        net = SimpleLinearModule()
+        net2 = SimpleLinearModule()
+        x = torch.randn(1, 5)
+
+        def test_fn(x, net):
+            return net(x)
+
+        # When nn is in input, we don't install the params
+        self.check_num_inputs_and_equality(test_fn, 3, 3, (x, net))
+
+        def test_fn2(x, net, net2):
+            return net(x) + net2(x)
+
+        self.check_num_inputs_and_equality(test_fn2, 5, 5, (x, net, net2))
+
+        def test_fn3(x, net):
+            return net(x) + net2(x)
+
+        # In case of local scope (net2 here), we can install
+        self.check_num_inputs_and_equality(test_fn3, 5, 3, (x, net))
+
+        def test_fn_list(x, nets):
+            return sum([net(x) for net in nets])
+
+        self.check_num_inputs_and_equality(test_fn_list, 5, 5, (x, [net, net2]))
+
+    def test_resnet_structure(self) -> None:
+        class ResBlock(torch.nn.Module):
+            def __init__(self, in_, out_):
+                super().__init__()
+                self.conv1 = torch.nn.Sequential(
+                    torch.nn.Conv2d(in_, out_, kernel_size=3, padding=1),
+                    torch.nn.BatchNorm2d(out_),
+                    torch.nn.ReLU(),
+                )
+                self.conv2 = torch.nn.Sequential(
+                    torch.nn.Conv2d(out_, out_, kernel_size=3, padding=1),
+                    torch.nn.BatchNorm2d(out_),
+                )
+                self.activation = torch.nn.ReLU()
+
+            def forward(self, x):
+                skip = x
+                out = self.conv1(x)
+                out = self.conv2(out)
+                out += skip
+                out = self.activation(out)
+                return out
+
+        net = ResBlock(3, 3)
+        tensor = torch.randn(1, 3, 3, 3)
+        # Conv2d has 2 params, BatchNorm2d has 3 buffers + 2 params, and Relu has 0 params
+        # So expected = 2 + 5 + 5 + 2 = 14 + 1 for input
+        self.check_num_inputs_and_equality(net, 15, 1, (tensor,))
+
+    def test_transformer(self) -> None:
+        # NOTE: Transformer fails the equality test, so skip that check
+        # Example from docs
+        transformer = torch.nn.Transformer(d_model=64)
+        src = torch.rand(10, 32, 64)
+        tgt = torch.rand(20, 32, 64)
+
+        torch._dynamo.config.inline_inbuilt_nn_modules = True
+        torch._dynamo.config.install_params_as_graph_attr = True
+
+        _, graphs = compile_and_extract_graph(transformer, *(src, tgt))
+        self.assertEqual(len(graphs), 1, msg="Expected 1 graph (no breaks)")
+        actual_num_inputs = get_num_input_nodes(graphs[0])
+        self.assertEqual(actual_num_inputs, 2)
 
     # ==================== Test Parameters and Buffers as input ====================
     def test_optimizing_params_in_input(self) -> None:
@@ -128,7 +229,30 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         def test_fn(x):
             return net(x)
 
-        self.check_num_inputs_and_equality(test_fn, param, 3)
+        self.check_num_inputs_and_equality(test_fn, 3, 1, (param,))
+
+        x = torch.randn(1, 5)
+
+        def test_fn2(x, param):
+            return net(x) + param
+
+        # net gets installed, param does not here
+        self.check_num_inputs_and_equality(test_fn2, 4, 2, (x, param))
+
+        global global_param
+        global_param = torch.nn.Parameter(torch.randn(1, 5))
+
+        def test_fn3(x):
+            return net(x) + global_param
+
+        # net and global get installed
+        self.check_num_inputs_and_equality(test_fn3, 4, 1, (x,))
+
+        def test_fn4(x, list_params):
+            return net(x) + sum(list_params)
+
+        # list_params should not be installed
+        self.check_num_inputs_and_equality(test_fn4, 4, 2, (x, [param, param]))
 
     def test_optimizing_buffer_in_input(self) -> None:
         buf = torch.nn.Buffer(data=torch.ones((1, 5)))
@@ -137,7 +261,24 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         def test_fn(x) -> torch.Tensor:
             return net(x)
 
-        self.check_num_inputs_and_equality(test_fn, buf, 3)
+        self.check_num_inputs_and_equality(test_fn, 3, 1, (buf,))
+
+        x = torch.randn(1, 5)
+
+        def test_fn2(x, buf):
+            return net(x) + buf
+
+        # net gets installed, buf does not here
+        self.check_num_inputs_and_equality(test_fn2, 4, 2, (x, buf))
+
+        global global_buf
+        global_buf = torch.nn.Buffer(torch.randn(1, 5))
+
+        def test_fn3(x):
+            return net(x) + global_buf
+
+        # net and global gets installed
+        self.check_num_inputs_and_equality(test_fn3, 4, 1, (x,))
 
     def test_optimizing_buffer_and_param_in_input(self) -> None:
         param = torch.nn.Parameter(torch.randn(5, 1))
@@ -147,7 +288,16 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         def test_linear(x: torch.Tensor) -> torch.Tensor:
             return param * x + buf
 
-        self.check_num_inputs_and_equality(test_linear, x, 3)
+        # In this fn, param and buf are not input so should be inlined
+        self.check_num_inputs_and_equality(test_linear, 3, 1, (x,))
+
+        def test_linear_explicit(
+            x: torch.Tensor, a: torch.Tensor, b: torch.Tensor
+        ) -> torch.Tensor:
+            return a * x + b
+
+        # Now, param and buf are input so should not be inlined
+        self.check_num_inputs_and_equality(test_linear_explicit, 3, 3, (x, param, buf))
 
 
 if __name__ == "__main__":
