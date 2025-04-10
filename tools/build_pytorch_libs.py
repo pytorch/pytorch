@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-from glob import glob
 from pathlib import Path
 
 from .setup_helpers.cmake import CMake, USE_NINJA
