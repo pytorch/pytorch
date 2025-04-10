@@ -46,7 +46,6 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # -- General configuration ------------------------------------------------
 
-
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
@@ -198,7 +197,9 @@ templates_path = [
 ]
 # TODO: document these and remove them from here.
 
-html_domain_indices = False
+html_domain_indices = {
+    'py-modindex',
+}
 
 coverage_ignore_functions = [
     # torch
