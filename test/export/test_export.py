@@ -4097,6 +4097,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
+        class O(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 8, 6),)
+        dynamic_shapes = {"x": (dim, None)}
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Expected dynamic shape spec .* at `dynamic_shapes\['x'\]` to have the same length "
+            r"as the actual tensor shape torch\.Size\(\[4, 8, 6\]\) \(expected 3, but got 2 instead\)",
+        ):
+            export(O(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_unbacked_bindings_for_divisible_u_symint(self):
         from torch._export.utils import _get_shape_env_from_gm
         from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
