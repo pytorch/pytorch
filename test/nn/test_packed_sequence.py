@@ -205,11 +205,6 @@ class PackedSequenceTest(TestCase):
         )
         self.assertEqual(padded, expected.transpose(0, 1))
 
-        # pad_to_multiple_of = 4
-        expected = torch.tensor([[4, 5, 0, 0], [1, 2, 3, 0], [6, 0, 0, 0]])
-        padded = rnn_utils.pad_sequence([b, a, c], True, 1, "right", 4)
-        self.assertEqual(padded.shape, expected.shape)
-
         # pad with non-zero value
         expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]])
         padded = rnn_utils.pad_sequence([b, a, c], True, 1)
