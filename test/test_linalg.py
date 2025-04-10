@@ -5685,51 +5685,55 @@ class TestLinalg(TestCase):
 
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
 
             # record GEMM
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable.record_untuned_enable(True)
             self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
 
-            ldb = 10
             lda = 12
+            ldb = 10
             ldc = 14
-            k = 2
-            m = 4
             n = 8
-            # # 'TN'
-            # matA = torch.rand(lda, k, dtype=dtype, device=device)
-            # matB = torch.rand(ldb, k, dtype=dtype, device=device).t()
-            # # matC = torch.empty(ldc, m, device=device)
+            m = 4
+            k = 2
 
-            # subA = matA[:m,:k]
-            # subB = matB[:k,:n]
-            # torch.mm(matA, matB)
-            # torch.mm(subA, subB)
-            
-            # # 'NN'
-            # matA = torch.rand(lda, k, dtype=dtype, device=device)
-            # matB = torch.rand(k, ldb, dtype=dtype, device=device)
-            # subA = matA[:m, :k]
-            # subB = matB[:k, :n]
-            # torch.mm(matA, matB)
-            # torch.mm(subA, subB)
+            # 'TN'
+            matA = torch.rand(lda, ldc, dtype=dtype, device=device)
+            matB = torch.rand(ldb, ldc, dtype=dtype, device=device).t()
 
-            # # 'NT'
-            matA = torch.rand(k, lda, dtype=dtype, device=device).t()
-            matB = torch.rand(k, ldb, dtype=dtype, device=device)
-            subA = matA[:k, :m]
+            subA = matA[:m,:k]
+            subB = matB[:k,:n]
+
+            torch.mm(matA, matB)
+            torch.mm(subA, subB)
+
+            # 'NN'
+            matA = torch.rand(lda, ldc, dtype=dtype, device=device)
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:m, :k]
             subB = matB[:k, :n]
             torch.mm(matA, matB)
             torch.mm(subA, subB)
 
-            # # 'TT'
-            # matA = torch.rand(k, lda, dtype=dtype, device=device).t()
-            # matB = torch.rand(ldb, k, dtype=dtype, device=device).t()
-            # subA = matA[:k, :m]
-            # subB = matB[:n, :k]
-            # torch.mm(matA, matB)
-            # torch.mm(subA, subB)
+            # 'NT'
+            matA = torch.rand(ldc, lda, dtype=dtype, device=device).t()
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(matA, matB)
+            torch.mm(subA, subB)
+
+            # 'TT'
+            matA = torch.rand(k, lda, dtype=dtype, device=device).t()
+            matB = torch.rand(ldb, k, dtype=dtype, device=device).t()
+            subA = matA[:k, :m]
+            subB = matB[:n, :k]
+            torch.mm(matA, matB)
+            torch.mm(subA, subB)
 
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
