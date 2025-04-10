@@ -1179,9 +1179,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
-        # block_n for woq int4 is 64, which is too large for micro kernel
-        # so we split it into 2x32
-        num_columns = 2 if self.is_woq_int4() else block_n // 16
+        num_columns = block_n // 16
+        if self.is_woq_int4():
+            # block_n for woq int4 is 64, which is too large for micro kernel
+            # so we split it into 2x32. Here num_columns = 2.
+            num_columns //= 2
         options = {
             "declare_kernel": self.get_kernel_declaration(),
             "use_cached_dequantized_B": (
@@ -1417,7 +1419,7 @@ inline void {{kernel_name}}_kernel(
     int64_t ldb,
     int64_t ldc,
     int64_t q_group_size,
-    const bfloat16* {{restrict_keyword}} ScaleAndZeros,
+    const at:BFloat16* {{restrict_keyword}} ScaleAndZeros,
     int64_t lds, // leading dimension of ScaleAndZeros
     int64_t k_start) {
   constexpr int BLOCK_K = {{block_k}};
@@ -1555,7 +1557,7 @@ inline void {{kernel_name}}_kernel(
     def get_kernel_extra_args_declare(self) -> str:
         return (
             "const int64_t q_group_size,\n"
-            "    const bfloat16* __restrict__ ScaleAndZeros,\n"
+            "    const at:BFloat16* __restrict__ ScaleAndZeros,\n"
             "    const int64_t lds,\n"
             "    int64_t k_start,"
         )
@@ -1615,7 +1617,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
 
     constexpr int BLOCK_K = {{block_k}};
-    constexpr int64_t BLOCK_N = 64;
+    constexpr int64_t BLOCK_N = {{block_n}};
     constexpr int COLS = BLOCK_N / 16;
     const int PREFETCH_SIZE_K = 16 * 4;
     const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
@@ -1762,8 +1764,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
         }
     };
 
-    // const int64_t updated_ldb = {{block_n}} / 2;
-    const int64_t updated_ldb = 32;
+    const int64_t updated_ldb = {{block_n}} / 2;
     for (int64_t n = 0; n < N; n += {{block_n}}) {
         // Dequantize K * block_n int8 B elements into BF16
         dequantize_B(n);
