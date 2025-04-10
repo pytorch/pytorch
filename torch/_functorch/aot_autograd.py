@@ -1702,7 +1702,7 @@ compiled_function = aot_function
 compiled_module = aot_module
 
 
-DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX = True
+DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX = False
 import threading
 from collections import deque
 
