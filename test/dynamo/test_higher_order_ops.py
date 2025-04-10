@@ -2311,10 +2311,9 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile"
+            "map doesn't work unless it is captured completely with torch.compile",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
