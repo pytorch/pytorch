@@ -69,19 +69,12 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
-    # store the replacements for the index when normalizing
-    replacement: tuple[tuple[sympy.Symbol, sympy.Expr], ...] = ()
-    # store the indirect broadcast dimensions
-    indirect_broadcast: Union[tuple[()], tuple[sympy.Symbol, sympy.Symbol]] = ()
 
     def __repr__(self) -> str:
         maybe_mode = ""
         if self.mode is not None:
             maybe_mode = f", {self.mode}"
-        return (
-            f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode}, "
-            f"replacement={self.replacement}, indirect_broadcast={self.indirect_broadcast})"
-        )
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode})"
 
     @property
     def num_vars(self) -> int:
@@ -165,8 +158,6 @@ class MemoryDep(Dep):
             var_names,
             sizes,
             self.mode,
-            replacement,
-            self.indirect_broadcast,
         )
 
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
@@ -225,8 +216,6 @@ class MemoryDep(Dep):
             var_names=self.var_names,
             size=self.size,
             mode=self.mode,
-            replacement=self.replacement,
-            indirect_broadcast=self.indirect_broadcast,
         )
 
     def get_numel(self) -> sympy.Expr:
@@ -248,8 +237,6 @@ class MemoryDep(Dep):
                 var_names=self.var_names,
                 size=self.size,
                 mode=self.mode,
-                replacement=self.replacement,
-                indirect_broadcast=self.indirect_broadcast,
             )
         return self
 
@@ -305,31 +292,6 @@ class MemoryDep(Dep):
 
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
-
-    def set_indirect_broadcast(
-        self, indirect_broadcast: Union[tuple[()], tuple[sympy.Symbol, sympy.Symbol]]
-    ) -> "MemoryDep":
-        return MemoryDep(
-            name=self.name,
-            index=self.index,
-            var_names=self.var_names,
-            size=self.size,
-            mode=self.mode,
-            replacement=self.replacement,
-            indirect_broadcast=indirect_broadcast,
-        )
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, MemoryDep):
-            return NotImplemented
-        # Compare all core attributes except replacement and indirect_broadcast
-        return (
-            self.name == other.name
-            and self.index == other.index
-            and self.var_names == other.var_names
-            and self.size == other.size
-            and self.mode == other.mode
-        )
 
     def __hash__(self) -> int:
         # Hash must be consistent with __eq__
@@ -496,6 +458,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs: OrderedSet[IndexExprDep] = OrderedSet()
         self._var_ranges: VarRanges = var_ranges
         self._should_normalize: bool = normalize
+        self.mem_dep_replacements: dict[Dep, dict[sympy.Symbol, sympy.Symbol]] = {}
+        self.replacements: dict[sympy.Symbol, sympy.Symbol] = {}
 
     @staticmethod
     def drop_unused_symbols(
@@ -522,7 +486,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
-        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Expr], ...]],
+        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Symbol], ...]],
     ]:
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -552,7 +516,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
-        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Expr], ...]],
+        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Symbol], ...]],
     ]:
         if not self._should_normalize:
             sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
@@ -572,9 +536,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def load(self, name: str, index: sympy.Expr) -> str:
         index, var_names, sizes, replacement = self.canonicalize(index)
-        self._reads.add(
-            MemoryDep(name, index, var_names, sizes, replacement=replacement)
-        )
+        load_dep = MemoryDep(name, index, var_names, sizes)
+        self._reads.add(load_dep)
+        self.mem_dep_replacements[load_dep] = dict(replacement)
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int) -> str:
@@ -585,9 +549,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
     ) -> str:
         index, var_names, sizes, replacement = self.canonicalize(index)
-        self._writes.add(
-            MemoryDep(name, index, var_names, sizes, replacement=replacement, mode=mode)
-        )
+        store_dep = MemoryDep(name, index, var_names, sizes, mode=mode)
+        self._writes.add(store_dep)
+        self.mem_dep_replacements[store_dep] = dict(replacement)
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> str:
@@ -706,12 +670,12 @@ def extract_loop_body_with_args(
 
     inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
     name_to_index = fn.indexing_from_args(args)
-    repl = {}
 
     if fn.indirect_vars:
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
         name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+        fn.replacements.update(repl)
     for entry in fn.memory_usage[MemoryUsageType.LOAD]:
         inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
@@ -741,79 +705,11 @@ def extract_loop_body_with_args(
             None,  # type: ignore[arg-type]
             None,  # type: ignore[arg-type]
         )
+    for mem_dep, replacement in inner.mem_dep_replacements.items():
+        # check before update to avoid overriding by empty replacements
+        if replacement:
+            fn.mem_dep_replacements.setdefault(mem_dep, {}).update(replacement)
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
-    # detect indirect broadcast
-    repl_reverse = {v: k for k, v in repl.items()}
-    replacement_mem_dep = {}
-    name_to_node = {node.target: node for node in fn.get_nodes()}
-    for read in inner._reads:
-        if isinstance(read, MemoryDep) and read.replacement:
-            # find out the indirect var in memdep's indexing expr, e.g. indirect0 in
-            # index0 = 4096*indirect0 + p1
-            (
-                additive_symbol,
-                coefficient,
-                multiplied_symbol,
-            ) = extract_coefficient_pattern(read.index)
-            if any(
-                x is None for x in (additive_symbol, coefficient, multiplied_symbol)
-            ):
-                continue
-            # check if the coefficient is the stride
-            buffer = V.graph.try_get_buffer(read.name)
-
-            if buffer is None or not isinstance(
-                buffer.get_layout(), torch._inductor.ir.FixedLayout
-            ):
-                continue
-            if coefficient not in buffer.get_stride():
-                continue
-            # check the indirect variable
-            indirect_load_dim_indexing_expr = None
-            indirect_var = multiplied_symbol
-            if indirect_var is None or not is_indirect(indirect_var.name):
-                continue
-            # find out its corresponding set_indirect node, e.g. set_indirect0
-            set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
-            if (
-                len(set_indirect_node.args) == 1
-                and set_indirect_node.args[0].target.startswith("load")
-                and "load_seed" not in set_indirect_node.args[0].target
-            ):
-                the_load_node = set_indirect_node.args[0]
-                # example args: (ops, 'primals_2', get_index)
-                arg_pattern = [str(arg) for arg in the_load_node.args]
-                if (
-                    len(arg_pattern) == 3
-                    and arg_pattern[0] == "ops"
-                    and arg_pattern[2].startswith("get_index")
-                ):
-                    the_load_index_node = the_load_node.args[2]
-                    if len(the_load_index_node.args) == 1:
-                        # we require the get_index node should use indexX as its
-                        # argument and the indexX's expression should be in
-                        # fn.iter_vars, e.g. index0 = p0
-                        indexing = fn.indexing_exprs.get(the_load_index_node.args[0])
-                        if indexing is not None and indexing in fn.iter_vars:
-                            indirect_load_dim_indexing_expr = indexing
-            if indirect_load_dim_indexing_expr is None:
-                continue
-            broadcast_dim_indexing = None
-            replacement = dict(read.replacement)
-            replacement_reverse = {v: k for k, v in replacement.items()}
-            if additive_symbol not in replacement_reverse:
-                continue
-            d_symbol = replacement_reverse[additive_symbol]
-            d_p_replacement = {v: k for k, v in fn.replacement.items()}
-            broadcast_dim_indexing = d_p_replacement[d_symbol]
-            # add this indirect broadcast dimension pair, e.g., (p0, p1) to the memdep
-            read_new = read.set_indirect_broadcast(
-                (indirect_load_dim_indexing_expr, broadcast_dim_indexing)
-            )
-            replacement_mem_dep[read] = read_new
-    for read, read_new in replacement_mem_dep.items():
-        inner._reads.remove(read)
-        inner._reads.add(read_new)
     return inner
 
 
@@ -959,57 +855,3 @@ def extract_free_symbols(
     ):
         fn(*args)
     return handler.symbols
-
-
-def extract_coefficient_pattern(
-    expr: sympy.Expr,
-) -> tuple[
-    Optional[sympy.Symbol], Optional[Union[int, sympy.Integer]], Optional[sympy.Symbol]
-]:
-    """
-    Extracts a pattern of the form 'symbol + coefficient*symbol' from a sympy expression.
-
-    Returns:
-        A tuple (additive_symbol, coefficient, multiplied_symbol) if the pattern is found,
-        or (None, None, None) otherwise.
-
-    Example:
-        For 'c1 + 4096*tmp0', returns (c1, 4096, tmp0)
-    """
-    if not isinstance(expr, sympy.Add):
-        return None, None, None
-
-    terms = expr.args
-    if len(terms) != 2:
-        return None, None, None
-
-    # Try to find one symbol term and one Mul term
-    additive_symbol = None
-    mul_term = None
-
-    for term in terms:
-        if isinstance(term, sympy.Symbol):
-            additive_symbol = term
-        elif isinstance(term, sympy.Mul) and any(
-            isinstance(arg, sympy.Symbol) for arg in term.args
-        ):
-            mul_term = term
-
-    if additive_symbol is None or mul_term is None:
-        return None, None, None
-
-    # Extract the coefficient and the multiplied symbol from the Mul
-    coeff = None
-    multiplied_symbol = None
-
-    for arg in mul_term.args:
-        if isinstance(arg, sympy.Symbol):
-            multiplied_symbol = arg
-        elif isinstance(arg, (int, sympy.core.numbers.Integer)):
-            coeff = arg
-
-    # Return None if we didn't find a valid coefficient
-    if coeff is None or multiplied_symbol is None:
-        return None, None, None
-
-    return additive_symbol, coeff, multiplied_symbol

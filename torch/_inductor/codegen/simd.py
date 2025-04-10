@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import re
 import textwrap
 from collections import Counter
 from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
@@ -2051,20 +2052,100 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+        is_indirect = re.compile(r"indirect|tmp").search
         have_indirect_broadcast = False
         for node in EnableReduction.filter(node_schedule):
+            fn = node._body
+            name_to_node = {n.target: n for n in fn.get_nodes()}
+            repl_reverse = {v: k for k, v in fn.replacements.items()}
             # save iter vars in indirect broadcast memory reads
             indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
             for read in node.read_writes.reads:
-                if (
+                # Skip if not a memory dependency with replacements
+                if not (
                     isinstance(read, MemoryDep)
-                    and hasattr(read, "indirect_broadcast")
-                    and read.indirect_broadcast
+                    and fn.mem_dep_replacements.get(read, None) is not None
                 ):
-                    indirect_broadcast_pairs.append(read.indirect_broadcast)
+                    continue
+
+                # Extract pattern components from the index
+                pattern_components = extract_coefficient_pattern(read.index)
+                additive_symbol, coefficient, multiplied_symbol = pattern_components
+                if any(x is None for x in pattern_components):
+                    continue
+
+                # Verify buffer and coefficient
+                buffer = V.graph.try_get_buffer(read.name)
+                if (
+                    buffer is None
+                    or not isinstance(
+                        buffer.get_layout(), torch._inductor.ir.FixedLayout
+                    )
+                    or coefficient not in buffer.get_stride()
+                ):
+                    continue
+
+                # Check indirect variable
+                indirect_var = multiplied_symbol
+                if not (indirect_var and is_indirect(indirect_var.name)):
+                    continue
+
+                # Get set_indirect node
+                set_indirect_key = f"set_{repl_reverse[indirect_var].name}"
+                set_indirect_node = name_to_node.get(set_indirect_key)
+                if not set_indirect_node:
+                    continue
+
+                # Check set_indirect node has one argument
+                if len(getattr(set_indirect_node, "args", [])) != 1:
+                    continue
+
+                the_load_node = set_indirect_node.args[0]
+                load_target = getattr(the_load_node, "target", "")
+
+                # Check it's a load node but not load_seed
+                if not (
+                    isinstance(load_target, str)
+                    and load_target.startswith("load")
+                    and "load_seed" not in load_target
+                ):
+                    continue
+
+                # Check load node has expected arguments
+                load_args = getattr(the_load_node, "args", [])
+                if (
+                    len(load_args) != 3
+                    or str(load_args[0]) != "ops"
+                    or not str(load_args[2]).startswith("get_index")
+                ):
+                    continue
+
+                # Check get_index node
+                the_load_index_node = load_args[2]
+                if len(getattr(the_load_index_node, "args", [])) != 1:
+                    continue
+                indexing = fn.indexing_exprs.get(the_load_index_node.args[0])
+                if not indexing or indexing not in fn.iter_vars:
+                    continue
+
+                # Process broadcast dimension indexing
+                replacement = fn.mem_dep_replacements.get(read, {})
+                replacement_reverse = {v: k for k, v in replacement.items()}
+                if additive_symbol not in replacement_reverse:
+                    continue
+
+                d_symbol = replacement_reverse[additive_symbol]
+                d_p_replacement = {v: k for k, v in fn.replacements.items()}
+                if d_symbol not in d_p_replacement:
+                    continue
+
+                broadcast_dim_indexing = d_p_replacement[d_symbol]
+
+                # Found a valid pair
+                indirect_broadcast_pairs.append((indexing, broadcast_dim_indexing))
+                have_indirect_broadcast = True
 
             if indirect_broadcast_pairs:
-                have_indirect_broadcast = True
                 tail: list[int] = []
                 for pair in indirect_broadcast_pairs:
                     # indirect load dimension
@@ -2163,3 +2244,57 @@ class CandidateTiling:
 
 class CantSplit(Exception):
     pass
+
+
+def extract_coefficient_pattern(
+    expr: sympy.Expr,
+) -> tuple[
+    Optional[sympy.Symbol], Optional[Union[int, sympy.Integer]], Optional[sympy.Symbol]
+]:
+    """
+    Extracts a pattern of the form 'symbol + coefficient*symbol' from a sympy expression.
+
+    Returns:
+        A tuple (additive_symbol, coefficient, multiplied_symbol) if the pattern is found,
+        or (None, None, None) otherwise.
+
+    Example:
+        For 'c1 + 4096*tmp0', returns (c1, 4096, tmp0)
+    """
+    if not isinstance(expr, sympy.Add):
+        return None, None, None
+
+    terms = expr.args
+    if len(terms) != 2:
+        return None, None, None
+
+    # Try to find one symbol term and one Mul term
+    additive_symbol = None
+    mul_term = None
+
+    for term in terms:
+        if isinstance(term, sympy.Symbol):
+            additive_symbol = term
+        elif isinstance(term, sympy.Mul) and any(
+            isinstance(arg, sympy.Symbol) for arg in term.args
+        ):
+            mul_term = term
+
+    if additive_symbol is None or mul_term is None:
+        return None, None, None
+
+    # Extract the coefficient and the multiplied symbol from the Mul
+    coeff = None
+    multiplied_symbol = None
+
+    for arg in mul_term.args:
+        if isinstance(arg, sympy.Symbol):
+            multiplied_symbol = arg
+        elif isinstance(arg, (int, sympy.core.numbers.Integer)):
+            coeff = arg
+
+    # Return None if we didn't find a valid coefficient
+    if coeff is None or multiplied_symbol is None:
+        return None, None, None
+
+    return additive_symbol, coeff, multiplied_symbol

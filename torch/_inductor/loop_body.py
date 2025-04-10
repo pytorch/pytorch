@@ -30,6 +30,8 @@ from .virtualized import ops, V
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from .dependencies import Dep
+
 
 T = TypeVar("T")
 
@@ -122,7 +124,10 @@ class LoopBody:
             self._init_with_tracing(fn, args)
 
         self.indexing = None
-        self.replacement = {}
+        # save how indexing variables are replaced in memory dependencies. e.g., d0 -> c0
+        self.mem_dep_replacements: dict[Dep, dict[sympy.Symbol, sympy.Symbol]] = {}
+        # save how indexing variables are replaced in the body. e.g., p0 -> d0
+        self.replacements: dict[sympy.Symbol, sympy.Symbol] = {}
 
     def _init_with_tracing(self, fn, args):
         """Do an FX trace of an arbitrary callable to construct self"""
@@ -398,7 +403,7 @@ class LoopBody:
             f"{self.var_ranges=}, {indices=}"
         )
         replacements = dict(zip(self.var_ranges.keys(), index))
-        self.replacement = replacements
+        self.replacements.update(replacements)
         return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
