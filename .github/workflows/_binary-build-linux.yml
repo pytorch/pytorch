@@ -50,6 +50,8 @@ on:
         required: true
         type: string
         description: Desired Cuda version
+      # ===========================================================================
+      # TODO: Rename these to ACCELERATOR_VERSION and ACCELERATOR_TYPE
       GPU_ARCH_VERSION:
         required: false
         type: string
@@ -58,10 +60,16 @@ on:
         required: true
         type: string
         description: GPU Arch type
+      # ===========================================================================
+
+      # ===========================================================================
+      # TODO: Rename this to CONTAINER_IMAGE
       DOCKER_IMAGE:
         required: true
         type: string
         description: Docker image to use
+      # ===========================================================================
+
       LIBTORCH_CONFIG:
         required: false
         type: string
@@ -70,10 +78,13 @@ on:
         required: false
         type: string
         description: Desired libtorch variant (for libtorch builds only)
+      # ===========================================================================
+      # TODO: Rename this to PYTHON_VERSION
       DESIRED_PYTHON:
         required: false
         type: string
         description: Desired python version
+      # ===========================================================================
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
         required: false
         type: string
@@ -152,7 +163,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: ${{ contains(inputs.build_environment, 'aarch64') || contains(inputs.build_environment, 's390x') }}
 
       - name: Setup Linux
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
@@ -172,7 +183,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]] || [[ ${{ inputs.build_environment }} == 'linux-s390x-binary-manywheel' ]] ; then
+          if [[ ${{ inputs.build_environment }} =~ 'aarch64' ]] || [[ ${{ inputs.build_environment }} =~ 's390x' ]] ; then
             rm -rf "${RUNNER_TEMP}/artifacts"
             mkdir "${RUNNER_TEMP}/artifacts"
           fi
@@ -259,17 +270,17 @@ jobs:
             ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: always() && !contains(inputs.build_environment, 's390x')
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
-        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: always() && !contains(inputs.build_environment, 's390x')
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
 
       - name: Cleanup docker
-        if: always() && inputs.build_environment == 'linux-s390x-binary-manywheel'
+        if: always() && contains(inputs.build_environment, 's390x')
         shell: bash
         run: |
           # on s390x stop the container for clean worker stop

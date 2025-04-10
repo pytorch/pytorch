@@ -156,7 +156,7 @@ build_and_run_example_cpp () {
 ###############################################################################
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   # NS: Set LD_LIBRARY_PATH for CUDA builds, but perhaps it should be removed
-  if [[ "$DESIRED_CUDA" == "cu"* ]]; then
+  if [[ "$GPU_ARCH_TYPE" =~ "*cuda*" ]]; then
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64
   fi
   build_and_run_example_cpp simple-torch-test
@@ -229,7 +229,7 @@ if [[ "$OSTYPE" == "msys" ]]; then
 fi
 
 # Test that CUDA builds are setup correctly
-if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" ]]; then
+if [[ "$GPU_ARCH_TYPE" = "cuda" ]]; then
   if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     build_and_run_example_cpp check-torch-cuda
   else
