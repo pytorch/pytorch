@@ -236,9 +236,10 @@ def aot_dispatch_base(
     cache_info = aot_config.cache_info
     if cache_info is not None:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
+            debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward(fw_key),
+                compiled_fw=CompiledForward((fw_key, debug_lines)),  # type: ignore[arg-type]
                 compiled_bw=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
@@ -1264,7 +1265,15 @@ def aot_dispatch_autograd(
             compiled_bw_func, _fw_metadata, aot_config
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_debug_lines = getattr(
+                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+            )
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+            bw_debug_lines = getattr(
+                compiled_bw_func, "_fx_graph_cache_debug_lines", []
+            )
+            fw_info = (fw_key, fw_debug_lines)
+            bw_info = (bw_key, bw_debug_lines)
             cache_info = aot_config.cache_info
             if cache_info is not None and fw_key and bw_key:
                 assert forward_time_taken_ns is not None
@@ -1280,9 +1289,9 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_key),
+                    CompiledForward(fw_info),  # type: ignore[arg-type]
                     CompiledBackward(
-                        bw_key,
+                        bw_info,  # type: ignore[arg-type]
                         backward_state_indices,
                         num_symints_saved_for_bw,
                     ),
