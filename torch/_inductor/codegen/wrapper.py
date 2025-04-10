@@ -1619,8 +1619,6 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
     ):
-        from torch.utils._triton import patch_triton_dtype_repr
-
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -1635,7 +1633,6 @@ class PythonWrapperCodegen(CodeGen):
         )
         from .triton import gen_common_triton_imports, TritonKernel
 
-        patch_triton_dtype_repr()
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
@@ -2223,7 +2220,7 @@ class PythonWrapperCodegen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_arg_str(self, s, type_=None):
-        from torch.utils._triton import dtype_to_string, has_triton_package
+        from torch.utils._triton import has_triton_package
 
         if has_triton_package():
             import triton
@@ -2250,7 +2247,7 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
-            return dtype_to_string(s)
+            return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
         else:
