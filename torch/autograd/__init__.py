@@ -325,8 +325,15 @@ def backward(
                 "arguments both passed to `backward()`. Please only "
                 "use `grad_tensors`."
             )
-    if inputs is not None and len(inputs) == 0:
-        raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
+
+    if inputs is None:
+        inputs = ()
+    elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
+        inputs = (inputs,)
+    else:
+        inputs = tuple(inputs)
+        if len(inputs) == 0:
+            raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(
@@ -334,13 +341,6 @@ def backward(
         )
     else:
         tensors = tuple(tensors)
-    inputs = (
-        (inputs,)
-        if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs)
-        if inputs is not None
-        else ()
-    )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
