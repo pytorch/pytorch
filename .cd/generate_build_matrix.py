@@ -30,7 +30,7 @@ from functools import cache
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).parent.parent.parent
+ROOT_DIR = Path(__file__).parent.parent
 
 STABLE_CUDA_VERSION = "12.6"
 
