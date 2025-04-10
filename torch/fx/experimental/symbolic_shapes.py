@@ -3245,8 +3245,8 @@ class ShapeEnv:
             else []
         )
 
-        # Set true when dde are handled by caller side and not thrown. ex: guard_or_false
-        # and guard_or_true. In this case we reduce less different logs on data dependent errors.
+        # Set true when data dependent errors are handled by caller side and not thrown. Ex: guard_or_false
+        # and guard_or_true. When its true, a different error message is produced.
         self._dde_suppressed = False
 
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
@@ -3263,7 +3263,7 @@ class ShapeEnv:
 
     @contextlib.contextmanager
     def dde_suppressed(self) -> Iterator[None]:
-        # we do not really expect this to be called recursively.
+        # We do not expect this to be called recursively.
         assert not self._dde_suppressed, "not expected value for dde_suppressed"
         self._dde_suppressed = True
         try:
