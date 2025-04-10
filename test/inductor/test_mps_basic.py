@@ -183,6 +183,7 @@ for test_name in [
     "test_consecutive_split_cumprod",
     "test_consecutive_split_cumsum",
     "test_constant_pad_float64",
+    "test_convolution4",
     "test_cumsum_inf",
     "test_custom_op_2",
     "test_div1",
