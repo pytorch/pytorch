@@ -2509,7 +2509,7 @@ class TestAutograd(TestCase):
 
     def test_backward_with_scalar_input(self):
         x = torch.randn([], dtype=torch.double, requires_grad=True)
-        out = x ** 2
+        out = x**2
         out.backward(inputs=x)
         self.assertEqual(x.grad, 2 * x)
 
