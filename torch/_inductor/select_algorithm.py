@@ -749,7 +749,21 @@ class TritonTemplateKernel(TritonKernel):
 
             strided_index = sympy_dot(input_node.get_stride(), index_symbols)
             strided_index = self.rename_indexing(strided_index)
-            self.body.writeline("xindex = " + texpr(strided_index))
+
+            x_index_str = texpr(strided_index)
+            broadcast_shape = None
+            for unused_symbol in OrderedSet(index_symbols) - strided_index.free_symbols:
+                if broadcast_shape is None:
+                    broadcast_shape = f"{unused_symbol}"
+                else:
+                    broadcast_shape = (
+                        f"tl.broadcast({unused_symbol}, ({broadcast_shape}))[0]"
+                    )
+
+            if broadcast_shape is not None:
+                x_index_str = f"tl.broadcast({x_index_str}, {broadcast_shape})[0]"
+
+            self.body.writeline("xindex = " + x_index_str)
 
             xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
