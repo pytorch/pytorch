@@ -3277,7 +3277,6 @@ class GraphModule(torch.nn.Module):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
-    select_copy = torch.ops.aten.select_copy.int(flip, 0, 0);  select_copy = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
@@ -3285,9 +3284,8 @@ def forward(self, fct_1, init_1, xs_1):
     scan_combine_graph_0 = self.scan_combine_graph_0
     scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
-    getitem_1 = scan[1];  getitem_1 = None
-    getitem_2 = scan[2];  scan = None
-    flip_1 = torch.ops.aten.flip.default(getitem_2, [0]);  getitem_2 = None
+    getitem_1 = scan[1];  scan = None
+    flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
     return (getitem, flip_1)""",  # noqa: B950
         )
 
