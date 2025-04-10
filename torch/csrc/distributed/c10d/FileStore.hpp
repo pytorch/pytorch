@@ -13,8 +13,6 @@ class TORCH_API FileStore : public Store {
  public:
   explicit FileStore(std::string path, int numWorkers);
 
-  c10::intrusive_ptr<Store> clone() override;
-
   ~FileStore() override;
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
