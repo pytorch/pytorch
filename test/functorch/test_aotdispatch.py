@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import ContextDecorator, nullcontext
+from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
@@ -54,6 +54,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -109,6 +110,19 @@ except ImportError:
     warnings.warn("Some tests use networkx but it was not installed", UserWarning)
 
 # NB: numpy is a testing dependency!
+
+
+def saved_tensors_hooks_to_gm(pack, unpack):
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    # TODO: symbolic shapes tracing to be able to provide not the same shape?
+    inp = torch.randn(2, 3)
+    torch._dynamo.mark_dynamic(inp, 0)
+    torch._dynamo.mark_dynamic(inp, 1)
+    pack_out = pack(inp)
+    pack_gm = make_fx(pack)(inp)
+    unpack_gm = make_fx(unpack)(pack_out)
+    return pack_gm, unpack_gm
 
 
 class AOTTestCase(TestCase):
@@ -6602,6 +6616,286 @@ metadata incorrectly.
 
             self.assertEqual(1, len(ctx.tangent_strides))
             self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    def test_saved_tensors_hooks(self):
+        eager_ctx = torch.autograd.graph.saved_tensors_hooks
+        inline_ctx = eager_ctx
+        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
+            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
+
+        def _test_pack_hooks(fn, inp_fn, hooks):
+            torch._dynamo.reset()
+            with ExitStack() as stack:
+                # All hooks in eager to get ref
+                for hook, _ in hooks:
+                    pack, unpack = hook
+                    stack.enter_context(eager_ctx(pack, unpack))
+                ref_x = inp_fn()
+                x = ref_x.detach().clone().requires_grad_()
+
+                ref_y = fn(ref_x)
+                ref_y.sum().backward()
+
+            with ExitStack() as stack:
+                for hook, inline in hooks:
+                    pack, unpack = hook
+                    if inline:
+                        stack.enter_context(
+                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
+                        )
+                    else:
+                        stack.enter_context(eager_ctx(pack, unpack))
+
+                y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                y.sum().backward()
+                self.assertEqual(ref_y, y, atol=1e-2, rtol=1e-2)
+                self.assertEqual(ref_x.grad, x.grad, atol=1e-2, rtol=1e-2)
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.d1 = x.size(1)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                d1 = ctx.d1
+                return gx + saved_x * d1
+
+        def fn(x):
+            x = x.relu()
+            x = x + 1
+            x = x.relu()
+            x = 2 * x
+            x = AF.apply(x)
+            return x
+
+        def simple_fn(x):
+            x = x + 1
+            x = SAF.apply(x)
+            return x
+
+        device = torch.device("cuda:0")
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        def pack_dev_sym_cpu(x):
+            # TODO: support sym tracing with make_fx
+            return (x.device, x.size(1), 10 * x.cpu())
+
+        def unpack_dev_sym_cpu(packed):
+            device, dim1, tensor = packed
+            ret = tensor.to(device=device) * dim1
+            return ret
+
+        def pack_tensor(x):
+            return x.cpu()
+
+        def unpack_tensor(packed):
+            t_cpu = packed
+            return t_cpu.to(device=device)
+
+        def pack_bf16(x):
+            return x.dtype, x.to(dtype=torch.bfloat16)
+
+        def unpack_bf16(packed):
+            dtype, x = packed
+            return x.to(dtype)
+
+        def pack_mul2(x):
+            return x * 2
+
+        def unpack_mul2(x):
+            return x / 2
+
+        FP8_DTYPE = torch.float8_e5m2
+
+        def pack_float8(x):
+            return (x.dtype, x.to(FP8_DTYPE))
+
+        def unpack_float8(packed):
+            dtype, tensor = packed
+            return tensor.to(dtype)
+
+        def amax_to_scale(
+            amax: torch.Tensor,
+            float8_dtype: torch.dtype,
+            round_scales_to_power_of_2: bool = False,
+        ):
+            amax = amax.to(torch.float64)
+            res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=1e-12)
+            res = res.to(torch.float32)
+            return res
+
+        def pack_fp8_with_scale(x):
+            amax = torch.max(torch.abs(x))
+            scale = amax_to_scale(amax, FP8_DTYPE)
+            x_scaled = x.to(torch.float32) * scale
+            x_fp8 = x_scaled.to(FP8_DTYPE)
+            return x.dtype, scale, x_fp8
+
+        def unpack_fp8_with_scale(x):
+            dtype, scale, x_fp8 = x
+            y = x_fp8.to(dtype) / scale
+            return y
+
+        def pack_wrapper_sc(x):
+            return WrapperSubclass(x)
+
+        def unpack_wrapper_sc(x):
+            return x.a
+
+        def pack_wrapper_two_tensor(x):
+            return TwoTensor(x, x)
+
+        def unpack_wrapper_two_tensor(x):
+            return x.a + x.b
+
+        def pack_mul2_eager(x):
+            return x * 2
+
+        def unpack_mul2_eager(x):
+            return x / 2
+
+        for test_fn in [simple_fn, fn]:
+            _test_pack_hooks(test_fn, inp_fn, [((pack_bf16, unpack_bf16), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_mul2, unpack_mul2), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_float8, unpack_float8), True)])
+            _test_pack_hooks(test_fn, inp_fn, [((pack_tensor, unpack_tensor), True)])
+            _test_pack_hooks(
+                test_fn, inp_fn, [((pack_dev_sym_cpu, unpack_dev_sym_cpu), True)]
+            )
+            _test_pack_hooks(
+                test_fn, inp_fn, [((pack_fp8_with_scale, unpack_fp8_with_scale), True)]
+            )
+            _test_pack_hooks(
+                test_fn, inp_fn, [((pack_mul2_eager, unpack_mul2_eager), False)]
+            )
+            # Disable testing of Subclasses for now
+            # _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+            # _test_pack_hooks(
+            #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+            # )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    def test_saved_tensors_hooks_recompile(self):
+        eager_ctx = torch.autograd.graph.saved_tensors_hooks
+        inline_ctx = eager_ctx
+        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
+            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
+
+        def pack_bf16(x):
+            return x.to(dtype=torch.bfloat16)
+
+        def unpack_bf16(x):
+            return x.to(dtype=torch.float)
+
+        def pack_mul2(x):
+            return x * 2
+
+        def unpack_mul2(x):
+            return x / 2
+
+        def _test(hooks, inline, expected_compile_count):
+            class SAF(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    return gx + saved_x
+
+            class AF(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    ctx.d1 = x.size(1)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    d1 = ctx.d1
+                    return gx + saved_x * d1
+
+            def fn(x):
+                x = x.relu()
+                x = x + 1
+                x = 2 * x
+                x = AF.apply(x)
+                return x
+
+            def simple_fn(x):
+                x = x + 1
+                x = SAF.apply(x)
+                return x
+
+            device = torch.device("cuda:0")
+
+            def inp_fn():
+                x = torch.ones(2, 3, device=device, requires_grad=True)
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                return x
+
+            from torch._dynamo.testing import CompileCounter
+
+            cnt = CompileCounter()
+            x = inp_fn()
+            y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+            y.sum().backward()
+
+            def _test_with_hooks(hooks):
+                with ExitStack() as stack:
+                    pack, unpack = hooks
+                    if inline:
+                        stack.enter_context(
+                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
+                        )
+                    else:
+                        stack.enter_context(eager_ctx(pack, unpack))
+
+                    x = inp_fn()
+                    y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+                    y.sum().backward()
+
+            _test_with_hooks(hooks[0])
+            _test_with_hooks(hooks[1])
+            self.assertEqual(cnt.frame_count, expected_compile_count)
+
+        _test(
+            ((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)),
+            inline=False,
+            expected_compile_count=1,
+        )
+        _test(
+            ((pack_bf16, unpack_bf16), (pack_mul2, unpack_mul2)),
+            inline=True,
+            expected_compile_count=3,
+        )
 
 
 # entries in here don't work and need to be fixed.

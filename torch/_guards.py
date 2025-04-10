@@ -832,6 +832,7 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # breakpoint()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
@@ -962,6 +963,7 @@ def tracing(context: Optional[TracingContext]):
     """
     old_context = getattr(_TLS, "tracing_context", None)
     _TLS.tracing_context = context
+    # breakpoint()
     try:
         yield context
     except Exception as e:
