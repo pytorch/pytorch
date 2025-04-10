@@ -1184,6 +1184,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1192,6 +1203,8 @@ def compute_unbacked_bindings(
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
 #      benefit of not failing.
+
+
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
@@ -1199,7 +1212,7 @@ def guard_or_false(a: BoolLikeType) -> bool:
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
-    shape_env = a.node.shape_env
+
     with a.node.shape_env.dde_suppressed():
         if torch.fx.experimental._config.backed_size_oblivious:
             return statically_known_true(a)
@@ -1207,13 +1220,7 @@ def guard_or_false(a: BoolLikeType) -> bool:
             try:
                 return bool(guard_bool(a))
             except GuardOnDataDependentSymNode:
-                sloc, extra = shape_env._get_stack_summary(True)
-                log.info(
-                    "could not evaluate %s due to data dependency, it was assumed to be False with no runtime assertions %s %s",
-                    a,
-                    sloc,
-                    extra,
-                )
+                _log_suppressed_dde(a, False)
                 return False
 
 
@@ -1224,8 +1231,8 @@ def guard_or_true(a: BoolLikeType) -> bool:
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
-    shape_env = a.node.shape_env
-    with shape_env.dde_suppressed():
+
+    with a.node.shape_env.dde_suppressed():
         if torch.fx.experimental._config.backed_size_oblivious:
             result = _static_eval_sym_bool(a)
             if result is not None:
@@ -1235,13 +1242,7 @@ def guard_or_true(a: BoolLikeType) -> bool:
             try:
                 return bool(guard_bool(a))
             except GuardOnDataDependentSymNode:
-                sloc, extra = shape_env._get_stack_summary(True)
-                log.info(
-                    "could not evaluate %s due to data dependency, it was assumed to be True with no runtime assertions %s %s",
-                    a,
-                    sloc,
-                    extra,
-                )
+                _log_suppressed_dde(a, True)
                 return True
 
 
