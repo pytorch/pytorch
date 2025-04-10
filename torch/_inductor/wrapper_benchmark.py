@@ -440,7 +440,7 @@ def compiled_module_main(
         "--ncu-kernel-regex",
         type=str,
         default=None,
-        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'. If None, NCU will use '--kernel-name-base function'.",
+        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'. If None, NCU will profile all kernels.",
     )
     parser.add_argument(
         "--ncu-metrics",
