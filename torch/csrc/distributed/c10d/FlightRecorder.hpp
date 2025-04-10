@@ -198,7 +198,7 @@ struct FlightRecorder {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void record_nccl_version(const std::string nccl_version);
+  void record_accelerator_version(const std::string nccl_version);
 
   void update_state(Entry& r);
 

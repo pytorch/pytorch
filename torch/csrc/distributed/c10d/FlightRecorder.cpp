@@ -324,7 +324,8 @@ void FlightRecorder::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
-void FlightRecorder::record_nccl_version(const std::string nccl_version) {
+void FlightRecorder::record_accelerator_version(
+    const std::string nccl_version) {
   if (!enabled_) {
     return;
   }
