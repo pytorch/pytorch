@@ -274,3 +274,8 @@ def record_chromium_event_internal(
     event: dict[str, Any],
 ):
     return None
+
+def maybe_enable_numa_binding(
+    device_type: Optional[str] = None, device_id: Optional[int] = None
+):
+    return None
