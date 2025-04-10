@@ -201,7 +201,7 @@ def build_metadata_from_local_shards(
 
 
 def build_global_metadata(
-    gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]],
+    gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]], reset_size: bool = False
 ):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
@@ -252,6 +252,9 @@ def build_global_metadata(
             )
 
     if global_sharded_tensor_metadata is not None:
+        if reset_size:
+            reset_shard_sizes(global_sharded_tensor_metadata, gathered_metadatas)
+
         # check if shards_metadata have overlap shards
         validate_non_overlapping_shards_metadata(
             global_sharded_tensor_metadata.shards_metadata
@@ -266,3 +269,31 @@ def build_global_metadata(
         raise ValueError("ShardedTensor have no local shards on all ranks!")
 
     return global_sharded_tensor_metadata
+
+def reset_shard_sizes(global_sharded_tensor_metadata: ShardedTensorMetadata, gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]]) -> None:
+    sharded_dims: list[int] = []
+    shards = global_sharded_tensor_metadata.shards_metadata
+    for dim in range(len(shards[0].shard_offsets)):
+        for i in range(1, len(shards)):
+            if (
+                shards[i].shard_offsets[dim] != shards[0].shard_offsets[dim]
+                or shards[i].shard_sizes[dim] != shards[0].shard_sizes[dim]
+            ):
+                sharded_dims.append(dim)
+                break
+    reset_size = [0] * len(global_sharded_tensor_metadata.size)
+    dim_offsets = [0] * len(sharded_dims)
+    for rank_metadata in global_sharded_tensor_metadata.shards_metadata:
+        if rank_metadata is None:
+            continue
+
+        for dim in sharded_dims:
+            rank_metadata.shard_offsets[dim] = dim_offsets[dim]
+            reset_size[dim] += rank_metadata.shard_sizes[dim]
+            dim_offsets[dim] += rank_metadata.shard_sizes[dim]
+    for dim in range(len(shards[0].shard_offsets)):
+        if dim not in sharded_dims:
+            reset_size[dim] = global_sharded_tensor_metadata.size[dim]
+
+
+    global_sharded_tensor_metadata.size = torch.Size(reset_size)
