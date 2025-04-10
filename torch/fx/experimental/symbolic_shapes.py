@@ -1207,6 +1207,9 @@ def guard_or_false(a: BoolLikeType) -> bool:
             try:
                 return bool(guard_bool(a))
             except GuardOnDataDependentSymNode:
+                sloc, extra = shape_env._get_stack_summary(True)
+                log.info(f"could not evaluate {a} due to data dependency, it was assumed to be False with no runtime assertions "
+                         f"{sloc} + {extra}")
                 return False
 
 
@@ -1217,8 +1220,8 @@ def guard_or_true(a: BoolLikeType) -> bool:
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
-
-    with a.node.shape_env.dde_suppressed():
+    shape_env = a.node.shape_env
+    with shape_env.dde_suppressed():
         if torch.fx.experimental._config.backed_size_oblivious:
             result = _static_eval_sym_bool(a)
             if result is not None:
@@ -1228,6 +1231,9 @@ def guard_or_true(a: BoolLikeType) -> bool:
             try:
                 return bool(guard_bool(a))
             except GuardOnDataDependentSymNode:
+                sloc, extra = shape_env._get_stack_summary(True)
+                log.info(f"could not evaluate {a} due to data dependency, it was assumed to be True with no runtime assertions "
+                         f"{sloc} + {extra}")
                 return True
 
 
