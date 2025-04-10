@@ -15,7 +15,8 @@ class FileBaton:
             lock_file_path: The path to the file used for locking.
             wait_seconds: The seconds to periodically sleep (spin) when
                 calling ``wait()``.
-            warn_after_seconds: The seconds to wait before showing lock file path to warn existing lock file.
+            warn_after_seconds: The seconds to wait before showing
+                lock file path to warn existing lock file.
         """
         self.lock_file_path = lock_file_path
         self.wait_seconds = wait_seconds
