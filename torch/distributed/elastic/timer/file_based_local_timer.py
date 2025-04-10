@@ -39,7 +39,7 @@ def _retry(max_retries: int, sleep_time: float) -> Callable:
     """
 
     def wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             for i in range(max_retries):
                 try:
                     return func(*args, **kwargs)

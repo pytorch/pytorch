@@ -347,9 +347,9 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f):
+    def wrap(f: Callable[P, T]) -> Callable[P, T]:
         @wraps(f)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker
             error_handler.initialize()
             try:

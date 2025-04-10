@@ -86,7 +86,7 @@ def _disable_user_warnings(
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=regex, module=module
