@@ -268,6 +268,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
+    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -1222,8 +1223,8 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
+    "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
-    "cpp_extensions/open_registration_extension/test/test_openreg": run_test_with_openreg,
 }
 
 
