@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import Callable, NamedTuple, Optional, overload, TypeVar
+from typing import Callable, NamedTuple, Optional, overload, TypeVar, Any
 from typing_extensions import ParamSpec
 
 import torch
@@ -450,7 +450,7 @@ def backwards_not_supported(prim):
 # TODO: when tracing this will add torch tensors and not TensorMeta objects
 # to the trace -- we should fix this by adding a tracing context and NumberMeta classes
 # TODO: this wrapper is currently untested
-def elementwise_unary_scalar_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def elementwise_unary_scalar_wrapper(fn: Callable[_P, _T]) -> Callable[_P, Any]:
     """
     Allows unary operators that accept tensors to work with Python numbers.
     """

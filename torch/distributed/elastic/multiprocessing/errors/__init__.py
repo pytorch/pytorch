@@ -307,7 +307,7 @@ class ChildFailedError(Exception):
 
 def record(
     fn: Callable[P, T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[P, T]:
+) -> Callable[P, T | None]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -347,7 +347,7 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[P, T]) -> Callable[P, T]:
+    def wrap(f: Callable[P, T]) -> Callable[P, T | None]:
         @wraps(f)
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker
