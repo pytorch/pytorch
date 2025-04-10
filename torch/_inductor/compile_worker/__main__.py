@@ -8,6 +8,7 @@ import sys
 from typing import TypeVar
 
 from torch._inductor.async_compile import pre_fork_setup
+from torch._inductor.codecache import torch_key
 from torch._inductor.compile_worker.subproc_pool import (
     SubprocKind,
     SubprocMain,
@@ -56,6 +57,7 @@ def main():
         parser.add_argument("--parent", type=int)
         parser.add_argument("--read-fd", type=int)
         parser.add_argument("--write-fd", type=int)
+        parser.add_argument("--torch-key", type=str)
         args = parser.parse_args()
         if os.getppid() != args.parent:
             sys.exit(0)
@@ -63,6 +65,8 @@ def main():
         write_fd = os.fdopen(args.write_fd, "wb")
 
         pre_fork_setup()
+
+        torch_key.set(args.torch_key.encode("latin-1"))  # type: ignore[attr-defined]
 
         _async_compile_initializer(args.parent)
 
