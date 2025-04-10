@@ -212,9 +212,9 @@ def hardswish(self: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
-        self < -3,
+        self <= -3,
         0.0,
-        torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
+        torch.where(self < 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
 
@@ -748,7 +748,7 @@ def slice_forward(
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
-    sizes[dim] = -(len // -step)  # round-up, avoiding overflow
+    sizes[dim] = (len + step - 1) // step
     strides[dim] *= step
 
     if self.is_quantized:
@@ -757,23 +757,6 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
-
-
-@register_decomposition([aten.slice_copy.Tensor, aten.slice_copy.Tensor_out])
-def slice_copy(
-    self: Tensor,
-    dim: int = 0,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
-    step: int = 1,
-    out: Optional[Tensor] = None,
-):
-    _slice = slice_forward(self, dim, start, end, step)
-    slice_clone = _slice.clone(memory_format=torch.contiguous_format)
-    if out is None:
-        return slice_clone
-    else:
-        return _safe_copy_out(copy_from=slice_clone, copy_to=out, exact_dtype=True)
 
 
 def _normalize_start_end(
@@ -1499,7 +1482,7 @@ def _addmm_activation(
 
 
 @register_decomposition(aten.addmv)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -1508,6 +1491,8 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     out = alpha * torch.mv(mat1, vec)
     if beta == 0:
         return out
+    if out.numel() == 0:  # handle empty matrix
+        return beta * self
     return out + beta * self
 
 
@@ -4353,7 +4338,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def mv(self, vec):
     torch._check(
@@ -5046,7 +5031,7 @@ def register_inplace(aten_op, outplace_op):
 
 
 @register_decomposition([aten.baddbmm])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
