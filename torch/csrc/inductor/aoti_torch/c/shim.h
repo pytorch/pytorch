@@ -783,11 +783,6 @@ int32_t aoti_torch_dtype() = delete;
     return aoti_torch_dtype_##typename();            \
   }
 
-namespace c10 {
-struct BFloat16;
-struct Half;
-} // namespace c10
-
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
 DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
