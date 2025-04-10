@@ -41,10 +41,13 @@ fbscribelogger==0.1.7
 #Pinned versions: 0.1.6
 #test that import:
 
-flatbuffers==2.0
+flatbuffers==2.0 ; platform_machine != "s390x"
 #Description: cross platform serialization library
 #Pinned versions: 2.0
 #test that import:
+
+flatbuffers ; platform_machine == "s390x"
+#Description: cross platform serialization library; Newer version is required on s390x for new python version
 
 hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -353,7 +356,7 @@ parameterized==0.8.1
 #Pinned versions: 1.24.0
 #test that import: test_sac_estimator.py
 
-pwlf==2.2.1 ; python_version >= "3.8"
+pwlf==2.2.1
 #Description: required for testing torch/distributed/_tools/sac_estimator.py
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
@@ -367,7 +370,7 @@ setuptools
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
-pulp==2.9.0 ; python_version >= "3.8"
+pulp==2.9.0
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py
