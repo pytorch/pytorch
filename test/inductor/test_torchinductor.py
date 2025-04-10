@@ -49,7 +49,6 @@ from torch._inductor.aoti_eager import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
-from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -2641,6 +2640,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
+
+    @skip_if_halide  # different pow accuracies
+    @xfail_if_triton_cpu
+    def test_norm_constant_overflow(self):
+        def fn(a):
+            return (
+                torch.norm(a, p=-41.0, dim=1),
+                torch.norm(a, p=-41.0, dim=0),
+            )
+
+        self.common(fn, (torch.randn(4, 1, 4),))
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
@@ -6441,7 +6451,6 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6490,7 +6499,6 @@ class CommonTemplate:
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
@@ -6511,7 +6519,6 @@ class CommonTemplate:
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_with_suffix(self):
@@ -12883,6 +12890,68 @@ class CommonTemplate:
         self.common(fn, (0, x))
         self.common(fn, (1, x))
         self.common(fn, (2, x))
+
+    def test_unaligned_input(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024 + 16, device=self.device)[1:-15]
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_unaligned_input_2d(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)[:, 1:-15]
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_alignment_without_custom_op(self):
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = (3 * a)[1:-15]
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op(self):
+        def slice1d(x):
+            return (3 * x)[1:-15]
+
+        def slice1d_meta(x):
+            return torch.empty_like(x)[1:-15]
+
+        define_custom_op_for_test("slice1d", slice1d, slice1d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice1d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 1:-15]
+
+        define_custom_op_for_test("slice2d", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
 
 
 @dataclasses.dataclass

@@ -27,6 +27,7 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
 
@@ -1144,6 +1145,78 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
 
   return out;
 }
+// ============================================================================
+// == Memory Tracer ======================================================
+// ============================================================================
+
+// Assuming python_tracer::PythonMemoryTracerBase is defined elsewhere
+class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
+ public:
+  explicit PythonMemoryTracer() = default;
+  ~PythonMemoryTracer() override = default;
+  void start() override;
+  void stop() override;
+  void export_memory_history(const std::string path) override;
+};
+
+static void toggle_memory_tracing(bool enable) {
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  THPObjectPtr torch_cuda_memory_module(
+      PyImport_ImportModule("torch.cuda.memory"));
+  if (!torch_cuda_memory_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(PyObject_GetAttrString(
+      torch_cuda_memory_module.get(), "_record_memory_history_impl"));
+  if (!snapshot_func) {
+    return;
+  }
+  // Call the function with arguments
+  PyObject* args = PyTuple_New(6);
+  PyTuple_SetItem(args, 0, enable ? PyUnicode_FromString("all") : Py_None);
+  PyTuple_SetItem(args, 1, PyUnicode_FromString("all")); // context
+  PyTuple_SetItem(args, 2, PyUnicode_FromString("all")); // stacks
+  PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
+  PyTuple_SetItem(args, 4, Py_None); // device (None)
+  PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+  PyGILState_Release(gil_state);
+}
+
+void PythonMemoryTracer::start() {
+  toggle_memory_tracing(true);
+}
+
+void PythonMemoryTracer::export_memory_history(const std::string path) {
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  THPObjectPtr torch_cuda_memory_module(
+      PyImport_ImportModule("torch.cuda.memory"));
+  if (!torch_cuda_memory_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(
+      PyObject_GetAttrString(torch_cuda_memory_module.get(), "_dump_snapshot"));
+  if (!snapshot_func) {
+    return;
+  }
+  PyObject* py_filename = PyUnicode_FromString(path.c_str());
+  // Call the function with arguments (e.g., a file path)
+  PyObject* args = PyTuple_Pack(1, py_filename);
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+  PyGILState_Release(gil_state);
+}
+
+void PythonMemoryTracer::stop() {
+  toggle_memory_tracing(false);
+}
 
 // ============================================================================
 // == API =====================================================================
@@ -1181,6 +1254,11 @@ std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
     torch::profiler::impl::RecordQueue* queue) {
   return std::make_unique<PythonTracer>(queue);
 }
+
+std::unique_ptr<python_tracer::PythonMemoryTracerBase> getMemoryTracer() {
+  return std::make_unique<PythonMemoryTracer>();
+}
+
 } // namespace
 } // namespace torch::profiler::impl
 
@@ -1191,5 +1269,7 @@ void init() {
   TORCH_CHECK(PyType_Ready(&torch::profiler::impl::TraceContextType) == 0);
   torch::profiler::impl::python_tracer::registerTracer(
       &torch::profiler::impl::getTracer);
+  torch::profiler::impl::python_tracer::registerMemoryTracer(
+      &torch::profiler::impl::getMemoryTracer);
 }
 } // namespace torch::autograd::profiler::python_tracer
