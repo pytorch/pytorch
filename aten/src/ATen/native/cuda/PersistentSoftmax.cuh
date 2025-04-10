@@ -302,7 +302,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool is_masked>
 void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count, const bool *mask = nullptr, int chunk_size = -1, bool is_transformer_mask = false)
 {
-    TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
+    TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 2048 );
     if (softmax_elements == 0) {
         return;
     } else {
@@ -342,7 +342,8 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
             LAUNCH_SOFTMAX_WARP_FORWARD(7);  // 128
             LAUNCH_SOFTMAX_WARP_FORWARD(8);  // 256
             LAUNCH_SOFTMAX_WARP_FORWARD(9);  // 512
-            LAUNCH_SOFTMAX_WARP_FORWARD(10); ; // 1024
+            LAUNCH_SOFTMAX_WARP_FORWARD(10); // 1024
+            LAUNCH_SOFTMAX_WARP_FORWARD(11); // 2048
             default:
                 break;
         }

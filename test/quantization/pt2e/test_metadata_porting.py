@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
-from typing import List
 
 import torch
 import torch._export
@@ -35,7 +34,7 @@ class TestHelperModules:
 
 
 def _tag_partitions(
-    backend_name: str, op_name: str, annotated_partitions: List[List[Node]]
+    backend_name: str, op_name: str, annotated_partitions: list[list[Node]]
 ):
     for index, partition_nodes in enumerate(annotated_partitions):
         tag_name = backend_name + "_" + op_name + "_" + str(index)
@@ -99,10 +98,7 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = torch.export.export_for_training(
-            m,
-            example_inputs,
-        ).module()
+        m = torch.export.export_for_training(m, example_inputs, strict=True).module()
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate

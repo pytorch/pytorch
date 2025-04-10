@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -65,15 +65,15 @@ else:
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
-            self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[C10dBackend.Options]]
+            self.mesh_stack: list[DeviceMesh] = []
+            self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: dict[
+                int, tuple[str, Optional[C10dBackend.Options]]
             ] = {}
-            self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
-            self.flatten_name_to_root_dims: Dict[
-                DeviceMesh, Dict[str, Tuple[int, ...]]
+            self.flatten_name_to_root_dims: dict[
+                DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
@@ -84,8 +84,8 @@ else:
         def create_sub_mesh(
             self,
             device_mesh: "DeviceMesh",
-            submesh_dim_names: Tuple[str, ...],
-            submesh_dims: List[Tuple[int, ...]],
+            submesh_dim_names: tuple[str, ...],
+            submesh_dims: list[tuple[int, ...]],
         ) -> "DeviceMesh":
             # Get the submesh dim size from the submesh_dims.
             # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
@@ -221,8 +221,12 @@ else:
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
-            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
+                res_flattened_mesh  # type: ignore[possibly-undefined]
+            )
+            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(
+                flatten_dims_in_root
+            )  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
@@ -242,9 +246,9 @@ else:
             root_mesh = self.get_root_mesh(device_mesh)
             child_mesh_dim_names = device_mesh.mesh_dim_names
             if root_mesh and child_mesh_dim_names:
-                assert (
-                    len(child_mesh_dim_names) == 1
-                ), "The submesh can only be a 1D mesh."
+                assert len(child_mesh_dim_names) == 1, (
+                    "The submesh can only be a 1D mesh."
+                )
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
             return None
@@ -286,7 +290,7 @@ else:
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
-        ) -> List[Tuple[int, ...]]:
+        ) -> list[tuple[int, ...]]:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -338,7 +342,7 @@ else:
 
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> List["DeviceMesh"]:
+        ) -> list["DeviceMesh"]:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
@@ -418,14 +422,14 @@ else:
 
         device_type: str
         mesh: torch.Tensor
-        mesh_dim_names: Optional[Tuple[str, ...]]
+        mesh_dim_names: Optional[tuple[str, ...]]
 
         def __init__(
             self,
             device_type: str,
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
             _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
@@ -458,7 +462,7 @@ else:
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
                 assert rank_coords.size(0) in (0, 1)
-                self._coordinate_on_dim: Optional[List[int]] = (
+                self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
@@ -498,7 +502,7 @@ else:
             # TODO(yifu): remove tag and ranks once we fully migrate to native
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: List[Tuple[str, List[int], str]] = []
+            dim_group_infos: list[tuple[str, list[int], str]] = []
             default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
@@ -657,7 +661,7 @@ else:
                 )
 
         def __getitem__(
-            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+            self, mesh_dim_names: Union[str, tuple[str, ...]]
         ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
@@ -763,7 +767,9 @@ else:
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][:2]  # type: ignore[index]
+                dim_group_infos = root_to_flatten_mapping[
+                    mesh_dim  # type: ignore[index]
+                ]._dim_group_infos[0][:2]
                 return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
             else:
                 mesh_dim = (
@@ -775,7 +781,7 @@ else:
                     _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
                 )
 
-        def get_all_groups(self) -> List[ProcessGroup]:
+        def get_all_groups(self) -> list[ProcessGroup]:
             """
             Returns a list of ProcessGroups for all mesh dimensions.
 
@@ -786,20 +792,47 @@ else:
 
         @staticmethod
         def from_group(
-            group: Union[ProcessGroup, List[ProcessGroup]],
+            group: Union[ProcessGroup, list[ProcessGroup]],
             device_type: str,
             mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
         ) -> "DeviceMesh":
             """
             Constructs a :class:`DeviceMesh` with ``device_type`` from an
-            existing :class:`ProcessGroup`.
+            existing :class:`ProcessGroup` or a list of existing :class:`ProcessGroup`.
 
             The constructed device mesh has number of dimensions equal to the
-            number of groups passed. If more than one group is passed, then the
-            ``mesh`` argument is required.
+            number of groups passed. For example, if a single process group is passed in,
+            the resulted DeviceMesh is a 1D mesh. If a list of 2 process groups is passed in,
+            the resulted DeviceMesh is a 2D mesh.
+
+            If more than one group is passed, then the ``mesh`` and ``mesh_dim_names`` arguments
+            are required. The order of the process groups passed in determines the topology of
+            the mesh. For example, the first process group will be the 0th dimension of the DeviceMesh.
+            The `mesh` tensor passed in must have the same number of dimensions as the number of process
+            groups passed in, and the order of the dimensions in the `mesh` tensor must match the order
+            in the process groups passed in.
+
+            Args:
+                group (ProcessGroup or list[ProcessGroup]): the existing ProcessGroup
+                    or a list of existing ProcessGroups.
+                device_type (str): The device type of the mesh. Currently supports: "cpu",
+                    "cuda/cuda-like". Passing in a device type with a GPU index, such as "cuda:0",
+                    is not allowed.
+                mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
+                    integer tensor describing the layout of devices, where the IDs are global IDs
+                    of the default process group. Default is None.
+                mesh_dim_names (tuple[str], optional): A tuple of mesh dimension names to assign
+                    to each dimension of the multi-dimensional array describing the layout of devices.
+                    Its length must match the length of `mesh_shape`. Each string in `mesh_dim_names`
+                    must be unique. Default is None.
+
+            Returns:
+                DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
             """
+
+            # 1D scenario
             if isinstance(group, ProcessGroup):
                 group_ranks = get_process_group_ranks(group)
                 if (
@@ -823,11 +856,17 @@ else:
                     (_get_group_tag(group), group_ranks, group.group_name)
                 ]
                 return device_mesh
+
+            # nD scenario
             groups = list(group)
             if len(groups) == 0:
                 raise ValueError("Expects at least one ProcessGroup to be passed")
             if mesh is None:
                 raise ValueError("Must pass mesh if passing multiple ProcessGroups")
+            if mesh_dim_names is None:
+                raise ValueError(
+                    "Must pass mesh_dim_names if passing multiple ProcessGroups"
+                )
             mesh = (
                 mesh.detach().to(dtype=torch.int, device="cpu")
                 if isinstance(mesh, torch.Tensor)
@@ -859,7 +898,7 @@ else:
             return self.mesh.ndim
 
         @property
-        def shape(self) -> Tuple[int, ...]:
+        def shape(self) -> tuple[int, ...]:
             return tuple(self.mesh.shape)
 
         def get_rank(self) -> int:
@@ -905,12 +944,12 @@ else:
                 mesh_dim = 0
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
-            assert isinstance(
-                mesh_dim_group, ProcessGroup
-            ), "We expect ProcessGroup before calling `get_rank`!"
+            assert isinstance(mesh_dim_group, ProcessGroup), (
+                "We expect ProcessGroup before calling `get_rank`!"
+            )
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> Optional[List[int]]:
+        def get_coordinate(self) -> Optional[list[int]]:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
@@ -939,9 +978,9 @@ else:
 
     def init_device_mesh(
         device_type: str,
-        mesh_shape: Tuple[int, ...],
+        mesh_shape: tuple[int, ...],
         *,
-        mesh_dim_names: Optional[Tuple[str, ...]] = None,
+        mesh_dim_names: Optional[tuple[str, ...]] = None,
     ) -> DeviceMesh:
         """
         Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.

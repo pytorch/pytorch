@@ -10,8 +10,8 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -47,6 +47,21 @@ public:
   operator svfloat32_t() const {
     return values;
   }
+  template <uint64_t mask>
+  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+    // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
+    __at_align__ int32_t flag_arr[size()];
+    for (int i = 0; i < size(); i++) {
+        flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
+    }
+    // Load the flag array into an SVE int32 vector.
+    svint32_t int_mask = svld1_s32(svptrue_b32(), flag_arr);
+    // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
+    svbool_t blend_mask = svcmpne_n_s32(svptrue_b32(), int_mask, 0);
+    // Use svsel to select elements from b where the predicate is true, else from a.
+    svfloat32_t result = svsel_f32(blend_mask, b.values, a.values);
+    return Vectorized<float>(result);
+  }
   static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
                               const Vectorized<float>& mask_) {
     svbool_t mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_),
@@ -69,6 +84,58 @@ public:
       return svsel_f32(svwhilelt_b32(0ull, count), b, a);
     }
     return b;
+  }
+  //Implementation is picked from https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L105
+  inline svfloat32_t svexp_f32_z(svbool_t pg, svfloat32_t x) const {
+    const auto c1 = svreinterpret_f32_u32(svdup_n_u32(0x3f7ffff6)); // x^1: 0x1.ffffecp-1f
+    const auto c2 = svreinterpret_f32_u32(svdup_n_u32(0x3efffedb)); // x^2: 0x1.fffdb6p-2f
+    const auto c3 = svreinterpret_f32_u32(svdup_n_u32(0x3e2aaf33)); // x^3: 0x1.555e66p-3f
+    const auto c4 = svreinterpret_f32_u32(svdup_n_u32(0x3d2b9f17)); // x^4: 0x1.573e2ep-5f
+    const auto c5 = svreinterpret_f32_u32(svdup_n_u32(0x3c072010)); // x^5: 0x1.0e4020p-7f
+    const auto shift   = svreinterpret_f32_u32(svdup_n_u32(0x4b00007f)); // 2^23 + 127 = 0x1.0000fep23f
+    const auto inv_ln2 = svreinterpret_f32_u32(svdup_n_u32(0x3fb8aa3b)); // 1 / ln(2) = 0x1.715476p+0f
+    const auto neg_ln2_hi =
+        svreinterpret_f32_u32(svdup_n_u32(0xbf317200)); // -ln(2) from bits  -1 to -19: -0x1.62e400p-1f
+    const auto neg_ln2_lo =
+        svreinterpret_f32_u32(svdup_n_u32(0xb5bfbe8e)); // -ln(2) from bits -20 to -42: -0x1.7f7d1cp-20f
+    const auto inf       = svdup_n_f32(std::numeric_limits<float>::infinity());
+    const auto max_input = svdup_n_f32(88.37f); // Approximately ln(2^127.5)
+    const auto zero      = svdup_n_f32(0.f);
+    const auto min_input = svdup_n_f32(-86.64f); // Approximately ln(2^-125)
+    // Range reduction:
+    //   e^x = 2^n * e^r
+    // where:
+    //   n = floor(x / ln(2))
+    //   r = x - n * ln(2)
+    //
+    // By adding x / ln(2) with 2^23 + 127 (shift):
+    //   * As FP32 fraction part only has 23-bits, the addition of 2^23 + 127 forces decimal part
+    //     of x / ln(2) out of the result. The integer part of x / ln(2) (i.e. n) + 127 will occupy
+    //     the whole fraction part of z in FP32 format.
+    //     Subtracting 2^23 + 127 (shift) from z will result in the integer part of x / ln(2)
+    //     (i.e. n) because the decimal part has been pushed out and lost.
+    //   * The addition of 127 makes the FP32 fraction part of z ready to be used as the exponent
+    //     in FP32 format. Left shifting z by 23 bits will result in 2^n.
+    const auto z     = svmla_f32_z(pg, shift, x, inv_ln2);
+    const auto n     = svsub_f32_z(pg, z, shift);
+    const auto scale = svreinterpret_f32_u32(svlsl_n_u32_z(pg, svreinterpret_u32_f32(z), 23)); // 2^n
+    // The calculation of n * ln(2) is done using 2 steps to achieve accuracy beyond FP32.
+    // This outperforms longer Taylor series (3-4 tabs) both in term of accuracy and performance.
+    const auto r_hi = svmla_f32_z(pg, x, n, neg_ln2_hi);
+    const auto r    = svmla_f32_z(pg, r_hi, n, neg_ln2_lo);
+    // Compute the truncated Taylor series of e^r.
+    //   poly = scale * (1 + c1 * r + c2 * r^2 + c3 * r^3 + c4 * r^4 + c5 * r^5)
+    const auto r2 = svmul_f32_z(pg, r, r);
+    const auto p1     = svmul_f32_z(pg, c1, r);
+    const auto p23    = svmla_f32_z(pg, c2, c3, r);
+    const auto p45    = svmla_f32_z(pg, c4, c5, r);
+    const auto p2345  = svmla_f32_z(pg, p23, p45, r2);
+    const auto p12345 = svmla_f32_z(pg, p1, p2345, r2);
+    auto poly = svmla_f32_z(pg, scale, p12345, scale);
+    // Handle underflow and overflow.
+    poly = svsel_f32(svcmplt_f32(pg, x, min_input), zero, poly);
+    poly = svsel_f32(svcmpgt_f32(pg, x, max_input), inf, poly);
+    return poly;
   }
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
@@ -318,8 +385,34 @@ public:
   Vectorized<float> tan() const {
     return USE_SLEEF(Vectorized<float>(Sleef_tanfx_u10sve(values)),map(std::tan));
   }
+  //Implementation is picked from https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
   Vectorized<float> tanh() const {
-    return USE_SLEEF(Vectorized<float>(Sleef_tanhfx_u10sve(values)),map(std::tanh));
+    // Constants used for the tanh calculation.
+    const svfloat32_t CONST_1        = svdup_n_f32(1.f);  // Constant 1.0f for the tanh formula.
+    const svfloat32_t CONST_2        = svdup_n_f32(2.f);  // Constant 2.0f for the tanh formula (used in exp(2x)).
+    const svfloat32_t CONST_MIN_TANH = svdup_n_f32(-10.f); // Minimum threshold for input values to prevent overflow.
+    const svfloat32_t CONST_MAX_TANH = svdup_n_f32(10.f); // Maximum threshold for input values to prevent overflow.
+
+    // Step 1: Clamp the values within the range [-10, 10] to prevent overflow during exponentiation.
+    // The tanh function approaches ±1 rapidly as the input grows large, so we limit the input range to avoid numerical instability.
+    // svmax_f32_z ensures values are greater than -10, and svmin_f32_z ensures they are less than 10.
+    svfloat32_t x     = svmin_f32_z(ptrue, svmax_f32_z(ptrue, values, CONST_MIN_TANH), CONST_MAX_TANH);
+
+    // Step 2: Calculate exp(2 * x), where x is the clamped value.
+    // svmul_f32_z computes 2 * x, and svexp_f32_z computes the exponential of the result.
+    svfloat32_t exp2x = svexp_f32_z(ptrue, svmul_f32_z(ptrue, CONST_2, x));
+
+    // Step 3: Calculate the numerator of the tanh function, which is exp(2x) - 1.
+    svfloat32_t num   = svsub_f32_z(ptrue, exp2x, CONST_1);
+
+    // Step 4: Calculate the denominator of the tanh function, which is exp(2x) + 1.
+    svfloat32_t den   = svadd_f32_z(ptrue, exp2x, CONST_1);
+
+    // Step 5: Calculate the tanh function as the ratio of the numerator and denominator: num / den.
+    svfloat32_t tanh  = svdiv_f32_z(ptrue, num, den);
+
+    // Return the calculated tanh values.
+    return tanh;
   }
   Vectorized<float> trunc() const {
     return svrintz_f32_x(ptrue, values);
@@ -570,4 +663,4 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

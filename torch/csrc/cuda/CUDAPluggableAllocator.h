@@ -34,10 +34,10 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
   void* data_;
   size_t size_;
   int device_;
-  cudaStream_t stream_;
+  cudaStream_t stream_{};
 };
 
-#if defined(TORCH_HIP_VERSION)
+#if defined(USE_ROCM)
 using streamType = c10::hip::HIPStream;
 #else
 using streamType = c10::cuda::CUDAStream;
@@ -63,7 +63,7 @@ struct _AllocationMetadata {
       cudaStream_t stream);
   size_t size;
   c10::DeviceIndex device_idx;
-  cudaStream_t stream;
+  cudaStream_t stream{};
 };
 
 struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
@@ -145,7 +145,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      c10::cuda::CUDACachingAllocator::RecordContext when) override;
+      c10::cuda::CUDACachingAllocator::RecordContext when,
+      bool clearHistory) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
   void attachAllocatorTraceTracker(

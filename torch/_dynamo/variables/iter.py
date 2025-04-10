@@ -1,9 +1,24 @@
 # mypy: ignore-errors
 
+"""
+This module provides iterator-related variable tracking functionality for Dynamo.
+It implements variable classes for handling Python iterators and itertools functions
+during symbolic execution and tracing.
+
+The module includes:
+- Base iterator variable classes for tracking iterator state
+- Implementations of built-in iterators (zip, map, filter)
+- Support for itertools functions (product, accumulate, combinations, etc.)
+- Mutation tracking and reconstruction capabilities for iterator operations
+
+These classes integrate with Dynamo's variable tracking system to enable proper
+handling of iterator operations during code transformation and optimization.
+"""
+
 import itertools
 import operator
 import sys
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -19,6 +34,7 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -39,8 +55,8 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
 
@@ -138,19 +154,20 @@ class ItertoolsVariable(VariableTracker):
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                keyfunc = (
-                    (
-                        lambda x: (
-                            retrieve_const_key(
-                                kwargs.get("key").call_function(tx, [x], {})
-                            )
-                        )
-                    )
-                    if "key" in kwargs
-                    else None
-                )
             else:
                 unimplemented("Unsupported arguments for itertools.groupby")
+
+            if "key" in kwargs:
+
+                def keyfunc(x):
+                    return retrieve_const_key(
+                        kwargs.get("key").call_function(tx, [x], {})
+                    )
+
+            else:
+
+                def keyfunc(x):
+                    return retrieve_const_key(x)
 
             result = []
             try:
@@ -208,15 +225,18 @@ class IteratorVariable(VariableTracker):
     # Normally, iterators are accessed lazily.
     # Example of safe eager unpacking: list(map(f, seq))
     # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
+        self.force_apply_to_var_sequence(tx, result.append)
+        return result
+
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
         while True:
             try:
-                result.append(self.next_variable(tx))
+                fn(self.next_variable(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
-        return result
 
     # don't call force_unpack_var_sequence since it can mutate
     # IteratorVariable state!
@@ -233,7 +253,7 @@ class RepeatIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         return self.item
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -263,7 +283,7 @@ class CountIteratorVariable(IteratorVariable):
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
         return old_item
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -281,7 +301,7 @@ class CycleIteratorVariable(IteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,
-        saved: Optional[List[VariableTracker]] = None,
+        saved: Optional[list[VariableTracker]] = None,
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
@@ -335,7 +355,7 @@ class ZipVariable(IteratorVariable):
 
     def __init__(
         self,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         strict: bool = False,
         **kwargs,
     ) -> None:
@@ -355,7 +375,7 @@ class ZipVariable(IteratorVariable):
             for it in self.iterables
         )
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         iterables = []
         for it in self.iterables:
@@ -409,7 +429,7 @@ class ZipVariable(IteratorVariable):
         self.index += 1
         return variables.TupleVariable(args)
 
-    def reconstruct_items(self, codegen):
+    def reconstruct_items(self, codegen: "PyCodegen"):
         for it in self.iterables:
             if isinstance(it, list):
                 remaining_items = it[self.index :]
@@ -420,7 +440,7 @@ class ZipVariable(IteratorVariable):
             else:
                 codegen(it)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "zip"), call_function_ex=True
         )
@@ -449,7 +469,7 @@ class MapVariable(ZipVariable):
     def __init__(
         self,
         fn: VariableTracker,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         **kwargs,
     ) -> None:
         super().__init__(iterables, **kwargs)
@@ -465,7 +485,7 @@ class MapVariable(ZipVariable):
         args = super().next_variable(tx)
         return self.fn.call_function(tx, args.items, {})
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "map"), call_function_ex=True
         )
@@ -492,7 +512,7 @@ class FilterVariable(IteratorVariable):
     def __init__(
         self,
         fn: VariableTracker,
-        iterable: Union[List[VariableTracker], VariableTracker],
+        iterable: Union[list[VariableTracker], VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -508,7 +528,7 @@ class FilterVariable(IteratorVariable):
             tx
         )
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         it = None
         if isinstance(self.iterable, list):
@@ -539,7 +559,7 @@ class FilterVariable(IteratorVariable):
             if pred_res.as_python_constant():
                 return item
 
-    def reconstruct_items(self, codegen):
+    def reconstruct_items(self, codegen: "PyCodegen"):
         if isinstance(self.iterable, list):
             remaining_items = self.iterable[self.index :]
             codegen.foreach(remaining_items)
@@ -549,7 +569,7 @@ class FilterVariable(IteratorVariable):
         else:
             codegen(self.iterable)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "filter"))
         codegen(self.fn)
         self.reconstruct_items(codegen)

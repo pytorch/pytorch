@@ -1,6 +1,6 @@
 #pragma once
 
-#include <math.h>
+#include <cmath>
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>

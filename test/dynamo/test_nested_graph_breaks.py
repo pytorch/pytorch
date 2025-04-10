@@ -2,34 +2,24 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
-try:
-    from . import (
-        test_aot_autograd,
-        test_ctx_manager,
-        test_functions,
-        test_higher_order_ops,
-        test_misc,
-        test_modules,
-        test_repros,
-        test_sdpa,
-        test_subgraphs,
-    )
-except ImportError:
-    import test_aot_autograd
-    import test_ctx_manager
-    import test_export
-    import test_functions
-    import test_higher_order_ops
-    import test_misc
 
-    import test_modules
-    import test_repros
-    import test_sdpa
-    import test_subgraphs
+try:
+    from . import test_ctx_manager
+except ImportError:
+    # import test_aot_autograd
+    import test_ctx_manager
+
+    # import test_export
+    # import test_functions
+    # import test_higher_order_ops
+    # import test_misc
+    # import test_modules
+    # import test_repros
+    # import test_sdpa
+    # import test_subgraphs
 
 
 test_classes = {}

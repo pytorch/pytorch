@@ -49,9 +49,11 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
+    skipIfRocmArch,
     TestCase,
 )
 
@@ -77,6 +79,11 @@ def simple_reduce_tests(rank, world_size):
             c10d.ReduceOp.MAX,
             torch.tensor([rank + 1.0]),
             torch.tensor([float(world_size)]),
+        ),
+        (
+            c10d.ReduceOp.AVG,
+            torch.tensor([rank + 1.0]),
+            torch.tensor([float((world_size + 1) / 2)]),
         ),
     ]
 
@@ -699,6 +706,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
+    def test_reduce_scatter(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        # variable size per rank
+        inputs = [torch.rand(i) for i in range(self.world_size)]
+        output = torch.empty(self.rank)
+
+        work = dist.reduce_scatter(output, inputs, async_op=True)
+        work.wait()
+
+        expect = inputs[self.rank] * self.world_size
+        self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
     def test_reduce_scatter_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -1097,6 +1125,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(MI300_ARCH)
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]

@@ -6,12 +6,14 @@
 
 import argparse
 import math
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Group,
+    MatchInfo,
     MatchState,
+    MatchStateRecord,
     Membership,
     Op,
     P2P,
@@ -27,14 +29,14 @@ except ModuleNotFoundError:
     logger.debug("tabulate is not installed. Proceeding without it.")
 
 
-def format_frame(frame: Dict[str, str]) -> str:
+def format_frame(frame: dict[str, str]) -> str:
     name = frame["name"]
     filename = frame["filename"]
     line = frame["line"]
     return f"{name} at {filename}:{line}"
 
 
-def format_frames(frames: List[Dict[str, str]]) -> str:
+def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
         formatted_frames.append(format_frame(frame))
@@ -42,22 +44,22 @@ def format_frames(frames: List[Dict[str, str]]) -> str:
 
 
 def match_one_event(
-    event_a: Dict[Any, Any],
-    event_b: Dict[Any, Any],
-    memberships: Dict[str, Set[Any]],
+    event_a: dict[Any, Any],
+    event_b: dict[Any, Any],
+    memberships: dict[str, set[Any]],
     pg_name: str,
-) -> MatchState:
+) -> MatchInfo:
     op_a = Op(event_a, memberships, pg_name)
     op_b = Op(event_b, memberships, pg_name)
     return op_a.match(op_b)
 
 
 def match_coalesced_groups(
-    all_rank_events: Dict[Any, Any],
+    all_rank_events: dict[Any, Any],
     group_size: int,
-    groups: Dict[str, Group],
-    memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    groups: dict[str, Group],
+    memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
 ) -> bool:
     """
     all_rank_events: {
@@ -92,7 +94,7 @@ def match_coalesced_groups(
 
     def visualize_ops(
         match: bool,
-        _pg_guids: Dict[Tuple[str, int], str],
+        _pg_guids: dict[tuple[str, int], str],
     ) -> None:
         all_ops = {
             rank: [
@@ -152,7 +154,7 @@ def match_coalesced_groups(
             dst_global_rank = sorted(memberships[op.pg_name])[op.dst]
             peer_ops = all_ops[dst_global_rank]
             for i, other in enumerate(peer_ops):
-                if op.match(other) == MatchState.FULLY_MATCHED:
+                if op.match(other).state == MatchState.FULLY_MATCHED:
                     match_idx = i
                     break
                 elif op.dst == other.src:
@@ -174,7 +176,7 @@ def match_coalesced_groups(
     return True
 
 
-def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int, int]:
+def check_size_alltoall(alltoall_cases: list[dict[str, Any]]) -> tuple[bool, int, int]:
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
@@ -183,12 +185,164 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
     return input_numel != output_numel, input_numel, output_numel
 
 
+def check_current_entry_match(
+    all_entries: dict[int, list[dict[str, Any]]],
+    _pg_guids: dict[tuple[str, int], str],
+    pg_info: tuple[str, str],
+    current_entry: dict[str, Any],
+    _memberships: dict[str, set[Any]],
+    mismatch: dict[str, int],
+    match_record: MatchStateRecord,
+) -> None:
+    pg_name, desc = pg_info[0], pg_info[1]
+    for o in match_record.expected_ranks.intersection(set(match_record.other_ranks)):
+        for i, e in enumerate(all_entries[o]):  # type: ignore[index]
+            # step over ops from other PGs
+            # only check match state when seq_id matches
+            if (
+                _pg_guids[(e["process_group"][0], o)] == pg_name
+                and e["process_group"][1] == desc
+                and e["collective_seq_id"] == match_record.entry_state.collective_seq_id
+            ):
+                match_info = match_one_event(current_entry, e, _memberships, pg_name)
+                if (
+                    match_info.state in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
+                    and mismatch[pg_name] == 0
+                ):
+                    match_record.found_ranks.add(o)
+                    match_record.found_idx[o] = i
+                    match_record.has_undecided_case = (
+                        match_info.state == MatchState.UNDECIDED
+                    )
+                else:
+                    match_record.candidate_ranks.add(o)
+                    match_record.candidate_idx[o] = i
+                    if match_info.state not in [
+                        MatchState.FULLY_MATCHED,
+                        MatchState.UNDECIDED,
+                    ]:
+                        # Here we assume the current rank is not the source of the error.
+                        # But it's possible that the current rank is the culprit, then users will
+                        # see lots of normal ranks reported as culprit.
+                        # TODO: we need to figure out a better way to handle the case mentioned above.
+                        match_record.errors.add((o, match_info))
+                break
+
+
+def error_analysis(
+    all_entries: dict[int, list[dict[str, Any]]],
+    match_record: MatchStateRecord,
+    dumps_ranks: set[int],
+    first_rank: int,
+    current_entry: dict[str, Any],
+    mismatch: dict[str, int],
+    version: tuple[int, int],
+    pg_name: str,
+) -> None:
+    major_v, minor_v = version[0], version[1]
+    # case one: not every rank join the collective or in the flight recorder.
+    if (
+        match_record.candidate_ranks | match_record.found_ranks
+    ) != match_record.expected_ranks and match_record.expected_ranks - (
+        match_record.candidate_ranks | match_record.found_ranks
+    ) <= dumps_ranks:
+        mismatch[pg_name] += 1
+        logger_msg = "Not all ranks joining collective, sequence number: %s"
+        missing_ranks = match_record.expected_ranks - (
+            match_record.candidate_ranks | match_record.found_ranks
+        )
+        match_record.entry_state.log(
+            logger, logger_msg, format_frames, missing_ranks=missing_ranks
+        )
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+    elif (
+        len(match_record.candidate_ranks) == 1
+        and dumps_ranks == match_record.expected_ranks
+    ):
+        # case two: alltoall or alltoall_base case.
+        if match_record.has_undecided_case:
+            alltoall_cases = [current_entry] + [
+                all_entries[o][match_record.found_idx[o]]
+                for o in match_record.found_ranks
+            ]
+            fail_check, total_input_numel, total_output_numel = check_size_alltoall(
+                alltoall_cases
+            )
+            if major_v <= 2 and minor_v <= 3:
+                # We don't log the input/output sizes for alltoall before v2.4,
+                # so we don't consider the size mismatch as an error for now.
+                fail_check = False
+            if fail_check:
+                # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
+                mismatch[pg_name] += 1
+                logger_msg = (
+                    "Input/output mismatch in the collective sequence number: %s"
+                )
+                match_record.entry_state.log(
+                    logger,
+                    logger_msg,
+                    format_frames,
+                    total_numel=(total_input_numel, total_output_numel),
+                )
+                match_record.candidate_ranks.update(match_record.found_ranks)
+                match_record.candidate_idx.update(match_record.found_idx)
+                match_record.found_idx.clear()
+                match_record.found_ranks.clear()
+                match_record.errors.add(
+                    (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
+                )
+            else:
+                match_record.found_ranks.update(match_record.candidate_ranks)
+                match_record.found_idx.update(match_record.candidate_idx)
+                match_record.candidate_idx.clear()
+                match_record.candidate_ranks.clear()
+        # case three: all joined and everything matches on all ranks.
+        else:
+            match_record.found_ranks.update(match_record.candidate_ranks)
+            match_record.found_idx.update(match_record.candidate_idx)
+            match_record.candidate_idx.clear()
+            match_record.candidate_ranks.clear()
+    # case four: mismatch cases due to not same type, size mismatch or state mismatch.
+    elif len(match_record.errors) > 0:
+        mismatch[pg_name] += 1
+        logger_msg = "Collective sequence number: %s has errors"
+        match_record.entry_state.log(
+            logger, logger_msg, format_frames, errors=match_record.errors
+        )
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+    # partial analysis case when we cannot decide what's wrong with this collective entry.
+    else:
+        match_record.candidate_ranks.update(match_record.found_ranks)
+        match_record.candidate_idx.update(match_record.found_idx)
+        match_record.found_idx.clear()
+        match_record.found_ranks.clear()
+        if match_record.expected_ranks - dumps_ranks:
+            mismatch[pg_name] += 1
+            logger.info(
+                "We cannot decide what's wrong with this collective entry "
+                "because we missed FR dumps from ranks (%s) so we don't have enough "
+                "information. If you want to debug further use -j to dump all raw trace",
+                str(match_record.expected_ranks - dumps_ranks),
+            )
+        else:
+            logger.info(
+                "No errors found for this collective entry, There could be some "
+                "other reasons why we see collective timeout."
+            )
+
+
 def find_coalesced_group(
     pg_name: str,
-    entries: List[Dict[str, Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    entries: list[dict[str, Any]],
+    _pg_guids: dict[tuple[str, int], str],
     rank: int,
-) -> List[Tuple[int, Dict[str, Any]]]:
+) -> list[tuple[int, dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
@@ -216,10 +370,10 @@ def find_coalesced_group(
 
 
 def just_print_entries(
-    all_entries: Dict[int, List[Dict[str, Any]]],
-    _groups: Dict[str, Group],
-    _memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    all_entries: dict[int, list[dict[str, Any]]],
+    _groups: dict[str, Group],
+    _memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
     args: argparse.Namespace,
 ) -> None:
     rows = []
@@ -257,25 +411,25 @@ def just_print_entries(
 
 
 def check_no_missing_dump_files(
-    entries: Dict[int, Any], memberships: List[Membership]
+    entries: dict[int, Any], memberships: list[Membership]
 ) -> None:
     all_ranks = set()
     for membership in memberships:
         all_ranks.add(int(membership.global_rank))
     dumps_ranks = {int(key) for key in entries.keys()}
-    assert (
-        dumps_ranks == all_ranks
-    ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    assert dumps_ranks == all_ranks, (
+        f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    )
 
 
-def check_version(version_by_ranks: Dict[str, str], version: str) -> None:
+def check_version(version_by_ranks: dict[str, str], version: str) -> None:
     for rank, v in version_by_ranks.items():
-        assert (
-            v == version
-        ), f"Rank {rank} has different version {v} from the given version {version}"
+        assert v == version, (
+            f"Rank {rank} has different version {v} from the given version {version}"
+        )
 
 
-def get_version_detail(version: str) -> Tuple[int, int]:
+def get_version_detail(version: str) -> tuple[int, int]:
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
@@ -283,8 +437,8 @@ def get_version_detail(version: str) -> Tuple[int, int]:
 
 
 def align_trace_from_beginning(
-    entries: Dict[int, List[Dict[str, Any]]],
-) -> Dict[int, List[Dict[str, Any]]]:
+    entries: dict[int, list[dict[str, Any]]],
+) -> dict[int, list[dict[str, Any]]]:
     """
     Align the trace entries by record ID for entries.
     This function takes a dictionary of rank names to lists of trace entries as input.

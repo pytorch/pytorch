@@ -5,17 +5,7 @@ import numbers
 import types
 import typing
 import warnings
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched
@@ -44,11 +34,11 @@ class ArgsKwargsPair(NamedTuple):
     Simple named tuple for wrapping args/kwargs pairs.
     """
 
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
 
 
-_manual_overrides: Dict[Callable, List[inspect.Signature]] = {}
+_manual_overrides: dict[Callable, list[inspect.Signature]] = {}
 
 
 def _nonzero_schemas():
@@ -108,7 +98,7 @@ def _torchscript_schema_to_signature_impl(
 ) -> inspect.Signature:
     from inspect import Parameter
 
-    parameters: List[Parameter] = []
+    parameters: list[Parameter] = []
     for arg in ts_schema.arguments:
         arg_type = _torchscript_type_to_python_type(arg.type)
         default = arg.default_value if arg.has_default_value() else Parameter.empty
@@ -154,7 +144,7 @@ def _torchscript_schema_to_signature_impl(
     return inspect.Signature(parameters, return_annotation=return_type)
 
 
-_SCHEMA_TO_SIGNATURE_CACHE: Dict[Tuple[str, str], inspect.Signature] = {}
+_SCHEMA_TO_SIGNATURE_CACHE: dict[tuple[str, str], inspect.Signature] = {}
 
 
 def _torchscript_schema_to_signature(
@@ -173,7 +163,7 @@ def _torchscript_schema_to_signature(
 
 @compatibility(is_backward_compatible=False)
 def check_for_mutable_operation(
-    target: Callable, args: Tuple["Argument", ...], kwargs: Dict[str, "Argument"]
+    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
 ):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
@@ -265,12 +255,12 @@ def create_type_hint(x):
             if isinstance(x, list):
 
                 def ret_type(x):
-                    return List[x]  # type: ignore[valid-type]
+                    return list[x]  # type: ignore[valid-type]
 
             else:
 
                 def ret_type(x):
-                    return Tuple[x, ...]
+                    return tuple[x, ...]  # type: ignore[valid-type]
 
             if len(x) == 0:
                 return ret_type(Any)
@@ -304,22 +294,23 @@ def type_matches(signature_type: Any, argument_type: Any):
         sig_contained = signature_type.__args__
         return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if signature_type is List[int] and argument_type is int:
-        # int can be promoted to List[int]
-        return True
-
-    if getattr(signature_type, "__origin__", None) in {list, List}:
+    if getattr(signature_type, "__origin__", None) is list:
         sig_el_type = signature_type.__args__[0]
+
+        # int can be promoted to list[int]
+        if argument_type is int and sig_el_type is int:
+            return True
+
         if not inspect.isclass(sig_el_type):
             warnings.warn(
                 f"Does not support nested parametric types, got {signature_type}. Please file a bug."
             )
             return False
-        if getattr(argument_type, "__origin__", None) in {list, List}:
+        if getattr(argument_type, "__origin__", None) is list:
             return issubclass(argument_type.__args__[0], sig_el_type)
 
         def is_homogeneous_tuple(t):
-            if getattr(t, "__origin__", None) not in {tuple, Tuple}:
+            if getattr(t, "__origin__", None) is not tuple:
                 return False
             contained = t.__args__
             if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
@@ -344,10 +335,10 @@ def type_matches(signature_type: Any, argument_type: Any):
 @compatibility(is_backward_compatible=False)
 def normalize_function(
     target: Callable,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    arg_types: Optional[Tuple[Any]] = None,
-    kwarg_types: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    arg_types: Optional[tuple[Any]] = None,
+    kwarg_types: Optional[dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -424,7 +415,7 @@ def normalize_function(
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
-                    arg_types = arg_types if arg_types else cast(Tuple[Any], ())
+                    arg_types = arg_types if arg_types else cast(tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
                     for candidate_signature in torch_op_schemas:
                         sig_matches = True
@@ -468,8 +459,8 @@ def normalize_function(
 def normalize_module(
     root: torch.nn.Module,
     target: str,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -513,8 +504,8 @@ def normalize_module(
 
 def _args_kwargs_to_normalized_args_kwargs(
     sig: inspect.Signature,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -552,8 +543,8 @@ def _args_kwargs_to_normalized_args_kwargs(
     bound_args = sig.bind(*args, **kwargs)
     bound_args.apply_defaults()
 
-    new_kwargs: Dict[str, Any] = {}
-    new_args: List[Any] = []
+    new_kwargs: dict[str, Any] = {}
+    new_args: list[Any] = []
     for i, param in enumerate(sig.parameters):
         if not normalize_to_only_use_kwargs and i < len(args):
             new_args.append(bound_args.arguments[param])
