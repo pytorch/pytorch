@@ -1662,6 +1662,9 @@ def non_single_tensor_return_unsupported(api, ret):
 
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="map doesn't work unless it is captured completely with torch.compile."
+    )
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1678,8 +1681,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_supported_callable_arg(tx, args[0], "map_fn")
 
         # args = f, flat_xs, flat_args
-        assert isinstance(args[1], ListVariable), args[1]
-        assert isinstance(args[2], ListVariable), args[2]
+        assert isinstance(args[1], (ListVariable, TupleVariable)), args[1]
+        assert isinstance(args[2], (ListVariable, TupleVariable)), args[2]
         unpacked_xs = args[1].unpack_var_sequence(tx)
         unpacked_args = args[2].unpack_var_sequence(tx)
 
