@@ -12930,22 +12930,21 @@ NUM_GPU_CYCLES_IN_ONE_SEC = 2_000_000_000
 
 
 class TestAutogradStreamSynchronization(TestCase):
-    def get_default_streams(self):
-        with torch.cuda.device(0):
-            default_stream_0 = torch.cuda.default_stream()
-        with torch.cuda.device(1):
-            default_stream_1 = torch.cuda.default_stream()
-        return default_stream_0, default_stream_1
+    def get_default_streams(self, num_devices=1):
+        out = []
+        for i in range(num_devices):
+            out.append(torch.cuda.default_stream(i))
+        return tuple(out)
 
-    def synchronize_all_devices(self):
-        torch.cuda.synchronize(0)
-        torch.cuda.synchronize(1)
+    def synchronize_all_devices(self, num_devices=1):
+        for i in range(num_devices):
+            torch.cuda.synchronize(i)
 
-    def assert_all_streams_default(self):
+    def assert_all_streams_default(self, num_devices=1):
         # Sanity check
-        d0, d1 = self.get_default_streams()
-        self.assertEqual(torch.cuda.current_stream(0), d0)
-        self.assertEqual(torch.cuda.current_stream(1), d1)
+        default_streams = self.get_default_streams(num_devices)
+        for i in range(num_devices):
+            self.assertEqual(torch.cuda.current_stream(i), default_streams[i])
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_consumer_to_single_producer_case_2_correctness(self):
@@ -13018,13 +13017,13 @@ class TestAutogradStreamSynchronization(TestCase):
                 return out
 
         def test():
-            self.synchronize_all_devices()
-            self.assert_all_streams_default()
+            self.synchronize_all_devices(2)
+            self.assert_all_streams_default(2)
 
             with torch.cuda.device(0):
                 s0 = torch.cuda.Stream()
                 s1 = torch.cuda.Stream()
-            default_stream_0, default_stream_1 = self.get_default_streams()
+            default_stream_0, = self.get_default_streams()
 
             # Ensure consumer node happens on non-default stream so that
             # when FuncBackward produces a gradient on a default stream
@@ -13046,7 +13045,7 @@ class TestAutogradStreamSynchronization(TestCase):
                 with ctx:
                     out.sum().backward()
 
-            self.synchronize_all_devices()
+            self.synchronize_all_devices(2)
 
             # Expected result: a.grad = (grad_out + 1) * 2 = 4
             self.assertEqual(a.grad, torch.ones_like(a) * 4)
@@ -13107,12 +13106,12 @@ class TestAutogradStreamSynchronization(TestCase):
                 return gO_1.to("cuda:0")
 
         def test():
-            self.synchronize_all_devices()
-            self.assert_all_streams_default()
+            self.synchronize_all_devices(2)
+            self.assert_all_streams_default(2)
 
             with torch.cuda.device(1):
                 s1 = torch.cuda.Stream()
-            _, default_stream_1 = self.get_default_streams()
+            _, default_stream_1 = self.get_default_streams(2)
 
             a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
             _unused, b = Consumer.apply(a)
@@ -13124,7 +13123,7 @@ class TestAutogradStreamSynchronization(TestCase):
             with torch.autograd.grad_mode.set_multithreading_enabled(False):
                 out.sum().backward()
 
-            self.synchronize_all_devices()
+            self.synchronize_all_devices(2)
 
             # Expected result: a.grad = grad_out + 1 = 2
             self.assertEqual(a.grad, torch.ones_like(a) * 2)
@@ -13178,13 +13177,13 @@ class TestAutogradStreamSynchronization(TestCase):
                 return (gO_1 * 2).to("cuda:0")
 
         def test():
-            self.synchronize_all_devices()
-            self.assert_all_streams_default()
+            self.synchronize_all_devices(2)
+            self.assert_all_streams_default(2)
 
             with torch.cuda.device(1):
                 s1 = torch.cuda.Stream()
                 s2 = torch.cuda.Stream()
-            default_stream_0, default_stream_1 = self.get_default_streams()
+            default_stream_0, default_stream_1 = self.get_default_streams(2)
 
             a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
             _unused, b = Consumer.apply(a)
@@ -13205,7 +13204,7 @@ class TestAutogradStreamSynchronization(TestCase):
             with torch.autograd.grad_mode.set_multithreading_enabled(False):
                 (out1 + out2).sum().backward()
 
-            self.synchronize_all_devices()
+            self.synchronize_all_devices(2)
 
             # If the accumulation stream does not wait for the slow producer stream
             # the in-place mul-by-2 is performed on the accumulated buffer AFTER
@@ -13276,7 +13275,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
             with torch.cuda.device(0):
                 s0 = torch.cuda.Stream()
-            default_stream_0, _ = self.get_default_streams()
+            default_stream_0, = self.get_default_streams()
 
             a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
             b = a.clone()  # not a leaf, does it matter?
