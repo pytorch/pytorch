@@ -25,7 +25,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -51,17 +51,16 @@ def create_block_mask_test(score_mod, query, key):
     return block_mask
 
 
-if HAS_GPU:
-    if HAS_CUDA:
-        test_dtypes = (
-            [torch.float16, torch.bfloat16, torch.float32]
-            if PLATFORM_SUPPORTS_BF16
-            else [torch.float16, torch.float32]
-        )
-        test_dtypes_fast = [torch.float16]
-    elif HAS_XPU:
-        test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
-        test_dtypes_fast = [torch.float16]
+if GPU_TYPE == "cuda":
+    test_dtypes = (
+        [torch.float16, torch.bfloat16, torch.float32]
+        if PLATFORM_SUPPORTS_BF16
+        else [torch.float16, torch.float32]
+    )
+    test_dtypes_fast = [torch.float16]
+elif GPU_TYPE == "xpu":
+    test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
+    test_dtypes_fast = [torch.float16]
 
 test_page_sizes = [64, 128, 256]
 
