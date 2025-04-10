@@ -560,3 +560,26 @@ class Op:
                 else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             )
         return MatchInfo(MatchState.FULLY_MATCHED)
+
+
+class MatchStateRecord:
+    def __init__(
+        self,
+        expected_ranks: set[int],
+        other_ranks: list[int],
+        entry_state: EntryState,
+        candidate_ranks: set[int],
+        candidate_idx: dict[int, int],
+        found_ranks: set[int],
+        found_idx: dict[int, int],
+        errors: set[tuple[int, MatchInfo]],
+    ) -> None:
+        self.expected_ranks = expected_ranks
+        self.other_ranks = other_ranks
+        self.entry_state = entry_state
+        self.candidate_ranks = candidate_ranks
+        self.candidate_idx = candidate_idx
+        self.found_ranks = found_ranks
+        self.found_idx = found_idx
+        self.errors = errors
+        self.has_undecided_case = False
