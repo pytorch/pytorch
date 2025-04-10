@@ -64,6 +64,7 @@ This unique string can be looked up in the Active Memory Timeline and searched
 in the Active State History to examine the memory state when a tensor was allocated or freed.
 
 .. _non_pytorch_alloc:
+
 Identifying Non-PyTorch allocations
 -----------------------------------
 
