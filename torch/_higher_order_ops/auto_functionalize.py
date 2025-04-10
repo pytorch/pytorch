@@ -10,6 +10,7 @@ import torch._library.utils as library_utils
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import reenter_make_fx, unique_graph_id
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -366,6 +367,9 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def can_auto_functionalize(op: OperatorBase) -> bool:
+    if isinstance(op, HigherOrderOperator):
+        return True
+
     if not isinstance(op, OpOverload):
         return False
 
@@ -403,23 +407,29 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
-    """
-    Returns the list of argument names that get mutated according to the
-    schema and their types.
-    """
+def get_mutable_args_from_schema(
+    schema: torch._C.FunctionSchema,
+) -> tuple[list[str], list[torch.Type]]:
     mutable_args_names = [
         arg.name
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
 
     mutable_args_types = [
         arg.type
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
     return mutable_args_names, mutable_args_types
+
+
+def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+    """
+    Returns the list of argument names that get mutated according to the
+    schema and their types.
+    """
+    return get_mutable_args_from_schema(op._schema)
 
 
 def do_auto_functionalize(
@@ -514,7 +524,7 @@ def do_auto_functionalize(
 
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: OpOverload,
+    op: Union[OpOverload, HigherOrderOperator],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -526,7 +536,12 @@ def do_auto_functionalize_v2(
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
 
-    schema = op._schema
+    assert isinstance(op, (OpOverload, HigherOrderOperator))
+    schema = (
+        op.gen_schema(*args, **kwargs)
+        if isinstance(op, HigherOrderOperator)
+        else op._schema
+    )
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
         if arg.name in kwargs:
@@ -540,7 +555,7 @@ def do_auto_functionalize_v2(
             normalized_kwargs[arg.name] = arg.default_value
 
     # List of the name of args that get mutated (according to the schema)
-    mutable_args_names, mutable_args_types = get_mutable_args(op)
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
 
     # A list of all bases of mutable args without duplication
     all_bases = []
@@ -604,7 +619,7 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _op_schema=schema)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -615,14 +630,18 @@ def do_auto_functionalize_v2(
         [] if len(all_bases) == 0 else unwrapped_outs[-len(all_bases) :]
     )
 
-    if len(op._schema.returns) == 0:
+    if len(schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
         unwrapped_actual_out = None
-    elif len(op._schema.returns) == 1:
-        assert len(unwrapped_actual_out) == 1
-        unwrapped_actual_out = unwrapped_actual_out[0]
+    elif len(schema.returns) == 1:
+        # Hop schema returns a single Argument of TupleType
+        if isinstance(schema.returns[0].type, torch.TupleType):
+            return unwrapped_actual_out
+        else:
+            assert len(unwrapped_actual_out) == 1
+            unwrapped_actual_out = unwrapped_actual_out[0]
     else:
-        assert len(unwrapped_actual_out) == len(op._schema.returns)
+        assert len(unwrapped_actual_out) == len(schema.returns)
 
     for orig_arg, unwrapped_out in zip(all_bases, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
@@ -731,12 +750,17 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 # auto_functionalized_v2 functions
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
-    _mutable_op: OpOverload,
+    _mutable_op: Union[OpOverload, HigherOrderOperator],
     _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
-    mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
+    schema = kwargs.pop("_op_schema", None)
+    assert schema is not None
+
+    # have to re-populate the schema since cannot proxied it in graph
+    # and we don't always hit functionalization key
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
     )
@@ -776,7 +800,16 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
-    out = _mutable_op(**new_kwargs)
+    # Schema to calling convention
+    final_args = []
+    final_kwargs = {}
+    for arg in schema.arguments:
+        if not arg.kwarg_only:
+            final_args.append(new_kwargs[arg.name])
+        else:
+            final_kwargs[arg.name] = new_kwargs[arg.name]
+
+    out = _mutable_op(*final_args, **final_kwargs)
 
     if isinstance(out, tuple):
         return (*out, *all_bases_new)  # type: ignore[return-value]
@@ -803,10 +836,51 @@ def auto_functionalized_v2_proxy(
     _mutable_op: OpOverload,
     **kwargs: dict[str, Any],
 ) -> tuple[Any, tuple[Tensor, ...]]:
+    # We need to normalize the higher order op's input fn to graph module
+    # this could happen e.g. when we are in backward of base_hop where we
+    # have FunctionWithNoFreeVars input
+    schema = kwargs["_op_schema"]
+    if isinstance(_mutable_op, HigherOrderOperator):
+        new_args = []
+        new_kwargs = {}
+        for arg in schema.arguments:
+            key = arg.name
+            if key not in kwargs:
+                assert "_" + key + "_base_index" in kwargs, (key, kwargs)
+                key = "_" + key + "_base_index"
+                val = kwargs["_all_bases"][kwargs[key]]
+            else:
+                val = kwargs[key]
+            if not arg.kwarg_only:
+                new_args.append(val)
+            else:
+                new_kwargs[arg.name] = val
+
+        args = new_args + list(new_kwargs.values())
+        n_args = len(new_args)
+
+        def fn(*args):
+            final_args = args[:n_args]
+            final_kwargs = dict(
+                k: v for k, v in zip(new_kwargs.keys(), args[n_args:])
+            )
+            return _mutable_op(*final_args, **final_kwargs)
+
+        hop_gm = reenter_make_fx(fn)(*args)
+        kwargs["subgraph"] = hop_gm.subgraph0
+
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 
+    def _create_submodule(val: Any):
+        _, graph_name = unique_graph_id(mode, prefix="auto_functionalized_subgraph")
+        mode.tracer.root.register_module(graph_name, val)
+        return val
+
+    kwargs = pytree.tree_map_only(torch.fx.GraphModule, _create_submodule, kwargs)
+
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized_v2,

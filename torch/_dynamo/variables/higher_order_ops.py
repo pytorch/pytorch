@@ -3080,7 +3080,7 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 class BaseHOPVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
+        self.supports_input_mutation = True
         self.supports_aliasing = False
 
     def python_type(self):
