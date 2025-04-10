@@ -2279,15 +2279,12 @@ def forward(self):
         mod = Module()
 
         mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
-        mod_for_eager = Module()
 
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        # There is graph break right when we enter body of map
-        # Since we are tracing through the Python dispatch logic, it ends up 8 graphs.
-        self.assertEqual(len(backend.graphs), 8)
-        self.assertEqual(
-            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "map doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
     def test_map_side_effect(self):
         backend = EagerAndRecordGraphs()
