@@ -132,10 +132,12 @@ class DeferredTritonCallWrapper:
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
-        # Ensure the cubin file is included in the package
-        V.graph.wrapper_code.additional_files.append(
-            params[get_cpp_wrapper_cubin_path_name()]
-        )
+
+        if not config.aot_inductor.embed_cubin:
+            # Ensure the cubin file is included in the package
+            V.graph.wrapper_code.additional_files.append(
+                params[get_cpp_wrapper_cubin_path_name()]
+            )
 
     def generate_grid(
         self,
@@ -448,7 +450,7 @@ class CppWrapperGpu(CppWrapperCpu):
             is not None
         ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(global_scratch_def)
+            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
