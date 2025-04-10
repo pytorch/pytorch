@@ -3264,7 +3264,7 @@ class ShapeEnv:
     @contextlib.contextmanager
     def dde_suppressed(self) -> Iterator[None]:
         # We do not expect this to be called recursively.
-        assert not self._dde_suppressed, "not expected value for dde_suppressed"
+        assert not self._dde_suppressed, "not expected value for _dde_suppressed"
         self._dde_suppressed = True
         try:
             yield
@@ -6066,11 +6066,11 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
-        if self._dde_suppressed:
-            return GuardOnDataDependentSymNode(
-                expr,
-                "This data dependent error is suppressed and handled by the caller",
-            )
+        # if self._dde_suppressed:
+        #     return GuardOnDataDependentSymNode(
+        #         expr,
+        #         "This data dependent error is suppressed and handled by the caller",
+        #     )
 
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
