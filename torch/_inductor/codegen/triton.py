@@ -933,7 +933,11 @@ class TritonOverrides(OpOverrides):
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
-        return f"tl.full({shape}, {triton_val}, {triton_type})"
+        if value < 0 and not dtype.is_signed:
+            triton_signed_type = f"tl.{triton_type[4:]}"
+            return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
+        else:
+            return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @classmethod
     def constant(cls, value, dtype):
