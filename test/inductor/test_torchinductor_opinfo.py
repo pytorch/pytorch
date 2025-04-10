@@ -228,7 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
-    "histc": {f16},
     "multinomial": {f16, f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
@@ -242,6 +241,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
 }
+if not torch._inductor.config.cpp_wrapper:
+    inductor_expected_failures_single_sample["cpu"]["histc"] = {f16}
 
 
 inductor_expected_failures_single_sample["cuda"] = {
