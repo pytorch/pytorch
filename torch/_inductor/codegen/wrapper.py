@@ -1123,9 +1123,7 @@ class PythonWrapperCodegen(CodeGen):
     # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
-    def write_get_raw_stream(
-        self, code: IndentedBuffer, device_idx: int, graph_name: str
-    ) -> str:
+    def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         if config.triton.autotune_at_compile_time:
@@ -1135,7 +1133,7 @@ class PythonWrapperCodegen(CodeGen):
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        code.writeline(f"{name} = get_raw_stream({device_idx})")
+        self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -2397,7 +2395,7 @@ class PythonWrapperCodegen(CodeGen):
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
         stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, code, device.index, graph_name
+            self, device.index, graph_name
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"

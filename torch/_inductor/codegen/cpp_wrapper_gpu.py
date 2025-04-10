@@ -240,16 +240,14 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
-    def write_get_raw_stream(
-        self, code: IndentedBuffer, device_idx: int, graph_name: str
-    ) -> str:
+    def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         name = f"stream{device_idx}"
-        code.writeline(
+        self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
             )
         )
-        code.writeline(
+        self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
@@ -506,7 +504,7 @@ class CppWrapperGpu(CppWrapperCpu):
         stream = (
             "stream"
             if V.graph.aot_mode
-            else self.write_get_raw_stream(code, device.index, graph_name)
+            else self.write_get_raw_stream(device.index, graph_name)
         )
 
         if triton:
