@@ -58,8 +58,20 @@ class VerificationInfoTest(common_utils.TestCase):
         self.assertEqual(asdict_result["name"], "test_tensor")
         self.assertEqual(asdict_result["max_abs_diff"], 0)
         self.assertEqual(asdict_result["max_rel_diff"], 0)
-        self.assertEqual(asdict_result["abs_diff_hist"], [[3.0] + [0.0] * 8, [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0]])
-        self.assertEqual(asdict_result["rel_diff_hist"], [[3.0] + [0.0] * 8, [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0]])
+        self.assertEqual(
+            asdict_result["abs_diff_hist"],
+            [
+                [3.0] + [0.0] * 8,
+                [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0],
+            ],
+        )
+        self.assertEqual(
+            asdict_result["rel_diff_hist"],
+            [
+                [3.0] + [0.0] * 8,
+                [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0],
+            ],
+        )
         self.assertEqual(asdict_result["expected_dtype"], "torch.float32")
         self.assertEqual(asdict_result["actual_dtype"], "torch.float32")
 
