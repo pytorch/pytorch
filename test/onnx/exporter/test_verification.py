@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 import torch
 from torch.onnx._internal.exporter import _verification
 from torch.testing._internal import common_utils
@@ -74,6 +76,10 @@ class VerificationInfoTest(common_utils.TestCase):
         )
         self.assertEqual(asdict_result["expected_dtype"], "torch.float32")
         self.assertEqual(asdict_result["actual_dtype"], "torch.float32")
+        # Ensure it can be round tripped as json
+        json_str = json.dumps(asdict_result)
+        loaded_dict = json.loads(json_str)
+        self.assertEqual(loaded_dict, asdict_result)
 
 
 class VerificationInterpreterTest(common_utils.TestCase):
