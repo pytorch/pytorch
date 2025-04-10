@@ -530,38 +530,38 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 )
                 return
 
-        matA = (
-            torch.rand(k, ldb, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(ldb, k, dtype=dtype, device=deviceid)
-        )
-        matB = (
-            torch.rand(lda, k, dtype=dtype, device=deviceid).t()
-            if transA
-            else torch.rand(k, lda, dtype=dtype, device=deviceid)
-        )
-        print(n, m, k, lda, ldb, ldc)
-
-        # m = max(k, ldc) # OK
-        # n = max(k, ldb)
         if subMatrix:
-            m = max(k, ldc)
+            # TO DO: rowsA = rowsB = ldc may not be necessary, but it is
+            # simplest scenario to consider
+            rowsA = rowsB = ldc
+
+            matA = torch.randn(rowsA, ldb, dtype=dtype, device=deviceid)
+            matB = torch.randn(rowsB, lda, dtype=dtype, device=deviceid)
 
             subA = (
-                matA[:k, :m]
+                matA[:k, :m].t()
                 if transB
                 else matA[:m, :k]
             )
-            
             subB = (
-                matB[:n, :k]
+                matB[:n, :k].t()
                 if transA
-                else matB[:k, :m]
+                else matB[:k, :n]
             )
-
             torch.mm(subA, subB)
+        else:
+            matA = (
+                torch.rand(k, m, dtype=dtype, device=deviceid).t()
+                if transB
+                else torch.rand(m, k, dtype=dtype, device=deviceid)
+            )
+            matB = (
+                torch.rand(n, k, dtype=dtype, device=deviceid).t()
+                if transA
+                else torch.rand(k, n, dtype=dtype, device=deviceid)
+            )
+            torch.mm(matA, matB)
 
-        torch.mm(matA, matB)
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
