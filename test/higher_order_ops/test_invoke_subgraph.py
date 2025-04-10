@@ -20,11 +20,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-if requires_cuda:
+if HAS_GPU:
     import triton
 
 
@@ -1364,7 +1364,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_native(self):
         from torch.testing._internal.triton_utils import add_kernel
 
