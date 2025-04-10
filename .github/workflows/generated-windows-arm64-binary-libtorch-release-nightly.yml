@@ -73,6 +73,20 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Print directories of installations
+        shell: cmd
+        run: |
+          echo === PATH ENVIRONMENT VARIABLE ===
+          echo %PATH%
+          echo.
+          echo === Location of cl.exe ===
+          where cl.exe
+          echo.
+          echo === Location of python.exe ===
+          where python.exe
+          echo.
+          echo === Python Version ===
+          python --version
       - name: Enable long paths on Windows
         shell: cmd
         run: |
@@ -83,14 +97,6 @@ jobs:
         with:
           path: "pytorch"
           submodules: recursive
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
@@ -167,18 +173,6 @@ jobs:
         with:
           path: "pytorch"
           submodules: recursive
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
