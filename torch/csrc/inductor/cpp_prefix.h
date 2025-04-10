@@ -9,10 +9,10 @@
 #include <memory>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
-// Because AOTInductor generated code will include this header for the CPU
-// backend, we have to make sure the used headers are implemented in a
-// header-only way, i.e. all the function and class definitions are in .h files
-// instead of .cpp files, to avoid ABI backward-compatibility breakage.
+// Because AOTInductor generated code will include this for the CPU backend, we
+// have to make sure the used headers are implemented in a header-only way; i.e.
+// all the function and class definitions are in .h files instead of .cpp files,
+// to avoid ABI backward-compatibility breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
@@ -45,12 +45,6 @@
 // For calc_erfinv
 #include <ATen/native/Math.h>
 #endif
-
-typedef at::Half half;
-typedef at::BFloat16 bfloat16;
-
-typedef at::Float8_e4m3fn float8_e4m3fn;
-typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
@@ -505,8 +499,8 @@ inline IndexValue<T> argmin_vec_reduce_all(
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
   __at_align__ std::array<T, len> tmpval;
   __at_align__ std::array<int64_t, len> tmpidx;
-  vec.value.store(tmpval);
-  vec.index.store(tmpidx);
+  vec.value.store(tmpval.data());
+  vec.index.store(tmpidx.data());
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
   for (int i = 1; i < len; i++) {
     res = argmin_combine(res, tmpval[i], tmpidx[i]);
@@ -520,8 +514,8 @@ inline IndexValue<T> argmax_vec_reduce_all(
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
   __at_align__ std::array<T, len> tmpval;
   __at_align__ std::array<int64_t, len> tmpidx;
-  vec.value.store(tmpval);
-  vec.index.store(tmpidx);
+  vec.value.store(tmpval.data());
+  vec.index.store(tmpidx.data());
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
   for (int i = 1; i < len; i++) {
     res = argmax_combine(res, tmpval[i], tmpidx[i]);
@@ -551,11 +545,11 @@ inline at::vec::Vectorized<scalar_t> vec_shuffle_down(
     size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
   alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
-  x.store(array);
+  x.store(array.data());
   for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
     array[i] = array[i + n];
   }
-  return Vec::loadu(array);
+  return Vec::loadu(array.data());
 }
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -624,13 +618,13 @@ Welford<scalar_t> welford_vec_reduce_all(
   }
 
   alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
-  acc.mean.store(array);
+  acc.mean.store(array.data());
   result.mean = array[0];
 
-  acc.m2.store(array);
+  acc.m2.store(array.data());
   result.m2 = array[0];
 
-  acc.weight.store(array);
+  acc.weight.store(array.data());
   result.weight = array[0];
   result.index = result.weight;
 
@@ -717,7 +711,7 @@ struct AsIntegerType<double> {
   typedef uint64_t type;
 };
 template <>
-struct AsIntegerType<bfloat16> {
+struct AsIntegerType<at::BFloat16> {
   typedef uint16_t type;
 };
 

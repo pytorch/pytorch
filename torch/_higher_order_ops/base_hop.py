@@ -6,7 +6,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import reenter_make_fx
+from torch._higher_order_ops.utils import (
+    check_input_alias_and_mutation_return_ouputs,
+    reenter_make_fx,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -125,6 +128,64 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             )
             out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
+
+    def gen_schema(self, *args, **kwargs):
+        from .schema import CFunctionSchemaGen, HopArgumentInfoGen
+
+        subgraph, *operands = args
+
+        assert isinstance(
+            subgraph, torch.fx.GraphModule
+        ), f"NYI non GraphModule subgraph got {subgraph}"
+
+        fake_args = [
+            ph.meta["example_value"]
+            for ph in subgraph.graph.find_nodes(op="placeholder")
+        ]
+        (
+            mutated_inp_idx,
+            inp_inp_alias,
+            inp_out_alias,
+            out_out_alias,
+            output,
+        ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
+
+        assert (
+            len(inp_inp_alias) == 0
+            and len(inp_out_alias) == 0
+            and len(out_out_alias) == 0
+        ), "Aliasing is not suppported for HOP subgraph."
+        args = [
+            HopArgumentInfoGen.from_example(
+                subgraph, name="subgraph", default_value=None, is_mutated=False
+            )
+        ]
+        for idx, arg in enumerate((*operands, *kwargs.items())):
+            if isinstance(arg, tuple):
+                # kwargs value are treated as default argument
+                arg_name, example_value = arg
+                default = example_value
+            else:
+                arg_name = f"arg{idx}"
+                example_value = arg
+                default = None
+            args.append(
+                HopArgumentInfoGen.from_example(
+                    example_value=example_value,
+                    name=arg_name,
+                    default_value=default,
+                    is_mutated=idx in mutated_inp_idx,
+                )
+            )
+
+        # The output is represented as a single argument
+        out = HopArgumentInfoGen.from_example(
+            example_value=output,
+            name="out",
+            default_value=None,
+            is_mutated=False,
+        )
+        return CFunctionSchemaGen.from_hop_argument_info(str(self), args, out)
 
 
 class BaseHOPFunction(torch.autograd.Function):
