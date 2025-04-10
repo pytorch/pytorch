@@ -6620,7 +6620,10 @@ metadata incorrectly.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks(self):
-        sth_context = torch.autograd.graph.saved_tensors_hooks
+        eager_ctx = torch.autograd.graph.saved_tensors_hooks
+        inline_ctx = eager_ctx
+        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
+            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
 
         def _test_pack_hooks(fn, inp_fn, hooks):
             torch._dynamo.reset()
@@ -6628,7 +6631,7 @@ metadata incorrectly.
                 # All hooks in eager to get ref
                 for hook, _ in hooks:
                     pack, unpack = hook
-                    stack.enter_context(sth_context(pack, unpack))
+                    stack.enter_context(eager_ctx(pack, unpack))
                 ref_x = inp_fn()
                 x = ref_x.detach().clone().requires_grad_()
 
@@ -6640,10 +6643,10 @@ metadata incorrectly.
                     pack, unpack = hook
                     if inline:
                         stack.enter_context(
-                            sth_context(*saved_tensors_hooks_to_gm(pack, unpack))
+                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
                         )
                     else:
-                        stack.enter_context(sth_context(pack, unpack))
+                        stack.enter_context(eager_ctx(pack, unpack))
 
                 y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
                 y.sum().backward()
@@ -6796,7 +6799,10 @@ metadata incorrectly.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_recompile(self):
-        sth_context = torch.autograd.graph.saved_tensors_hooks
+        eager_ctx = torch.autograd.graph.saved_tensors_hooks
+        inline_ctx = eager_ctx
+        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
+            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
 
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
@@ -6867,10 +6873,10 @@ metadata incorrectly.
                     pack, unpack = hooks
                     if inline:
                         stack.enter_context(
-                            sth_context(*saved_tensors_hooks_to_gm(pack, unpack))
+                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
                         )
                     else:
-                        stack.enter_context(sth_context(pack, unpack))
+                        stack.enter_context(eager_ctx(pack, unpack))
 
                     x = inp_fn()
                     y = torch.compile(fn, backend=cnt, fullgraph=True)(x)

@@ -953,6 +953,9 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_saved_tensors_hooks_autograd_cache(self):
+        ctx = torch.autograd.graph.saved_tensors_hooks
+        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
+            ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
         from functorch import make_fx
 
         def saved_tensors_hooks_to_gm(pack, unpack):
@@ -1022,16 +1025,14 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-        sth_context = torch.autograd.graph.saved_tensors_hooks
-
-        with sth_context(*saved_tensors_hooks_to_gm(pack_mul2, unpack_mul2)):
+        with ctx(*saved_tensors_hooks_to_gm(pack_mul2, unpack_mul2)):
             x = inp_fn()
             y = fn_compiled(x)
             y.sum().backward()
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
-        with sth_context(*saved_tensors_hooks_to_gm(pack_mul2_2, unpack_mul2_2)):
+        with ctx(*saved_tensors_hooks_to_gm(pack_mul2_2, unpack_mul2_2)):
             x = inp_fn()
             y = fn_compiled(x)
             y.sum().backward()
@@ -1039,7 +1040,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
-        with sth_context(
+        with ctx(
             *saved_tensors_hooks_to_gm(pack_fp8_with_scale, unpack_fp8_with_scale)
         ):
             x = inp_fn()
