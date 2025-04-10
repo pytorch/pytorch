@@ -17,7 +17,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
-from torch.onnx._internal.exporter import _core, _dynamic_shapes, _ir_passes
+from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
 
@@ -122,6 +122,8 @@ def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
     """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
     import onnxruntime as ort
 
+    from torch.onnx._internal.exporter import _core
+
     if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
         # This requires ONNX Runtime 1.21 or newer
         if tensor.dtype in _NP_UNSUPPORTED_DTYPES:
@@ -129,7 +131,7 @@ def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
             return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
                 tensor.numpy(force=True), onnx_element_type=onnx_type
             )
-    # TODO(justinchuby): Use dlpack when ORT properly supports it
+    # TODO(#151064): Use dlpack when ORT properly supports it
     return ort.OrtValue.ortvalue_from_numpy(tensor.numpy(force=True))
 
 
