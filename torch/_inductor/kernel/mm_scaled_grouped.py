@@ -471,7 +471,10 @@ def tuned_scaled_grouped_mm(
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias):
         if len(m1_size) == 2:
             if len(m2_size) == 2:
-                pass  # fixme for 2d/2d
+                # fixme for 2d/2d
+                # (silence mypy until 2d/2d implemented)
+                g = m = n = k = 0
+                a_is_2d = b_is_2d = True
             else:
                 m, k1 = m1_size
                 g, k2, n = m2_size
