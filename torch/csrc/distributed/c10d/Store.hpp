@@ -32,10 +32,6 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   ~Store() override = default;
 
-  // Clone a thread safe copy of this store object that points to the same
-  // underlying store.
-  virtual c10::intrusive_ptr<Store> clone() = 0;
-
   void set(const std::string& key, const std::string& value);
 
   virtual void set(
