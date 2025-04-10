@@ -274,10 +274,6 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
-  c10::intrusive_ptr<Store> clone() override {
-    PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
-  }
-
   // Note: this function manually calls the Python-side overload
   // for this function instead of using the PYBIND11_OVERLOAD_XYZ
   // macros. This is done so that we can call the Python-side
@@ -1212,16 +1208,6 @@ and :class:`~torch.distributed.HashStore`).
 )")
           // Default constructor.
           .def(py::init<>())
-          .def(
-              "clone",
-              &::c10d::Store::clone,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Clones the store and returns a new object that points to the same underlying
-store. The returned store can be used concurrently with the original object.
-This is intended to provide a safe way to use a store from multiple threads by
-cloning one store per thread.
-)")
           // Convert from std::string to std::vector<uint8>.
           .def(
               "set",
@@ -2863,36 +2849,24 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   processGroupGloo
       .def_static(
           "create_device",
-          [](const std::string& hostname,
-             const std::string& interface,
-             std::optional<bool> lazyInit_)
+          [](const std::string& hostname, const std::string& interface)
               -> std::shared_ptr<::gloo::transport::Device> {
-            bool lazyInit =
-                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
-
             if (!hostname.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForHostname(
-                  hostname, lazyInit);
+                  hostname);
             }
             if (!interface.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                  interface, lazyInit);
+                  interface);
             }
             throw std::invalid_argument(
                 "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
-          py::arg("interface") = "",
-          py::arg("lazy_init") = std::nullopt)
+          py::arg("interface") = "")
       .def_static(
           "create_default_device",
-          [](std::optional<bool> lazyInit_) {
-            bool lazyInit =
-                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
-
-            return ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit);
-          },
-          py::arg("lazy_init") = std::nullopt);
+          &::c10d::ProcessGroupGloo::createDefaultDevice);
 
   processGroupGloo
       .def(
@@ -2924,22 +2898,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             py::gil_scoped_release nogil{};
 
             auto options = ::c10d::ProcessGroupGloo::Options::create();
-            bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
             if (ifnameEnv && strlen(ifnameEnv) > 1) {
               for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                        iface, lazyInit));
+                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
             } else {
               // If no hostname is specified, this function looks up
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
               options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
+                  ::c10d::ProcessGroupGloo::createDefaultDevice());
             }
 
             options->timeout = timeout;
@@ -3586,14 +3558,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         if (get("key3") != "15") {
           TORCH_CHECK(false, "assertion failed");
         }
-
-        auto cloned = store->clone();
-        store->set("foo", "bar");
-
-        auto ret = cloned->get("foo");
-        TORCH_CHECK(
-            std::string(ret.begin(), ret.end()) == "bar",
-            "checked clone behavior");
       },
       py::call_guard<py::gil_scoped_release>());
 
