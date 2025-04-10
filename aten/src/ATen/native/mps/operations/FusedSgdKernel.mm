@@ -114,6 +114,8 @@ void _fused_sgd_kernel_mps_(TensorList params,
                             const bool is_first_step,
                             const std::optional<Tensor>& grad_scale,
                             const std::optional<Tensor>& found_inf) {
+  TORCH_CHECK(!grad_scale.has_value() && !found_inf.has_value(), "grad_scale and found_inf are not supported on MPS");
+
   if (!momentum_buffer_list.empty()) {
     return _fused_sgd_with_momentum_kernel_mps_(params,
                                                 grads,
@@ -161,6 +163,8 @@ void _fused_sgd_kernel_mps_(TensorList params,
                             const bool is_first_step,
                             const std::optional<Tensor>& grad_scale,
                             const std::optional<Tensor>& found_inf) {
+  TORCH_CHECK(!grad_scale.has_value() && !found_inf.has_value(), "grad_scale and found_inf are not supported on MPS");
+
   if (!momentum_buffer_list.empty()) {
     return _fused_sgd_with_momentum_kernel_mps_(params,
                                                 grads,

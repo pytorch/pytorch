@@ -15,7 +15,6 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
     FileSystemWriter,
-    SerializationFormat,
 )
 
 
@@ -91,9 +90,6 @@ class FileSystem(FileSystemBase):
     def rm_file(self, path: Union[str, os.PathLike]) -> None:
         self.fs.rm(path)
 
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
-        return self.fs.ls(path)
-
 
 # TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):
@@ -119,7 +115,6 @@ class FsspecWriter(FileSystemWriter):
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
-        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         **kwargs,
     ) -> None:
         """
@@ -144,7 +139,6 @@ class FsspecWriter(FileSystemWriter):
             per_thread_copy_ahead,
             overwrite=overwrite,
             _extensions=_extensions,
-            serialization_format=serialization_format,
         )
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)

@@ -39,14 +39,12 @@ C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(
     GlooDeviceRegistry,
     ::gloo::transport::Device,
     const std::string& /* interface */,
-    const std::string& /* hostname */,
-    bool /* lazyInit */)
+    const std::string& /* hostname */)
 
 #if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
     const std::string& interfaceName,
-    const std::string& hostname,
-    bool lazyInit) {
+    const std::string& hostname) {
   TORCH_CHECK(
       !interfaceName.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
@@ -58,11 +56,7 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
   } else {
     attr.hostname = hostname;
   }
-  if (lazyInit) {
-    return ::gloo::transport::tcp::CreateLazyDevice(attr);
-  } else {
-    return ::gloo::transport::tcp::CreateDevice(attr);
-  }
+  return ::gloo::transport::tcp::CreateDevice(attr);
 }
 
 // Registry priority is per key identifier. We register TCP to `LINUX` for
@@ -75,14 +69,11 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice)
 #if GLOO_HAVE_TRANSPORT_TCP_TLS
 static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
     const std::string& interface,
-    const std::string& hostname,
-    bool lazyInit) {
+    const std::string& hostname) {
   TORCH_CHECK(
       !interface.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeTCPTLSDevice(): interface or hostname "
       "can't be empty");
-
-  TORCH_CHECK(!lazyInit, "TCP_TLS transport does not support lazy init");
 
   ::gloo::transport::tcp::attr attr;
   if (!interface.empty()) {
@@ -114,14 +105,11 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice)
 #if GLOO_HAVE_TRANSPORT_UV
 static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
     const std::string& interfaceName,
-    const std::string& hostname,
-    bool lazyInit) {
+    const std::string& hostname) {
   TORCH_CHECK(
       !interfaceName.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeUVDevice(): interface or hostname "
       "can't be empty");
-
-  TORCH_CHECK(!lazyInit, "UV transport does not support lazy init");
 
   ::gloo::transport::uv::attr attr;
   if (!interfaceName.empty()) {
@@ -143,27 +131,23 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice)
 namespace {
 std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
     const std::string& interfaceName,
-    const std::string& hostName,
-    bool lazyInit) {
+    const std::string& hostName) {
   static auto transportName = c10::utils::get_env("GLOO_DEVICE_TRANSPORT");
   if (transportName.has_value()) {
     return GlooDeviceRegistry()->Create(
-        transportName.value().c_str(), interfaceName, hostName, lazyInit);
+        transportName.value().c_str(), interfaceName, hostName);
   }
 
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create(
-      "LINUX", interfaceName, hostName, lazyInit);
+  return GlooDeviceRegistry()->Create("LINUX", interfaceName, hostName);
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create(
-      "APPLE", interfaceName, hostName, lazyInit);
+  return GlooDeviceRegistry()->Create("APPLE", interfaceName, hostName);
 #endif
 
 #ifdef _WIN32
-  return GlooDeviceRegistry()->Create(
-      "WIN32", interfaceName, hostName, lazyInit);
+  return GlooDeviceRegistry()->Create("WIN32", interfaceName, hostName);
 #endif
 
   return nullptr;
@@ -171,8 +155,8 @@ std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
 } // anonymous namespace
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
-    makeDeviceForInterface(const std::string& interfaceName, bool lazyInit) {
-  auto device = makeGlooDevice(interfaceName, "", lazyInit);
+    makeDeviceForInterface(const std::string& interfaceName) {
+  auto device = makeGlooDevice(interfaceName, "");
   if (!device) {
     TORCH_CHECK(false, "makeDeviceForInterface(): unsupported gloo device");
   }
@@ -180,8 +164,8 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
 }
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
-    makeDeviceForHostname(const std::string& hostname, bool lazyInit) {
-  auto device = makeGlooDevice("", hostname, lazyInit);
+    makeDeviceForHostname(const std::string& hostname) {
+  auto device = makeGlooDevice("", hostname);
   if (!device) {
     TORCH_CHECK(false, "makeDeviceForHostname(): unsupported gloo device");
   }

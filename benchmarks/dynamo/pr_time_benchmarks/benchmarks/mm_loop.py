@@ -7,12 +7,12 @@ from torch._inductor.utils import fresh_inductor_cache
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self, is_dynamic: bool) -> None:
+    def __init__(self) -> None:
         super().__init__(
             category="mm_loop",
             backend="inductor",
             device="cuda",
-            dynamic=is_dynamic,
+            dynamic=False,
         )
 
     def name(self) -> str:
@@ -37,7 +37,7 @@ class Benchmark(BenchmarkBase):
         @torch.compile(
             backend="inductor",
             fullgraph=True,
-            dynamic=self._dynamic,
+            dynamic=False,
         )
         def f(a, b):
             z = torch.mm(a, b)
@@ -51,11 +51,9 @@ class Benchmark(BenchmarkBase):
 
 def main():
     result_path = sys.argv[1]
-    all_benchamrks = [Benchmark(False), Benchmark(True)]
-    for b in all_benchamrks:
-        b.enable_compile_time_instruction_count().collect_all().append_results(
-            result_path
-        )
+    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(
+        result_path
+    )
 
 
 if __name__ == "__main__":

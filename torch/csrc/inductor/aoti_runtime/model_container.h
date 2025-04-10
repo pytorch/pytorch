@@ -349,8 +349,7 @@ class AOTInductorModelContainer {
         tensor = it->second;
       }
 
-      constants_map_to_update->insert_or_assign(
-          constant_name, RAIIAtenTensorHandle(tensor));
+      constants_map_to_update->insert_or_assign(constant_name, tensor);
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -362,8 +361,7 @@ class AOTInductorModelContainer {
   void update_constant_buffer(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
       bool use_inactive,
-      bool validate_full_update,
-      bool user_managed = false) {
+      bool validate_full_update) {
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
@@ -390,15 +388,6 @@ class AOTInductorModelContainer {
       } else {
         tensor = it->second;
       }
-
-      if (user_managed) {
-        // If user managed, we pass in the pointer directly, and skip the copy.
-        constants_map_to_update->insert_or_assign(
-            constant_name,
-            MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
-        continue;
-      }
-
       auto* constants_blob_ptr =
           static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
 
@@ -448,8 +437,7 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->insert_or_assign(
-          constant_name, RAIIAtenTensorHandle(tensor_handle));
+      constants_map_to_update->insert_or_assign(constant_name, tensor_handle);
     }
     // Update the inactive constant array.
     update_array_from_map(

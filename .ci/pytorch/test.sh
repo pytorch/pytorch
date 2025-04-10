@@ -1175,6 +1175,7 @@ build_xla() {
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
+  retry install_post_deps_pytorch_xla
   assert_git_not_dirty
 }
 
@@ -1474,7 +1475,8 @@ test_executorch() {
   pushd /executorch
 
   export PYTHON_EXECUTABLE=python
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
   # For llama3
   bash examples/models/llama3_2_vision/install_requirements.sh

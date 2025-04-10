@@ -605,9 +605,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
-            name := "pgo.get_remote_code_state",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
+            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
@@ -718,11 +716,7 @@ def put_local_code_state(cache_key: str) -> None:
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(
-        name := "pgo.put_remote_code_state",
-        log_pt2_compile_event=True,
-        dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
-    ):
+    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 

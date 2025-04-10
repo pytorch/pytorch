@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
-
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -53,12 +51,7 @@ class Categorical(Distribution):
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     has_enumerate_support = True
 
-    def __init__(
-        self,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -68,7 +61,6 @@ class Categorical(Distribution):
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            assert logits is not None  # helps mypy
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize

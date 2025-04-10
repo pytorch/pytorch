@@ -122,14 +122,9 @@ def signature_to_meta(
 
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
-    if buf_name in V.graph.unaligned_buffers:
-        return True
-
     if buf_name in V.graph.graph_inputs:
         # See Note: [Input Alignment handling in Inductor]
-        # For graph inputs that is not recorded in V.graph.unaligned_buffers,
-        # we know for sure the tensor is aligned.
-        return False
+        return buf_name not in V.graph.aligned_inputs
 
     if buf_name in V.graph.constants:
         # all constants are assumed to be aligned
