@@ -261,6 +261,7 @@ def export(
 
     """
     from ._trace import _export
+    from ._draft_export import draft_export
 
     if not isinstance(mod, torch.nn.Module):
         raise ValueError(
@@ -272,6 +273,18 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
+
+    if os.environ.get("DRAFT_EXPORT"):
+        return draft_export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes=dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
+
     return _export(
         mod,
         args,
