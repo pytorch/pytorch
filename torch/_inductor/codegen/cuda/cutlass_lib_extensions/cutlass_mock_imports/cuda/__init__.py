@@ -1,4 +1,6 @@
-__version__ = "12.6"
+import torch
 
-from .cuda import *
-from .cudart import *
+
+__version__ = torch.version.cuda
+
+from .cuda import *  # noqa: F403
