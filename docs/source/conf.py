@@ -198,7 +198,7 @@ templates_path = [
 # TODO: document these and remove them from here.
 
 html_domain_indices = {
-    'py-modindex',
+    "py-modindex",
 }
 
 coverage_ignore_functions = [
