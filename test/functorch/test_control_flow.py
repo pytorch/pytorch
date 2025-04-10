@@ -1404,7 +1404,7 @@ def forward(self, pred_1, x_1):
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
-            RuntimeError, "output must consist of tensors or ints only"
+            RuntimeError, "map doesn't work unless it is captured completely"
         ):
             control_flow.map(f, x, y)
 
@@ -5681,8 +5681,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -5698,8 +5696,6 @@ def forward(self, arg0_1):
         ):
             functional_f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -5738,8 +5734,6 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)
