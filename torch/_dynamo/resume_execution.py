@@ -345,11 +345,12 @@ class ContinueExecutionCache:
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = ()
             code_options["co_freevars"] = freevars
-            code_options["co_argcount"] = len(args)
+            code_options["co_argcount"] = 1
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
-                args
+                ["__frame_values"]
+                + args
                 + [v for v in argnames_null if v not in args]
                 + [
                     v
@@ -369,6 +370,23 @@ class ContinueExecutionCache:
                         create_instruction("COPY_FREE_VARS", arg=len(freevars))
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
+
+            # load this frame's values (stack + locals) to the right places
+            load_frame_values_source = "def load_frame_values(__frame_values):\n"
+            if len(args) == 0:
+                # load the value anyway so symbolic_convert can pop this local internally
+                load_frame_values_source += "    __frame_values"
+            elif len(args) == 1:
+                load_frame_values_source += f"    {args[0]} = __frame_values[0]"
+            else:
+                load_frame_values_source += f"    {', '.join(args)} = __frame_values"
+
+            load_frame_values_locals: dict[str, Any] = {}
+            exec(load_frame_values_source, None, load_frame_values_locals)
+            load_frame_values_bytecode = bytecode_from_template(
+                load_frame_values_locals["load_frame_values"],
+            )
+            prefix.extend(load_frame_values_bytecode)
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -567,78 +585,3 @@ class ContinueExecutionCache:
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args
         )
-
-
-"""
-# partially finished support for with statements
-
-def convert_locals_to_cells(
-        instructions: List[Instruction],
-        code_options: Dict[str, Any]):
-
-    code_options["co_cellvars"] = tuple(
-        var
-        for var in code_options["co_varnames"]
-        if var not in code_options["co_freevars"]
-        and not var.startswith("___stack")
-    )
-    cell_and_free = code_options["co_cellvars"] + code_options["co_freevars"]
-    for inst in instructions:
-        if str(inst.argval).startswith("___stack"):
-            continue
-        elif inst.opname == "LOAD_FAST":
-            inst.opname = "LOAD_DEREF"
-        elif inst.opname == "STORE_FAST":
-            inst.opname = "STORE_DEREF"
-        elif inst.opname == "DELETE_FAST":
-            inst.opname = "DELETE_DEREF"
-        else:
-            continue
-        inst.opcode = dis.opmap[inst.opname]
-        assert inst.argval in cell_and_free, inst.argval
-        inst.arg = cell_and_free.index(inst.argval)
-
-def patch_setup_with(
-    instructions: List[Instruction],
-    code_options: Dict[str, Any]
-):
-    nonlocal need_skip
-    need_skip = True
-    target_index = next(
-        idx for idx, i in enumerate(instructions) if i.offset == offset
-    )
-    assert instructions[target_index].opname == "SETUP_WITH"
-    convert_locals_to_cells(instructions, code_options)
-
-    stack_depth_before = nstack + stack_effect(instructions[target_index].opcode,
-                                               instructions[target_index].arg)
-
-    inside_with = []
-    inside_with_resume_at = None
-    stack_depth = stack_depth_before
-    idx = target_index + 1
-    for idx in range(idx, len(instructions)):
-        inst = instructions[idx]
-        if inst.opname == "BEGIN_FINALLY":
-            inside_with_resume_at = inst
-            break
-        elif inst.target is not None:
-            unimplemented("jump from with not supported")
-        elif inst.opname in ("BEGIN_FINALLY", "WITH_CLEANUP_START", "WITH_CLEANUP_FINISH", "END_FINALLY",
-                             "POP_FINALLY", "POP_EXCEPT",
-                             "POP_BLOCK", "END_ASYNC_FOR"):
-            unimplemented("block ops not supported")
-        inside_with.append(inst)
-        stack_depth += stack_effect(inst.opcode, inst.arg)
-    assert inside_with_resume_at
-
-    instructions = [
-        create_instruction("LOAD_FAST", f"___stack{i}") for i in range(nstack)
-    ] + [
-        create_instruction("SETUP_WITH", target=instructions[target_index].target)
-        ... call the function ...
-        unpack_tuple
-    ] + [
-        create_instruction("JUMP_ABSOLUTE", target=inside_with_resume_at)
-    ]
-"""
