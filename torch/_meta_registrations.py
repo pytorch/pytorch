@@ -2152,7 +2152,7 @@ def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) ->
 
 
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
@@ -2227,7 +2227,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 
 @register_meta(aten.mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
@@ -2508,7 +2508,8 @@ if torch._C._has_mkldnn:
     )
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
-    def meta_qconv2d_pointwise(
+    @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    def meta_qconv_pointwise(
         x,
         x_scale,
         x_zp,
@@ -2539,7 +2540,9 @@ if torch._C._has_mkldnn:
         )
         assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
-        out = out.to(memory_format=torch.channels_last)
+        assert len(shape_out) in [3, 4], "only conv1d/2d are supported"
+        format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
+        out = out.to(memory_format=format)
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
@@ -3460,7 +3463,7 @@ def meta_convolution_backward(
 
 
 @register_meta([aten.addbmm.default, aten.addbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
     dim2 = batch2.size(2)
@@ -3632,6 +3635,21 @@ def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
     torch._check(
         w.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm_with_scales_and_zeros])
+def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
@@ -6182,12 +6200,13 @@ def meta_scaled_mm(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
-    def is_fp8_type(dtype):
+    def is_fp8_or_fp4_type(dtype):
         return dtype in (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
             torch.float8_e4m3fnuz,
             torch.float8_e5m2fnuz,
+            torch.float4_e2m1fn_x2,
         )
 
     torch._check(
@@ -6195,8 +6214,8 @@ def meta_scaled_mm(
         lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
     )
     torch._check(
-        is_fp8_type(self.dtype) and is_fp8_type(mat2.dtype),
-        lambda: f"Expected both inputs to be fp8 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
+        is_fp8_or_fp4_type(self.dtype) and is_fp8_or_fp4_type(mat2.dtype),
+        lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
     if device_hint(self) == "cuda":
@@ -6232,18 +6251,32 @@ def meta_scaled_mm(
         m, _k = self.shape
         n = mat2.size(1)
 
+        is_blockwise_scaling = (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        ) or (
+            scale_a.dtype == torch.float8_e4m3fn
+            and scale_b.dtype == torch.float8_e4m3fn
+        )
+
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
             torch._check(
                 scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
                 lambda: "For tensorwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
             )
-        elif (
-            scale_a.dtype == torch.float8_e8m0fnu
-            and scale_b.dtype == torch.float8_e8m0fnu
-        ):
+        elif is_blockwise_scaling:
             # blockwise scaling
-            block_size_k = 32
+
+            if scale_a.dtype == torch.float8_e4m3fn:
+                # NVIDIA's nvfp4 recipe:
+                # * block size is 16 elements packed (32 unpacked)
+                # * _k needs to be translated to the unpacked version
+                block_size_k = 16
+                _k = _k * 2
+            else:
+                block_size_k = 32
+
             block_size_mn = 128
 
             def ceil_div(a, b):
