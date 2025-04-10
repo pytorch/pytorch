@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import importlib.util
 import logging
 import os
 import sys
@@ -84,14 +85,13 @@ def try_import_cutlass() -> bool:
     # we need cutlass for eVT
     cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
-    mock_cuda_src_path = os.path.join(
+    mock_src_path = os.path.join(
         torch_root,
         "_inductor",
         "codegen",
         "cuda",
         "cutlass_lib_extensions",
-        "mock_cuda_bindings",
-        "cuda",
+        "cutlass_mock_imports",
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
@@ -102,10 +102,10 @@ def try_import_cutlass() -> bool:
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
     dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
-    # cuda bindings needed to import cutlass
-    # pycute needed for EVT
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
-    dst_link_mock_cuda = path_join(tmp_cutlass_full_path, "cuda")
+
+    # mock modules to import cutlass
+    mock_modules = ["cuda", "scipy", "pydot"]
 
     if os.path.isdir(cutlass_python_path):
         if tmp_cutlass_full_path not in sys.path:
@@ -125,16 +125,22 @@ def try_import_cutlass() -> bool:
                 if parent_dir not in sys.path:
                     sys.path.append(parent_dir)
 
-            link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
             link_and_append(
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
             link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
-            link_and_append(
-                dst_link_mock_cuda, mock_cuda_src_path, tmp_cutlass_full_path
-            )
+            link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
+
+            for module in mock_modules:
+                if not importlib.util.find_spec(module):
+                    link_and_append(
+                        path_join(tmp_cutlass_full_path, module),  # dst_link
+                        path_join(mock_src_path, module),  # src_path
+                        tmp_cutlass_full_path,  # parent
+                    )
 
         try:
+            breakpoint()
             import cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
