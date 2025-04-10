@@ -127,6 +127,26 @@ class PaddedTensorFunctionalTests(TestCase):
         torch._dynamo.config.error_on_recompile = False
 
 
+class AtenOpTests(TestCase):
+    def setUp(self):
+        super().setUp()
+
+    def test_sum(self):
+        def f(a):
+            return a.sum()
+
+        f = torch.compile(f, fullgraph=True)
+        multipliers = {1: 16}
+
+        a = torch.randn([2, 121])
+        a_p = PaddedTensor.from_tensor(a, multipliers)
+
+        y = f(a_p)
+
+        self.assertEqual(y.shape, ())
+        self.assertEqual(y.original_tensor.shape, ())
+
+
 class NNOpTests(TestCase):
     def setUp(self):
         super().setUp()

@@ -84,14 +84,12 @@ class PaddedTensor(torch.Tensor):
     ):
         if multipliers is None:
             multipliers = {}
-        padded_shape = get_padded_shape(tensor.shape, multipliers)
-
         kwargs = {}
-        kwargs["strides"] = get_strides(padded_shape)
+        kwargs["strides"] = tensor.stride()
         kwargs["storage_offset"] = 0
         kwargs["device"] = tensor.device
         kwargs["layout"] = tensor.layout
-        kwargs["requires_grad"] = tensor.requires_grad
+        kwargs["requires_grad"] = kwargs.get("requires_grad", False)
         kwargs["dtype"] = tensor.dtype
 
         out = torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
@@ -124,7 +122,12 @@ class PaddedTensor(torch.Tensor):
             value=neutral_element,
         )
 
-        original_tensor = torch.ones(tensor.shape, device="meta", dtype=tensor.dtype)
+        original_tensor = torch.ones(
+            tensor.shape,
+            device="meta",
+            dtype=tensor.dtype,
+            requires_grad=tensor.requires_grad,
+        )
 
         return PaddedTensor(padded_tensor, multipliers, original_tensor)
 
@@ -146,6 +149,8 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def execute_padded(cls, func, types, args=..., kwargs=None):
+        log.debug(func.__name__)
+
         # In: Padded tensor
         if kwargs is None:
             kwargs = {}
@@ -161,7 +166,21 @@ class PaddedTensor(torch.Tensor):
         shapes_args = pytree.tree_map_only(
             torch.Tensor, lambda x: x.to("meta"), shapes_args
         )
-        out_shapes = func(*shapes_args, **shapes_kwargs)
+
+        def transform(x):
+            if isinstance(x, torch.Tensor) and x.dtype == torch.bfloat16:
+                return x.to(torch.float32)
+            else:
+                return x
+
+        shapes_args = pytree.tree_map(transform, shapes_args)
+
+        # Copy on meta tensor fails as we cannot do for non-data carrying tensor, so we just pass
+        # the original tensor shape
+        if func.__name__ == "_to_copy.default":
+            out_shapes = shapes_args[0]
+        else:
+            out_shapes = func(*shapes_args, **shapes_kwargs)
 
         # In: Multipliers
         args_multipliers, kwargs_multipliers = pytree.tree_map_only(
@@ -197,6 +216,9 @@ class PaddedTensor(torch.Tensor):
             "flatten",
             "scaled_dot_product_attention",
             "grad",
+            "contiguous",
+            "reshape",
+            "cross_entropy",
         ]
 
         if func.__name__ in shape_decomp_ops:
