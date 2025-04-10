@@ -500,6 +500,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -1129,7 +1132,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
