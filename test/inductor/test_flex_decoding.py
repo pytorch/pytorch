@@ -64,7 +64,7 @@ if HAS_GPU:
         test_dtypes_fast = [torch.float16]
     elif HAS_XPU:
         test_device = "xpu"
-        test_dtypes = [torch.float16]
+        test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
         test_dtypes_fast = [torch.float16]
 
 test_page_sizes = [64, 128, 256]
