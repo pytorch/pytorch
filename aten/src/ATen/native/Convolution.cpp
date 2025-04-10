@@ -1451,6 +1451,12 @@ static inline at::MemoryFormat determine_backend_memory_format(
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
+    case ConvBackend::Mps:
+    case ConvBackend::MpsTranspose:
+      if (mps_conv_use_channels_last(input, weight)) {
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+      }
+      break;
     default:
       backend_memory_format = at::MemoryFormat::Contiguous;
   }
