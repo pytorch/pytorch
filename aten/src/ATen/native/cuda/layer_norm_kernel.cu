@@ -1022,6 +1022,13 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
+
+  std::cout << " LayerNormKernelImpl " << std::endl
+  << " X.dtype()=" << X.dtype() << std::endl
+  << " gamma.dtype()=" << gamma.dtype() << std::endl
+  << " beta.dtype()=" << beta.dtype() << std::endl
+  << std::endl;
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -1512,7 +1519,7 @@ void rmsnorm_cuda_kernel(
   scalar_t* __restrict__ output,
   scalar_t* __restrict__ x_norm,
   scalar_t* __restrict__ inverse_rms,
-  const acc_t* __restrict__ weight,
+  const scalar_t* __restrict__ weight,
   int64_t N,   // size of the normalized dimension
   int64_t M,   // number of samples
   double eps) {
@@ -1570,6 +1577,14 @@ void rmsnorm_cuda_forward(
   const at::Tensor& weight,
   const int64_t normalized_shape_size,
   const double eps) {
+
+    std::cout << " ++++ AHMAD ++++ ======" << std::endl
+    << " input.dtype()=" << input.dtype() << std::endl
+    << " output.dtype()=" << output.dtype() << std::endl
+    << " x_norm.dtype()=" << x_norm.dtype() << std::endl
+    << " inverse_rms.dtype()=" << inverse_rms.dtype() << std::endl
+    << " weight.dtype()=" << weight.dtype() << std::endl
+    << std::endl;
   int64_t N = normalized_shape_size;
   int64_t M = input.numel() / N;
 
@@ -1589,7 +1604,7 @@ void rmsnorm_cuda_forward(
 
       auto* inverse_rms_ptr = inverse_rms.data_ptr<scalar_t>();
 
-      auto* weight_ptr = weight_contiguous->data_ptr<acc_t>();
+      auto* weight_ptr = weight_contiguous->data_ptr<scalar_t>();
       int threadsPerBlock = 256;
       int max_allowed_blocks = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
       int blocksPerGrid = std::min<int>(M, max_allowed_blocks); // e.g., max_allowed_blocks could be 1024
@@ -1633,7 +1648,7 @@ void rmsnorm_backward_input_kernel(
     scalar_t* __restrict__ grad_input,           // [M, N]
     int64_t N,
     int64_t M,
-    const acc_t* __restrict__ weight) {
+    const scalar_t* __restrict__ weight) {
   // Shared memory for reduction (to compute dot = sum_j(x_norm * g))
   alignas(sizeof(double)) extern __shared__ char s_data1[];
   acc_t * shared_buffer = reinterpret_cast<acc_t*>(&s_data1);
@@ -1648,7 +1663,7 @@ void rmsnorm_backward_input_kernel(
     // Each thread computes a partial dot product: sum_j(x_norm[j]*g[j])
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
       // Multiply grad by weight if provided.
-      acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
+      acc_t g_val = weight != nullptr ? static_cast<acc_t>(grad_row[j] * weight[j]) : static_cast<acc_t>(grad_row[j]);
       sum_val += static_cast<acc_t>(xnorm_row[j]) * static_cast<acc_t>(g_val);
     }
     shared_buffer[threadIdx.x] = sum_val;
@@ -1670,7 +1685,7 @@ void rmsnorm_backward_input_kernel(
 
     // Now compute grad_input[j] = inverse_rms * (g[j] - x_norm[j]*(dot/N))
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
-      acc_t g_val = weight != nullptr ? grad_row[j] * weight[j] : static_cast<acc_t>(grad_row[j]);
+      acc_t g_val = weight != nullptr ? static_cast<acc_t>(grad_row[j] * weight[j]) : static_cast<acc_t>(grad_row[j]);
       acc_t grad_val = inv_rms_val * ( static_cast<acc_t>(g_val) - static_cast<acc_t>(xnorm_row[j]) * (dot / static_cast<acc_t>(N)) );
       grad_in_row[j] = static_cast<scalar_t>(grad_val);
     }
@@ -1685,7 +1700,7 @@ __global__
 void rmsnorm_backward_weight_kernel(
     const scalar_t* __restrict__ grad,   // [M, N]
     const scalar_t* __restrict__ x_norm,   // [M, N]
-    acc_t* __restrict__ grad_weight,    // [N]
+    scalar_t* __restrict__ grad_weight,    // [N]
     int64_t N,
     int64_t M) {
   alignas(sizeof(double)) extern __shared__ char s_data2[];
@@ -1767,7 +1782,11 @@ rms_norm_backward_cuda(
       int blocksPerGrid = std::min<int>(M, 1024);
       size_t sharedMemSize = threadsPerBlock * sizeof(float); // Here we assume acc_t is float.
 
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_input", ([&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "rmsnorm_backward_input", ([&] {
         using acc_t = at::acc_type<scalar_t, true>;
         rmsnorm_backward_input_kernel<scalar_t, acc_t>
         <<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
@@ -1777,7 +1796,7 @@ rms_norm_backward_cuda(
           grad_input.data_ptr<scalar_t>(),
           N,
           M,
-          weight_opt.has_value() ? weight_contiguous->data_ptr<acc_t>() : nullptr
+          weight_opt.has_value() ? weight_contiguous->data_ptr<scalar_t>() : nullptr
         );
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -1786,7 +1805,11 @@ rms_norm_backward_cuda(
 
     // Launch configuration for the grad_weight kernel.
     if (grad_input_mask[1] && weight_opt.has_value()) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "rmsnorm_backward_weight", ([&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "rmsnorm_backward_weight", ([&] {
         using acc_t = at::acc_type<scalar_t, true>;
         dim3 threadsPerBlock(32, 32);
         dim3 blocksPerGrid;
@@ -1797,7 +1820,7 @@ rms_norm_backward_cuda(
         <<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(
           grad_contiguous->data_ptr<scalar_t>(),
           x_norm_contiguous->data_ptr<scalar_t>(),
-          grad_weight.data_ptr<acc_t>(),
+          grad_weight.data_ptr<scalar_t>(),
           N,
           M
         );
