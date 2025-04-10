@@ -143,7 +143,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
-            code.writeline,
             call_args,
             kernel_name,
             None,
