@@ -2513,9 +2513,6 @@ class TestAutograd(TestCase):
         out.backward(inputs=x)
         self.assertEqual(x.grad, 2 * x)
 
-        # Avoid leaking memory
-        x.grad = None
-
     def test_backward_with_nonleaf_inputs(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         x_nonleaf = x * 1
