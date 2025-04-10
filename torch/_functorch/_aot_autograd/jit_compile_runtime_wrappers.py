@@ -834,10 +834,13 @@ def maybe_inline_graph_saved_tensors_hooks(
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
 
-    from torch._functorch.aot_autograd import graph_saved_tensors_hooks_top
+    get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+    are_inline_hooks = (
+        torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    )
 
-    hooks = graph_saved_tensors_hooks_top()
-    if not hooks:
+    hooks = get_hooks()
+    if not are_inline_hooks(hooks):
         return
 
     pack_hook_gm, unpack_hook_gm = hooks
@@ -870,7 +873,10 @@ def maybe_inline_graph_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        if val.dtype in [torch.bool]:
+        # TODO(ivankobzarev): Find the way to do dtype filtering in GraphModule hooks.
+        # The main usecase for inlined saved_tensors_hooks are quantization
+        # Skipping non floating point type here as float8 is not supported for bool, int.
+        if not val.dtype.is_floating_point:
             fw_outs_saved_tensors_unchanged.append(saved)
             continue
 

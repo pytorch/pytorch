@@ -561,14 +561,15 @@ class OutputGraph:
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             return None
 
-        get_hooks = torch._functorch.aot_autograd.graph_saved_tensors_hooks_top
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+        )
         hooks = get_hooks()
-        if not hooks:
+        if not are_inline_hooks(hooks):
             return None
 
         pack_gm, unpack_gm = hooks
-        assert isinstance(pack_gm, torch.fx.GraphModule)
-        assert isinstance(unpack_gm, torch.fx.GraphModule)
         pack_subgraph_name = self.install_subgraph(
             "saved_tensors_hooks_pack",
             torch.fx.GraphModule(self.nn_modules, pack_gm.graph),
