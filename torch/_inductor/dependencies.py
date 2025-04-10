@@ -293,10 +293,6 @@ class MemoryDep(Dep):
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
-    def __hash__(self) -> int:
-        # Hash must be consistent with __eq__
-        return hash((self.name, self.index, self.var_names, self.size, self.mode))
-
 
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
