@@ -202,11 +202,13 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   return std::make_tuple(output, lengths_t);
 }
 
-Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const std::string_view padding_side) {
+Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const std::string_view padding_side, int64_t pad_to_multiple_of) {
   const int64_t sequences_size = sequences.size();
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
   TORCH_CHECK(padding_side == "left" || padding_side == "right",
               "Expected padding_side to be one of left or right, but got ", padding_side, ".");
+  TORCH_CHECK(pad_to_multiple_of > 0,
+              "Expected pad_to_multiple_of to be positive.");
   IntArrayRef max_size = sequences[0].sizes();
   IntArrayRef trailing_dims = max_size.slice(1);
   int64_t max_len = std::max_element(
@@ -216,6 +218,8 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
       return a.size(0) < b.size(0);
     }
   )->size(0);
+  int64_t remainder = max_len % pad_to_multiple_of;
+  max_len = remainder == 0 ? max_len : max_len + (pad_to_multiple_of - remainder);
 
   DimVector out_dims;
   if (batch_first) {
