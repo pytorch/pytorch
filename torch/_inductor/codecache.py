@@ -1812,7 +1812,43 @@ class AotCodeCompiler:
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
-            gpu_kernels_o = " ".join(gpu_kernels_o)
+
+            cubins_o = []
+            if config.aot_inductor.embed_cubin:
+                # Embed cubin files into .so using objcopy
+                if config.is_fbcode():
+                    ld = build_paths.ld
+                    objcopy = (
+                        build_paths.objcopy_fallback
+                        if use_relative_path
+                        else build_paths.objcopy
+                    )
+                else:
+                    ld = "ld"
+                    objcopy = "objcopy"
+
+                for kernel_name, value in CudaKernelParamCache.cache.items():
+                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    obj_file = cubin_file + ".o"
+                    cubins_o.append(obj_file)
+                    # Convert .cubin to .o
+                    cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
+                    os.remove(cubin_file)
+                    # Rename .data to .rodata
+                    cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
+                    # By default objcopy will create *_start, *_size, *_end symbols using the full path
+                    # Rename to use the unique kernel name
+                    file_name = re.sub(r"[\W]", "_", cubin_file)
+                    cmd = (
+                        f"{objcopy} "
+                        + f"--redefine-sym _binary_{file_name}_start=__{kernel_name}_start "
+                        + f"--redefine-sym _binary_{file_name}_size=__{kernel_name}_size "
+                        + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
+                        + obj_file
+                    )
+                    subprocess.run(cmd.split(), capture_output=True, text=True)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -1822,11 +1858,10 @@ class AotCodeCompiler:
                 use_relative_path=use_relative_path,
             )
 
+            obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[wrapper_o, kernel_o, consts_o, gpu_kernels_o]
-                if gpu_kernels_o
-                else [wrapper_o, kernel_o, consts_o],
+                sources=obj_srcs,
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1871,17 +1906,14 @@ class AotCodeCompiler:
 
                     generated_files.append(weight_file)
 
-                generated_files.append(consts_o)
-                generated_files.append(gpu_kernels_o)
-
-                so_builder.save_src_to_cmake(cmake_path, consts_o)
-                for gpu_o in gpu_kernels_o.split():
-                    so_builder.save_src_to_cmake(cmake_path, gpu_o)
+                obj_srcs = [consts_o, *gpu_kernels_o, *cubins_o]
+                generated_files.extend(obj_srcs)
+                for obj in obj_srcs:
+                    so_builder.save_src_to_cmake(cmake_path, obj)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
-
-                for o_file in [wrapper_o, kernel_o, consts_o]:
+                for o_file in obj_srcs:
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
