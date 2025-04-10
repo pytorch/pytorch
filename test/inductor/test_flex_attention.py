@@ -39,7 +39,8 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
+from torch.testing._internal.inductor_utils import HAS_GPU, HAS_XPU
 from torch.utils._triton import has_triton
 
 
@@ -106,15 +107,19 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
-
-if TEST_ON_CUDA:
-    test_device = "cuda"
-    test_dtypes = (
-        [torch.float32, torch.bfloat16, torch.float16]
-        if PLATFORM_SUPPORTS_BF16
-        else [torch.float16, torch.float32]
-    )
-    test_dtypes_fast = [torch.float16]
+if HAS_GPU:
+    if TEST_ON_CUDA:
+        test_device = "cuda"
+        test_dtypes = (
+            [torch.float32, torch.bfloat16, torch.float16]
+            if PLATFORM_SUPPORTS_BF16
+            else [torch.float16, torch.float32]
+        )
+        test_dtypes_fast = [torch.float16]
+    elif HAS_XPU:
+        test_device = "xpu"
+        test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
+        test_dtypes_fast = [torch.float16]
 else:
     test_device = "cpu"
     torch_config_string = torch.__config__.show()
@@ -204,7 +209,7 @@ def _squared(score, b, h, m, n):
 
 def _head_offset(dtype: torch.dtype):
     """Captured Buffer"""
-    head_offset = torch.rand(H, device="cuda", dtype=dtype)
+    head_offset = torch.rand(H, device=test_device, dtype=dtype)
 
     def score_mod(score, b, h, m, n):
         return score * head_offset[h]
@@ -807,53 +812,72 @@ class TestFlexAttention(InductorTestCase):
         score_mod, mask_mod = score_mask_mod
 
         # First batch with original dimensions (B, H, S, D)
-        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
 
-        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        k1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
         q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
 
-        backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
         golden_out1.backward(backward_grad1.to(torch.float64))
         ref_out1.backward(backward_grad1)
 
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
-        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
 
-        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        k2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
         q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, torch.float64)
         ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
         golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
 
-        backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
-        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
 
-        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        k3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
         q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
         ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
         golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
 
-        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
         golden_out3.backward(backward_grad3.to(torch.float64))
         ref_out3.backward(backward_grad3)
 
@@ -1078,7 +1102,9 @@ class TestFlexAttention(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256, device=self.device
+        )
         attention = functools.partial(
             flex_attention,
             score_mod=score_mod,
@@ -1247,10 +1273,10 @@ class TestFlexAttention(InductorTestCase):
     )
     @common_utils.parametrize("do_s", test_strides[:3])
     def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s, do_s):
-        q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
-        k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
-        v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
-        do1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
+        q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        do1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
 
         q_shape = (B, H, S // 2, D)
         k_shape = (B, H, S, D)
@@ -1310,7 +1336,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_doc_mask_sparse(self):
-        document_id = torch.zeros(S, dtype=torch.int, device="cuda")
+        document_id = torch.zeros(S, dtype=torch.int, device=self.device)
         for i in range(0, S, 256):
             document_id[i : i + 256] = i // 256
 
@@ -1324,7 +1350,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_multiple(self):
-        bias = torch.randn(B, S, device="cuda")
+        bias = torch.randn(B, S, device=self.device)
 
         def index_multiple(score, b, h, q_idx, kv_idx):
             return score + bias[b][q_idx]
@@ -1334,7 +1360,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_weird1(self):
-        bias = torch.randn(4, B, H, S, device="cuda")
+        bias = torch.randn(4, B, H, S, device=self.device)
 
         def index_weird1(score, b, h, q_idx, kv_idx):
             return score + bias[0][b, h][q_idx]
@@ -1344,8 +1370,8 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_weird2(self):
-        bias = torch.randn(B, H, 4, S, device="cuda")
-        which_bias = torch.tensor(0, device="cuda")
+        bias = torch.randn(B, H, 4, S, device=self.device)
+        which_bias = torch.tensor(0, device=self.device)
 
         def index_weird2(score, b, h, q_idx, kv_idx):
             return score + bias[b][h][which_bias, q_idx]
@@ -1380,9 +1406,9 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers_all_dims(self, dtype: torch.dtype):
-        head_scale = torch.randn(H, device="cuda")
-        batch_scale = torch.randn(B, device="cuda")
-        tok_scale = torch.randn(S, device="cuda")
+        head_scale = torch.randn(H, device=self.device)
+        batch_scale = torch.randn(B, device=self.device)
+        tok_scale = torch.randn(S, device=self.device)
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_q]
@@ -1396,7 +1422,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_seq_masking(self, dtype):
-        seq_idx = torch.zeros(S, device="cuda", dtype=torch.bool)
+        seq_idx = torch.zeros(S, device=self.device, dtype=torch.bool)
         seq_idx[S // 2 :] = 1
 
         def seq_mask_mod(score, b, h, q, kv):
@@ -1408,7 +1434,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_only(self, dtype):
-        bias = torch.randn(S, S, device="cuda", dtype=dtype)
+        bias = torch.randn(S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[q, kv]
@@ -1419,7 +1445,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype):
-        bias = torch.randn(B, S, S, device="cuda", dtype=dtype)
+        bias = torch.randn(B, S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, q, kv]
@@ -1430,7 +1456,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     def test_load_from_view_buffer(self):
         dtype = torch.float16
-        device = "cuda"
+        device = self.device
         W = 8
 
         class SimpleAttention(torch.nn.Module):
@@ -1477,7 +1503,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):
-        bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
+        bias = torch.randn(B, H, S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, h, q, kv]
@@ -1488,7 +1514,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_rel_bias(self, dtype):
-        rel_bias = torch.randn(2 * S, device="cuda", dtype=dtype)
+        rel_bias = torch.randn(2 * S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + rel_bias[(q - kv) + S]
@@ -1499,7 +1525,9 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_dependent_causal_bidirectional(self, dtype):
-        num_bidirectional = torch.randint(0, S, (B,), device="cuda", dtype=torch.int32)
+        num_bidirectional = torch.randint(
+            0, S, (B,), device=self.device, dtype=torch.int32
+        )
 
         def bias_mod(score, b, h, q, kv):
             causal_attention = q >= kv
@@ -1552,7 +1580,7 @@ class TestFlexAttention(InductorTestCase):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
@@ -1596,7 +1624,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_padded_dense_causal(self, dtype):
-        seq_len = torch.arange(B, device="cuda", dtype=torch.int32) + 1
+        seq_len = torch.arange(B, device=self.device, dtype=torch.int32) + 1
 
         def create_padded_dense_wrapper(orig_score_mod):
             def njt_score_mod(qk, b, h, q, kv):
@@ -1613,7 +1641,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_scale(self, dtype):
-        scale = torch.ones((), device="cuda", dtype=torch.int32)
+        scale = torch.ones((), device=self.device, dtype=torch.int32)
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale
@@ -1624,7 +1652,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_recompile_changed_score_mod(self, dtype):
-        scale = torch.ones((), device="cuda", dtype=torch.int32)
+        scale = torch.ones((), device=self.device, dtype=torch.int32)
         ADD = True
 
         def score_mod_scale(qk, b, h, q, kv):
@@ -1644,7 +1672,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_reduction(self, dtype):
-        scale = torch.randn((B, 8), device="cuda")
+        scale = torch.randn((B, 8), device=self.device)
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale[b].sum(dim=-1)
@@ -1653,13 +1681,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
 
@@ -1682,13 +1710,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_multiple_mask_calls(self):
         # Create inputs
         query = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
         key = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
         value = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
 
         window_size = 32
@@ -1699,9 +1727,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask_slidewindow_mod(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (q_idx <= kv_idx + window_size)
 
-        mask1 = create_block_mask(causal_mask, 1, None, 512, 512, _compile=False)
+        mask1 = create_block_mask(
+            causal_mask, 1, None, 512, 512, _compile=False, device=self.device
+        )
         mask2 = create_block_mask(
-            causal_mask_slidewindow_mod, 1, None, 512, 512, _compile=False
+            causal_mask_slidewindow_mod,
+            1,
+            None,
+            512,
+            512,
+            _compile=False,
+            device=self.device,
         )
 
         def f(q, k, v):
@@ -1724,13 +1760,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls2(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
 
@@ -1753,13 +1789,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls_paged_attention(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
 
@@ -1775,7 +1811,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
 
         (
             k_cache1,
@@ -1820,13 +1856,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls2_paged_attention(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
 
@@ -1845,7 +1881,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
         (
             k_cache1,
             v_cache1,
@@ -1905,7 +1941,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_inputs_are_realized(self):
         def f(q, k, v):
-            x = torch.randn(1024, device="cuda")
+            x = torch.randn(1024, device=self.device)
             x = x * 2
 
             def func(qk, b, h, q, kv):
@@ -1914,7 +1950,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return flex_attention(q.sin(), k, v, score_mod=func).cos()
 
         q, k, v = (
-            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            torch.randn(1, 8, 1024, 64, device=self.device, requires_grad=True)
             for _ in range(3)
         )
         ref = f(q, k, v)
@@ -1932,8 +1968,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask_a = torch.compile(create_block_mask)(causal_mask, 1, 1, 512, 512)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512)
+        block_mask_a = torch.compile(create_block_mask)(
+            causal_mask, 1, 1, 512, 512, device=self.device
+        )
+        block_mask_b = create_block_mask(
+            causal_mask, 1, 1, 512, 512, device=self.device
+        )
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -1950,21 +1990,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return (q - kv) <= 512
 
         block_mask = create_block_mask(
-            and_masks(causal_mask, sliding_window), 1, 1, S, S
+            and_masks(causal_mask, sliding_window), 1, 1, S, S, device=self.device
         )
         self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
         attention = functools.partial(flex_attention, block_mask=block_mask)
         self.run_test_with_call(attention)
 
         block_mask = create_block_mask(
-            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=self.device
         )
         self.assertEqual(block_mask.kv_num_blocks.sum(), 0)
 
         block_mask1 = create_block_mask(
-            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=self.device
         )
-        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S, device=self.device)
         self.assertEqual(block_mask1.sparsity(), block_mask2.sparsity())
 
     @supported_platform
@@ -1974,7 +2014,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out = flex_attention(q, k, v)
             return out.cos()
 
-        q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 1024, 64, device=self.device) for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
         fc = FileCheck()
@@ -1992,9 +2032,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("dtype", test_dtypes)
     def test_njt_causal(self, dtype):
         offsets = torch.tensor(
-            [0, 1024, 1024 + 512, S], device="cuda", dtype=torch.int32
+            [0, 1024, 1024 + 512, S], device=self.device, dtype=torch.int32
         )
-        seq_idx = torch.zeros(S, device="cuda", dtype=torch.int32)
+        seq_idx = torch.zeros(S, device=self.device, dtype=torch.int32)
         for idx in range(len(offsets) - 1):
             seq_idx[offsets[idx] : offsets[idx + 1]] = idx
 
@@ -2013,9 +2053,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_mixed_dtypes_fails(self):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device="cuda")
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device="cuda")
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=self.device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=self.device)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=self.device)
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
@@ -2034,9 +2074,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
-        head_scale = torch.randn(H, device="cuda")
-        batch_scale = torch.randn(B, device="cuda")
-        tok_scale = torch.randn(S, device="cuda")
+        head_scale = torch.randn(H, device=self.device)
+        batch_scale = torch.randn(B, device=self.device)
+        tok_scale = torch.randn(S, device=self.device)
 
         def bias_mod(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_q]
@@ -2081,7 +2121,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         func = torch.compile(flex_attention, fullgraph=True)
 
         q, k, v = (
-            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            torch.randn(1, 8, 1024, 64, device=self.device, requires_grad=True)
             for _ in range(3)
         )
 
@@ -2097,7 +2137,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
@@ -2107,15 +2147,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
         self.run_test_with_paged_attention(score_mod=_identity, block_mask=block_mask)
 
     @supported_platform
     def test_new_empty_mask_mod(self):
         S = 128
-        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+        q, k, v = (torch.randn(4, 1, S, 64, device=self.device) for _ in range(3))
 
-        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device=self.device).tril()
 
         def score_mod(score, b, h, q_idx, kv_idx):
             h_ = h.new_zeros(h.shape)
@@ -2125,7 +2165,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             h_ = h.new_zeros(h.shape)
             return attn_mask[b, h_, q_idx, kv_idx]
 
-        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        block_mask = create_block_mask(
+            causal, B=4, H=None, Q_LEN=S, KV_LEN=S, device=self.device
+        )
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
@@ -2139,7 +2181,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S // 8, S // 8)
+        block_mask = create_block_mask(
+            mask_mod, B, 1, S // 8, S // 8, device=self.device
+        )
         attention = functools.partial(
             flex_attention, block_mask=block_mask, enable_gqa=True
         )
@@ -2170,12 +2214,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        auto_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        auto_mask = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         BLOCK_SIZE = 128
 
         def causal_constructor(S):
-            num_blocks = torch.arange(S // BLOCK_SIZE, device="cuda") + 1
-            indices = torch.arange(S // BLOCK_SIZE, device="cuda").expand(
+            num_blocks = torch.arange(S // BLOCK_SIZE, device=self.device) + 1
+            indices = torch.arange(S // BLOCK_SIZE, device=self.device).expand(
                 S // BLOCK_SIZE, S // BLOCK_SIZE
             )
             num_blocks = num_blocks[None, None, :]
@@ -2195,7 +2239,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (B, H, S, D),
             dtype=dtype,
-            device="cuda",
+            device=self.device,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
@@ -2239,7 +2283,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (B, H, S, D),
             dtype=torch.float32,
-            device="cuda",
+            device=self.device,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
@@ -2264,7 +2308,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
@@ -2301,8 +2345,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
                 return x
 
-        model = Repro().cuda()
-        x = torch.randn((1, 512, 256), device="cuda", requires_grad=True)
+        model = Repro().to(self.device)
+        x = torch.randn((1, 512, 256), device=self.device, requires_grad=True)
         out = torch.compile(model, backend="aot_eager")(x)
         out.backward(torch.ones_like(out))
 
@@ -2311,7 +2355,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
@@ -2333,12 +2377,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        lse_mask = torch.randn(2, 2, 128, device="cuda")
+        lse_mask = torch.randn(2, 2, 128, device=self.device)
 
         out, lse = flex_attention(q, k, v, return_lse=True)
         (out.mean() + (lse * lse_mask).sum()).backward()
@@ -2373,12 +2417,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (4, 4, 4096, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
 
-        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        block_mask = create_block_mask(mask, None, None, 4096, 4096, device=self.device)
         # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
         torch.compile(flex_attention, dynamic=True)(
             make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
@@ -2387,7 +2431,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor2 = functools.partial(
             torch.randn,
             (4, 4, 2048, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2404,7 +2448,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k.grad = None
         v.grad = None
 
-        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        block_mask2 = create_block_mask(
+            mask, None, None, 2048, 2048, device=self.device
+        )
         # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
         out2 = torch.compile(flex_attention, dynamic=True)(
             q, k, v, block_mask=block_mask2
@@ -2429,7 +2475,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.zeros,
             (2, 2, 128, 32),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=False,
         )
@@ -2464,7 +2510,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
@@ -2482,7 +2528,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("mode", ["eager", "aot_eager"])
     def test_document_masking_edge_case(self, mode):
-        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device="cuda")
+        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device=self.device)
         document_masks[:, 64:] = 1
 
         def mask_mod(b, h, q, kv):
@@ -2492,23 +2538,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 1, 128, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         func = torch.compile(flex_attention, backend=mode, fullgraph=True)
 
-        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128)
+        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128, device=self.device)
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
 
     @supported_platform
     def test_strided_backwards(self):
         shape = (1, 2, 4096, 64)
-        Q = torch.randn(shape, requires_grad=True, device="cuda")
-        K = torch.randn(shape, requires_grad=True, device="cuda")
-        V = torch.randn(shape, requires_grad=True, device="cuda")
+        Q = torch.randn(shape, requires_grad=True, device=self.device)
+        K = torch.randn(shape, requires_grad=True, device=self.device)
+        V = torch.randn(shape, requires_grad=True, device=self.device)
         func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
 
         K_sliced = K[:, :, :-128]
@@ -2545,7 +2591,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             shape,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
             requires_grad=False if mode == "paged_attention" else True,
         )
@@ -2591,7 +2637,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         dtype = torch.float32
         make_tensor = functools.partial(
-            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+            torch.randn, shape, device=self.device, dtype=dtype, requires_grad=False
         )
 
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2630,13 +2676,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
         query = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
         key = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
         value = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
 
         M = S // 2
@@ -2644,7 +2690,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q < M
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
 
         flex = (
             torch.compile(flex_attention, dynamic=False) if compile else flex_attention
@@ -2665,7 +2711,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q < M
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
 
         def noop_mod(score, b, h, q_idx, kv_idx):
             return score
@@ -2677,7 +2723,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2701,10 +2747,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod_sparse_flex = functools.partial(
             flex_attention,
             score_mod=causal,
-            block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048),
+            block_mask=create_block_mask(
+                causal_mask, 1, 1, 2048, 2048, device=self.device
+            ),
         )
         mask_mod_sparse_flex = functools.partial(
-            flex_attention, block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048)
+            flex_attention,
+            block_mask=create_block_mask(
+                causal_mask, 1, 1, 2048, 2048, device=self.device
+            ),
         )
         for attention_call in [
             no_sparse_flex,
@@ -2717,13 +2768,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     2,
                     2048,
                     64,
-                    device="cuda",
+                    device=self.device,
                     dtype=torch.float16,
                     requires_grad=True,
                 )
                 for _ in range(3)
             ]
-            gradOut = torch.randn(2, 2, 2048, 64, device="cuda", dtype=torch.float16)
+            gradOut = torch.randn(
+                2, 2, 2048, 64, device=self.device, dtype=torch.float16
+            )
             out_ref = torch.nn.functional.scaled_dot_product_attention(
                 *inputs, is_causal=True
             )
@@ -2760,13 +2813,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_block_mask_non_divisible(self):
-        seq = torch.arange(1023, device="cuda") // 128
+        seq = torch.arange(1023, device=self.device) // 128
 
         def mod(b, h, q, kv):
             return seq[q] == seq[kv]
 
-        block_mask = create_block_mask(mod, None, None, 1023, 1023, device="cuda")
-        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device="cuda")
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device=self.device)
+        torch.compile(create_block_mask)(
+            mod, None, None, 1023, 1023, device=self.device
+        )
         self.run_test_with_call(
             lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
             Q_S=1023,
@@ -2776,7 +2831,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_head_bias_req_grad(self):
         B, H, S, D = 1, 4, 256, 64
-        bias = torch.randn(H, device="cuda", dtype=torch.float16, requires_grad=True)
+        bias = torch.randn(
+            H, device=self.device, dtype=torch.float16, requires_grad=True
+        )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -2810,7 +2867,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
-            2 * S, device="cuda", dtype=torch.float16, requires_grad=True
+            2 * S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2841,7 +2898,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+        bias = torch.randn(
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
+        )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -2870,7 +2929,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias + index multiple
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+        bias = torch.randn(
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
+        )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -2899,7 +2960,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias + transposed:
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+        bias = torch.randn(
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
+        )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -2929,7 +2992,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 3-dimensional bias + transposed
         B, H, S, D = 4, 8, 256, 64
         bias = torch.randn(
-            H, S, S, device="cuda", dtype=torch.float16, requires_grad=True
+            H, S, S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2973,7 +3036,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (B, H, S, D),
-            device="cuda",
+            device=self.device,
             dtype=torch.float16,
             requires_grad=True,
         )
@@ -3014,7 +3077,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S - 1, S - 1)
+        block_mask = create_block_mask(mask_mod, B, 1, S - 1, S - 1, device=self.device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
@@ -3023,7 +3086,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_modular_indexing(self):
         B, H, N, D = 100, 12, 128, 64
         dtype = torch.bfloat16
-        device = torch.device("cuda")
+        device = torch.device(self.device)
 
         class Attention(torch.nn.Module):
             def __init__(self):
@@ -3046,7 +3109,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return score_mod
 
-        m = Attention().cuda().eval().to(dtype)
+        m = Attention().to(self.device).eval().to(dtype)
         m = torch.compile(m, mode="default", fullgraph=False)
 
         q = torch.randn(B, H, N, D, device=device, dtype=dtype)
@@ -3061,7 +3124,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 16),
-            device="cuda",
+            device=self.device,
             dtype=dtype,
             requires_grad=False,
         )
@@ -3098,7 +3161,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, N_CTX, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3114,10 +3177,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return causal_mask & window_mask
 
         sliding_window_causal = torch.nn.attention.flex_attention.create_block_mask(
-            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            sliding_window_causal,
+            B=None,
+            H=None,
+            Q_LEN=N_CTX,
+            KV_LEN=N_CTX,
+            device=self.device,
         )
         global_causal = torch.nn.attention.flex_attention.create_block_mask(
-            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX, device=self.device
         )
 
         local_attn = functools.partial(
@@ -3164,10 +3232,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_mixed_device_error_message(self):
         # Create tensors on different devices
         cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
-        cuda_tensor = torch.randn(2, 2, 128, 16, device="cuda")
+        gpu_tensor = torch.randn(2, 2, 128, 16, device=self.device)
 
         # Use different devices for query, key, and value
-        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+        query, key, value = cpu_tensor, gpu_tensor, cpu_tensor
 
         expected_error_message = (
             "Expected query, key, and value to have the same device type, "
@@ -3180,8 +3248,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_captured_wrong_device_error_message(self):
-        means = torch.randn(64, 3).cuda()
-        length_scales = torch.logspace(0.001, 0.1, 8)
+        means = torch.randn(64, 3, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device="cpu")
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3193,15 +3261,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         expected_error_message = "Buffers cannot be created"
 
-        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 64, 64, device=self.device) for _ in range(3))
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
 
     @supported_platform
     def test_cant_lower_error_message(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(64, 256).cuda()
-        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+        means = torch.randn(64, 256, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3213,15 +3281,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         expected_error_message = "Buffers cannot be created"
 
-        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 64, 64, device=self.device) for _ in range(3))
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
 
     @supported_platform
     def test_reduction_unrolled(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3).cuda()
-        length_scales = torch.logspace(0.001, 0.1, H).cuda()
+        means = torch.randn(S, 3, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, H, device=self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3236,12 +3304,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_invalid_block_size(self):
         # Create tensors on different devices
-        q, k, v = (torch.randn(1, 8, 128, 64, device="cuda") for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 128, 64, device=self.device) for _ in range(3))
 
         expected_error_message = (
             "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
         )
-        block_mask = create_block_mask(noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96)
+        block_mask = create_block_mask(
+            noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=self.device
+        )
 
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
@@ -3251,7 +3321,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 1, 16),
-            device="cuda",
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3306,6 +3376,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     H=None,
                     Q_LEN=max_time,
                     KV_LEN=max_time,
+                    device=self.device,
                 )
 
                 x = torch.compile(
@@ -3318,11 +3389,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return x
 
-        model = Model(128).cuda()
+        model = Model(128).to(self.device)
         B, F, T = 16, 256, 12
         for _ in range(5):
-            x = torch.randn(B, T, F, device="cuda")
-            l = torch.randint(0, T, (B,), device="cuda")
+            x = torch.randn(B, T, F, device=self.device)
+            l = torch.randint(0, T, (B,), device=self.device)
             model(x, l)
 
         assert (
@@ -3334,7 +3405,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 1024, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3351,11 +3422,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 1024, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
-        block_mask = create_block_mask(_causal_mask, None, None, 1024, 1024)
+        block_mask = create_block_mask(
+            _causal_mask, None, None, 1024, 1024, device=self.device
+        )
 
         out_eager = flex_attention(query, key, value, block_mask=block_mask)
 
@@ -3371,7 +3444,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 0, 64),  # Zero in sequence dimension
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3387,8 +3460,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
-        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
-        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device=self.device, dtype=torch.bfloat16)
+        offset_kv = torch.randn(KV_S, device=self.device, dtype=torch.bfloat16)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_q[q] + offset_kv[kv]
@@ -3396,7 +3469,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=self.device)
 
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
@@ -3407,7 +3480,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         Q_S = S + 3
         KV_S = S + 3
 
-        multiplier = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        multiplier = torch.randn(Q_S, device=self.device, dtype=torch.bfloat16)
 
         def apply_multiplicative_bias(score, b, h, q_idx, kv_idx):
             return score * multiplier[q_idx]
@@ -3428,7 +3501,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (2, 2, 256, 32),
-            device="cuda:0",
+            device=f"{self.device}:0",
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3437,7 +3510,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
+        block_mask = create_block_mask(
+            mask_mod, 1, 1, 256, 256, device=f"{self.device}:1"
+        )
         with self.assertRaisesRegex(
             RuntimeError, "Expect q/k/v and block_mask to be on the same device"
         ):
@@ -3468,7 +3543,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(self.device)
         model.compile(mode="default", dynamic=True)
         sequence_len = 256
 
@@ -3476,7 +3551,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
             # Create dense mask
-            rand_mask = torch.randint(0, 2, (batch_shape, sequence_len)).cuda().bool()
+            rand_mask = torch.randint(
+                0, 2, (batch_shape, sequence_len), device=self.device
+            ).bool()
             block_mask = torch.compile(create_block_mask, dynamic=True)(
                 B=batch_shape,
                 BLOCK_SIZE=128,
@@ -3484,11 +3561,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 H=None,
                 Q_LEN=sequence_len,
                 KV_LEN=sequence_len,
-                device="cuda",
+                device=self.device,
             )
 
             # Run forward pass
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, device=self.device)
             model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
@@ -3515,7 +3592,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     block_mask=block_mask,
                 )
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(self.device)
         from torch._dynamo.testing import EagerAndRecordGraphs
 
         backend = EagerAndRecordGraphs()
@@ -3524,7 +3601,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, device=self.device)
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
@@ -3541,7 +3618,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
-            device="cuda",
+            device=self.device,
             dtype=torch.float64,
             requires_grad=True,
         )
@@ -3550,7 +3627,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128)
+        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128, device=self.device)
 
         func = torch.compile(flex_attention, backend=cnt, fullgraph=True)
         out = func(query, key, value, _squared, block_mask=block_mask)
@@ -3610,13 +3687,10 @@ class GraphModule(torch.nn.Module):
         out.sum().backward()
 
         joint_graph = normalize_gm(aot_graphs[1].print_readable(print_output=False))
-
-        self.assertExpectedInline(
-            joint_graph,
-            """\
+        expected_joint_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -3641,12 +3715,18 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full
-""",  # noqa: B950
+""".replace(  # noqa: B950
+            "GPU_TYPE", self.device
         )
 
-    @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
+        self.assertExpectedInline(
+            joint_graph,
+            expected_joint_graph,
+        )
+
+    @unittest.skipIf(HAS_GPU, "Testing CPU error message")
     def test_cpu_error_message_return_lse(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -3664,38 +3744,39 @@ class GraphModule(torch.nn.Module):
             attention(query, key, value, return_lse=True)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_device_cuda_1(self):
+    def test_device_gpu_1(self):
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
                 return flex_attention(q, k, v, block_mask=block_mask)
 
-        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        device = f"{self.device}:1"
+        q = torch.randn(1, 1, 256, 32, device=device, dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device=device, dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device=device, dtype=torch.bfloat16)
         mask = create_block_mask(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             B=None,
             H=None,
             Q_LEN=256,
             KV_LEN=256,
-            device="cuda:1",
+            device=device,
         )
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
-        self.assertEqual(attn_output.device, torch.device("cuda:1"))
+        self.assertEqual(attn_output.device, torch.device(device))
 
     @supported_platform
     def test_validate_small_embedding_size_error_message(self):
         # eager support for small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         flex_attention(q, k, v)
 
         # compiled cpu support for small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         flex_attention(q, k, v)
 
         # compiled gpu kernel does not support small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
         with self.assertRaisesRegex(
@@ -3706,7 +3787,7 @@ class GraphModule(torch.nn.Module):
             compiled_fa(q, k, v)
 
         # compiled gpu kernel supports large embedding size
-        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 16, device=self.device) for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
     @unittest.skipIf(
@@ -3715,7 +3796,7 @@ class GraphModule(torch.nn.Module):
     )
     def test_triton_template_warp_specialization(self):
         def make_tensor():
-            return torch.rand(4, 16, 4096, 64, device="cuda", dtype=torch.bfloat16)
+            return torch.rand(4, 16, 4096, 64, device=self.device, dtype=torch.bfloat16)
 
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         flex_compiled = torch.compile(flex_attention, fullgraph=True)
@@ -3753,14 +3834,20 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = test_device
+
     @supported_platform
     def test_block_mask_attributes(self):
-        offset = torch.zeros(8, device="cuda")
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+        block_mask = create_block_mask(
+            causal_mask, 4, 2, 2048, 2048, device=self.device
+        )
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
@@ -3770,8 +3857,10 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask[1, 0].sparsity(), 46.875)
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
-        offset = torch.arange(8, device="cuda")
-        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048)
+        offset = torch.arange(8, device=self.device)
+        block_mask = create_block_mask(
+            causal_mask, 8, 1, 2048, 2048, device=self.device
+        )
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
@@ -3788,7 +3877,7 @@ class TestBlockMask(InductorTestCase):
             Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
         block_mask = create_block_mask(
-            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE, device=self.device
         )
 
         self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
@@ -3796,12 +3885,12 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_getitem(self):
-        offset = torch.zeros(8, device="cuda")
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=self.device)
         assert block_mask.kv_num_blocks.shape == (4, 2, 4)
         assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
@@ -3853,12 +3942,12 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_block_mask_device_change(self):
-        offset = torch.zeros(8, device="cuda")
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512)
+        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=self.device)
         assert block_mask.kv_indices.is_cuda
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
@@ -3870,7 +3959,7 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_indices.is_cpu
         assert block_mask.q_num_blocks.is_cpu
 
-        block_mask = block_mask.to("cuda")
+        block_mask = block_mask.to(self.device)
         assert block_mask.kv_indices.is_cuda
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
@@ -3878,13 +3967,13 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        seq = torch.arange(512, device="cuda") // 127
+        seq = torch.arange(512, device=self.device) // 127
 
         def mask_mod(b, h, q, kv):
             return (q >= kv) & (seq[q] == seq[kv])
 
         block_mask = torch.compile(create_block_mask, fullgraph=True)(
-            mask_mod, 1, 1, 512, 512
+            mask_mod, 1, 1, 512, 512, device=self.device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
@@ -3896,21 +3985,27 @@ class TestBlockMask(InductorTestCase):
             return q >= kv
 
         torch._dynamo.reset()
-        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 2, 4, 1024, 1024, device=self.device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
 
         # automatic dynamic shapes triggered and recompilation.
-        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 4, 8, 2048, 2048, device=self.device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
         # no recompilation.
-        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 6, 16, 3072, 3072, device=self.device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
@@ -3921,7 +4016,9 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, 2048, 2048, device=self.device
+        )
 
         def replace_non_printable(s):
             def replace(c):
@@ -3957,12 +4054,14 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 )""",
         )
 
-        offset = torch.arange(8, device="cuda")
+        offset = torch.arange(8, device=self.device)
 
         def causal_offset_mask(b, h, q, kv):
             return (q + offset[b] * 128) >= kv
 
-        block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048)
+        block_mask = create_block_mask(
+            causal_offset_mask, 8, 1, 2048, 2048, device=self.device
+        )
         str_block_mask = str(block_mask)
         self.assertTrue("sparsity=29.10" in str_block_mask)
 
@@ -3994,7 +4093,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
     def test_from_kv_blocks(self, full_indices: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if HAS_GPU else "cpu")
         (
             kv_num_blocks,
             kv_indices,
@@ -4048,7 +4147,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_block_size(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if HAS_GPU else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
         block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices)
         self.assertEqual(
@@ -4064,10 +4163,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_upcast_appropriately(self):
-        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        mass = torch.ones((1), dtype=torch.float16, device="cuda")
+        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        mass = torch.ones((1), dtype=torch.float16, device=self.device)
 
         def score_mod(score, b, h, q_idx, kv_idx):
             return score + torch.log(mass[0])
@@ -4076,7 +4175,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_kv(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if HAS_GPU else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
             True, device
         )
@@ -4098,7 +4197,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_q(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if HAS_GPU else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
 
         with self.assertRaises(AssertionError):
@@ -4122,7 +4221,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, 2048, 2048, device=self.device
+        )
         # manually set q_num_blocks and q_indices to None
         block_mask.q_num_blocks = None
         block_mask.q_indices = None
@@ -4140,7 +4241,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 2,
                 2048,
                 64,
-                device="cuda",
+                device=self.device,
                 dtype=torch.float16,
                 requires_grad=True,
             )
@@ -4191,7 +4292,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 lengths[index] += 1
             return lengths
 
-        device = "cuda"
+        device = self.device
         max_seq_len, doc_count = 128, 4
         SEQ_LEN = max_seq_len
 
@@ -4221,7 +4322,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         for i in range(5):
             lengths = generate_random_lengths(1024 + i, 5)
-            offsets = length_to_offsets(lengths, "cuda")
+            offsets = length_to_offsets(lengths, self.device)
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
@@ -4233,7 +4334,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v = (
                 torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
             )
-            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            block_mask = create_block_mask(
+                doc_mask_mod, None, None, 1024 + i, 1024 + i, device=self.device
+            )
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @supported_platform
@@ -4245,7 +4348,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         seq_len = 256
         batch_size = 1
 
-        make_tensor = functools.partial(torch.randn, device="cuda", dtype=torch.float16)
+        make_tensor = functools.partial(
+            torch.randn, device=self.device, dtype=torch.float16
+        )
         q = make_tensor(*(batch_size, q_heads, seq_len, qk_dims))
         k = make_tensor(*(batch_size, kv_heads, seq_len, qk_dims))
         v = make_tensor(*(batch_size, kv_heads, seq_len, v_dims))
@@ -4267,6 +4372,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
     @supported_platform
+    @skipIfXpu
     def test_create_is_cuda_graphable(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -4292,18 +4398,28 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def create_inputs(S):
             q, k, v = (
                 torch.randn(
-                    1, 8, S, 64, dtype=torch.float16, requires_grad=True, device="cuda"
+                    1,
+                    8,
+                    S,
+                    64,
+                    dtype=torch.float16,
+                    requires_grad=True,
+                    device=self.device,
                 )
                 for _ in range(3)
             )
             return q, k, v
 
-        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
+        block_mask = create_block_mask(
+            mask_mod, None, None, 1024, 1024, device=self.device
+        )
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
-        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
+        block_mask = create_block_mask(
+            mask_mod, None, None, 1023, 1023, device=self.device
+        )
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
@@ -4337,9 +4453,11 @@ class TestPagedAttention(InductorTestCase):
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
 
-    def allocate_page_cache(self, n_pages: int, page_size: int):
+    def allocate_page_cache(
+        self, n_pages: int, page_size: int, device: Union[str, torch.device]
+    ):
         max_batch_size = 3
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device=device)
         return paged_cache
 
     def cdiv(self, x, y):
@@ -4351,7 +4469,7 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     def test_page_allocation(self):
         n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(n_pages, page_size)
+        paged_cache = self.allocate_page_cache(n_pages, page_size, device=self.device)
 
         batch_reserve(paged_cache, torch.tensor([8, 24, 16]))
 
@@ -4359,18 +4477,20 @@ class TestPagedAttention(InductorTestCase):
             AssertionError, "requested 2 pages but there are only 0 empty pages"
         ):
             paged_cache.reserve(
-                torch.tensor([0], device="cuda"), torch.tensor([16], device="cuda")
+                torch.tensor([0], device=self.device),
+                torch.tensor([16], device=self.device),
             )
 
-        paged_cache.erase(torch.tensor([1], device="cuda"))
+        paged_cache.erase(torch.tensor([1], device=self.device))
         paged_cache.reserve(
-            torch.tensor([0], device="cuda"), torch.tensor([16], device="cuda")
+            torch.tensor([0], device=self.device),
+            torch.tensor([16], device=self.device),
         )
 
     @supported_platform
     def test_allocate(self):
         n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(n_pages, page_size)
+        paged_cache = self.allocate_page_cache(n_pages, page_size, device=self.device)
 
         target_seq_len = torch.tensor([3, 11, 8])
         batch_reserve(paged_cache, target_seq_len)
@@ -4382,7 +4502,7 @@ class TestPagedAttention(InductorTestCase):
         )
 
         # deallocate batch 1
-        paged_cache.erase(torch.tensor([1], device="cuda"))
+        paged_cache.erase(torch.tensor([1], device=self.device))
         target_seq_len = torch.tensor([3, 0, 8])
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(paged_cache.capacity, self.roundup(target_seq_len, page_size))
@@ -4407,20 +4527,22 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     def test_convert_logical_block_mask(self):
         n_pages, page_size, max_batch_size, max_seq_len = 8, 128, 2, 512
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, device=self.device
+        )
 
-        batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([300, 512], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
-            device="cuda",
+            device=self.device,
         )
         self.assertEqual(
             paged_cache.capacity,
-            torch.tensor([512, 512], device="cuda"),
+            torch.tensor([512, 512], device=self.device),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
@@ -4429,14 +4551,14 @@ class TestPagedAttention(InductorTestCase):
             return q >= kv
 
         block_mask = create_block_mask(
-            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
+            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len, device=self.device
         )
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
         zeros = [0, 0, 0, 0]
         # Check that the new block mask is correct
         expected_kv_num_blocks = torch.tensor(
-            [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device="cuda", dtype=torch.int32
+            [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device=self.device, dtype=torch.int32
         )
         expected_kv_indices = torch.tensor(
             [
@@ -4457,11 +4579,11 @@ class TestPagedAttention(InductorTestCase):
                     ]
                 ],
             ],
-            device="cuda",
+            device=self.device,
             dtype=torch.int32,
         )
         expected_full_kv_num_blocks = torch.tensor(
-            [[[0, 1, 2, 3]], [[0, 1, 2, 3]]], device="cuda:0", dtype=torch.int32
+            [[[0, 1, 2, 3]], [[0, 1, 2, 3]]], device=self.device, dtype=torch.int32
         )
         expected_full_kv_indices = torch.tensor(
             [
@@ -4482,7 +4604,7 @@ class TestPagedAttention(InductorTestCase):
                     ]
                 ],
             ],
-            device="cuda",
+            device=self.device,
             dtype=torch.int32,
         )
         self.assertEqual(new_block_mask.kv_num_blocks, expected_kv_num_blocks)
@@ -4493,26 +4615,28 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     def test_convert_mask_mod(self):
         n_pages, page_size, max_batch_size = 8, 128, 2
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, device=self.device
+        )
 
-        batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([300, 512], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
-            device="cuda",
+            device=self.device,
         )
         self.assertEqual(
             paged_cache.capacity,
-            torch.tensor([512, 512], device="cuda"),
+            torch.tensor([512, 512], device=self.device),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         expected_physical_to_logical = torch.tensor(
             [[0, -1, -1, 1, -1, 2, -1, 3], [-1, 1, 0, -1, 2, -1, 3, -1]],
-            device="cuda",
+            device=self.device,
         )
         self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
 
@@ -4536,31 +4660,33 @@ class TestPagedAttention(InductorTestCase):
         dtype = torch.float32
 
         n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, device=self.device
+        )
 
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
-        k_cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
+        k_cache = torch.zeros(cache_shape, dtype=dtype, device=self.device)
 
-        batch_reserve(paged_cache, torch.tensor([1, 3], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([4, 5], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([6, 6], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([1, 3], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([4, 5], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([6, 6], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, -1, -1, -1], [2, 1, 4, -1, -1, -1]],
-            device="cuda",
+            device=self.device,
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
-        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
+        batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
         input_pos = (
-            torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
             .unsqueeze(0)
             .expand(max_batch_size, max_seq_len)
         )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         ).view(max_batch_size, n_heads, max_seq_len, head_dim)
 
@@ -4616,7 +4742,7 @@ class TestPagedAttention(InductorTestCase):
                     ],
                 ]
             ],
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         )
         self.assertEqual(k_cache, expected_cache)
@@ -4770,7 +4896,7 @@ supports_learnable_bias = unittest.skipUnless(
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        self.device = "cuda"
+        self.device = test_device
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
@@ -5332,9 +5458,9 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     def test_flex_attention_with_dynamic_max_autotune(self):
-        query = torch.randn(2, 16, 512, 64, device="cuda")
-        key = torch.randn(2, 16, 512, 64, device="cuda")
-        value = torch.randn(2, 16, 512, 64, device="cuda")
+        query = torch.randn(2, 16, 512, 64, device=self.device)
+        key = torch.randn(2, 16, 512, 64, device=self.device)
+        value = torch.randn(2, 16, 512, 64, device=self.device)
 
         shape = (2, 16, 512, 16, 512, 64)
         B, Hq, M, Hkv, N, D = shape
@@ -5345,7 +5471,7 @@ class TestLearnableBiases(InductorTestCase):
             return m >= n
 
         mask_shape = (1, 1, M, N)
-        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
+        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, self.device)
 
         compiled_sdpa = torch.compile(
             flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
