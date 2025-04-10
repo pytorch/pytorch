@@ -144,6 +144,7 @@ def try_import_cutlass() -> bool:
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
+            import pycute  # type: ignore[import-not-found]  # noqa: F401
 
             return True
         except ImportError as e:
