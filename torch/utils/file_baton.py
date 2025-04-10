@@ -52,7 +52,7 @@ class FileBaton:
                 waited_too_long = time.time() - start_time > self.warn_after_seconds
                 if waited_too_long and not has_warned:
                     warnings.warn(f'Waited on lock file "{self.lock_file_path}" '
-                            'for {self.warn_after_seconds} seconds.')
+                            f'for {self.warn_after_seconds} seconds.')
                     has_warned = True
 
     def release(self):
