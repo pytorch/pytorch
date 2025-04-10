@@ -187,11 +187,24 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     steps:
-      {%- if os == "windows-arm64" %}
+{%- if os == "windows-arm64" %}
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           path: "pytorch"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "pytorch"
+      - name: Git checkout PyTorch - recursive
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+          submodules: recursive
       - name: Populate binary env
         shell: cmd
         run: |
