@@ -442,6 +442,7 @@ class TestUnbackedSymints(InductorTestCase):
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
 
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_einsum(self, device):
         def fn(q, k, vector, scalar):
