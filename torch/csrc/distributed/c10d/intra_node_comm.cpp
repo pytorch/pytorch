@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-// #include <cuda_runtime.h>
+#if defined(USE_RCOM)
+#include <rocm_smi/rocm_smi.h>
+#endif
 
 namespace c10d::intra_node_comm {
 
