@@ -2926,11 +2926,13 @@ def rms_norm(
         return handle_torch_function(
             rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
         )
-    import os
-    if os.getenv("RMS_KERNEL") == "mine":
-        return torch.native_rms_norm(input, normalized_shape, weight, eps)[0]
-    else:
-        return torch.rms_norm(input, normalized_shape, weight, eps)
+    return torch.native_rms_norm(input, normalized_shape, weight, eps)[0]
+    # You can use the code below to switch dynamically at runtime.
+    # import os
+    # if os.getenv("RMS_KERNEL") == "mine":
+    #     return torch.native_rms_norm(input, normalized_shape, weight, eps)[0]
+    # else:
+    #     return torch.rms_norm(input, normalized_shape, weight, eps)
 
 
 
