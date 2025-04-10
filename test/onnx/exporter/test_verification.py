@@ -47,6 +47,22 @@ class VerificationInfoTest(common_utils.TestCase):
         self.assertEqual(verification_info.expected_dtype, torch.int64)
         self.assertEqual(verification_info.actual_dtype, torch.int64)
 
+    def test_asdict(self):
+        # Test the asdict method
+        expected = torch.tensor([1.0, 2.0, 3.0])
+        actual = torch.tensor([1.0, 2.0, 3.0])
+        verification_info = _verification.VerificationInfo.from_tensors(
+            "test_tensor", expected, actual
+        )
+        asdict_result = verification_info.asdict()
+        self.assertEqual(asdict_result["name"], "test_tensor")
+        self.assertEqual(asdict_result["max_abs_diff"], 0)
+        self.assertEqual(asdict_result["max_rel_diff"], 0)
+        self.assertEqual(asdict_result["abs_diff_hist"], [[3.0] + [0.0] * 8, [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0]])
+        self.assertEqual(asdict_result["rel_diff_hist"], [[3.0] + [0.0] * 8, [0.0, 1e-06, 1e-05, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 1000000.0]])
+        self.assertEqual(asdict_result["expected_dtype"], "torch.float32")
+        self.assertEqual(asdict_result["actual_dtype"], "torch.float32")
+
 
 class VerificationInterpreterTest(common_utils.TestCase):
     def test_interpreter_stores_correct_info(self):
