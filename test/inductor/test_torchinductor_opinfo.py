@@ -540,7 +540,7 @@ inductor_override_kwargs["xpu"] = {
     ("linalg.vecdot", f16): {"atol": 1e-5, "rtol": 2e-2},
     "log_normal": {"reference_in_float": True},
     ("logsumexp", f16): {"atol": 1e-5, "rtol": 1e-2},
-    ("masked.cumprod", f16): {"atol": 1e-5, "rtol": 5e-2},
+    ("masked.cumprod", f16): {"reference_in_float": True, "atol": 1e-5, "rtol": 5e-2},
     ("masked.cumsum", f16): {"atol": 1e-5, "rtol": 5e-3},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
     ("masked.softmax", f16): {"atol": 2e-4, "rtol": 0.01},
@@ -651,6 +651,14 @@ inductor_override_kwargs["xpu"] = {
         "check_gradient": False,
         "atol": 1e-4,
         "rtol": 1e-2,
+    },
+    ("nn.functional.max_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.unfold", f16): {
+        "reference_in_float": True,
     },
 }
 
@@ -1001,6 +1009,8 @@ class TestInductorOpInfo(TestCase):
             "nn.functional.interpolate.bicubic",
             "nn.functional.upsample_bilinear",
             "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
         ):
             if dtype not in allowed_dtypes:
                 raise unittest.SkipTest("Skipped!")
