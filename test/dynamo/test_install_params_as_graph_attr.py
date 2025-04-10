@@ -158,25 +158,24 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         def test_fn(x, net):
             return net(x)
 
-        # Incase nn is in input, we may install the params (?)
-        # TODO: Double check this semantics with export
-        self.check_num_inputs_and_equality(test_fn, 3, 1, (x, net))
+        # When nn is in input, we don't install the params
+        self.check_num_inputs_and_equality(test_fn, 3, 3, (x, net))
 
         def test_fn2(x, net, net2):
             return net(x) + net2(x)
 
-        self.check_num_inputs_and_equality(test_fn2, 5, 1, (x, net, net2))
+        self.check_num_inputs_and_equality(test_fn2, 5, 5, (x, net, net2))
 
         def test_fn3(x, net):
             return net(x) + net2(x)
 
         # In case of local scope (net2 here), we can install
-        self.check_num_inputs_and_equality(test_fn3, 5, 1, (x, net))
+        self.check_num_inputs_and_equality(test_fn3, 5, 3, (x, net))
 
         def test_fn_list(x, nets):
             return sum([net(x) for net in nets])
 
-        self.check_num_inputs_and_equality(test_fn_list, 5, 1, (x, [net, net2]))
+        self.check_num_inputs_and_equality(test_fn_list, 5, 5, (x, [net, net2]))
 
     def test_resnet_structure(self) -> None:
         class ResBlock(torch.nn.Module):

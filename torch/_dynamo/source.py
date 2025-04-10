@@ -900,3 +900,34 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
+
+
+def is_source_self(source: Source) -> bool:
+    """
+    Checks if source is from the "self"
+    which is useful of compiling nn.Module
+    for inlining
+    """
+    if isinstance(source, ChainedSource):
+        return is_source_self(source.base)
+    elif isinstance(source, LocalSource):
+        return source.local_name == "self"
+    else:
+        return False
+
+
+def is_explicit_member_buffer(source: Source) -> bool:
+    """
+    Checks if source is a member buffer; this check
+    is needed for buffers such as those in BatchNorm
+    to be installed properly for consistent export
+    """
+    # Case for batch norm - it is not a tensor, but a
+    # DictGetItemSource(AttrSource(LocalSource))
+    if isinstance(source, AttrSource):
+        return source.member == "_buffers"
+    elif isinstance(source, ChainedSource):
+        return is_explicit_member_buffer(source.base)
+    else:
+        # Made it to bottom and not a buffer can return
+        return False
