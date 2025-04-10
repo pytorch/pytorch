@@ -105,7 +105,6 @@ torch_version = str(torch.__version__)
 # TODO: change to [:2] at v1.0
 version = "main (" + torch_version + " )"
 # The full version, including alpha/beta/rc tags.
-# TODO: verify this works as expected
 release = "main"
 
 # Customized html_title here.
