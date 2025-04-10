@@ -26,6 +26,9 @@ c10::Device normalize_device(const c10::Device& device) {
   } else if (device.is_cuda()) {
     return c10::Device(
         c10::DeviceType::CUDA, device.has_index() ? device.index() : 0);
+  } else if (device.is_xpu()) {
+    return c10::Device(
+        c10::DeviceType::XPU, device.has_index() ? device.index() : 0);
   } else {
     TORCH_CHECK(false, "Unsupported device type", device);
   }
