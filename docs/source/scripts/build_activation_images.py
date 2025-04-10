@@ -46,8 +46,6 @@ functions = [
     torch.nn.Softsign(),
     torch.nn.Tanh(),
     torch.nn.Tanhshrink(),
-    torch.nn.Threshold(0, 0.5),
-    torch.nn.GLU(),
 ]
 
 
@@ -56,14 +54,8 @@ def plot_function(function, **args):
     Plot a function on the current plot. The additional arguments may
     be used to specify color, alpha, etc.
     """
-    if isinstance(function, torch.nn.GLU):
-        xrange = torch.arange(-7.0, 7.0, 0.01).unsqueeze(1).repeat(1, 2)
-        x = xrange.numpy()[:, 0]
-    else:
-        xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
-        x = xrange.numpy()
-    y = function(xrange).detach().numpy()
-    plt.plot(x, y, **args)
+    xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
+    plt.plot(xrange.numpy(), function(xrange).detach().numpy(), **args)
 
 
 # Step through all the functions

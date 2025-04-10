@@ -3,6 +3,7 @@
 
 set -ex
 
+NCCL_VERSION=v2.26.2-1
 CUDNN_VERSION=9.8.0.87
 
 function install_cusparselt_063 {
@@ -17,7 +18,7 @@ function install_cusparselt_063 {
 }
 
 function install_128 {
-  echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
+  echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.3"
   rm -rf /usr/local/cuda-12.8 /usr/local/cuda
   # install CUDA 12.8.0 in the same container
   wget -q https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_570.86.10_linux_sbsa.run
@@ -35,7 +36,14 @@ function install_128 {
   cd ..
   rm -rf tmp_cudnn
 
-  CUDA_VERSION=12.8 bash install_nccl.sh
+  # NCCL license: https://docs.nvidia.com/deeplearning/nccl/#licenses
+  # Follow build: https://github.com/NVIDIA/nccl/tree/master?tab=readme-ov-file#build
+  git clone -b ${NCCL_VERSION} --depth 1 https://github.com/NVIDIA/nccl.git
+  cd nccl && make -j src.build
+  cp -a build/include/* /usr/local/cuda/include/
+  cp -a build/lib/* /usr/local/cuda/lib64/
+  cd ..
+  rm -rf nccl
 
   install_cusparselt_063
 

@@ -77,8 +77,6 @@ class ShardingPropagator:
             aten.reshape.default: 1,
             aten.view.default: 1,
             aten._unsafe_view.default: 1,
-            aten.select_backward.default: 1,
-            aten.slice_backward.default: 1,
         }
 
     def register_sharding_prop_rule(

@@ -2813,10 +2813,7 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
-            number = super()._to_number(number_like, id=id)
-            if type(number) not in self._TYPE_TO_DTYPE.keys():
-                self._inputs_not_supported()
-            return number
+            return super()._to_number(number_like, id=id)
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -3036,7 +3033,9 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    abs_test_path = inspect.getfile(type(self))
+                    # NB: In Python 3.8, the getfile() call will return a path relative
+                    # to the working directory, so convert that to absolute.
+                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
                     test_run_cmd = f"python {test_filename} {class_name}.{method_name}"

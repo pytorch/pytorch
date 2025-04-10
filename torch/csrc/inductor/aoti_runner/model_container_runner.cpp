@@ -100,10 +100,7 @@ consider rebuild your model with the latest AOTInductor.");
       "AOTInductorModelContainerFreeInactiveConstantBuffer")
   TRY_LOAD_SYMBOL(
       extract_constants_map_func_,
-      "AOTInductorModelContainerExtractConstantsMap")
-  TRY_LOAD_SYMBOL(
-      update_user_managed_constant_buffer_func_,
-      "AOTInductorModelContainerUpdateUserManagedConstantBuffer")
+      "AOTInductorModelContainerExtractConstantsMap");
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -112,7 +109,7 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str);
+        json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {
@@ -226,45 +223,27 @@ const std::unordered_map<std::string, at::Tensor> AOTIModelContainerRunner::
 void AOTIModelContainerRunner::update_constant_buffer(
     const TensorConstantMap& const_map,
     bool use_inactive,
-    bool check_full_update,
-    bool user_managed) {
-  if (user_managed) {
-    AOTI_RUNTIME_ERROR_CODE_CHECK(update_user_managed_constant_buffer_func_(
-        container_handle_,
-        (AOTInductorConstantMapHandle)&const_map,
-        use_inactive,
-        check_full_update));
-  } else {
-    AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
-        container_handle_,
-        (AOTInductorConstantMapHandle)&const_map,
-        use_inactive,
-        check_full_update));
-  }
+    bool check_full_update) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
 }
 
 void AOTIModelContainerRunner::update_constant_buffer(
     std::unordered_map<std::string, at::Tensor>& tensor_map,
     bool use_inactive,
-    bool check_full_update,
-    bool user_managed) {
+    bool check_full_update) {
   TensorConstantMap const_map;
   for (auto& [k, v] : tensor_map) {
     const_map.emplace(k, &v);
   }
-  if (user_managed) {
-    AOTI_RUNTIME_ERROR_CODE_CHECK(update_user_managed_constant_buffer_func_(
-        container_handle_,
-        (AOTInductorConstantMapHandle)&const_map,
-        use_inactive,
-        check_full_update));
-  } else {
-    AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
-        container_handle_,
-        (AOTInductorConstantMapHandle)&const_map,
-        use_inactive,
-        check_full_update));
-  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
 }
 
 void AOTIModelContainerRunner::update_inactive_constant_buffer(

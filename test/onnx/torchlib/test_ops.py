@@ -220,9 +220,7 @@ def run_test_output_match(
 
                 test_name = test_suite.id()
                 function_output, model_proto = function_executor(
-                    test_name,
-                    reference_torch_outputs,
-                    opset_version=torchlib_op_info.opset_introduced,
+                    test_name, reference_torch_outputs
                 )(onnx_function, input_onnx, kwargs_onnx)
                 # Finally we re-flatten everything
                 # TODO: add pytree structure comparison.
