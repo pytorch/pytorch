@@ -2056,7 +2056,7 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
-            self.nodes = self.reorder_for_partition(self.nodes)
+            self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
         self.compute_last_usage()
         log_ir_post_fusion(self.nodes)
@@ -4214,41 +4214,6 @@ class Scheduler:
 
         return signatures[::-1]
 
-    def reorder_for_partition_based_on_devices(
-        self, nodes: list[BaseSchedulerNode]
-    ) -> list[BaseSchedulerNode]:
-        """
-        Given topologically sorted `nodes`, reorder by devices while
-        respecting dependencies. Specifically, when a node reads from
-        another device, execute all leading nodes on that device since
-        we already have a graph partition for that device.
-        """
-
-        result: list[BaseSchedulerNode] = []
-        device_to_nodes: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
-            collections.defaultdict(list)
-        )
-
-        def visit(node: BaseSchedulerNode) -> None:
-            node_device = node.get_device()
-            for dep in node.unmet_dependencies:
-                if (
-                    buffer := self.name_to_buf.get(dep.name, None)
-                ) and buffer.get_device() != node_device:
-                    input_device = buffer.get_device()
-                    # the dependent node may have been processed
-                    if input_device_nodes := device_to_nodes.pop(input_device, None):
-                        result.extend(input_device_nodes)
-            device_to_nodes[node_device].append(node)
-
-        for node in nodes:
-            visit(node)
-
-        for on_device_nodes in device_to_nodes.values():
-            result.extend(on_device_nodes)
-
-        return result
-
     def reorder_for_partition_with_simple_dependency(
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
@@ -4280,13 +4245,6 @@ class Scheduler:
                 middle.append(node)
 
         return front + middle + back
-
-    def reorder_for_partition(
-        self, nodes: list[BaseSchedulerNode]
-    ) -> list[BaseSchedulerNode]:
-        nodes = self.reorder_for_partition_based_on_devices(nodes)
-        nodes = self.reorder_for_partition_with_simple_dependency(nodes)
-        return nodes
 
     def graph_partition(
         self,
