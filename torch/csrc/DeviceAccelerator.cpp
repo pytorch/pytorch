@@ -16,12 +16,6 @@ void initModule(PyObject* module) {
     }
   });
 
-  m.def("_accelerator_deviceCount", []() {
-    auto device_type = at::accelerator::getAccelerator(false);
-    torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::deviceCount();
-  });
-
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
     // If device index is negative, no-op
     if (device_index < 0) {
