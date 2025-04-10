@@ -430,7 +430,7 @@ class ExternKernelAllocLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(code), *node.codegen_kwargs(code=code)]
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
         self.wrapper._generate_extern_kernel_alloc_helper(code, self.node, args)
 
 
@@ -441,7 +441,7 @@ class ExternKernelOutLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(code), *node.codegen_kwargs(code, skip_out=True)]
+        args = [*node.codegen_args(), *node.codegen_kwargs(skip_out=True)]
         kernel_name = node.get_kernel_name()
         if (
             V.graph.cpp_wrapper
@@ -2507,7 +2507,7 @@ class PythonWrapperCodegen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_arg_str(self, s, type_=None, code: Optional[IndentedBuffer] = None):
+    def val_to_arg_str(self, s, type_=None):
         from torch.utils._triton import dtype_to_string, has_triton_package
 
         if has_triton_package():
@@ -2533,11 +2533,11 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
-            return s.codegen_reference(writer=code)
+            return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
         elif isinstance(s, ir.GeneratorState):
-            return s.codegen_reference(writer=code)
+            return s.codegen_reference()
         else:
             return repr(s)
 
