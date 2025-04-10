@@ -1,7 +1,7 @@
 import collections
 import functools
 import inspect
-from typing import Any, Callable, Dict, final, Optional, Tuple, Union
+from typing import Any, Callable, final, Optional, Union
 from typing_extensions import Self
 
 from ..utils import is_function_or_wrapper
@@ -108,7 +108,7 @@ class LazyVariableTracker(VariableTracker):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[Dict[int, Tuple[Any, Any]]] = None,
+        cache: Optional[dict[int, tuple[Any, Any]]] = None,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.

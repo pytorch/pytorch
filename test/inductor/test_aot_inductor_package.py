@@ -19,12 +19,7 @@ from torch._inductor.package import AOTICompiledModel, load_package, package_aot
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -94,7 +89,6 @@ class TestAOTInductorPackage(TestCase):
         example_inputs,
         inductor_configs=None,
         dynamic_shapes=None,
-        disable_constraint_solver=False,
         atol=None,
         rtol=None,
     ) -> AOTICompiledModel:
@@ -184,7 +178,6 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # build system may be different
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         if not self.package_cpp_only:
@@ -473,6 +466,28 @@ class TestAOTInductorPackage(TestCase):
         expected = model(test_inputs)
         output = compiled(test_inputs)
         self.assertEqual(expected, output)
+
+    def test_deepcopy_compiled_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model = Model()
+
+        compiled = compile(model, example_inputs)
+
+        copmiled_copy = copy.deepcopy(compiled)
+
+        expected = model(*example_inputs)
+        output = compiled(*example_inputs)
+        output_copy = copmiled_copy(*example_inputs)
+        self.assertEqual(expected, output)
+        self.assertEqual(expected, output_copy)
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,

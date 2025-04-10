@@ -62,7 +62,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   return comm;
 }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -87,7 +87,39 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#endif
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
+    int numRanks,
+    int rank,
+    std::vector<ncclUniqueId>& commIds,
+    at::DeviceIndex deviceIndex,
+    ncclConfig_t& config) {
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
+  auto comm = std::make_shared<NCCLComm>();
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+            << (comm->nonBlocking_ ? "nonblocking" : "blocking")
+            << " with scalable init.";
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommInitRankScalable(
+          &(comm->ncclComm_),
+          numRanks,
+          rank,
+          commIds.size(),
+          commIds.data(),
+          &config),
+      std::nullopt);
+  // Only the first ncclUniqueId will be used to create the
+  // communicator hash id, which is used to identify the communicator
+  // in the log file and in the replay tool.
+  comm->ncclId_ = commIds[0];
+  comm->rank_ = rank;
+  comm->deviceIndex_ = deviceIndex;
+  comm->initialized_ = !comm->nonBlocking_;
+  return comm;
+}
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_CONFIG
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
@@ -119,6 +151,10 @@ ncclComm_t NCCLComm::getNcclComm() {
               << " is initialized.";
   }
   return ncclComm_;
+}
+
+at::DeviceIndex NCCLComm::getDeviceIndex() {
+  return deviceIndex_;
 }
 
 // Wait for the communicator to be ready. This is a blocking function.
@@ -311,19 +347,26 @@ ncclResult_t NCCLComm::checkForNcclError() {
 #endif
 }
 
-ncclResult_t NCCLComm::registerSegment(void* ptr, size_t size) {
+ncclResult_t NCCLComm::registerSegment(
+    void* ptr,
+    size_t size,
+    bool errorOnRereg /*=true*/) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
   // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
   // maps to a unique handle and should not be registered before the current
   // ptr is deregistered and freed.
-  TORCH_CHECK(
-      registeredSegmentHandles_.count(ptr) == 0,
-      "Segment with ptr ",
-      ptr,
-      " has already been registered on ncclComm_ ",
-      ncclComm_);
+  if (registeredSegmentHandles_.count(ptr) > 0) {
+    TORCH_CHECK(
+        !errorOnRereg,
+        "Segment with ptr ",
+        ptr,
+        " has already been registered on ncclComm_ ",
+        ncclComm_);
+    // Skip below
+    return ncclSuccess;
+  }
 
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
@@ -390,11 +433,9 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 #endif
 
 std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
-
-  c10::call_once(ncclGetVersionFlag, []() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -417,12 +458,24 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }
 
-#ifdef USE_C10D_NCCL
+int getNcclVersionNumber() {
+  static int version = []() {
+    int version = 0;
+    ncclResult_t status = ncclGetVersion(&version);
+    if (status != ncclSuccess) {
+      return 0; // Error.
+    }
+    return version;
+  }();
+  return version;
+}
+
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -433,7 +486,8 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
+        AT_CUDA_CHECK(
+            cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
           hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
@@ -443,7 +497,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
-#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
@@ -523,7 +576,7 @@ std::string getNcclErrorDetailStr(
 
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
-    std::string dumpReason,
+    const std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap) {
   LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
   for (auto& [key, value] : dumpMap) {

@@ -3,16 +3,19 @@
 
 import io
 import os
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from fsspec.core import url_to_fs
 
+from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
     FileSystemWriter,
+    SerializationFormat,
 )
 
 
@@ -56,8 +59,10 @@ class FileSystem(FileSystemBase):
     ) -> Union[str, os.PathLike]:
         return os.path.join(path, suffix)
 
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
-        self.fs, _ = url_to_fs(path)
+    def init_path(
+        self, path: Union[str, os.PathLike], **kwargs
+    ) -> Union[str, os.PathLike]:
+        self.fs, _ = url_to_fs(path, **kwargs)
         return path
 
     def rename(
@@ -86,6 +91,9 @@ class FileSystem(FileSystemBase):
     def rm_file(self, path: Union[str, os.PathLike]) -> None:
         self.fs.rm(path)
 
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+        return self.fs.ls(path)
+
 
 # TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):
@@ -110,6 +118,9 @@ class FsspecWriter(FileSystemWriter):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        **kwargs,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -121,6 +132,7 @@ class FsspecWriter(FileSystemWriter):
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -131,9 +143,11 @@ class FsspecWriter(FileSystemWriter):
             thread_count,
             per_thread_copy_ahead,
             overwrite=overwrite,
+            _extensions=_extensions,
+            serialization_format=serialization_format,
         )
         self.fs = FileSystem()
-        self.path = self.fs.init_path(path)
+        self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -141,10 +155,10 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: Union[str, os.PathLike]) -> None:
+    def __init__(self, path: Union[str, os.PathLike], **kwargs) -> None:
         super().__init__(path)
         self.fs = FileSystem()
-        self.path = self.fs.init_path(path)
+        self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:

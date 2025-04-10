@@ -17,21 +17,12 @@ import re
 import time
 import urllib.parse
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    NamedTuple,
-    Optional,
-    Pattern,
-    Tuple,
-)
+from re import Pattern
+from typing import Any, Callable, cast, NamedTuple, Optional
 from warnings import warn
 
 import yaml
@@ -78,7 +69,7 @@ class JobCheckState(NamedTuple):
     summary: Optional[str]
 
 
-JobNameToStateDict = Dict[str, JobCheckState]
+JobNameToStateDict = dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
@@ -468,10 +459,10 @@ def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     return rc["data"]["repository"]["pullRequest"]
 
 
-@lru_cache(maxsize=None)
-def gh_get_team_members(org: str, name: str) -> List[str]:
-    rc: List[str] = []
-    team_members: Dict[str, Any] = {
+@cache
+def gh_get_team_members(org: str, name: str) -> list[str]:
+    rc: list[str] = []
+    team_members: dict[str, Any] = {
         "pageInfo": {"hasNextPage": "true", "endCursor": None}
     }
     while bool(team_members["pageInfo"]["hasNextPage"]):
@@ -494,7 +485,7 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
     if workflow_run is None:
         return ""
     else:
-        return f'{workflow_run["workflow"]["name"]} / '
+        return f"{workflow_run['workflow']['name']} / "
 
 
 def is_passing_status(status: Optional[str]) -> bool:
@@ -503,14 +494,14 @@ def is_passing_status(status: Optional[str]) -> bool:
 
 def add_workflow_conclusions(
     checksuites: Any,
-    get_next_checkruns_page: Callable[[List[Dict[str, Dict[str, Any]]], int, Any], Any],
+    get_next_checkruns_page: Callable[[list[dict[str, dict[str, Any]]], int, Any], Any],
     get_next_checksuites: Callable[[Any], Any],
 ) -> JobNameToStateDict:
     # graphql seems to favor the most recent workflow run, so in theory we
     # shouldn't need to account for reruns, but do it just in case
 
     # workflow -> job -> job info
-    workflows: Dict[str, WorkflowCheckState] = {}
+    workflows: dict[str, WorkflowCheckState] = {}
 
     # for the jobs that don't have a workflow
     no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", 0, None)
@@ -554,7 +545,7 @@ def add_workflow_conclusions(
                     if not isinstance(checkrun_node, dict):
                         warn(f"Expected dictionary, but got {type(checkrun_node)}")
                         continue
-                    checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
+                    checkrun_name = f"{get_check_run_name_prefix(workflow_run)}{checkrun_node['name']}"
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
                     if existing_checkrun is None or not is_passing_status(
                         existing_checkrun.status
@@ -633,8 +624,8 @@ def _revlist_to_prs(
     pr: "GitHubPR",
     rev_list: Iterable[str],
     should_skip: Optional[Callable[[int, "GitHubPR"], bool]] = None,
-) -> List[Tuple["GitHubPR", str]]:
-    rc: List[Tuple[GitHubPR, str]] = []
+) -> list[tuple["GitHubPR", str]]:
+    rc: list[tuple[GitHubPR, str]] = []
     for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
         m = RE_PULL_REQUEST_RESOLVED.search(msg)
@@ -656,7 +647,7 @@ def _revlist_to_prs(
 
 def get_ghstack_prs(
     repo: GitRepo, pr: "GitHubPR", open_only: bool = True
-) -> List[Tuple["GitHubPR", str]]:
+) -> list[tuple["GitHubPR", str]]:
     """
     Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
     @:param open_only: Only return open PRs
@@ -669,7 +660,7 @@ def get_ghstack_prs(
         if not open_only or not candidate.is_closed():
             return False
         print(
-            f"Skipping {idx+1} of {len(rev_list)} PR (#{candidate.pr_num}) as its already been merged"
+            f"Skipping {idx + 1} of {len(rev_list)} PR (#{candidate.pr_num}) as its already been merged"
         )
         return True
 
@@ -701,14 +692,14 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
-        self.changed_files: Optional[List[str]] = None
-        self.labels: Optional[List[str]] = None
+        self.changed_files: Optional[list[str]] = None
+        self.labels: Optional[list[str]] = None
         self.conclusions: Optional[JobNameToStateDict] = None
-        self.comments: Optional[List[GitHubComment]] = None
-        self._authors: Optional[List[Tuple[str, str]]] = None
-        self._reviews: Optional[List[Tuple[str, str]]] = None
+        self.comments: Optional[list[GitHubComment]] = None
+        self._authors: Optional[list[tuple[str, str]]] = None
+        self._reviews: Optional[list[tuple[str, str]]] = None
         self.merge_base: Optional[str] = None
-        self.submodules: Optional[List[str]] = None
+        self.submodules: Optional[list[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -763,7 +754,7 @@ class GitHubPR:
 
         return self.merge_base
 
-    def get_changed_files(self) -> List[str]:
+    def get_changed_files(self) -> list[str]:
         if self.changed_files is None:
             info = self.info
             unique_changed_files = set()
@@ -786,14 +777,14 @@ class GitHubPR:
             raise RuntimeError("Changed file count mismatch")
         return self.changed_files
 
-    def get_submodules(self) -> List[str]:
+    def get_submodules(self) -> list[str]:
         if self.submodules is None:
             rc = gh_graphql(GH_GET_REPO_SUBMODULES, name=self.project, owner=self.org)
             info = rc["data"]["repository"]["submodules"]
             self.submodules = [s["path"] for s in info["nodes"]]
         return self.submodules
 
-    def get_changed_submodules(self) -> List[str]:
+    def get_changed_submodules(self) -> list[str]:
         submodules = self.get_submodules()
         return [f for f in self.get_changed_files() if f in submodules]
 
@@ -809,7 +800,7 @@ class GitHubPR:
             and all("submodule" not in label for label in self.get_labels())
         )
 
-    def _get_reviews(self) -> List[Tuple[str, str]]:
+    def _get_reviews(self) -> list[tuple[str, str]]:
         if self._reviews is None:
             self._reviews = []
             info = self.info
@@ -828,13 +819,12 @@ class GitHubPR:
                     cursor=info["reviews"]["pageInfo"]["startCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
-        reviews = {}
-        for author, state in self._reviews:
-            if state != "COMMENTED":
-                reviews[author] = state
+        reviews = {
+            author: state for author, state in self._reviews if state != "COMMENTED"
+        }
         return list(reviews.items())
 
-    def get_approved_by(self) -> List[str]:
+    def get_approved_by(self) -> list[str]:
         return [login for (login, state) in self._get_reviews() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
@@ -843,12 +833,12 @@ class GitHubPR:
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
-    def _fetch_authors(self) -> List[Tuple[str, str]]:
+    def _fetch_authors(self) -> list[tuple[str, str]]:
         if self._authors is not None:
             return self._authors
-        authors: List[Tuple[str, str]] = []
+        authors: list[tuple[str, str]] = []
 
-        def add_authors(info: Dict[str, Any]) -> None:
+        def add_authors(info: dict[str, Any]) -> None:
             for node in info["commits_with_authors"]["nodes"]:
                 for author_node in node["commit"]["authors"]["nodes"]:
                     user_node = author_node["user"]
@@ -881,7 +871,7 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
 
-    def get_labels(self) -> List[str]:
+    def get_labels(self) -> list[str]:
         if self.labels is not None:
             return self.labels
         labels = (
@@ -899,7 +889,7 @@ class GitHubPR:
         orig_last_commit = self.last_commit()
 
         def get_pr_next_check_runs(
-            edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any
+            edges: list[dict[str, dict[str, Any]]], edge_idx: int, checkruns: Any
         ) -> Any:
             rc = gh_graphql(
                 GH_GET_PR_NEXT_CHECK_RUNS,
@@ -951,7 +941,7 @@ class GitHubPR:
 
         return self.conclusions
 
-    def get_authors(self) -> Dict[str, str]:
+    def get_authors(self) -> dict[str, str]:
         rc = {}
         for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
@@ -995,7 +985,7 @@ class GitHubPR:
             url=node["url"],
         )
 
-    def get_comments(self) -> List[GitHubComment]:
+    def get_comments(self) -> list[GitHubComment]:
         if self.comments is not None:
             return self.comments
         self.comments = []
@@ -1069,7 +1059,7 @@ class GitHubPR:
         skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
         skip_all_rule_checks: bool = False,
-    ) -> List["GitHubPR"]:
+    ) -> list["GitHubPR"]:
         assert self.is_ghstack_pr()
         ghstack_prs = get_ghstack_prs(
             repo, self, open_only=False
@@ -1099,7 +1089,7 @@ class GitHubPR:
     def gen_commit_message(
         self,
         filter_ghstack: bool = False,
-        ghstack_deps: Optional[List["GitHubPR"]] = None,
+        ghstack_deps: Optional[list["GitHubPR"]] = None,
     ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
@@ -1151,7 +1141,7 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
         comment_id: Optional[int] = None,
-        ignore_current_checks: Optional[List[str]] = None,
+        ignore_current_checks: Optional[list[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
         (
@@ -1223,7 +1213,7 @@ class GitHubPR:
         comment_id: Optional[int] = None,
         branch: Optional[str] = None,
         skip_all_rule_checks: bool = False,
-    ) -> List["GitHubPR"]:
+    ) -> list["GitHubPR"]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks, useful for dry-running merge locally
         """
@@ -1233,9 +1223,17 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            repo.fetch(self.last_commit()["oid"], pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
             return []
         else:
             return self.merge_ghstack_into(
@@ -1263,14 +1261,14 @@ class PostCommentError(Exception):
 @dataclass
 class MergeRule:
     name: str
-    patterns: List[str]
-    approved_by: List[str]
-    mandatory_checks_name: Optional[List[str]]
+    patterns: list[str]
+    approved_by: list[str]
+    mandatory_checks_name: Optional[list[str]]
     ignore_flaky_failures: bool = True
 
 
 def gen_new_issue_link(
-    org: str, project: str, labels: List[str], template: str = "bug-report.yml"
+    org: str, project: str, labels: list[str], template: str = "bug-report.yml"
 ) -> str:
     labels_str = ",".join(labels)
     return (
@@ -1282,7 +1280,7 @@ def gen_new_issue_link(
 
 def read_merge_rules(
     repo: Optional[GitRepo], org: str, project: str
-) -> List[MergeRule]:
+) -> list[MergeRule]:
     """Returns the list of all merge rules for the repo or project.
 
     NB: this function is used in Meta-internal workflows, see the comment
@@ -1312,12 +1310,12 @@ def find_matching_merge_rule(
     repo: Optional[GitRepo] = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: Optional[List[str]] = None,
-) -> Tuple[
+    ignore_current_checks: Optional[list[str]] = None,
+) -> tuple[
     MergeRule,
-    List[Tuple[str, Optional[str], Optional[int]]],
-    List[Tuple[str, Optional[str], Optional[int]]],
-    Dict[str, List[Any]],
+    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, Optional[str], Optional[int]]],
+    dict[str, list[Any]],
 ]:
     """
     Returns merge rule matching to this pr together with the list of associated pending
@@ -1504,21 +1502,51 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
-def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
+def checks_to_str(checks: list[tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
 def checks_to_markdown_bullets(
-    checks: List[Tuple[str, Optional[str], Optional[int]]],
-) -> List[str]:
+    checks: list[tuple[str, Optional[str], Optional[int]]],
+) -> list[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
 
 
+def post_starting_merge_comment(
+    repo: GitRepo,
+    pr: GitHubPR,
+    explainer: TryMergeExplainer,
+    dry_run: bool,
+    ignore_current_checks_info: Optional[
+        list[tuple[str, Optional[str], Optional[int]]]
+    ] = None,
+) -> None:
+    """Post the initial merge starting message on the PR. Also post a short
+    message on all PRs in the stack."""
+    gh_post_pr_comment(
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        explainer.get_merge_message(ignore_current_checks_info),
+        dry_run=dry_run,
+    )
+    if pr.is_ghstack_pr():
+        for additional_prs, _ in get_ghstack_prs(repo, pr):
+            if additional_prs.pr_num != pr.pr_num:
+                gh_post_pr_comment(
+                    additional_prs.org,
+                    additional_prs.project,
+                    additional_prs.pr_num,
+                    f"Starting merge as part of PR stack under #{pr.pr_num}",
+                    dry_run=dry_run,
+                )
+
+
 def manually_close_merged_pr(
     pr: GitHubPR,
-    additional_merged_prs: List[GitHubPR],
+    additional_merged_prs: list[GitHubPR],
     merge_commit_sha: str,
     dry_run: bool,
 ) -> None:
@@ -1551,12 +1579,12 @@ def save_merge_record(
     owner: str,
     project: str,
     author: str,
-    pending_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    failed_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    ignore_current_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    broken_trunk_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    flaky_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    unstable_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    pending_checks: list[tuple[str, Optional[str], Optional[int]]],
+    failed_checks: list[tuple[str, Optional[str], Optional[int]]],
+    ignore_current_checks: list[tuple[str, Optional[str], Optional[int]]],
+    broken_trunk_checks: list[tuple[str, Optional[str], Optional[int]]],
+    flaky_checks: list[tuple[str, Optional[str], Optional[int]]],
+    unstable_checks: list[tuple[str, Optional[str], Optional[int]]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1714,9 +1742,9 @@ def is_invalid_cancel(
 def get_classifications(
     pr_num: int,
     project: str,
-    checks: Dict[str, JobCheckState],
-    ignore_current_checks: Optional[List[str]],
-) -> Dict[str, JobCheckState]:
+    checks: dict[str, JobCheckState],
+    ignore_current_checks: Optional[list[str]],
+) -> dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
     # to get the latest results as well as update Dr.CI PR comment
@@ -1825,7 +1853,7 @@ def get_classifications(
 
 def filter_checks_with_lambda(
     checks: JobNameToStateDict, status_filter: Callable[[Optional[str]], bool]
-) -> List[JobCheckState]:
+) -> list[JobCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
 
 
@@ -1841,7 +1869,7 @@ def get_pr_commit_sha(repo: GitRepo, pr: GitHubPR) -> str:
 
 def validate_revert(
     repo: GitRepo, pr: GitHubPR, *, comment_id: Optional[int] = None
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     comment = (
         pr.get_last_comment()
         if comment_id is None
@@ -1871,7 +1899,7 @@ def validate_revert(
 
 def get_ghstack_dependent_prs(
     repo: GitRepo, pr: GitHubPR, only_closed: bool = True
-) -> List[Tuple[str, GitHubPR]]:
+) -> list[tuple[str, GitHubPR]]:
     """
     Get the PRs in the stack that are above this PR (inclusive).
     Throws error if stack have branched or original branches are gone
@@ -1897,7 +1925,7 @@ def get_ghstack_dependent_prs(
     # Remove commits original PR depends on
     if skip_len > 0:
         rev_list = rev_list[:-skip_len]
-    rc: List[Tuple[str, GitHubPR]] = []
+    rc: list[tuple[str, GitHubPR]] = []
     for pr_, sha in _revlist_to_prs(repo, pr, rev_list):
         if not pr_.is_closed():
             if not only_closed:
@@ -1910,7 +1938,7 @@ def get_ghstack_dependent_prs(
 
 def do_revert_prs(
     repo: GitRepo,
-    shas_and_prs: List[Tuple[str, GitHubPR]],
+    shas_and_prs: list[tuple[str, GitHubPR]],
     *,
     author_login: str,
     extra_msg: str = "",
@@ -2001,7 +2029,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     if skip_mandatory_checks:
         return
     response = cast(
-        Dict[str, Any],
+        dict[str, Any],
         gh_fetch_json_list(
             "https://api.github.com/search/issues",
             # Having two label: queries is an AND operation
@@ -2019,29 +2047,29 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     return
 
 
-def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
+def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
 def categorize_checks(
     check_runs: JobNameToStateDict,
-    required_checks: List[str],
+    required_checks: list[str],
     ok_failed_checks_threshold: Optional[int] = None,
-) -> Tuple[
-    List[Tuple[str, Optional[str], Optional[int]]],
-    List[Tuple[str, Optional[str], Optional[int]]],
-    Dict[str, List[Any]],
+) -> tuple[
+    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, Optional[str], Optional[int]]],
+    dict[str, list[Any]],
 ]:
     """
     Categories all jobs into the list of pending and failing jobs. All known flaky
     failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
     is not set (unlimited)
     """
-    pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-    failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    pending_checks: list[tuple[str, Optional[str], Optional[int]]] = []
+    failed_checks: list[tuple[str, Optional[str], Optional[int]]] = []
 
     # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on s3
-    failed_checks_categorization: Dict[str, List[Any]] = defaultdict(list)
+    failed_checks_categorization: dict[str, list[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -2139,13 +2167,7 @@ def merge(
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks:
-        gh_post_pr_comment(
-            pr.org,
-            pr.project,
-            pr.pr_num,
-            explainer.get_merge_message(),
-            dry_run=dry_run,
-        )
+        post_starting_merge_comment(repo, pr, explainer, dry_run)
         return pr.merge_into(
             repo,
             dry_run=dry_run,
@@ -2168,12 +2190,12 @@ def merge(
         )
         ignore_current_checks_info = failing
 
-    gh_post_pr_comment(
-        pr.org,
-        pr.project,
-        pr.pr_num,
-        explainer.get_merge_message(ignore_current_checks_info),
-        dry_run=dry_run,
+    post_starting_merge_comment(
+        repo,
+        pr,
+        explainer,
+        dry_run,
+        ignore_current_checks_info=ignore_current_checks_info,
     )
 
     start_time = time.time()
@@ -2259,7 +2281,8 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                flush=True,
             )
             time.sleep(5 * 60)
     # Finally report timeout back

@@ -1,5 +1,4 @@
 #include <torch/csrc/python_headers.h>
-#include <system_error>
 #include <vector>
 
 #include <ATen/ops/from_blob.h>
@@ -9,10 +8,10 @@
 #include <torch/csrc/serialization.h>
 
 template <class io>
-Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
 
 static Py_ssize_t doPartialPythonReadBuffered(
     PyObject* fildes,

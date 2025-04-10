@@ -204,7 +204,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -4751,7 +4751,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 super().__init__()
                 self.lstm = nn.LSTM(50, 50, 1)
 
-            def forward(self, inputs: torch.Tensor, state: List[torch.Tensor]):
+            def forward(self, inputs: torch.Tensor, state: list[torch.Tensor]):
                 h = state[0]
                 c = state[1]
                 return self.lstm(inputs, (h, c))
@@ -5938,7 +5938,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        all_qconfigs: List[Tuple[QConfig, str]] = [
+        all_qconfigs: list[tuple[QConfig, str]] = [
             (get_default_qconfig("qnnpack", version=0), "default_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=0), "default_qat_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=1), "default_qat_qnnpack_qconfig_v1"),
@@ -6666,6 +6666,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 setattr(self, 'submodule|2', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule/3', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule:4', SubModule(hidden_dim, hidden_dim))
+                setattr(self, 'submodule: 5', SubModule(hidden_dim, hidden_dim))
                 self._w = nn.Parameter(torch.randn(output_dim, hidden_dim))
 
             def forward(self, x):
@@ -6673,8 +6674,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 x2 = getattr(self, 'submodule|2')(x1)
                 x3 = getattr(self, 'submodule/3')(x2)
                 x4 = getattr(self, 'submodule:4')(x3)
-                x5 = F.linear(x4, self._w)
-                return x5
+                x5 = getattr(self, 'submodule: 5')(x4)
+                x6 = F.linear(x5, self._w)
+                return x6
 
         input_dim = 10
         hidden_dim = 20
@@ -6688,7 +6690,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepared_model(example_inputs)
         quantized_model = convert_fx(prepared_model, keep_original_weights=True)
 
-        self.assertTrue(len(quantized_model.original_weights_lookup) == 5)
+        self.assertTrue(len(quantized_model.original_weights_lookup) == 6)
         self.assertTrue("submodule_1_packed_weight_0" in quantized_model.original_weights_lookup)
         torch.testing.assert_close(
             quantized_model.original_weights_lookup["submodule_1_packed_weight_0"][0],
@@ -6724,6 +6726,15 @@ class TestQuantizeFx(QuantizationTestCase):
         torch.testing.assert_close(
             quantized_model.original_weights_lookup["submodule_4_packed_weight_0"][1],
             getattr(model, "submodule:4").b
+        )
+        self.assertTrue("submodule_5_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][0],
+            getattr(model, "submodule: 5").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][1],
+            getattr(model, "submodule: 5").b
         )
         self.assertTrue("_packed_weight_0" in quantized_model.original_weights_lookup)
         torch.testing.assert_close(

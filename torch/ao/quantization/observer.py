@@ -8,12 +8,13 @@ This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 """
 
+import operator
 import re
 import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -24,6 +25,7 @@ from torch.ao.quantization.utils import (
     is_per_tensor,
     validate_qmin_qmax,
 )
+from torch.fx import Node
 
 
 __all__ = [
@@ -339,7 +341,7 @@ class UniformQuantizationObserverBase(ObserverBase):
     @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
@@ -491,6 +493,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
     """
+
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -700,6 +703,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
+
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -789,13 +793,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         version = local_metadata.get("version", None)
         if version is not None and version < 3:
@@ -849,13 +853,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict_script(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         self._load_from_state_dict(
             state_dict,
@@ -995,6 +999,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
     3. Compute the scale and zero point the same way as in the
         :class:`~torch.ao.quantization.MinMaxObserver`
     """
+
     histogram: torch.Tensor
     min_val: torch.Tensor
     max_val: torch.Tensor
@@ -1113,7 +1118,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         return norm.sum().item()
 
-    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _non_linear_param_search(self) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -1522,7 +1527,8 @@ class RecordingObserver(ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
-    __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
+
+    __annotations__ = {"tensor_val": list[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):
         super().__init__(dtype=dtype, is_dynamic=False)
@@ -1682,7 +1688,7 @@ class PerBlock(Granularity):
         block_size (Tuple[int, ...]): The size of each quantization group
     """
 
-    block_size: Tuple[int, ...]
+    block_size: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -1763,8 +1769,8 @@ class PerToken(Granularity):
 
 
 def get_block_size(
-    input_shape: Tuple[int, ...], granularity: Granularity
-) -> Tuple[int, ...]:
+    input_shape: tuple[int, ...], granularity: Granularity
+) -> tuple[int, ...]:
     """Get the block size based on the input shape and granularity type.
 
     Args:
@@ -1788,7 +1794,7 @@ def get_block_size(
         ), f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
         return (1, granularity.group_size)
     elif isinstance(granularity, PerToken):
-        block_size = list(input_shape)
+        block_size = [1] * len(input_shape)
         block_size[-1] = input_shape[-1]
         return tuple(block_size)
     raise ValueError(f"Unsupported Granularity: {granularity}")
@@ -1845,10 +1851,88 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """
 
     @abstractmethod
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate quantization parameter based on the stats attached to the observer module
         and returns a tuple of scale and zero_point Tensor
         """
+
+    def convert(self, model: torch.fx.GraphModule, observer_node: Node):
+        """
+        Converts the observer node in the graph into its quantized representation
+
+        Args:
+            model: graph module to conver the observer node in
+            observer_node: the observer node to convert
+        """
+        from torch.ao.quantization.fx.utils import create_getattr_from_value
+
+        with model.graph.inserting_before(observer_node):
+            assert self.block_size is not None, "Expecting block_size to be populated"
+            assert (
+                self.original_dtype is not None
+            ), "Expecting original_dtype to be populated"
+            if hasattr(self, "is_dynamic") and self.is_dynamic:
+                choose_qparams_affine = model.graph.call_function(
+                    torch.ops.pt2e_quant.choose_qparams_affine,
+                    (
+                        observer_node.args[0],
+                        self.mapping_type.name,
+                        self.block_size,
+                        self.target_dtype,
+                        self.quant_min,
+                        self.quant_max,
+                        self.eps,
+                        self.scale_dtype,
+                        self.zero_point_dtype,
+                        self.preserve_zero,
+                        self.zero_point_domain.name,
+                    ),
+                )
+                scale_node = model.graph.call_function(
+                    operator.getitem, (choose_qparams_affine, 0)
+                )
+                zero_point_node = model.graph.call_function(
+                    operator.getitem, (choose_qparams_affine, 1)
+                )
+            else:
+                scale, zero_point = self.calculate_qparams()
+                scale_node = create_getattr_from_value(
+                    model, model.graph, "_scale", scale
+                )
+                zero_point_node = create_getattr_from_value(
+                    model, model.graph, "_zero_point", zero_point
+                )
+
+            q_node = model.graph.call_function(
+                torch.ops.pt2e_quant.quantize_affine,
+                (
+                    observer_node.args[0],
+                    self.block_size,
+                    scale_node,
+                    zero_point_node,
+                    self.target_dtype,
+                    self.quant_min,
+                    self.quant_max,
+                    self.zero_point_domain.name,
+                ),
+                {},
+            )
+            dq_node = model.graph.call_function(
+                torch.ops.pt2e_quant.dequantize_affine,
+                (
+                    q_node,
+                    self.block_size,
+                    scale_node,
+                    zero_point_node,
+                    self.target_dtype,
+                    self.quant_min,
+                    self.quant_max,
+                    self.zero_point_domain.name,
+                ),
+                {"output_dtype": self.original_dtype},
+            )
+            observer_node.replace_all_uses_with(dq_node)
+            model.graph.erase_node(observer_node)
 
 
 def _is_observer_script_module(mod, obs_type_name):
@@ -1910,8 +1994,8 @@ def load_observer_state_dict(mod, obs_dict):
     load the stats back into the model. The observer state_dict can be saved
     using torch.ao.quantization.get_observer_state_dict
     """
-    missing_keys: List[str] = []
-    unexpected_keys: List[str] = []
+    missing_keys: list[str] = []
+    unexpected_keys: list[str] = []
     for name, module in mod.named_modules():
         prefix = name + "."
         if _is_activation_post_process(module):

@@ -136,6 +136,7 @@ class TestXpu(TestCase):
                 device_capability["architecture"],
             )
 
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
@@ -192,9 +193,11 @@ model = torch.nn.Sequential(
     torch.nn.ReLU(),
     torch.nn.MaxPool2d(2, 2),
 )
-test_multi_process(model, input)
-test_multi_process(model, input)
-print(torch.xpu.device_count())
+
+if __name__ == "__main__":
+    test_multi_process(model, input)
+    test_multi_process(model, input)
+    print(torch.xpu.device_count())
 """
         rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))
@@ -308,6 +311,27 @@ print(torch.xpu.device_count())
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
+
+    def test_stream_context_manager(self):
+        prev_stream = torch.xpu.current_stream()
+        with torch.xpu.Stream() as stream:
+            self.assertEqual(stream, torch.xpu.current_stream())
+        self.assertEqual(prev_stream, torch.xpu.current_stream())
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.xpu.set_device(src_device)
+        src_prev_stream = torch.xpu.current_stream(src_device)
+        dst_prev_stream = torch.xpu.current_stream(dst_device)
+        with torch.xpu.Stream(dst_device) as dst_stream:
+            self.assertEqual(dst_device, torch.xpu.current_device())
+            self.assertEqual(dst_stream, torch.xpu.current_stream())
+            self.assertEqual(src_prev_stream, torch.xpu.current_stream(src_device))
+        self.assertEqual(src_device, torch.xpu.current_device())
+        self.assertEqual(src_prev_stream, torch.xpu.current_stream())
+        self.assertEqual(dst_prev_stream, torch.xpu.current_stream(dst_device))
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -458,7 +482,7 @@ print(torch.xpu.device_count())
     def test_device_memory_allocated(self):
         device_count = torch.xpu.device_count()
         current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
-        torch.ones(10, device="xpu:0")
+        a = torch.ones(10, device="xpu:0")
         self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(
@@ -466,6 +490,7 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+        del a
 
     @skipXPUIf(
         int(torch.version.xpu) < 20250000,
