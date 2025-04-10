@@ -1023,11 +1023,11 @@ void LayerNormKernelImpl(
     Tensor* mean,
     Tensor* rstd) {
 
-  std::cout << " LayerNormKernelImpl " << std::endl
-  << " X.dtype()=" << X.dtype() << std::endl
-  << " gamma.dtype()=" << gamma.dtype() << std::endl
-  << " beta.dtype()=" << beta.dtype() << std::endl
-  << std::endl;
+  // std::cout << " LayerNormKernelImpl " << std::endl
+  // << " X.dtype()=" << X.dtype() << std::endl
+  // << " gamma.dtype()=" << gamma.dtype() << std::endl
+  // << " beta.dtype()=" << beta.dtype() << std::endl
+  // << std::endl;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
@@ -1578,13 +1578,13 @@ void rmsnorm_cuda_forward(
   const int64_t normalized_shape_size,
   const double eps) {
 
-    std::cout << " ++++ AHMAD ++++ ======" << std::endl
-    << " input.dtype()=" << input.dtype() << std::endl
-    << " output.dtype()=" << output.dtype() << std::endl
-    << " x_norm.dtype()=" << x_norm.dtype() << std::endl
-    << " inverse_rms.dtype()=" << inverse_rms.dtype() << std::endl
-    << " weight.dtype()=" << weight.dtype() << std::endl
-    << std::endl;
+    // std::cout << " ++++ AHMAD ++++ ======" << std::endl
+    // << " input.dtype()=" << input.dtype() << std::endl
+    // << " output.dtype()=" << output.dtype() << std::endl
+    // << " x_norm.dtype()=" << x_norm.dtype() << std::endl
+    // << " inverse_rms.dtype()=" << inverse_rms.dtype() << std::endl
+    // << " weight.dtype()=" << weight.dtype() << std::endl
+    // << std::endl;
   int64_t N = normalized_shape_size;
   int64_t M = input.numel() / N;
 
