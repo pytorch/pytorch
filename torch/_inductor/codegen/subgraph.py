@@ -65,7 +65,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func = mod.call
                 bm_func([*args])
 
-
         return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
 
     def hash_key(self) -> str:
