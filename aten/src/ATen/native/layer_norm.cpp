@@ -343,9 +343,6 @@ std::tuple<Tensor, Tensor, Tensor> rms_norm_cpu(
   // Use a default epsilon if not provided
   double eps = eps_opt.has_value() ? eps_opt.value() : 1e-6;
 
-  // Square the input.
-  auto squared = input.pow(2);
-
   // Determine the dimensions to reduce over.
   // Assuming normalized_shape corresponds to the trailing dimensions.
   int64_t input_dims = input.dim();
@@ -355,25 +352,37 @@ std::tuple<Tensor, Tensor, Tensor> rms_norm_cpu(
     reduce_dims.push_back(i);
   }
 
-  // Compute the mean over the normalized dimensions and keep dimensions for broadcasting.
-  auto mean_squared = squared.mean(reduce_dims, /*keepdim=*/true);
+  auto result = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "rms_norm",
+        [&] {
+    // Square the input.
+    auto squared = input.pow(2);
 
-  // Compute the inverse RMS: 1 / sqrt(mean_squared + eps)
-  auto inv_rms = at::rsqrt(mean_squared.add_(eps));
+    // Compute the mean over the normalized dimensions and keep dimensions for broadcasting.
+    auto mean_squared = squared.mean(reduce_dims, /*keepdim=*/true);
 
-  // Normalize the input.
-  auto x_norm = at::mul(input, inv_rms);
+    // Compute the inverse RMS: 1 / sqrt(mean_squared + eps)
+    auto inv_rms = at::rsqrt(mean_squared.add_(eps));
 
-  // If a weight is provided, apply it elementwise; otherwise, output is just x_norm.
-  at::Tensor output;
-  if (weight_opt.has_value() && weight_opt.value().defined()) {
-    // Assumes weight is broadcastable to the shape of x_norm.
-    output = at::mul(x_norm, weight_opt.value());
-  } else {
-    output = x_norm;
-  }
-  // Return the tuple: (output, x_norm, inv_rms)
-  return std::make_tuple(output, x_norm, inv_rms);
+    // Normalize the input.
+    auto x_norm = at::mul(input, inv_rms);
+
+    // If a weight is provided, apply it elementwise; otherwise, output is just x_norm.
+    at::Tensor output;
+    if (weight_opt.has_value() && weight_opt.value().defined()) {
+      // Assumes weight is broadcastable to the shape of x_norm.
+      output = at::mul(x_norm, weight_opt.value());
+    } else {
+      output = x_norm;
+    }
+    // Return the tuple: (output, x_norm, inv_rms)
+    return std::make_tuple(output, x_norm, inv_rms);
+  });
+
+  return result;
 }
 
 std::tuple<Tensor, Tensor>
