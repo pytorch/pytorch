@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import Callable, NamedTuple, Optional, overload, TypeVar
+from typing import Callable, NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -453,7 +453,7 @@ def backwards_not_supported(prim):
 # TODO: this wrapper is currently untested
 def elementwise_unary_scalar_wrapper(
     fn: Callable[_P, _T],
-) -> Callable[_P, _T | NumberType]:
+) -> Callable[_P, Union[_T, NumberType]]:
     """
     Allows unary operators that accept tensors to work with Python numbers.
     """
