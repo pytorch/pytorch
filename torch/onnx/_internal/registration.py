@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
+
 """Module for handling symbolic function registration."""
 
 import warnings
 from collections.abc import Collection, Sequence
-from typing import Callable, Generic, Optional, TypeVar, Union
+from typing import Callable, Generic, Optional, TypeVar, Union, ParamSpec
+from collections.abc import Iterator
 
 from torch.onnx import _constants, errors
 
@@ -51,6 +52,8 @@ def _dispatch_opset_version(
 
 _K = TypeVar("_K")
 _V = TypeVar("_V")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 class OverrideDict(Collection[_K], Generic[_K, _V]):
@@ -93,13 +96,13 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
 
-    def get(self, key: _K, default: Optional[_V] = None):
+    def get(self, key: _K, default: Optional[_V] = None) -> Optional[_V]:
         return self._merged.get(key, default)
 
     def __contains__(self, key: object) -> bool:
         return key in self._merged
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[_K]:
         return iter(self._merged)
 
     def __len__(self) -> int:
@@ -287,7 +290,7 @@ def onnx_symbolic(
         ValueError: If the separator '::' is not in the name.
     """
 
-    def wrapper(func: Callable) -> Callable:
+    def wrapper(func: Callable[_P, _R]) -> Callable[_P, _R]:
         decorated = func
         if decorate is not None:
             for decorate_func in decorate:

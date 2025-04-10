@@ -5,7 +5,7 @@ import logging
 import operator
 import types
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union, ParamSpec
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -58,6 +58,8 @@ Argument = Optional[
     ]
 ]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 _legal_ops = dict.fromkeys(
     [
@@ -102,7 +104,7 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> Callable:
+def has_side_effect(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     _side_effectful_functions.add(fn)
     return fn
 

@@ -1,18 +1,20 @@
 """Isolated calls to methods that may segfault."""
 
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import multiprocessing
 import os
 import warnings
-from typing import Callable
+from typing import Callable, ParamSpec, TypeVar, Any
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _IS_WINDOWS = os.name == "nt"
 
 
-def _call_function_and_return_exception(func, args, kwargs):
+def _call_function_and_return_exception(func: Callable[_P, _R], args: tuple[Any, ...],
+                                        kwargs: dict[str, Any]) -> _R | Exception:
     """Call function and return a exception if there is one."""
 
     try:
@@ -21,7 +23,7 @@ def _call_function_and_return_exception(func, args, kwargs):
         return e
 
 
-def safe_call(func: Callable, *args, **kwargs):
+def safe_call(func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs) -> _R:
     """Call a function in a separate process.
 
     Args:

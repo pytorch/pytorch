@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar, ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -83,6 +83,7 @@ _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
 T = TypeVar("T")
+P = ParamSpec("P")
 
 
 @dataclass
@@ -305,8 +306,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[..., T]:
+    fn: Callable[P, T], error_handler: Optional[ErrorHandler] = None
+) -> Callable[P, T]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
