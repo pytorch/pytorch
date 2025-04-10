@@ -28,6 +28,66 @@ class InvokeQuantTest(torch._higher_order_ops.BaseHOP):
     def __call__(self, subgraph, *operands, scheme):
         return super().__call__(subgraph, *operands, scheme=scheme)
 
+    def gen_schema(self, subgraph, *operands, scheme):
+        # Idea 1: using inspect.signature and sample inputs to generate a schema
+        # Idea 2: we still need to know how to call into subgraph/fn given the inputs.
+        #       wrap_subgraphs gives two callable to call into subgraph.
+        from torch._higher_order_ops.schema import (
+            CFunctionSchemaGen,
+            HopArgumentInfoGen,
+        )
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_ouputs,
+        )
+
+        (
+            mutated_inp_idx,
+            inp_inp_alias,
+            inp_out_alias,
+            out_out_alias,
+            output,
+        ) = check_input_alias_and_mutation_return_ouputs(subgraph, operands)
+        assert (
+            len(inp_inp_alias) == 0
+            and len(inp_out_alias) == 0
+            and len(out_out_alias) == 0
+        ), "Aliasing is not suppported for HOP subgraph."
+
+        args = [
+            HopArgumentInfoGen.from_example(
+                subgraph, name="subgraph", default_value=None, is_mutated=False
+            )
+        ]
+        for idx, arg in enumerate(operands):
+            example_value = arg
+            arg_name = f"operands{idx}"
+            args.append(
+                HopArgumentInfoGen.from_example(
+                    example_value=example_value,
+                    name=arg_name,
+                    default_value=None,
+                    is_mutated=idx in mutated_inp_idx,
+                )
+            )
+
+        args.append(
+            HopArgumentInfoGen.from_example(
+                example_value=scheme,
+                name="scheme",
+                default_value=scheme,
+                is_mutated=False,
+                kw_only=True,
+            )
+        )
+        output = HopArgumentInfoGen.from_example(
+            example_value=output,
+            name="output",
+            default_value=None,
+            is_mutated=False,
+            kw_only=False,
+        )
+        return CFunctionSchemaGen.from_hop_argument_info(str(self), args, output)
+
 
 invoke_quant_test = InvokeQuantTest()
 
@@ -258,6 +318,44 @@ class GraphModule(torch.nn.Module):
     class subgraph_0(torch.nn.Module):
         def forward(self, l_y_: "f32[3, 4]"):
             add: "f32[3, 4]" = 1 + l_y_;  l_y_ = None
+            return (add,)
+""",
+        )
+
+    def test_auto_functionalize(self):
+        def inner(x, y):
+            x.add_(1)
+            return x + y
+
+        backend = AotEagerAndRecordGraphs()
+
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        x = torch.randn(3, 3, requires_grad=False)
+        x_clone = x.clone()
+        y = torch.randn(3, 3, requires_grad=True)
+        compiled_out = torch.compile(f, backend=backend, fullgraph=True)(x, y)
+        # assert x is not mutated
+        self.assertEqual(x, x_clone)
+        self.assertEqual(compiled_out, x + y + 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertExpectedInline(
+            normalize_graph(backend.fw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        _function_schema_constant_0 = self._FunctionSchema_constant_0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, operands1 = primals_2, scheme = 'nf4', _operands0_base_index = 0, _all_bases = [primals_1], _op_schema = _function_schema_constant_0);  auto_functionalized_subgraph_0 = _function_schema_constant_0 = None
+        getitem: "f32[3, 3]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+        return (getitem, primals_1, primals_2)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            add_: "f32[3, 3]" = torch.ops.aten.add_.Tensor(arg0_1, 1);  arg0_1 = None
+
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_, arg1_1);  add_ = arg1_1 = None
             return (add,)
 """,
         )
