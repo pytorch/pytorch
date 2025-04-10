@@ -1193,6 +1193,9 @@ def _compile(
                 "has_guarded_code": guarded_code is not None,
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
+                # Note: should we be adding install_params here too? or since only really used in
+                # export not really
+                # "config_install_params_as_graph_attr": config.install_params_as_graph_attr,
                 "specialize_float": config.specialize_float,
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(

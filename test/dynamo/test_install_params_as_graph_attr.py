@@ -300,6 +300,208 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         self.check_num_inputs_and_equality(test_linear_explicit, 3, 3, (x, param, buf))
 
 
+class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
+    def check_export_matches_expectation(
+        self,
+        fn_to_export: Callable,
+        expected_num_exported_inputs: int,
+        example_inputs: Sequence[Any],
+    ) -> None:
+        """Compiles the original fn, then:
+        * Checks that the number of inputs in the graph is expected_num_inputs
+        * Checks that the compiled fn and original fn are equal
+        * Checks the number of inputs when installed is consistent with original_fn
+        # Checks that the compiled fn when installed and original fn are equal
+        """
+        torch._dynamo.config.inline_inbuilt_nn_modules = True
+        exported_fn = torch._dynamo.export(fn_to_export)
+        out_graph = exported_fn(*example_inputs)[0]
+        # out_graph.print_readable()
+        actual_num_inputs = get_num_input_nodes(out_graph)
+        self.assertEqual(actual_num_inputs, expected_num_exported_inputs)
+        self.assertEqual(out_graph(*example_inputs), fn_to_export(*example_inputs))
+
+    def test_simple_linear(self):
+        net = SimpleLinearModule()
+        input1 = torch.randn((1, 5))
+        self.check_export_matches_expectation(net, 1, (input1,))
+
+        def test_fn(x):
+            return net(x)
+
+        self.check_export_matches_expectation(test_fn, 1, (input1,))
+
+        # Check multiple inputs
+        def test_fn_2(x, y):
+            return net(x) + net(y)
+
+        input2 = torch.randn((1, 5))
+        self.check_export_matches_expectation(test_fn_2, 2, (input1, input2))
+
+        # def test_fn_UNUSED(x, net):
+        #     return net(x)
+        # nn.Modules not supported as input to fn, since not flattenable
+        # can script and then check
+        # Buuuuut, "ScriptModules aren't supported in UnspecializedNNModuleVariable" so skip
+        # self.check_export_matches_expectation(test_fn2, 1, (input1, torch.jit.script(net)))
+
+    def test_simple_batchnorm(self) -> None:
+        # Note: Seems batchnorm "buffers" are not actually buffer type, so
+        # cause user error (pasted below)
+        # TODO: Investigate this failure further (seems with export and inline?)
+        """
+        Cannot export model which references tensors that are neither buffers/parameters/constants
+        nor are direct inputs.  For each tensor, if you'd like this tensor to be an explicit
+        input, add it as a dummy argument to the top-level model definition you are exporting;
+        if you would like its value to be embedded as an exported constant, wrap its access
+        in a function marked with @assume_constant_result.
+        """
+        net = torch.nn.BatchNorm2d(3)
+        tensor = torch.randn((1, 3, 3, 3))
+        # BatchNorm2d has 2 params, and 3 buffers
+        self.check_export_matches_expectation(net, 1, (tensor,))
+
+        def test_fn(x):
+            return net(x)
+
+        self.check_export_matches_expectation(test_fn, 1, (tensor,))
+
+    def test_resnet_structure(self) -> None:
+        class ResBlock(torch.nn.Module):
+            def __init__(self, in_, out_):
+                super().__init__()
+                self.conv1 = torch.nn.Sequential(
+                    torch.nn.Conv2d(in_, out_, kernel_size=3, padding=1),
+                    torch.nn.BatchNorm2d(out_),
+                    torch.nn.ReLU(),
+                )
+                self.conv2 = torch.nn.Sequential(
+                    torch.nn.Conv2d(out_, out_, kernel_size=3, padding=1),
+                    torch.nn.BatchNorm2d(out_),
+                )
+                self.activation = torch.nn.ReLU()
+
+            def forward(self, x):
+                skip = x
+                out = self.conv1(x)
+                out = self.conv2(out)
+                out += skip
+                out = self.activation(out)
+                return out
+
+        net = ResBlock(3, 3)
+        tensor = torch.randn(1, 3, 3, 3)
+        self.check_export_matches_expectation(net, 1, (tensor,))
+
+        def test_fn(x):
+            return net(x)
+
+        self.check_export_matches_expectation(test_fn, 1, (tensor,))
+
+    def test_transformer(self) -> None:
+        # NOTE: Transformer fails the equality test, so skip that check
+        # Example from docs
+        transformer = torch.nn.Transformer(d_model=64)
+        src = torch.rand(10, 32, 64)
+        tgt = torch.rand(20, 32, 64)
+
+        torch._dynamo.config.inline_inbuilt_nn_modules = True
+        exported_fn = torch._dynamo.export(transformer)
+        out_graph = exported_fn(src, tgt)[0]
+        # out_graph.print_readable()
+        actual_num_inputs = get_num_input_nodes(out_graph)
+        self.assertEqual(actual_num_inputs, 2)
+
+        def test_fn(src, tgt):
+            return transformer(src, tgt)
+
+        torch._dynamo.config.inline_inbuilt_nn_modules = True
+        exported_fn = torch._dynamo.export(test_fn)
+        out_graph = exported_fn(src, tgt)[0]
+        # out_graph.print_readable()
+        actual_num_inputs = get_num_input_nodes(out_graph)
+        self.assertEqual(actual_num_inputs, 2)
+
+    def test_optimizing_params_in_input(self) -> None:
+        param = torch.nn.Parameter(torch.randn(1, 5))
+        net = SimpleLinearModule()
+
+        def test_fn(x):
+            return net(x)
+
+        self.check_export_matches_expectation(net, 1, (param,))
+        self.check_export_matches_expectation(test_fn, 1, (param,))
+
+        x = torch.randn(1, 5)
+
+        def test_fn2(x, param):
+            return net(x) + param
+
+        # net gets installed, param does not here
+        self.check_export_matches_expectation(test_fn2, 2, (x, param))
+
+        global global_param
+        global_param = torch.nn.Parameter(torch.randn(1, 5))
+
+        def test_fn3(x):
+            return net(x) + global_param
+
+        # net and global get installed
+        self.check_export_matches_expectation(test_fn3, 1, (x,))
+
+        def test_fn4(x, list_params):
+            return net(x) + sum(list_params)
+
+        # list_params should not be installed, but they do get unwrapped in fn
+        self.check_export_matches_expectation(test_fn4, 3, (x, [param, param]))
+
+    def test_optimizing_buffer_in_input(self) -> None:
+        buf = torch.nn.Buffer(data=torch.ones((1, 5)))
+        net = SimpleLinearModule()
+
+        def test_fn(x) -> torch.Tensor:
+            return net(x)
+
+        self.check_export_matches_expectation(net, 1, (buf,))
+        self.check_export_matches_expectation(test_fn, 1, (buf,))
+
+        x = torch.randn(1, 5)
+
+        def test_fn2(x, buf):
+            return net(x) + buf
+
+        # net gets installed, buf does not here
+        self.check_export_matches_expectation(test_fn2, 2, (x, buf))
+
+        global global_buf
+        global_buf = torch.nn.Buffer(torch.randn(1, 5))
+
+        def test_fn3(x):
+            return net(x) + global_buf
+
+        # net and global gets installed
+        self.check_export_matches_expectation(test_fn3, 1, (x,))
+
+    def test_optimizing_buffer_and_param_in_input(self) -> None:
+        param = torch.nn.Parameter(torch.randn(5, 1))
+        buf = torch.nn.Buffer(data=torch.ones((1, 1)))
+        x = torch.randn(1, 5)
+
+        def test_linear(x: torch.Tensor) -> torch.Tensor:
+            return param * x + buf
+
+        # In this fn, param and buf are not input so should be inlined
+        self.check_export_matches_expectation(test_linear, 1, (x,))
+
+        def test_linear_explicit(
+            x: torch.Tensor, a: torch.Tensor, b: torch.Tensor
+        ) -> torch.Tensor:
+            return a * x + b
+
+        # Now, param and buf are input so should not be inlined
+        self.check_export_matches_expectation(test_linear_explicit, 3, (x, param, buf))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
