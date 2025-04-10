@@ -125,6 +125,7 @@ def _compute_local_shape_and_global_offset(
     ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     if my_coordinate is None:
+        # TODO(whc) should we also return dimsize as offset for this case, or leave it empty to disambiguate?
         # if rank not in the mesh, return empty offset
         return ((0,), ())
     else:
@@ -146,15 +147,20 @@ def _compute_local_shape_and_global_offset(
 
                 local_shape[shard_dim] = shard_size
                 local_offset[shard_dim] = shard_offset
-
-                # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
-                # it means that this dimension has been already sharded in previous placement.
-                # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
-                # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
-                if global_offset[shard_dim] <= local_offset[shard_dim]:
-                    global_offset[shard_dim] = local_offset[shard_dim]
+                if shard_size == 0:
+                    # Special case to fill in a standardized non-garbage value for the global_offset
+                    # of zero-sized shards.  This value is out of bounds of the tensor, so it won't conflict
+                    # with any real offsets.  DCP may rely on this value to de-duplicate shards.
+                    global_offset[shard_dim] = global_shape[shard_dim]
                 else:
-                    global_offset[shard_dim] += local_offset[shard_dim]
+                    # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
+                    # it means that this dimension has been already sharded in previous placement.
+                    # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
+                    # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
+                    if global_offset[shard_dim] <= local_offset[shard_dim]:
+                        global_offset[shard_dim] = local_offset[shard_dim]
+                    else:
+                        global_offset[shard_dim] += local_offset[shard_dim]
 
         # NOTE: the offset compute relies on the local shard index and it has no
         # problem when strided sharding is not present. To correctly compute, we assume

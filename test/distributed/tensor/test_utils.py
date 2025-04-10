@@ -7,8 +7,8 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
-    _explicit_order_placements,
     _compute_local_shape_and_global_offset,
+    _explicit_order_placements,
     compute_local_shape_and_global_offset,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -103,8 +103,9 @@ class LocalTest(TestCase):
                     test_case["mesh_shape"], test_case["placements"]
                 )
 
-
     def test_compute_local_shape_and_global_offset_uneven(self):
+        # This case is not only 'uneven' bug also has an empty shard
+        # (e.g. most DP ranks have local shape 18,4096, one has 8,4096, one has 0,4096
         global_shape = (4096, 4096)
         DP = 30
         TP = 8
@@ -119,13 +120,19 @@ class LocalTest(TestCase):
             dp_rank, tp_rank = my_coordinate
             if dp_rank < 28:
                 self.assertEqual(local_shape, (18, 4096))
-                self.assertEqual(global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0))
+                self.assertEqual(
+                    global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0)
+                )
             elif dp_rank == 28:
                 self.assertEqual(local_shape, (8, 4096))
-                self.assertEqual(global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0))
+                self.assertEqual(
+                    global_offset, (tp_rank * TP_shard_size + 18 * dp_rank, 0)
+                )
             elif dp_rank == 29:
                 self.assertEqual(local_shape, (0, 4096))
-
+                # we define the offset value of a zero-sized shard as the dim size
+                # this actually matters, because DCP uses offset to deduplicate shards when saving
+                self.assertEqual(global_offset, (4096, 0))
 
 
 class UtilTest(DTensorTestBase):
