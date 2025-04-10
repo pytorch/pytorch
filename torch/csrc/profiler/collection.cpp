@@ -1115,7 +1115,9 @@ class TransferEvents {
                     "ROCTracer produced duplicate flow start: ", i.flow.id);
               }
 #else // USE_ROCM
+              if (!at::hasMTIA()) {
               TORCH_INTERNAL_ASSERT(inserted.second);
+              }
 #endif // USE_ROCM
             }
             TORCH_INTERNAL_ASSERT(e->parent_.expired());
