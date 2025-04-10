@@ -482,7 +482,6 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
         const auto ndim = operands[i].ndimension() - (static_cast<int64_t>(op_labels[i].size()) - 1);
         for (auto j = ell_num_dim - ndim; j < ell_num_dim; ++j) {
           if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
-          // if (op.sym_size(dim) != 1) {
             // Update ellipsis size
             TORCH_SYM_CHECK(
                 ell_sizes[j].sym_eq(1) || ell_sizes[j].sym_eq(op.sym_size(dim)),
@@ -502,7 +501,6 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
         }
       } else if (permutation[label_perm_index[s]] == -1) {
         if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
-        // if (op.sym_size(dim) != 1) {
           // Update subscript
           TORCH_SYM_CHECK(
               label_size[s].sym_eq(1) || label_size[s].sym_eq(op.sym_size(dim)),
@@ -582,18 +580,15 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
       if (TORCH_GUARD_SIZE_OBLIVIOUS(a.sym_size(dim).sym_ne(1))
         && TORCH_GUARD_SIZE_OBLIVIOUS(b.sym_size(dim).sym_ne(1))) {
-      // if (a.sym_size(dim) != 1 && b.sym_size(dim) != 1) {
         if (--dim_counts[dim] == 1) {
           sum_dims.push_back(dim);
           dim_counts[dim] = 0;
         }
       } else if (dim_counts[dim] == 1) {
         if (TORCH_GUARD_SIZE_OBLIVIOUS(a.sym_size(dim).sym_ne(1))) {
-        // if (a.sym_size(dim) != 1) {
           a_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
         } else if (TORCH_GUARD_SIZE_OBLIVIOUS(b.sym_size(dim).sym_ne(1))) {
-        // } else if (b.sym_size(dim) != 1) {
           b_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
         }
