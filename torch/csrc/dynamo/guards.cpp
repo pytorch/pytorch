@@ -5224,16 +5224,7 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   if (root == nullptr) {
     return false;
   }
-  static bool enable_cpp_framelocals_guard_eval =
-      py::module_::import("torch._dynamo.config")
-          .attr("enable_cpp_framelocals_guard_eval")
-          .cast<bool>();
-  if (enable_cpp_framelocals_guard_eval) {
-    return ((RootGuardManager*)root)->check_nopybind(f_locals);
-  } else {
-    return ((RootGuardManager*)root)
-        ->check_nopybind((PyObject*)f_locals->to_dict());
-  }
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
 PyObject* torch_c_dynamo_guards_init() {
