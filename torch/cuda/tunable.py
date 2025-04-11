@@ -470,11 +470,11 @@ def _create_matrices(
         rowsA = rowsB = ldc
 
         if randn:
-            matA = torch.randn(rowsA, ldb, dtype=dtypeA, device=deviceid)
-            matB = torch.randn(rowsB, lda, dtype=dtypeA, device=deviceid)
+            matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, ldb, dtype=dtypeA, device=deviceid)
         else:
-            matA = torch.full((rowsA, ldb), fillA, dtype=dtypeB, device=deviceid)
-            matB = torch.full((rowsB, lda), fillB, dtype=dtypeB, device=deviceid)
+            matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
 
         subA = matA[:k, :m].t() if transB else matA[:m, :k]
         subB = matB[:n, :k].t() if transA else matB[:k, :n]
@@ -568,10 +568,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
     if op_sig == "GemmStridedBatchedTunableOp":
         assert untuned_gemm_temp[6] == "ld"
-        [lda, ldb, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
+        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
     else:
         assert untuned_gemm_temp[4] == "ld"
-        [lda, ldb, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
+        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # Detect subMatrix case
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
