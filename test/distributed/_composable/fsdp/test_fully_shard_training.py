@@ -30,7 +30,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
-    fsdp_test_,
+    compiled_fsdp_test,
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
@@ -315,7 +315,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -362,7 +362,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
