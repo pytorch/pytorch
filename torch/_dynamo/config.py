@@ -419,7 +419,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # produces a consitent number of inputs to the graph.
 install_params_as_graph_attr = False
 
-# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
