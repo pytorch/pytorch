@@ -1767,10 +1767,9 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
-        should_install_graph_params = (
-            config.install_params_as_graph_attr
-            and (is_from_unspecialized_param_buffer_source(source)
-            or is_from_global_source(source))
+        should_install_graph_params = config.install_params_as_graph_attr and (
+            is_from_unspecialized_param_buffer_source(source)
+            or is_from_global_source(source)
         )
 
         make_graph_attribute = is_static_input and (
