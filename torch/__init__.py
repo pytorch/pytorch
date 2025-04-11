@@ -2303,10 +2303,13 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
+        cuda_version = "0.0"
+        if hasattr(torch, "version"):
+            cuda_version = getattr(torch.version, "cuda", "0.0")
+
         if self.config.get("triton.cudagraphs", False) and (
             (
-                getattr(torch.version, "cuda", None)
-                and TorchVersion(torch.version.cuda) < "12.6"
+                TorchVersion(cuda_version) < "12.6"
             )
             or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
         ):

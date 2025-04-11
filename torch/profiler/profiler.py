@@ -225,10 +225,13 @@ class _KinetoProfile:
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
 
+                cuda_version = "0.0"
+                if hasattr(torch, "version"):
+                    cuda_version = getattr(torch.version, "cuda", "0.0")
+
                 if inductor_config.triton.cudagraphs and (
                     (
-                        getattr(torch.version, "cuda", None)
-                        and TorchVersion(torch.version.cuda) < "12.6"
+                        TorchVersion(cuda_version) < "12.6"
                     )
                     or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
                 ):
