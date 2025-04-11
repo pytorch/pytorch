@@ -31,6 +31,7 @@ from typing import (
 
 import torch
 from torch._prims_common import compute_required_storage_length
+from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -815,13 +816,18 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed(
-            "CachingAutotuner.benchmark_all_configs",
-            log_pt2_compile_event=True,
-            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-            compile_id=self.compile_id,
-            is_backward=self.is_backward,
+        with (
+            dynamo_timed(
+                "CachingAutotuner.benchmark_all_configs",
+                log_pt2_compile_event=True,
+                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
+                compile_id=self.compile_id,
+                is_backward=self.is_backward,
+                log_waitcounter=True,
+                waitcounter_name_override="triton_autotuner",
+            ),
+            _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -972,7 +978,15 @@ class CachingAutotuner(KernelInterface):
                 self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
             )
-        return config2launcher.get(best_config)
+
+        if best_config not in config2launcher:
+            # On a Coordesc cache hit, we might not have loaded the launcher
+            # This can happen because PyCodeCache saves CachingAutotuners in memory,
+            # even for separate compile IDs (which can have different inputs without changing output code)
+            config2launcher[best_config] = self._precompile_config(
+                best_config
+            ).make_launcher()
+        return config2launcher[best_config]
 
     def run(
         self,

@@ -197,9 +197,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-        comms.reinplace_fsdp_all_gather
-    )
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+            comms.reinplace_fsdp_all_gather
+        )
     GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
         lower_scan_to_while_loop
     )
