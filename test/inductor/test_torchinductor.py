@@ -292,6 +292,14 @@ def get_divisible_by_16(cfg):
     ]
 
 
+def get_post_grad_graph(f, inputs):
+    log_stream, ctx = logs_to_string("torch._inductor.compile_fx", "post_grad_graphs")
+    with ctx():
+        f(*inputs)
+    post_grad_graph = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+    return post_grad_graph
+
+
 class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
@@ -12888,7 +12896,7 @@ class CommonTemplate:
 
                 assert len(inps) == 0
 
-    def test_remove_noop_view(self):
+    def test_remove_noop_view_default(self):
         def f(x):
             batch_size = x.shape[0]
             x = x.transpose(1, 2)  # (batch_size, 2, 3)
@@ -12897,37 +12905,69 @@ class CommonTemplate:
 
         f = torch.compile(f)
 
-        def run(f, shape, expected_graph):
-            x = torch.randn(shape, device="cuda")
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
-            )
-            with ctx():
-                f(x)
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-            self.assertExpectedInline(
-                post_grad_graphs,
-                expected_graph,
-                ignore_comments=True,
-                ignore_empty_lines=True,
-            )
-
-        expected_graph1 = """\
-def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]cuda:0"):
-        permute: "f32[2, 2, 3][6, 1, 2]cuda:0" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
+        x = torch.randn((2, 3, 2), device=self.device)
+        expected_graph1 = f"""\
+def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
+        permute: "f32[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
         return (permute,)"""  # noqa: B950
 
-        run(f, (2, 3, 2), expected_graph1)
+        post_grad_graph = get_post_grad_graph(f, (x,))
 
-        expected_graph2 = """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]cuda:0"):
-        permute: "f32[s77, 2, 3][6, 1, 2]cuda:0" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
-        return (permute,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph1,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
         # dynamic shape
-        run(f, (4, 3, 2), expected_graph2)
+        x = torch.randn((4, 3, 2), device=self.device)
+        expected_graph2 = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.device)}"):
+        permute: "f32[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
+        return (permute,)"""  # noqa: B950
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph2,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    def test_remove_noop_view_device(self):
+        def f(x):
+            x = x.transpose(1, 2)  # (batch_size, 2, 3)
+            x = x.view(torch.uint8)  # noop
+            return x
+
+        f = torch.compile(f)
+
+        x = torch.ones((2, 3, 2), device=self.device, dtype=torch.uint8)
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph1 = f"""\
+def forward(self, arg0_1: "u8[2, 3, 2][6, 2, 1]{str(x.device)}"):
+        permute: "u8[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
+        return (permute,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph1,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        # dynamic shape
+        x = torch.ones((4, 3, 2), device=self.device, dtype=torch.uint8)
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph2 = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "u8[s77, 3, 2][6, 2, 1]{str(x.device)}"):
+        permute: "u8[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
+        return (permute,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph2,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
