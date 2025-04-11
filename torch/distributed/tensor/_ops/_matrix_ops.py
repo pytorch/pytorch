@@ -162,9 +162,9 @@ def _scaled_mm_like_strategy(
     assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
     assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
-    assert scale_result_strategy is None, (
-        "_scaled_mm on DTensors doesn't support scale_result"
-    )
+    assert (
+        scale_result_strategy is None
+    ), "_scaled_mm on DTensors doesn't support scale_result"
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
@@ -936,7 +936,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
     single_mesh_dim_strategies = [all_replicate, partial_replicate, replicate_partial]
 
     if mat1_strategy.ndim == 2 and mat2_strategy.ndim == 3:
-        # rowwise_replicate for 2dx2d not supported
+        # rowwise_replicate for 2dx3d not supported
         replicate_colwise_2x3: PlacementList = [
             Shard(1),
             Replicate(),  # mat1
@@ -963,8 +963,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             None,  # bias
         ]
         rowwise_replicate_3x2: PlacementList = [
-            Partial(),
-            Shard(0),  # mat1
+            Shard(0),
+            Shard(1),  # mat1
             Replicate(),  # mat2
             offs_placement,  # offs
             None,  # bias
@@ -1013,8 +1013,20 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             offs_placement,  # offs
             None,  # bias
         ]
+        batch_dim_sharding: PlacementList = [
+            Shard(0),
+            Shard(0),  # mat1
+            Shard(0),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
         single_mesh_dim_strategies.extend(
-            [replicate_colwise_3x3, rowwise_replicate_3x3, colwise_rowwise_3x3]
+            [
+                replicate_colwise_3x3,
+                rowwise_replicate_3x3,
+                colwise_rowwise_3x3,
+                batch_dim_sharding,
+            ]
         )
 
     return expand_to_full_mesh_op_strategy(
