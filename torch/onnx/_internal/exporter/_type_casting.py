@@ -1,9 +1,9 @@
-import torch
 import numpy as np
 
-def unpack_float4x2_as_uint8(
-    tensor: torch.Tensor
-) -> np.ndarray:
+import torch
+
+
+def unpack_float4x2_as_uint8(tensor: torch.Tensor) -> np.ndarray:
     """Convert a float4x2 tensor to unpacked uint8 np array."""
     # FIXME: Figure out what the shape really means
     data = tensor.view(torch.uint8).numpy(force=True).flatten()
