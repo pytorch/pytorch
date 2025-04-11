@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
+from typing_extensions import Never
 
 from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -232,9 +232,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        assert isinstance(
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
+        ), f"expected FunctionType found {typestr(fn)} {fn}"
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -563,13 +563,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
+        self.force_apply_to_var_sequence(tx, result.append)
+        return result
+
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
         while True:
             try:
-                result.append(self.next_variable(tx))
+                fn(self.next_variable(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
-        return result
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
@@ -1331,11 +1334,10 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{qualname}` or the file `{path}` "
-                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                        "attempting to trace into the function.",
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
-                        # TODO suggest mark_force_inline when implemented
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
