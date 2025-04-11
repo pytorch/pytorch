@@ -82,9 +82,9 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
   c10::call_once(flag, [device_type]() {
     static at::DeviceType at_fork_device_type = device_type;
     pthread_atfork(nullptr, nullptr, []() {
-      set_device_in_bad_fork(at_fork_device_type.value(), true);
-      if (is_device_lazy_init_supported(at_fork_device_type.value())) {
-        set_requires_device_init(at_fork_device_type.value(), true);
+      set_device_in_bad_fork(at_fork_device_type, true);
+      if (is_device_lazy_init_supported(at_fork_device_type)) {
+        set_requires_device_init(at_fork_device_type, true);
       }
     });
   });
