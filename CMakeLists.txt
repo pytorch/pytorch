@@ -839,6 +839,9 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
+configure_file(${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake.in
+               ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake @ONLY)
+
 # Note for ROCM platform: 1. USE_ROCM is always ON until
 # include(cmake/Dependencies.cmake) 2. USE_CUDA will become OFF during
 # re-configuration Truth Table: CUDA 1st pass: USE_CUDA=True;USE_ROCM=True,
@@ -1285,7 +1288,7 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2
     COMPONENT dev)
   install(
-    FILES ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+    FILES ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake

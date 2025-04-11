@@ -41,7 +41,7 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
   set(CAFFE2_USE_CUFILE ${USE_CUFILE})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
+  include(${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
