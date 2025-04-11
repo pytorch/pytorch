@@ -1179,7 +1179,11 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          opt_next_stream,
+          graph_task->dependencies_orig_[next.function.get()]);
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1195,7 +1199,11 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          opt_next_stream,
+          graph_task->dependencies_orig_[next.function.get()]);
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1229,7 +1237,6 @@ auto Engine::compute_dependencies(
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
-  auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back();
     queue.pop_back();
@@ -1241,7 +1248,8 @@ auto Engine::compute_dependencies(
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
-        dependencies[next_ptr] += 1;
+        task.dependencies_[next_ptr] += 1;
+        task.dependencies_orig_[next_ptr] += 1;
         const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
           queue.push_back(next_ptr);
@@ -1347,7 +1355,8 @@ auto Engine::execute(
         root_edges.at(0).input_nr,
         std::move(input),
         input_stream,
-        opt_next_stream);
+        opt_next_stream,
+        1);
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));
