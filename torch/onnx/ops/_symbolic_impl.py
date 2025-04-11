@@ -40,7 +40,7 @@ _ONNX_DTYPE_TO_TORCH_DTYPE: dict[int, torch.dtype] = {
     20: torch.float8_e5m2fnuz,  # FLOAT8E5M2FNUZ
     21: torch.uint8,  # UINT4
     22: torch.uint8,  # INT4
-    23: torch.uint8,  # FLOAT4E2M1
+    23: torch.float4_e2m1fn_x2,  # FLOAT4E2M1
 }
 
 _INT_TYPE = "i"
