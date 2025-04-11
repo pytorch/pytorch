@@ -43,6 +43,7 @@ from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._traceback import CapturedTraceback
 
 from ..utils import remove_proxy_from_state_dict
 
@@ -1701,6 +1702,9 @@ class GraphModuleDeserializer(metaclass=Final):
                         compiler_min=vr.lower,  # type: ignore[arg-type]
                         compiler_max=vr.upper,  # type: ignore[arg-type]
                     )
+                # ShapeEnv meta
+                if isinstance(sym, sympy.Symbol):
+                    self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
             return sym
 
         expr = sympy.sympify(
