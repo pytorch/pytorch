@@ -2,9 +2,9 @@
 #include <c10/core/Scalar.h>
 #include <limits>
 
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 template <typename scalar_t>
 int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar& step) {
@@ -42,4 +42,4 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   return static_cast<int64_t>(size_d);
 }
 
-}}  // namespace at::native
+} // namespace at::native

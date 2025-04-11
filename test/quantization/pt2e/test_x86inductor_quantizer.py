@@ -2862,23 +2862,36 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_annotate_mul_tensor(self):
         class M1(torch.nn.Module):
-            def __init__(self, type):
+            def __init__(self):
                 super().__init__()
-                self.type = type
 
             def forward(self, x, y):
-                if self.type == 0:
-                    return x * y
-                elif self.type == 1:
-                    return x * y.sum(-1)
-                elif self.type == 2:
-                    return x * y.sum()
-                else:
-                    return x * y.sum().item()
+                return x * y
 
-        for type in [0, 1, 2, 3]:
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum(-1)
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum()
+
+        class M4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum().item()
+
+        for Mod in [M1, M2, M3, M4]:
             with override_quantized_engine("x86"), torch.no_grad():
-                m = M1(type).eval()
+                m = Mod().eval()
                 example_inputs = (torch.randn(64, 64), torch.randn(64, 64))
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -2888,10 +2901,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 2
-                    if type == 0
+                    if isinstance(m, M1)
                     else 0,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2
-                    if type == 0
+                    if isinstance(m, M1)
                     else 0,
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
@@ -2899,7 +2912,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.aten.mul.Tensor,
                 ]
-                if type == 0:
+                if isinstance(m, M1):
                     node_list = [
                         torch.ops.quantized_decomposed.quantize_per_tensor.default,
                         torch.ops.quantized_decomposed.dequantize_per_tensor.default,

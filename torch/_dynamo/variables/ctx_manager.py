@@ -41,8 +41,11 @@ from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedNestedUserFunctionVariable,
+    WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
@@ -112,9 +115,21 @@ class ContextWrappingVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
+        assert isinstance(
+            args[0],
+            (
+                NestedUserFunctionVariable,
+                SkipFunctionVariable,
+                UserMethodVariable,
+                UserFunctionVariable,
+            ),
+        )
+
         if isinstance(args[0], NestedUserFunctionVariable):
-            args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
+            return WrappedNestedUserFunctionVariable(args[0], self)
+
+        if isinstance(args[0], SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(args[0], self)
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
