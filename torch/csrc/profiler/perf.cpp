@@ -63,7 +63,7 @@ void PerfEvent::Init() {
     TORCH_CHECK(false, "Unsupported profiler event name: ", name_);
   }
 
-  struct perf_event_attr attr {};
+  struct perf_event_attr attr{};
 
   attr.size = sizeof(perf_event_attr);
   attr.type = it->second.first;
