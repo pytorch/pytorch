@@ -5701,14 +5701,13 @@ class TestLinalg(TestCase):
             m = 4
             k = 2
 
+            # There might be less confusing ways create submatrices, but this works
+            # just fine and covers the four transA, transB combinations.
             # 'TN'
-            matA = torch.rand(lda, ldc, dtype=dtype, device=device)
-            matB = torch.rand(ldb, ldc, dtype=dtype, device=device).t()
-
+            matA = torch.rand(ldc, lda, dtype=dtype, device=device)
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
             subA = matA[:m,:k]
             subB = matB[:k,:n]
-
-            torch.mm(matA, matB)
             torch.mm(subA, subB)
 
             # 'NN'
@@ -5716,7 +5715,6 @@ class TestLinalg(TestCase):
             matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
             subA = matA[:m, :k]
             subB = matB[:k, :n]
-            torch.mm(matA, matB)
             torch.mm(subA, subB)
 
             # 'NT'
@@ -5724,7 +5722,6 @@ class TestLinalg(TestCase):
             matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
             subA = matA[:m, :k]
             subB = matB[:k, :n]
-            torch.mm(matA, matB)
             torch.mm(subA, subB)
 
             # 'TT'
@@ -5732,7 +5729,6 @@ class TestLinalg(TestCase):
             matB = torch.rand(ldb, k, dtype=dtype, device=device).t()
             subA = matA[:k, :m]
             subB = matB[:n, :k]
-            torch.mm(matA, matB)
             torch.mm(subA, subB)
 
             self.assertTrue(torch.cuda.tunable.is_enabled())
@@ -5756,7 +5752,7 @@ class TestLinalg(TestCase):
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
-            # self.assertEqual(total_num_results, 1)
+            self.assertEqual(total_num_results, 4)
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
