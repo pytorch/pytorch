@@ -627,9 +627,10 @@ def do_auto_functionalize_v2(
     assert (
         "_all_bases" not in unwrapped_kwargs and "_ops_schema" not in unwrapped_kwargs
     ), (op, unwrapped_kwargs)
+    auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped) if isinstance(op, OpOverload) else dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _op_schema=schema)
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _op_schema=schema)  # type: ignore[arg-type]
+            op, **auto_func_kwargs # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -785,7 +786,7 @@ def auto_functionalized_v2_dense(
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
-    schema = kwargs.pop("_op_schema", None)
+    schema = kwargs.pop("_op_schema", None) if isinstance(_mutable_op, HigherOrderOperator) else _mutable_op._schema
     assert schema is not None
 
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
@@ -858,7 +859,7 @@ def auto_functionalized_v2_proxy(
     # We need to normalize the higher order op's input fn to graph module
     # this could happen e.g. when we are in backward of base_hop where we
     # have FunctionWithNoFreeVars input
-    schema = kwargs["_op_schema"]
+    schema = kwargs.get("_op_schema", None) if isinstance(_mutable_op, HigherOrderOperator) else _mutable_op._schema
     if isinstance(_mutable_op, HigherOrderOperator):
         new_args = []
         new_kwargs = {}
@@ -889,20 +890,33 @@ def auto_functionalized_v2_proxy(
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 
-    def _create_submodule(val: Any):
-        _, graph_name = unique_graph_id(mode, prefix="auto_functionalized_subgraph")
-        mode.tracer.root.register_module(graph_name, val)
+    def _maybe_create_proxy(val: Any):
+        if isinstance(val, torch.fx.GraphModule):
+            _, graph_name = unique_graph_id(mode, prefix="auto_functionalized_subgraph")
+            mode.tracer.root.register_module(graph_name, val)
+            return val
+        elif isinstance(val, torch._C.FunctionSchema):
+            _, name = unique_graph_id(mode, prefix="functiona_schema")
+            setattr(mode.tracer.root, name, val)
+            proxy = mode.tracer.create_proxy(
+                "get_attr",
+                name,
+                tuple(),
+                {},
+            )
+            track_tensor_tree(val, proxy, constant=None, tracer=mode.tracer)
+            return proxy
         return val
 
-    kwargs = pytree.tree_map_only(torch.fx.GraphModule, _create_submodule, kwargs)
-
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+
+    kwargs = pytree.tree_map(_maybe_create_proxy, proxy_kwargs)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized_v2,
         (_mutable_op,),
-        proxy_kwargs,
+        kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     return result

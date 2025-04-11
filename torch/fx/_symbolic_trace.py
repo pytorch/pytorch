@@ -31,7 +31,7 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 _orig_module_call: Callable = torch.nn.Module.__call__
 _orig_module_getattr: Callable = torch.nn.Module.__getattr__
 
-_proxyable_classes: dict[type, None] = {torch._C.FunctionSchema: None}
+_proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
 

@@ -401,6 +401,8 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
         return val
     elif isinstance(val, BackwardState):
         return val
+    elif isinstance(val, torch._C.FunctionSchema):
+        return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
     elif isinstance(val, dict):
@@ -677,6 +679,9 @@ def track_tensor_tree(
             assert isinstance(proxy, Proxy)
             set_meta(proxy, e)
             e.proxy = proxy
+        elif isinstance(e, torch._C.FunctionSchema):
+            assert isinstance(proxy, Proxy)
+            set_meta(proxy, e)
         else:
             # intentionally pass on primitives
             pass
@@ -1077,6 +1082,8 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             assert a.node.constant is not None
             return a.node.constant
+        if isinstance(a, torch.FunctionSchema):
+            breakpoint()
         return super().create_arg(a)  # type: ignore[return-value]
 
     @overload

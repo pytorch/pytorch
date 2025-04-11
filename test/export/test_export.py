@@ -5899,7 +5899,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
+                "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
 
@@ -6038,7 +6038,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Foo(), (torch.randn(64).cuda(),))
+        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":

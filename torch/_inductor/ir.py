@@ -4483,19 +4483,7 @@ class TemplateBuffer(OperationBuffer):
         )
 
         for inp in self.inputs:
-            layout = inp.layout
-
-            # we dont know what the iteration order is of the template,
-            # so we just want to make a single, contiguous dependency
-            if not layout.is_contiguous():
-                layout = FixedLayout(
-                    device=layout.device,
-                    dtype=layout.dtype,
-                    size=layout.size,
-                    stride=FlexibleLayout.contiguous_strides(layout.size),
-                    offset=layout.offset,
-                )
-            indexer = layout.make_indexer()
+            indexer = inp.layout.make_indexer()
 
             def dummy(index, rindex):  # type: ignore[no-untyped-def]
                 assert len(rindex) == 0
@@ -6009,6 +5997,49 @@ class TMADescriptor(ExternKernel):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_tma_descriptor(self)
+
+
+class SubgraphBuffer(ExternKernel):
+    def __init__(
+        self,
+        layout: Layout,
+        input_nodes: list[Buffer],
+        gm: torch.fx.GraphModule,
+        example_inputs: list[Any],
+        subgraph_name: str,
+    ):
+        super().__init__(None, layout, input_nodes)
+        self.gm = gm
+        self.example_inputs = example_inputs
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+        self.subgraph = V.graph.make_subgraph(
+            self.gm, self.example_inputs, subgraph_name
+        )
+
+        import torch._inductor.config as inductor_config
+
+        with V.set_graph_handler(self.subgraph):
+            # Don't bother autotuning on Triton here
+            with inductor_config.patch(  # type: ignore[no-untyped-def]
+                max_autotune=False,
+                max_autotune_gemm=False,
+                max_autotune_gemm_backends="ATEN",
+            ):
+                self.subgraph.run(*self.example_inputs)
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        class CodegenGraph:
+            def __init__(self, graph: GraphLowering):
+                self.graph = graph
+                self.name = graph.name
+
+        wrapper.codegen_subgraph(
+            CodegenGraph(self.subgraph),
+            [*[buffer.get_name() for buffer in self.inputs]],
+            [self.name],
+        )
 
 
 class UserDefinedTritonKernel(ExternKernel):
