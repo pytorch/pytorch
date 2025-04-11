@@ -34,12 +34,12 @@ from torch.utils._pytree import (
 
 OPTREE_VERSION = TorchVersion(python_pytree._optree_version)
 OPTREE_REQUIRED_VERSION = "0.13.0"
-if OPTREE_VERSION < OPTREE_REQUIRED_VERSION:  # type: ignore[attr-defined]
+if OPTREE_VERSION < OPTREE_REQUIRED_VERSION:
     raise ImportError(
-        f"torch.utils._cxx_pytree depends on `optree>={OPTREE_REQUIRED_VERSION}`, "
+        f"{__name__} depends on `optree>={OPTREE_REQUIRED_VERSION}`, "
         "which is an optional dependency of PyTorch. "
         "To use it, please upgrade your optree package via "
-        "`python3 -m pip install --ugprade optree`"
+        "`python3 -m pip install --upgrade optree`"
     )
 
 del TorchVersion
