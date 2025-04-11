@@ -5,6 +5,7 @@
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
 #endif
+#include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
