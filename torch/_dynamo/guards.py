@@ -2493,10 +2493,13 @@ class CheckFunctionManager:
         if guard_filter_fn:
 
             def make_guard_filter_entry(guard):
+                MISSING = object()
                 name = strip_local_scope(guard.name)
                 if name == "":
-                    value = None
+                    has_value = False
+                    value = MISSING
                 else:
+                    has_value = True
                     value = builder.get(guard.name)
                 is_global = is_from_global_source(guard.originating_source)
                 guard_fn = guard.create_fn
@@ -2504,6 +2507,7 @@ class CheckFunctionManager:
                     guard_fn = guard.create_fn.func
                 return GuardFilterEntry(
                     name=name,
+                    has_value=has_value,
                     value=value,
                     guard_type=guard_fn.__name__,
                     derived_guard_types=tuple(guard.guard_types)
