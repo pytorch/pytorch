@@ -93,6 +93,7 @@ default_quantizable_ops = propagation_quantizable_ops | {
 # but not enabled by default recipe of X86InductorQuantizer.
 quantizable_ops = default_quantizable_ops | {
     torch.ops.aten.matmul.default,
+    torch.ops.aten.mul.Tensor,
 }
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
@@ -212,6 +213,12 @@ def _map_module_function_to_aten_operator_type():
                 torch.matmul,
             ],
             torch.ops.aten.matmul.default,
+        ),
+        (
+            [
+                torch.mul,
+            ],
+            torch.ops.aten.mul.Tensor,
         ),
     )
     for map_item in map_list:
@@ -729,6 +736,7 @@ class X86InductorQuantizer(Quantizer):
         self._annotate_conv2d_fusion_pattern(model, quantization_config, filter_fn)
         self._annotate_linear_fusion_pattern(model, quantization_config, filter_fn)
         self._annotate_matmul(model, quantization_config, filter_fn)
+        self._annotate_mul_tensor(model, quantization_config, filter_fn)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -1570,6 +1578,48 @@ class X86InductorQuantizer(Quantizer):
                         _annotated=True,
                         _is_output_of_quantized_pattern=True,
                     )
+
+    def _annotate_mul_tensor(
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
+    ):
+        def _is_tensor(n: Node):
+            return isinstance(n, Node) and isinstance(
+                n.meta["val"], torch._subclasses.fake_tensor.FakeTensor
+            )
+
+        def _same_shape(n1: Node, n2: Node):
+            return n1.meta["val"].shape == n2.meta["val"].shape
+
+        for node in model.graph.nodes:
+            if node.target != torch.ops.aten.mul.Tensor:
+                continue
+
+            if _skip_annotate([node], filter_fn):
+                continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize(node)
+                continue
+
+            assert len(node.args) == 2
+            if not (_is_tensor(node.args[0]) and _is_tensor(node.args[1])):
+                continue
+
+            if not _same_shape(node.args[0], node.args[1]):
+                continue
+
+            input_qspec_map = {}
+            mul_node = node
+            for input_node in mul_node.args:
+                input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+            mul_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

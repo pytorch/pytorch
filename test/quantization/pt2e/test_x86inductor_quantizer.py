@@ -2858,3 +2858,70 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 lower=True,
             )
+
+    @skipIfNoX86
+    def test_annotate_mul_tensor(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum(-1)
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum()
+
+        class M4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * y.sum().item()
+
+        for Mod in [M1, M2, M3, M4]:
+            with override_quantized_engine("x86"), torch.no_grad():
+                m = Mod().eval()
+                example_inputs = (torch.randn(64, 64), torch.randn(64, 64))
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                quantizer.set_function_type_qconfig(
+                    torch.mul, quantizer.get_global_quantization_config()
+                )
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2
+                    if isinstance(m, M1)
+                    else 0,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2
+                    if isinstance(m, M1)
+                    else 0,
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+                }
+                node_list = [
+                    torch.ops.aten.mul.Tensor,
+                ]
+                if isinstance(m, M1):
+                    node_list = [
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    ] + node_list
+
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
