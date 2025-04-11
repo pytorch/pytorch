@@ -173,13 +173,14 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    # optree was not imported
-    _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    # optree can not be imported
+    _cxx_pytree_exists = False
+    _optree_version = "0.0.0"
 else:
-    # optree was imported
+    # optree can be imported
     _cxx_pytree_exists = True
-    _cxx_pytree_dynamo_traceable = True
 
+_cxx_pytree_dynamo_traceable = _cxx_pytree_exists
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
 
