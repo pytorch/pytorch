@@ -2507,6 +2507,12 @@ class TestAutograd(TestCase):
             lambda: torch.autograd.backward(fn(), gradient, inputs=[]),
         )
 
+    def test_backward_with_scalar_input(self):
+        x = torch.randn([], dtype=torch.double, requires_grad=True)
+        out = x**2
+        out.backward(inputs=x)
+        self.assertEqual(x.grad, 2 * x)
+
     def test_backward_with_nonleaf_inputs(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         x_nonleaf = x * 1
