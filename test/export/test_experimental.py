@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import unittest
+import types
 from typing import Dict, List, Tuple
 
 import torch
@@ -9,7 +10,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export, export_for_training
 from torch.export._trace import _convert_ts_to_export_experimental
-from torch.export.experimental import _export_forward_backward
+from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 
@@ -332,6 +333,89 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             ep_joint.graph_signature.output_specs[2].kind,
             OutputKind.LOSS_OUTPUT,
         )
+    
+    def test_sticky_export(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Pipeline():
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *args, **kwargs):
+                return self.model(*args, **kwargs)
+
+        inp = torch.randn(4, 4)
+
+        p = Pipeline(Model())
+        orig_forward = p.model.forward
+        p.model.forward = _sticky_export(p.model.forward)
+        res = p.generate(inp)
+
+        p.model.forward = orig_forward
+        res2 = p.generate(inp)
+        self.assertTrue(torch.allclose(res, res2))
+
+    def test_sticky_export_invalid(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                if x.shape[0] < 5:
+                    return self.linear(x)
+                return x.sin()
+
+        class Pipeline():
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *args, **kwargs):
+                return self.model(*args, **kwargs)
+
+        inp = torch.randn(4, 4)
+
+        p = Pipeline(Model())
+        p.model.forward = _sticky_export(p.model.forward)
+        _ = p.generate(inp)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expected input at \*args\[0\].shape\[0\]"):
+            p.generate(torch.randn(5, 5))
+
+    def test_sticky_export_nested_inp(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, *, inputs):
+                return self.linear(inputs[0]) + self.linear(inputs[1])
+
+        class Pipeline():
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *, input_tensor, input_tensor2):
+                inputs = [input_tensor, input_tensor2]
+                return self.model(inputs=inputs)
+
+        inp = torch.randn(4, 4)
+        inp2 = torch.randn(4, 4)
+
+        p = Pipeline(Model())
+        orig_forward = p.model.forward
+        p.model.forward = _sticky_export(p.model.forward)
+        res = p.generate(input_tensor=inp, input_tensor2=inp2)
+
+        p.model.forward = orig_forward
+        res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
+        self.assertTrue(torch.allclose(res, res2))
 
 
 if __name__ == "__main__":
