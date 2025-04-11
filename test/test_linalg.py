@@ -5797,6 +5797,7 @@ class TestLinalg(TestCase):
             torch.tensordot(a, b, dims=([1], [0]), out=d)
 
         with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
+            # Hack to avoid resize error for CUDA tensors as resize_cuda_ is different to resize_.
             c.requires_grad = False
             torch.tensordot(a, b, dims=([1], [0]), out=c)
             self.assertEqual(len(w), 1)
