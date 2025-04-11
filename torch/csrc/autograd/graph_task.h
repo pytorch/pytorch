@@ -28,6 +28,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // has_error_, future_result_, cpu_ready_queue_, and leaf_streams.
   std::mutex mutex_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
+  std::unordered_map<Node*, int> dependencies_orig_;
   std::unordered_map<Node*, int> dependencies_;
 
   // Records the nodes that are in the graph

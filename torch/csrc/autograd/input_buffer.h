@@ -15,7 +15,11 @@
 namespace torch::autograd {
 
 struct InputBuffer {
-  explicit InputBuffer(size_t size) : buffer(size) {}
+  explicit InputBuffer(size_t size)
+      : buffer(size),
+        opt_accum_streams(size),
+        opt_first_producer_streams(size),
+        accum_counts(size, 0) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
@@ -28,7 +32,9 @@ struct InputBuffer {
       size_t pos,
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream);
+      const std::optional<c10::Stream>& opt_consumer_stream,
+      // How many times we expect to add to this pos in total
+      int num_dependencies);
 
   Variable operator[](size_t pos) {
     return buffer[pos];
@@ -38,6 +44,9 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& g);
 
   std::vector<Variable> buffer;
+  std::vector<std::optional<c10::Stream>> opt_accum_streams;
+  std::vector<std::optional<c10::Stream>> opt_first_producer_streams;
+  std::vector<int> accum_counts;
 };
 
 } // namespace torch::autograd

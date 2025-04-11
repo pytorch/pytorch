@@ -13056,7 +13056,6 @@ class TestAutogradStreamSynchronization(TestCase):
     # This fails because we currently sync to the default stream
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @unittest.skipIf(torch.cuda.device_count() < 2, "GPU count is less than 2")
-    @unittest.expectedFailure
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self,
     ):
@@ -13218,7 +13217,6 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.expectedFailure
     def test_side_stream_backward_overlap(self):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
