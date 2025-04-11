@@ -166,7 +166,6 @@ def _calculate_flops(event: dict[str, Any]) -> int:
         if op_name in adapters_map:
             args, kwargs = adapters_map[op_name](input_shapes, concrete)
         else:
-            breakpoint()
             args, kwargs = default_adapter(input_shapes, concrete)
         return flop_function(*args, **kwargs)
     elif "kernel_flop" in event["args"]:
@@ -205,7 +204,6 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
         ):
             continue
         if len(extern_mapping[event["args"]["External id"]]) > 0:
-            breakpoint()
             raise ParseException("duplicate external id in event")
         extern_mapping[event["args"]["External id"]].append(event)
 
@@ -215,11 +213,6 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
         if event["cat"] == "kernel":
             if "args" not in event:
                 raise ParseException(f"kernel has no args: {event}")
-            try:
-                if event["args"]["External id"] not in extern_mapping:
-                    breakpoint()
-            except:
-                breakpoint()
 
             external_op = extern_mapping[event["args"]["External id"]][0]
             external_op["args"]["kernel_flop"] = _calculate_flops(external_op)
@@ -674,7 +667,6 @@ def parse_profile_event_list(
 
         print(tabulate_line)
 
-    # breakpoint()
     report()
 
 
