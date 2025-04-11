@@ -3,7 +3,7 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#if defined(USE_RCOM)
+#if defined(USE_ROCM)
 #include <rocm_smi/rocm_smi.h>
 #endif
 

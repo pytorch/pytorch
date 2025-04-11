@@ -63,6 +63,9 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 
 __device__ __forceinline__ void trap() {
 #if defined(USE_ROCM)
+  // abort() calls trap() under the covers. However, on ROCm, the trap is
+  // handled differently inside hip runtime. It collects a gpu core dump and
+  // causes linux kernerl to create a core dump of the host application.
   abort();
 #else
   __trap();

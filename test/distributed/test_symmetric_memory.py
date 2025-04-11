@@ -236,6 +236,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
@@ -257,6 +262,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
@@ -281,6 +291,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
