@@ -138,11 +138,7 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if (
-        torch.get_float32_matmul_precision() == "highest"
-        or torch.version.hip
-        or torch.mtia.is_available()
-    ):
+    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
         return "'ieee'"
     else:
         return "'tf32'"
@@ -1340,9 +1336,11 @@ def flex_attention(
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: (
+            V.graph.sizevars.evaluate_static_shape(v)
+            if isinstance(v, sympy.Symbol)
+            else v
+        )
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1476,11 +1474,13 @@ def flex_attention(
     # ROCm specific considerations
     if torch.version.hip:
         kernel_options["kpack"] = 2
-
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             if len(configs) == 1:
@@ -1502,6 +1502,12 @@ def flex_attention(
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_stages", num_stages)
         cur_kernel_options.setdefault("num_warps", num_warps)
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -2441,9 +2447,11 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: (
+            V.graph.sizevars.evaluate_static_shape(v)
+            if isinstance(v, sympy.Symbol)
+            else v
+        )
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2557,8 +2565,11 @@ def flex_attention_backward(*args, **kwargs):
     choices: list[Any] = []
     configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
+
         configs.extend(
             [
                 (BLOCK1, BLOCK2, w, s)
@@ -2570,7 +2581,12 @@ def flex_attention_backward(*args, **kwargs):
             ]
         )
     original_kernel_options = kernel_options.copy()
-    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
+    for (
+        BLOCK1,
+        BLOCK2,
+        num_warps,
+        num_stages,
+    ) in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK1 != 0
@@ -2591,6 +2607,12 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("num_stages", num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
 
         cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
         cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
@@ -2682,10 +2704,8 @@ def flex_attention_backward(*args, **kwargs):
         grad_value = broadcasted_grad_value
     else:
         assert V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)), (
-            f"Bq and Bkv must broadcastable. "
-            f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
-            f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
-        )
+            f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
+        )  # noqa: B950
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
