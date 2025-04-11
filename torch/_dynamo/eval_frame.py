@@ -969,6 +969,7 @@ def _optimize(
     nopython=False,
     guard_export_fn=None,
     guard_fail_fn=None,
+    guard_filter_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -1004,7 +1005,11 @@ def _optimize(
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
     # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
     # easier to understand UX at the cost of a little more plumbing on our end.
-    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
+    hooks = Hooks(
+        guard_export_fn=guard_export_fn,
+        guard_fail_fn=guard_fail_fn,
+        guard_filter_fn=guard_filter_fn,
+    )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (
         disable
@@ -1866,7 +1871,7 @@ def export(
 def optimize_assert(
     backend,
     *,
-    hooks=Hooks(None, None),
+    hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
