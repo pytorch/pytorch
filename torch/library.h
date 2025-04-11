@@ -884,13 +884,19 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
-#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
 void initialize_torch_libraries();
 #endif
 
 namespace detail {
 
-#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+// This is an experimental feature to defer TorchLibraryInit cost to run either
+// at model load time, or when a client application explicitly calls
+// torch::initialize_torch_libraries().
+//
+// This is not thread safe, the client is required to ensure that libraries
+// containing TORCH_LIBRARY initializers are loaded in a thread safe manner.
 extern std::vector<TorchLibraryInit*> torch_library_initializers;
 class TorchLibraryInit final {
     private:
