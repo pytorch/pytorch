@@ -92,6 +92,7 @@ opmath_t<T> threadgroup_prod(
 
 template <typename T>
 float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   float m = data[0];
   float m2 = 0;
   for (unsigned idx = 1; idx < size; ++idx) {
@@ -107,7 +108,7 @@ template <typename T>
 float3 welford_combine(T a, T b) {
   float delta = a.x - b.x;
   float new_weight = a.z + b.z;
-  auto w2_over_w = new_weight != 0 ? b.z / a.z : 0.0;
+  auto w2_over_w = new_weight != 0 ? b.z / new_weight : 0.0;
   return float3(
       a.x + delta * w2_over_w,
       a.y + b.y + delta * delta * a.z * w2_over_w,
