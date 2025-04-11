@@ -1,4 +1,5 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
@@ -45,7 +46,6 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   }
 };
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");

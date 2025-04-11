@@ -86,5 +86,4 @@ std::string& getLTCForceFallback() {
   return config;
 }
 
-// NOLINTEND(misc-use-internal-linkage)
 } // namespace torch::lazy

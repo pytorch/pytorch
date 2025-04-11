@@ -1436,7 +1436,7 @@ static Operation createTensorExprOp(const Node* node) {
   };
 }
 
-RegisterOperators TensorExprOps({
+static RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
         createTensorExprOp,
