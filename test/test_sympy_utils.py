@@ -956,6 +956,43 @@ class TestSingletonInt(TestCase):
 
         self.assertEqual(j1.free_symbols, set())
 
+class TestFloorDiv(TestCase):
+    def test_rewrite_floor_div_mul(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor(x / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, y))
+
+    def test_rewrite_floor_div_rational(self):
+        x = sympy.Symbol("x")
+        expr = sympy.floor(x / 5)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, 5))
+
+    def test_no_rewrite_div(self):
+        x, y = sympy.symbols("x y")
+        expr = x / y
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertEqual(rewritten, expr)
+
+    def test_rewrite_floor_div_nested(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor((sympy.floor(x / 5) + 1) / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertEqual(rewritten.count(FloorDiv), 2)
+
 class TestIdentity(TestCase):
     def test_expand_identity(self):
         """

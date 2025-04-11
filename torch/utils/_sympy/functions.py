@@ -296,6 +296,32 @@ class FloorDiv(sympy.Function):
         divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"floor({base}/{divisor})"
 
+    @staticmethod
+    def rewrite(expr: sympy.Expr) -> sympy.Expr:
+        """
+        Finds instances of floor(x / y) and replaces them with FloorDiv(x, y).
+        """
+
+        def replace(arg: sympy.Expr) -> sympy.Expr:
+            if isinstance(arg, sympy.core.mul.Mul):
+                for arg_idx, frac in enumerate(arg.args):
+                    other_arg = arg.args[1 - arg_idx]
+                    if isinstance(frac, sympy.Rational):
+                        # Look for x * (y / z). This becomes FloorDiv(x * y, z).
+                        numerator = other_arg * frac.numerator
+                        return FloorDiv(numerator, frac.denominator)
+                    elif isinstance(frac, sympy.Pow):
+                        # Look for x * (y ** -n). This becomes FloorDiv(x, y ^ n).
+                        base, power = frac.args
+                        if power.is_negative:
+                            return FloorDiv(other_arg, base**-power)
+            elif isinstance(arg, sympy.Rational):
+                return FloorDiv(arg.numerator, arg.denominator)
+
+            return sympy.floor(arg)
+
+        return expr.replace(sympy.floor, replace)
+
 
 class ModularIndexing(sympy.Function):
     """
