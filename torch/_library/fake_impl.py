@@ -32,7 +32,7 @@ class FakeImplHolder:
         raise RuntimeError("Unable to directly set kernel.")
 
     def register(
-        self, func: Callable, source: str, *, lib=None, allow_override=False
+        self, func: Callable, source: str, lib, *, allow_override=False
     ) -> RegistrationHandle:
         """Register an fake impl.
 
@@ -75,13 +75,13 @@ class FakeImplHolder:
         kernel = Kernel(func, source)
         self.kernels.append(kernel)
 
-        def deregister_fake_class():
+        def deregister_fake_kernel():
             self.kernels.remove(kernel)
 
         meta_kernel = construct_meta_kernel(self.qualname, self)
         lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
 
-        handle = RegistrationHandle(deregister_fake_class)
+        handle = RegistrationHandle(deregister_fake_kernel)
         return handle
 
 
