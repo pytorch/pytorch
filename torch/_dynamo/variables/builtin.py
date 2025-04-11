@@ -1060,15 +1060,18 @@ class BuiltinVariable(VariableTracker):
                             ],
                         )
 
-                _items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
-                n_slices_ellipsis = args[0].ndim - len([item for item in _items if not (isinstance(item, variables.ConstantVariable) and item.value == None)]) + 1
-                items = []
-                for i, item in enumerate(_items):
+                items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
+
+                index_ellipsis = None
+                n_none_slices = args[0].ndim + 1
+                for i, item in enumerate(items):
+                    if not (isinstance(item, variables.ConstantVariable) and item.value == None):
+                        n_none_slices -= 1
                     if isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
-                        for _ in range(n_slices_ellipsis):
-                            items.append(variables.SliceVariable((variables.ConstantVariable.create(None),)))
-                    else:
-                        items.append(item)
+                        index_ellipsis = i
+                if index_ellipsis is not None:
+                    none_slice = variables.SliceVariable((variables.ConstantVariable.create(None),))
+                    items[index_ellipsis: index_ellipsis + 1] = [none_slice] * n_none_slices
 
                 dim = 0
                 # Sequence rewrites.
