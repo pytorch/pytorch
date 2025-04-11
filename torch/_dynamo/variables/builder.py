@@ -100,6 +100,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_global_source,
     is_from_optimizer_source,
     is_from_unspecialized_param_buffer_source,
     ListGetItemSource,
@@ -1768,7 +1769,8 @@ class VariableBuilder:
 
         should_install_graph_params = (
             config.install_params_as_graph_attr
-            and is_from_unspecialized_param_buffer_source(source)
+            and (is_from_unspecialized_param_buffer_source(source)
+            or is_from_global_source(source))
         )
 
         make_graph_attribute = is_static_input and (
