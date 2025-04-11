@@ -172,15 +172,6 @@ class StoreTestBase:
     def test_multi_get(self):
         self._test_multi_get(self._create_store())
 
-    def test_clone(self):
-        a = self._create_store()
-        b = a.clone()
-
-        self.assertIsInstance(b, dist.Store)
-
-        a.set("foo", "bar")
-        self.assertEqual(b.get("foo"), b"bar")
-
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -636,9 +627,6 @@ class MyPythonStore(dist.Store):
         if expected == val or val is None:
             val = self.store[key] = newValue
         return val
-
-    def clone(self) -> "MyPythonStore":
-        return self
 
 
 class PythonStoreTest(TestCase):
