@@ -87,7 +87,6 @@ def scaled_grouped_mm_configs():
 
 def early_config_prune(configs, named_args):
     dtsize = 1
-
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
