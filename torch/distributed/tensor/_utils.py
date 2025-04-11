@@ -125,7 +125,6 @@ def _compute_local_shape_and_global_offset(
     ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     if my_coordinate is None:
-        # TODO(whc) should we also return dimsize as offset for this case, or leave it empty to disambiguate?
         # if rank not in the mesh, return empty offset
         return ((0,), ())
     else:
