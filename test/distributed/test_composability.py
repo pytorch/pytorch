@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
+    TEST_WITH_ROCM,
 )
 
 
@@ -202,7 +202,6 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @skipIfRocm
     @parametrize(
         "ScheduleClass",
         [
@@ -279,7 +278,6 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @skipIfRocm
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
@@ -291,6 +289,9 @@ class ComposabilityTest(MultiProcContinousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, ScheduleClass):
+        if TEST_WITH_ROCM:
+            return
+
         device_mesh = self._build_mesh((2, 2), ("dp", "pp"))
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
