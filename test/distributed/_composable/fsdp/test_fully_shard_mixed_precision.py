@@ -27,6 +27,7 @@ from torch.testing._internal.common_fsdp import (
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.utils.checkpoint import checkpoint
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
@@ -580,6 +581,28 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device="cuda")
             loss = model(inp).sum()
             loss.backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_mp_with_checkpoint(self):
+        class ForwardModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2048, 2048)
+
+            def forward(self, x):
+                return self.linear(nn.functional.gelu(x))
+
+        x = torch.randn(256, 2048).cuda()
+        x.requires_grad = True
+        model = ForwardModel().cuda()
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        out = checkpoint(model, x, use_reentrant=False)
+        loss = out.sum()
+        # checkpoint would call pre_forward again
+        loss.backward()
 
 
 if __name__ == "__main__":
