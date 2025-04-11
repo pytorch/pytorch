@@ -27,7 +27,7 @@ from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
 from torch.distributed.checkpoint.staging import AsyncStager
 from torch.distributed.checkpoint.stateful import Stateful
-from torch.distributed.checkpoint.storage import StorageWriter
+from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
 from torch.distributed.distributed_c10d import _get_default_group
 
 from .utils import _api_bc_check, _DistWrapper, _profile
@@ -81,6 +81,7 @@ def save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     no_dist: bool = False,
+    no_rank_coordination: bool = False,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -132,6 +133,9 @@ def save(
             (Default: ``None``)
         no_dist (bool):
             If ``True``, this function will assume the intent is to load
+            a checkpoint on a single rank/process.
+            (Default: ``False``)
+        no_rank_coordination (bool): If ``True``, this function will assume the intent is to load
             a checkpoint without using cross-rank synchronization.
             (Default: ``False``)
 
@@ -179,6 +183,7 @@ def save(
             process_group=process_group,
             no_dist=no_dist,
             planner=planner,
+            no_rank_coordination=no_rank_coordination,
         )
 
 
@@ -191,6 +196,8 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.THREAD,
+    no_dist: bool = False,
+    no_rank_coordination: bool = False,
 ) -> Future:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
@@ -216,6 +223,11 @@ def async_save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
+        no_dist (bool):
+            If ``True``, this function will assume the intent is to save
+            a checkpoint on a single rank/process.
+            (Default: ``False``)
+        no_rank_coordination: Save the checkpoint without rank coordination. (Default: ``False``)
 
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
@@ -272,6 +284,8 @@ def async_save(
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
+        no_dist=no_dist,
+        no_rank_coordination=no_rank_coordination,
     )
 
     if (
@@ -300,6 +314,7 @@ def _save_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
+    no_rank_coordination: bool = False,
 ) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
@@ -332,7 +347,18 @@ def _save_state_dict(
                 storage_meta=storage_meta,
                 is_coordinator=distW.is_coordinator,
             )
-        storage_writer.set_up_storage_writer(distW.is_coordinator)
+
+        if (
+            "kwargs"
+            in inspect.signature(storage_writer.set_up_storage_writer).parameters
+        ):
+            storage_writer.set_up_storage_writer(
+                distW.is_coordinator,
+                rank=distW.rank,
+                no_rank_coordination=no_rank_coordination,
+            )
+        else:
+            storage_writer.set_up_storage_writer(distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
@@ -347,11 +373,18 @@ def _save_state_dict(
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: SavePlan = distW.reduce_scatter("plan", local_step, global_step)
+    central_plan: Optional[SavePlan] = None
+    if no_rank_coordination:
+        local_plan: SavePlan = local_step()
+        global_plan: list[SavePlan] = global_step([local_plan])
+        central_plan = global_plan[0]
+    else:
+        central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
     @_dcp_method_logger(**ckpt_kwargs)
     def write_data():
         assert planner is not None
+        assert central_plan is not None
         final_local_plan = planner.finish_plan(central_plan)
         all_writes = storage_writer.write_data(final_local_plan, planner)
 
@@ -364,4 +397,11 @@ def _save_state_dict(
         storage_writer.finish(metadata=global_metadata, results=all_results)
         return global_metadata
 
-    return distW.all_reduce("write", write_data, finish_checkpoint)
+    if no_rank_coordination:
+        write_results: list[WriteResult] = write_data()
+        metadata = finish_checkpoint([write_results])
+        distW.barrier()
+    else:
+        metadata = distW.all_reduce("write", write_data, finish_checkpoint)
+
+    return metadata
