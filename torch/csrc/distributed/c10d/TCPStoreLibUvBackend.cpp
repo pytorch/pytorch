@@ -125,6 +125,9 @@ class UvTcpSocket : public UvHandle {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
+    } else if (nread == UV_EOF) { // Handle EOF cases
+      C10D_DEBUG("Remote peer closed the connection.");
+      uv_socket->close();
     } else if (nread < 0) { // Handle error and EOF cases
       C10D_DEBUG(
           "Read callback failed. code:{} name:{} desc:{}",
