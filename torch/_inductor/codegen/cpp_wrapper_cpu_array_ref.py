@@ -95,8 +95,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
@@ -779,7 +781,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
 
@@ -833,16 +835,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if (name := data.get_name()) in self.stack_allocated_buffers:
                 return name, []
 
-            # TODO (benjaminglass1): uncomment this and remove  create_reinterpret_view
-            # after the AOTI forwards compatibility window has passed.
-            #
-            # tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
-            # tmp_call_strs = [
-            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
-            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            # ]
-            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
-            return create_reinterpret_call(), []
+            tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
