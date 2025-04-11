@@ -21,6 +21,6 @@ CAUSED_BY_EARLIER_GRAPH_BREAK = [
 ]
 INFERENCE_MODE = [
     "Avoid using `tensor.is_inference()` and `torch.is_inference_mode_enabled()` in your compile code. "
-    "This is primarily used in conjunction with `torch.inference_mode`. Consider using `torch.no_grad` instead ",
-    " because `torch.no_grad` leads to same improvements as `inference_mode` when `torch.compile` is used.",
+    "This is primarily used in conjunction with `torch.inference_mode`. Consider using `torch.no_grad` instead "
+    "because `torch.no_grad` leads to same improvements as `inference_mode` when `torch.compile` is used.",
 ]
