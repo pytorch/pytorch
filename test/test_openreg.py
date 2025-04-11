@@ -6,7 +6,7 @@ import psutil
 import pytorch_openreg  # noqa: F401
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class TestOpenReg(TestCase):
@@ -70,6 +70,7 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.type, "openreg")
         self.assertEqual(generator.device.index, 1)
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
         self.assertFalse(cpu_a.is_pinned())
@@ -108,6 +109,7 @@ class TestOpenReg(TestCase):
         self.assertNotEqual(0, event2.event_id)
         self.assertNotEqual(event1.event_id, event2.event_id)
 
+    @skipIfTorchDynamo()
     def test_event_elapsed_time(self):
         stream = torch.Stream(device="openreg:1")
         e1 = torch.Event(device="openreg:1", enable_timing=True)
