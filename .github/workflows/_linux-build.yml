@@ -68,7 +68,7 @@ on:
         description: Role to assume for downloading artifacts
         required: false
         type: string
-        default: ""
+        default: "arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts"
       max-jobs:
         description: |
           Overwrite the number of jobs to use for the build
@@ -303,6 +303,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload_benchmark_results
+          role-session-name: gha-linux-build
+          aws-region: us-east-1
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
