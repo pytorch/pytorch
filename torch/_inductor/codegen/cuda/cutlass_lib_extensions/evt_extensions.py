@@ -32,6 +32,7 @@ if try_import_cutlass():
         TileDescription,
     )
 
+    from torch._inductor.codegen.cuda import cuda_env
     import torch
     from torch._inductor.utils import IndentedBuffer
 
@@ -114,9 +115,11 @@ if try_import_cutlass():
         epilogue_schedule: EpilogueScheduleType,
         **kwargs,
     ):
+        cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
+        assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
         epilogue_functor = _trace(fn_src, example_tensors, **kwargs)
-        visitor = EpilogueFunctorVisitor(90, epilogue_functor)
-        fusion_callbacks = FusionCallbacks(visitor.graph, 90, emit_CD=False)
+        visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
+        fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
         collective_epilogue = CollectiveEpilogue(
             tile_description,
             epilogue_schedule,
@@ -124,7 +127,7 @@ if try_import_cutlass():
             output_type,
             fusion_callbacks,
         )
-        return collective_epilogue.emit()
+        return "".join(collective_epilogue.emit())
 
     # Based off of
     # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
