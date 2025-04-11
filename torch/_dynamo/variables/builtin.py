@@ -1012,9 +1012,26 @@ class BuiltinVariable(VariableTracker):
                 # scenario is to de-sugar eagerly.
                 fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
-            if fn is operator.getitem and isinstance(args[0], variables.TensorVariable):
+            # Interaction between ndarray and tensors:
+            #   We prefer the tensor op whenever there are tensors involved
+            if check_numpy_ndarray_args(args, kwargs) and not any(
+                type(arg) == variables.TensorVariable for arg in args
+            ):
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    numpy_operator_wrapper(fn),
+                    *proxy_args_kwargs(args, kwargs),
+                )
 
+                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+
+            if fn is operator.getitem and isinstance(args[0], variables.TensorVariable):
                 def rewrite(dim, item):
+                    if isinstance(item, variables.ConstantVariable) and item.value == None:
+                        return dim + 1, (
+                            torch.unsqueeze,
+                            [variables.ConstantVariable.create(dim)],
+                        )
                     if isinstance(item, (variables.ConstantVariable, SymNodeVariable)):
                         # Standard indexing will force specialization due to
                         # __index__.  Rewrite as a regular torch op which will
@@ -1043,7 +1060,16 @@ class BuiltinVariable(VariableTracker):
                             ],
                         )
 
-                items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
+                _items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
+                n_slices_ellipsis = args[0].ndim - len([item for item in _items if not (isinstance(item, variables.ConstantVariable) and item.value == None)]) + 1
+                items = []
+                for i, item in enumerate(_items):
+                    if isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
+                        for _ in range(n_slices_ellipsis):
+                            items.append(variables.SliceVariable((variables.ConstantVariable.create(None),)))
+                    else:
+                        items.append(item)
+
                 dim = 0
                 # Sequence rewrites.
                 sequence = []
@@ -1068,19 +1094,6 @@ class BuiltinVariable(VariableTracker):
                     # Return last.
                     _method, _args = last
                     fn, args = _method, [t, *_args]
-
-            # Interaction between ndarray and tensors:
-            #   We prefer the tensor op whenever there are tensors involved
-            if check_numpy_ndarray_args(args, kwargs) and not any(
-                type(arg) == variables.TensorVariable for arg in args
-            ):
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    numpy_operator_wrapper(fn),
-                    *proxy_args_kwargs(args, kwargs),
-                )
-
-                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
             proxy = tx.output.create_proxy(
                 "call_function",
