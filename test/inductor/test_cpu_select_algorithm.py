@@ -1377,6 +1377,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize(
         "batch_size",
         (
+            1,
             17,
             32,
         ),
@@ -1428,8 +1429,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if batch_size * mid_dim >= 16:
+            vec_amx = VecAMX()
+            self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
