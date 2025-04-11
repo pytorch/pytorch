@@ -105,7 +105,7 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
 // of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
 // along an individual dot product.
 // NB: lda must be long, otherwise it can cause int32 overflow
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const long lda, const Half *x, const float beta, Half* y, int incy) {
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
       for (int i = begin; i < end; ++i) {
@@ -396,7 +396,7 @@ float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) 
 }
 
 // NB: lda must be long, otherwise it can cause int32 overflow
-void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const long lda, const Half *x, const float beta, Half* y, int incy) {
+void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
       for (int i = begin; i < end; ++i) {
@@ -451,7 +451,7 @@ float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec
 }
 
 // NB: lda must be long, otherwise it can cause int32 overflow
-void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const long lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
+void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int64_t lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
     for (int i = begin; i < end; ++i) {
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);

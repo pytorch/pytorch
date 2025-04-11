@@ -9425,6 +9425,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(rc, ref)
 
     @dtypes(torch.float, torch.half, torch.bfloat16)
+    @largeTensorTest('16GB')
     def test_matmul_mv(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/150637
         # Such matrix will take more than 4Gb in memory
