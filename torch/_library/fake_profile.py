@@ -119,24 +119,36 @@ def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
         namespace, op_name_str = op_name_split[0], op_name_split[1]
         op_str = f"{namespace}::{op_name_str}"
 
-        newlib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
         fake_kernel = _generate_fake_kernel(op_str, profiles)
 
-        # Check if there are any fake kernels already registered
         if opdef := _maybe_get_opdef(op_str):
+            # If the op is a CustomOpDef, save the existing abstract_fn so that
+            # we can restore it after this contextmanager
             if opdef._abstract_fn is not None:
                 old_fake_impls[op_str] = opdef._abstract_fn
+            opdef.register_fake(fake_kernel)
 
-        torch.library.register_fake(
-            op_str, fake_kernel, lib=newlib, allow_override=True
-        )
-        libs.append(newlib)
+        else:
+            # Create a new library so that we can register a new fake impl.
+            # These libraries will then be destroyed after the contextmanager,
+            # which will automatically restore the previously registered fake
+            # impls.
+            newlib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
+            torch.library.register_fake(
+                op_str, fake_kernel, lib=newlib, allow_override=True
+            )
+            libs.append(newlib)
 
     try:
         yield libs
     finally:
+        # Destroying the libraries will automatically restore the previously
+        # registered fake impls
         for lib in libs:
             lib._destroy()
 
+        # Restore abstract_fns for CustomOpDefs
         for op_str, old_fake in old_fake_impls.items():
-            torch.library.register_fake(op_str, old_fake, allow_override=True)
+            opdef = _maybe_get_opdef(op_str)
+            assert opdef is not None
+            opdef.register_fake(old_fake)

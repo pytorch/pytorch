@@ -305,6 +305,11 @@ class Library:
                           the dispatch key that the library was created with.
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+            allow_override: Flag controlling if we want to override an
+                         existing registered kernel implementation. This is by
+                         default off, and will error you're trying to register a
+                         kernel to a dispatch key with a kernel already
+                         registered.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -944,6 +949,18 @@ def register_fake(
 
     For a detailed guide on custom ops, please see
     https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        func: Fake tensor implementation.
+        lib (Optional[Library]): Library to register the fake tensor to.
+        allow_override: Flag controlling if we want to override an
+                        existing registered fake impl. This is by default off,
+                        and will error you're trying to register a fake impl to
+                        an operator that already has a fake impl. This also only
+                        applies if the custom operator was not created via
+                        torch.library.custom_op, as overriding and existing fake
+                        impl is already allowed.
 
     Examples:
         >>> import torch
