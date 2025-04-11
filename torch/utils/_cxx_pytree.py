@@ -19,9 +19,6 @@ from collections.abc import Iterable
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
 
-import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
-
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion
 from torch.utils._pytree import (
@@ -35,14 +32,20 @@ from torch.utils._pytree import (
 )
 
 
+OPTREE_VERSION = TorchVersion(python_pytree._optree_version)
 OPTREE_REQUIRED_VERSION = "0.13.0"
-if TorchVersion(optree.__version__) < OPTREE_REQUIRED_VERSION:  # type: ignore[attr-defined]
+if OPTREE_VERSION < OPTREE_REQUIRED_VERSION:  # type: ignore[attr-defined]
     raise ImportError(
-        "torch.utils._cxx_pytree depends on optree, which is an optional dependency of PyTorch. "
-        f"To use it, please upgrade your optree package to >= {OPTREE_REQUIRED_VERSION}"
+        f"torch.utils._cxx_pytree depends on `optree>={OPTREE_REQUIRED_VERSION}`, "
+        "which is an optional dependency of PyTorch. "
+        "To use it, please upgrade your optree package via "
+        "`python3 -m pip install --ugprade optree`"
     )
 
 del TorchVersion
+
+import optree
+from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
 
 
 __all__ = [
