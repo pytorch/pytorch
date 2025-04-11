@@ -232,6 +232,7 @@ class CompileCounter:
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
+        print("GRAPH", gm.graph)
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:

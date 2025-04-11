@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import builtins
 import dataclasses
 import functools
 import inspect
@@ -1790,6 +1791,91 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
 
+def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
+    """
+    This logic is replicated from dynamo/variables/builtin.py
+    """
+    if len(args) == 2 and not kwargs:
+        arg1, arg2 = args
+        
+        # Check if either argument is a tensor
+        if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
+            return tensor_callable(arg1, arg2)
+
+        elif isinstance(arg1, torch.Tensor) or isinstance(arg2, torch.Tensor):
+            if not isinstance(arg1, torch.Tensor):
+                arg1, arg2 = arg2, arg1 
+            
+            if isinstance(arg2, (int, float)):
+                kwarg = {"min" if tensor_callable is torch.maximum else "max": arg2}
+                return torch.clamp(arg1, **kwarg)
+            
+            else:
+                return real_callable(arg1, arg2)
+        else:
+            # if isinstance(arg1, torch.SymInt) and isinstance(arg2, torch.SymInt):
+            #     new_tensor = torch.tensor((arg1, arg2))
+            #     if tensor_callable is torch.maximum:
+            #         val = torch.ops.aten.max(new_tensor).item()
+            #     else:
+            #         val = torch.ops.aten.min(new_tensor).item()
+            #     breakpoint()
+            #     torch._check_is_size(val)
+            #     return val
+            if isinstance(arg1, torch.SymInt) or isinstance(arg2, torch.SymInt):
+                
+                return torch.sym_max(arg1, arg2) if tensor_callable is torch.maximum else torch.sym_min(arg1, arg2)
+
+    # Single iterable argument handling
+    if len(args) == 1 and not kwargs:
+        iterable = args[0]
+
+        if isinstance(iterable, torch.Tensor):
+            return tensor_callable(iterable)
+        try:
+            iterator = iter(iterable)
+        except TypeError:
+            pass
+        else:
+            items = list(iterator)
+            if not items:
+                raise ValueError(f"{real_callable.__name__}() arg is an empty sequence")
+
+            return functools.reduce(
+                lambda a, b: _tensor_min_max(
+                    a, b, real_callable=real_callable, tensor_callable=tensor_callable
+                ),
+                items
+            )
+
+    # Fallback to original callable
+    return real_callable(*args, **kwargs)
+
+
+@contextmanager
+def _override_builtin_min_max():
+    original_max = builtins.max
+    original_min = builtins.min
+
+    builtins.max = functools.partial(
+        _tensor_min_max,
+        real_callable=original_max,
+        tensor_callable=torch.maximum
+    )
+
+    builtins.min = functools.partial(
+        _tensor_min_max,
+        real_callable=original_min,
+        tensor_callable=torch.minimum
+    )
+
+    try:
+        yield
+    finally:
+        builtins.max = original_max
+        builtins.min = original_min
+
+
 def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -1926,7 +2012,7 @@ def _non_strict_export(
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
+        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode), _override_builtin_min_max():
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,

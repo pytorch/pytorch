@@ -1347,7 +1347,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         args: tuple[object, ...] = (),
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
-        kwargs = kwargs or {}
+        kwargs = kwargs or {} 
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,

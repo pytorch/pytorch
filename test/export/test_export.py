@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # ruff: noqa: F841
 # flake8: noqa
+import builtins
 import copy
 import dataclasses
 import logging
@@ -744,6 +745,85 @@ graph():
         self.assertEqual(gm(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
+
+    def test_export_max_onnx_reported(self):
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                s1 = max(x.shape[0], y.shape[0])
+                s2 = max(x.shape[1], y.shape[1])
+                z = torch.zeros((s1, s2), dtype=x.dtype)
+                z[:x.shape[0], :x.shape[1]] = x
+                z[:y.shape[0], :y.shape[1]] += y
+                return z
+
+
+        model = Model()
+        x = torch.arange(6).reshape((2,3))
+        y = torch.arange(6).reshape((3,2)) * 10
+        DYN = torch.export.Dim.DYNAMIC
+
+        ep = export(model, (x,y), dynamic_shapes=({0:DYN, 1:DYN},{0:DYN, 1:DYN}), strict=False)
+        self.assertTrue(torch.allclose(ep.module()(x, y), model(x, y)))
+        x2 = torch.arange(4).reshape((2,2))
+        y2 = torch.arange(9).reshape((3,3))
+        self.assertTrue(torch.allclose(ep.module()(x2, y2), model(x2, y2)))
+            
+            
+    @testing.expectedFailureLegacyExportNonStrict  # Some small change due to unbacked values getting regenerated
+    @testing.expectedFailureLegacyExportStrict  # Some small change due to unbacked values getting regenerated
+    def test_export_max_nonstrict(self):
+        class FooMax(torch.nn.Module):
+            def forward(self, x):
+                return torch.ones(max(x.item(), 1024))
+        
+        ep_strict_foo_max_symint = export(FooMax(), (torch.tensor(4),), strict=True).graph
+        ep_non_strict_foo_max_symint = export(FooMax(), (torch.tensor(4),), strict=False).graph
+    
+        self.assertEqual(str(ep_strict_foo_max_symint), str(ep_non_strict_foo_max_symint))
+        
+        class FooMaxTensors(torch.nn.Module):
+            def forward(self, x):
+                return torch.ones(max(x, x)) + torch.ones(min(x, x))
+        
+        ep_strict_foo_max_symint = export(FooMaxTensors(), (torch.tensor(4),), strict=True).graph
+        ep_non_strict_foo_max_symint = export(FooMaxTensors(), (torch.tensor(4),), strict=False).graph
+        self.assertEqual(str(ep_strict_foo_max_symint), str(ep_non_strict_foo_max_symint))
+
+        class FooMaxTensorsIter(torch.nn.Module):
+            def forward(self, x):
+                return max([x, x]) + min([x, x]) + max(x, 5) + min(x, 3)
+        
+        ep_strict_foo_max_symint = export(FooMaxTensorsIter(), (torch.tensor(4),), strict=True).graph
+        ep_non_strict_foo_max_symint = export(FooMaxTensorsIter(), (torch.tensor(4),), strict=False).graph
+        self.assertEqual(str(ep_strict_foo_max_symint), str(ep_non_strict_foo_max_symint))
+
+        class FooMaxTensorsSymInt(torch.nn.Module):
+            def forward(self, x, y):
+                return max([x.shape[0], y.shape[0], x.shape[0]]) + min([x.shape[0], y.shape[0], x.shape[0]])
+
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.AUTO},
+            "y": {0: torch.export.Dim.AUTO},
+        }
+        
+        ep_strict_foo_max_symint = export(FooMaxTensorsSymInt(), (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=dynamic_shapes, strict=True).graph
+        ep_non_strict_foo_max_symint = export(FooMaxTensorsSymInt(), (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=dynamic_shapes, strict=False).graph
+        self.assertEqual(str(ep_strict_foo_max_symint), str(ep_non_strict_foo_max_symint))
+    
+        class FooMaxTensorsSymShape(torch.nn.Module):
+            def forward(self, x):
+                return max(x, x.shape[0])
+
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.AUTO},
+        }
+        
+        with self.assertRaisesRegex(RuntimeError, "Dynamo failed to run FX node with fake tensors"):
+            ep_strict_foo_max_symint = export(FooMaxTensorsSymShape(), (torch.randn(4, 4),), dynamic_shapes=dynamic_shapes, strict=True).graph
+        
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+            ep_non_strict_foo_max_symint = export(FooMaxTensorsSymShape(), (torch.randn(4, 4),), dynamic_shapes=dynamic_shapes, strict=False).graph
 
     @requires_gpu
     def test_export_custom_triton_kernel(self):
@@ -1640,17 +1720,7 @@ graph():
         self.assertEqual(ep.module()(*inputs), model(*inputs))
         x = torch.zeros(64)
         y = torch.ones(64)
-        # This seems to be a bug with old export because when we pass in x, x
-        # as input, runtime assertion should fail. This is because we would create
-        # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
-        # assertion.
-        if is_non_strict_test(self._testMethodName) and not is_non_strict_legacy_test(
-            self._testMethodName
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
-                ep.module()(x, x)
-        else:
-            self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     def test_draft_export_checks_mutation_with_nan(self):
@@ -4576,7 +4646,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
         dim = torch.export.Dim("Dim", min=16, max=64)
-        dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
+        dynamic_shapes = {"x": {2: torch.export.Dim.AUTO, 3: torch.export.Dim.AUTO}, "y": {2: torch.export.Dim.AUTO, 3: torch.export.Dim.AUTO}}
 
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
         self.assertEqual(exported_program.module()(*inputs), model(*inputs))
