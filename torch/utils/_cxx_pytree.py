@@ -107,6 +107,9 @@ OPTREE_VERSION = TorchVersion(optree.__version__)  # type: ignore[attr-defined]
 del TorchVersion
 
 
+__name__ = "torch.utils.pytree.cxx"  # sets the __module__ attribute of all functions in this module
+
+
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
 __TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
 
