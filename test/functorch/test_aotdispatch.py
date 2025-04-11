@@ -6010,7 +6010,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace
@@ -6049,7 +6049,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace

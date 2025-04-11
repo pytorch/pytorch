@@ -8,6 +8,7 @@ import inspect
 import logging
 import operator
 import sys
+import traceback
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
@@ -245,7 +246,30 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         if self.record_stack_traces and not proxy.node.stack_trace:
-            proxy.node.stack_trace = "".join(CapturedTraceback.extract().format())
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [
+                    frame
+                    for frame in user_frame_summary
+                    if (
+                        frame.name == "forward"
+                        or frame.filename.endswith("torch/__init__.py")
+                    )
+                ]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame
+                    for frame in stack_trace
+                    if not (
+                        frame.filename.endswith("fx/_symbolic_trace.py")
+                        or frame.filename.endswith("export/_trace.py")
+                    )
+                ]
+                stack_trace = traceback.StackSummary.from_list(stack_trace)
+                proxy.node.stack_trace = "".join(stack_trace.format()).strip()
 
         return proxy
 

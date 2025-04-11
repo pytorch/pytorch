@@ -719,7 +719,7 @@ class TestFX(JitTestCase):
         # saving the original list because we will insert new nodes as a part of a test
         orig_graph_nodes = list(graph.nodes)
         for node in orig_graph_nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_fx.py" in node.stack_trace
