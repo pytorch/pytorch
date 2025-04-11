@@ -315,17 +315,11 @@ def export(
                 torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
             ),
         ):
-            if sys.version_info >= (3, 11):
-                e.add_notes(draft_export_msg)  # type: ignore[union-attr]
-            else:
-                new_msg = str(e) + "\n\n" + draft_export_msg
-                e.args = (new_msg,)
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
         elif isinstance(e, RuntimeError) and "no fake impl registered" in str(e):
-            if sys.version_info >= (3, 11):
-                e.add_notes(draft_export_msg)
-            else:
-                new_msg = str(e) + "\n\n" + draft_export_msg
-                e.args = (new_msg,)
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
         raise e
 
 
