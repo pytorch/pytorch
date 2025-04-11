@@ -576,7 +576,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.divide: lambda input, other, rounding_mode=None, out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
-         torch.dsmm: lambda input, mat2, out_dtype=None: -1,
+        torch.dsmm: lambda input, mat2, out_dtype=None: -1,
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
