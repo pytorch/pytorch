@@ -108,6 +108,7 @@ class TestOpenReg(TestCase):
         self.assertNotEqual(0, event2.event_id)
         self.assertNotEqual(event1.event_id, event2.event_id)
 
+    @skipIfTorchDynamo()
     def test_event_elapsed_time(self):
         stream = torch.Stream(device="openreg:1")
         e1 = torch.Event(device="openreg:1", enable_timing=True)
@@ -121,14 +122,12 @@ class TestOpenReg(TestCase):
         ms = e1.elapsed_time(e2)
         self.assertTrue(ms > 0)
 
-    @skipIfTorchDynamo()
     def test_stream_wait_event(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
         e = s1.record_event()
         s2.wait_event(e)
 
-    @skipIfTorchDynamo()
     def test_event_wait_stream(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
