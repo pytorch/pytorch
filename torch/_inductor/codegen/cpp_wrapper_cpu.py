@@ -2037,7 +2037,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
 
@@ -2192,7 +2192,7 @@ if (!custom_op_wrapper) {
         codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[list[str]] = None,
+        output_args: Optional[list[Optional[str]]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
@@ -2236,9 +2236,9 @@ if (!custom_op_wrapper) {
             """
         )
 
-        if len(output_args) == 1:
+        if len(output_args) == 1 and (output := output_args[0]) is not None:
             # result is a single tensor
-            lines += f"{output_args[0]} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
             for idx, output_arg in enumerate(output_args):
