@@ -17,6 +17,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/WaitCounter.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -309,8 +310,11 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
 // - This map has also to be maintained as global variable since the register
 //   hooks are called outside the scope of any PG, thus we need traverse
 //   communicators in all PGs.
-static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
-static std::mutex ncclCommDevIdxMapMutex;
+using MemPoolSet = std::
+    unordered_set<c10::cuda::MempoolId_t, c10::hash<c10::cuda::MempoolId_t>>;
+static std::unordered_map<std::shared_ptr<NCCLComm>, MemPoolSet>
+    ncclCommMemPoolMap;
+static std::mutex ncclCommMemPoolMapMutex;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
@@ -322,10 +326,11 @@ static void cacheAllocatorRegisterHook(
     return;
   }
 
-  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+  std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+  for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors()) {
+      if (shouldAllCommunicatorsRegisterAllTensors() ||
+          memPools.find(te.mempool_) != memPools.end()) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
       }
@@ -341,10 +346,11 @@ static void cacheAllocatorDeregisterHook(
     return;
   }
 
-  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+  std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+  for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors()) {
+      if (shouldAllCommunicatorsRegisterAllTensors() ||
+          memPools.find(te.mempool_) != memPools.end()) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
       }
@@ -375,14 +381,14 @@ static std::
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
   // dump_nccl_trace is only called from the default PG (local_id_=0), but we
-  // want to dump from all comms so we need to iterate over ncclCommDevIdxMap,
+  // want to dump from all comms so we need to iterate over ncclCommMemPoolMap,
   // which is static
   std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
   // within the critical section, we don't want to dump while holding the lock
   // as dump might hang
   {
-    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-    for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+    for (auto& [ncclComm, _] : ncclCommMemPoolMap) {
       allNCCLComms.push_back(ncclComm);
     }
   }
@@ -861,8 +867,8 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclComm_->abort();
 
   {
-    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-    ncclCommDevIdxMap.erase(ncclComm_);
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+    ncclCommMemPoolMap.erase(ncclComm_);
   }
 }
 
@@ -1180,6 +1186,12 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
     ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
   }
   TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+    auto iter = ncclCommMemPoolMap.find(ncclComm);
+    iter->second.insert(pool->id());
+  }
+  attachAllocatorHooks();
   auto ctx = c10::cuda::MemPoolContext(pool);
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
@@ -1210,6 +1222,11 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
   }
   TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+    auto iter = ncclCommMemPoolMap.find(ncclComm);
+    iter->second.erase(pool->id());
+  }
   auto ctx = c10::cuda::MemPoolContext(pool);
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
@@ -1399,15 +1416,15 @@ void ProcessGroupNCCL::abortCommsFromMap(
 // method calls `abortComms` but does more destruction than the latter.
 bool ProcessGroupNCCL::abortComms(
     const std::optional<std::string>& abortReason) {
-  // Remove record from global ncclCommDevIdxMapMutex before aboarting,
+  // Remove record from global ncclCommMemPoolMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
-  // communicators. Note that ncclCommDevIdxMap is a global container which may
+  // communicators. Note that ncclCommMemPoolMap is a global container which may
   // contain other PG's communicators, thus we need to only erase communicators
   // for the current PG.
   {
-    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
-      ncclCommDevIdxMap.erase(ncclComm);
+      ncclCommMemPoolMap.erase(ncclComm);
     }
   }
 
@@ -2720,8 +2737,8 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   usedDeviceIdxs_.clear();
 
   {
-    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-    ncclCommDevIdxMap.erase(ncclComm);
+    std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+    ncclCommMemPoolMap.erase(ncclComm);
   }
 }
 
@@ -3001,8 +3018,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // NOTE: we need remove the communicator from this map when it is
     // destroyed, otherwise may register onto an invalid communicator.
     {
-      std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-      ncclCommDevIdxMap.emplace(ncclComm, device.index());
+      std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
+      ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
   }
 
@@ -5493,6 +5510,8 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
             getMemAllocator().get());
     // Pool is created
     memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
+    // Register so that we call ncclCommRegister on all new allocations
+    registerMemPool(memPool_.get());
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 
@@ -5501,9 +5520,6 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
   at::Tensor tensor = at::empty({size}, options);
-  // Also need to ncclCommRegister the pool in case new segments are created;
-  // reregistration of old segments will be ignored
-  registerMemPool(memPool_.get());
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
       memPool_->device(), memPool_->id());
   c10::cuda::CUDACachingAllocator::releasePool(
