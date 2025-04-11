@@ -4,8 +4,11 @@
 set -ex
 
 cd /
-git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.29 --depth 1 --shallow-submodules
-
+if [ -n "$OPENBLAS_VERSION" ]; then
+    git clone https://github.com/OpenMathLib/OpenBLAS.git -b $OPENBLAS_VERSION --depth 1 --shallow-submodules
+else
+    git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.29 --depth 1 --shallow-submodules
+fi
 
 OPENBLAS_BUILD_FLAGS="
 NUM_THREADS=128
