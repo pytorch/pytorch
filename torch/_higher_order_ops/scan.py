@@ -353,9 +353,7 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs):
     return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
 
-scan_op.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(scan_op, deferred_error=True)
-)
+scan_op.py_autograd_impl(autograd_not_implemented(scan_op, deferred_error=True))
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)

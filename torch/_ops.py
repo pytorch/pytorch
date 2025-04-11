@@ -307,18 +307,19 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         return super().py_impl(k)
 
     def py_autograd_impl(
-        self, fn: Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]
-    ) -> Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]:
-        def maybe_run_autograd(op, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        self,
+        fn: Callable[_P, _T],
+    ) -> Callable[_P, _T]:
+        def maybe_run_autograd(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if not torch.is_grad_enabled() or pytree.tree_all_only(
                 torch.Tensor,
                 lambda t: not t.requires_grad,  # type: ignore[union-attr]
                 (*args, kwargs),
             ):
                 with torch._C._AutoDispatchBelowAutograd():
-                    return self(op, *args, **kwargs)
+                    return self(*args, **kwargs)
 
-            return fn(op, *args, **kwargs)
+            return fn(*args, **kwargs)
 
         self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)
 
