@@ -26,7 +26,7 @@ namespace {
 // See https://github.com/pytorch/pytorch/issues/60306
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
-void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
@@ -154,7 +154,8 @@ void InputBuffer::add(
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   const auto device_type = device->type();
-  bool is_accelerator = device->is_cuda() || device->is_mtia() || device->is_privateuseone();
+  bool is_accelerator =
+      device->is_cuda() || device->is_mtia() || device->is_privateuseone();
 
   // [ Single producer ]
   // If there's only a single producer, there is no accumulation involved.
