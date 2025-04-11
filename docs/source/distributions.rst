@@ -122,6 +122,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`GeneralizedPareto`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.generalized_pareto
+.. autoclass:: GeneralizedPareto
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Geometric`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -419,6 +428,7 @@ Probability distributions - torch.distributions
 .. py:module:: torch.distributions.exponential
 .. py:module:: torch.distributions.fishersnedecor
 .. py:module:: torch.distributions.gamma
+.. py:module:: torch.distributions.generalized_pareto
 .. py:module:: torch.distributions.geometric
 .. py:module:: torch.distributions.gumbel
 .. py:module:: torch.distributions.half_cauchy
