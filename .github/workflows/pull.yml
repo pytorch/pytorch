@@ -49,8 +49,11 @@ jobs:
     name: linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "lf."
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
