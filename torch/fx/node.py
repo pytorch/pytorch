@@ -60,7 +60,7 @@ Argument = Optional[
 ]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
 _P = ParamSpec("_P")
-_T = TypeVar("_T")
+_R = TypeVar("_R")
 
 _legal_ops = dict.fromkeys(
     [
@@ -105,7 +105,7 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     _side_effectful_functions.add(fn)
     return fn
 

@@ -83,8 +83,8 @@ JSON = dict
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
-T = TypeVar("T")
-P = ParamSpec("P")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 @dataclass
@@ -307,8 +307,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[P, T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[P, Union[T, None]]:
+    fn: Callable[_P, _R], error_handler: Optional[ErrorHandler] = None
+) -> Callable[_P, Union[_R, None]]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -348,9 +348,9 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[P, T]) -> Callable[P, Union[T, None]]:
+    def wrap(f: Callable[_P, _R]) -> Callable[_P, Union[_R, None]]:
         @wraps(f)
-        def wrapper(*args: P.args, **kwargs: P.kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker
             error_handler.initialize()
             try:
