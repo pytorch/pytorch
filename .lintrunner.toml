@@ -93,6 +93,8 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/generated/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    'torch/csrc/nativert/common/lightweightsemaphore.h',
+    'torch/csrc/nativert/common/concurrentqueue.h',
     'aten/src/ATen/dlpack.h',
 ]
 init_command = [
@@ -272,6 +274,8 @@ exclude_patterns = [
     'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
+    'torch/csrc/nativert/common/lightweightsemaphore.h',
+    'torch/csrc/nativert/common/concurrentqueue.h',
     'aten/src/ATen/ExpandBase.h',
 ]
 init_command = [
@@ -453,6 +457,8 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'torch/csrc/nativert/common/lightweightsemaphore.h',
+    'torch/csrc/nativert/common/concurrentqueue.h',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
     '**/*.patch',
@@ -531,6 +537,8 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/glsl/**',
     '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/nativert/common/lightweightsemaphore.h',
+    'torch/csrc/nativert/common/concurrentqueue.h',
     'torch/csrc/utils/pythoncapi_compat.h',
 ]
 command = [
