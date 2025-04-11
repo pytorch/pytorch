@@ -3914,7 +3914,7 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
-                elif name.startswith(("fwd_rng_state", "bwd_rng_state")):
+                elif isinstance(inp, ir.GeneratorState):
                     continue
                 else:
                     storage = inp.data
