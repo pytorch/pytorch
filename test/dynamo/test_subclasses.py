@@ -927,7 +927,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_tensor_subclass_with_non_classmethod_torch_function(self):
         class MySubclass(torch.Tensor):
             def __torch_function__(self, func, types, args, kwargs=None):
-                return super().__torch_function__(func, types, args, kwargs)
+                if kwargs is None:
+                    kwargs = {}
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
 
         def fn(x):
             return x + 1
