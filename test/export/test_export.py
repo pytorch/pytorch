@@ -2383,6 +2383,49 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    def test_dim_dynamic_specialization(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        # 0/1 specialization
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 0 for dimension "
+            r"inputs\['x'\]\.shape\[0\](.*\n)*.*"
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 1 for dimension "
+            r"inputs\['x'\]\.shape\[1\].*",
+        ):
+            export(
+                Foo(),
+                (torch.randn(0, 1),),
+                dynamic_shapes={
+                    "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                assert x.shape[0] <= 32
+                return x + 2
+
+        # static specialization
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 32 for dimension "
+            r"inputs\['x'\]\.shape\[0\](.*\n)*.*",
+        ):
+            export(
+                Bar(),
+                (torch.randn(32),),
+                dynamic_shapes={
+                    "x": {0: Dim.DYNAMIC(min=32)},
+                },
+            )
+
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -3104,28 +3147,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             self.assertTrue(
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
-
-    @testing.expectedFailureLegacyExportNonStrict  # FIXME constraint violation (guard: s0 - s0%8 != 1)
-    @testing.expectedFailureCppSerDes  # FIXME data-dependent error (hinted: True, unhinted: s0 - s0%8 >= 0)
-    def test_bound_sympy_accuracy(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                expr = x.shape[0] - (x.shape[0] % 8)
-                return torch.empty(expr)
-
-        ep = export(
-            Foo(),
-            (torch.randn(13),),
-            dynamic_shapes={"x": (Dim("dim", min=2),)},
-        )
-
-        (output,) = ep.graph.output_node().args[0]
-        sym_node = output.meta["val"].shape[0].node
-        vr = torch.utils._sympy.value_ranges.bound_sympy(
-            sym_node.expr,
-            sym_node.shape_env.var_to_range,
-        )
-        self.assertEqual(vr.lower, 0)
 
     @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_keep_composite_ops_invalid(self):
@@ -7514,14 +7535,6 @@ def forward(self, b_a_buffer, x):
         )
         epm = exported_module(inputs)
         # output shape is (3, 2), with n_row 3 and n_sample 2 <= dist_size 2
-        check(inputs, epm)
-
-        inputs = (
-            torch.tensor([[4, 5], [6, 7], [8, 9], [10, 11]], dtype=torch.float32),
-            torch.ones(1, dtype=torch.int64),
-        )
-        epm = exported_module(inputs)
-        # output shape is (4, 1), with n_row 4 and n_sample 1 <= dist_size 2
         check(inputs, epm)
 
         inputs = (

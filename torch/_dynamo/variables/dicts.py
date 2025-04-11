@@ -22,7 +22,9 @@ None values for efficiency and code reuse.
 
 import collections
 import functools
+import inspect
 import types
+from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -44,12 +46,17 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
+
+
+def was_instancecheck_override(obj):
+    return type(obj).__dict__.get("__instancecheck__", False)
 
 
 def is_hashable(x):
@@ -71,6 +78,13 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif (
+        isinstance(x, variables.UserDefinedObjectVariable)
+        and not was_instancecheck_override(x.value)
+        and inspect.getattr_static(x.value, "__hash__") is int.__hash__
+        and isinstance(x.value, int)
+    ):
+        return isinstance(x.value, py_Hashable)
     else:
         return isinstance(
             x,
@@ -79,7 +93,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
-                variables.user_defined.UserDefinedClassVariable,
+                variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
@@ -139,6 +153,11 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.UserDefinedObjectVariable):
+                # The re module in Python 3.13+ has a dictionary (_cache2) with
+                # an object as key (`class _ZeroSentinel(int): ...`):
+                # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual
+                return self.vt.value
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -263,7 +282,7 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -546,7 +565,7 @@ class MappingProxyVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # load types.MappingProxyType
         if self.source:
             unimplemented(
@@ -681,7 +700,7 @@ class SetVariable(ConstDictVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
@@ -786,7 +805,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -879,7 +898,7 @@ class DictViewVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.view_items_vt
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
