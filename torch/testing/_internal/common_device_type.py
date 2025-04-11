@@ -937,18 +937,21 @@ def instantiate_device_type_tests(
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
-        # The dynamically-created test class derives from the test template class
-        # and the empty class. Arrange for both setUpClass and tearDownClass methods
-        # to be called. This allows the parameterized test classes to support setup
-        # and teardown.
+        # Arrange for setUpClass and tearDownClass methods defined both in the test template
+        # class and in the generic base to be called. This allows device-parameterized test
+        # classes to support setup and teardown.
         @classmethod
         def _setUpClass(cls):
             base.setUpClass()
-            empty_class.setUpClass()
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.setUpClass.__func__(cls)
 
         @classmethod
         def _tearDownClass(cls):
-            empty_class.tearDownClass()
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.tearDownClass.__func__(cls)
             base.tearDownClass()
 
         device_type_test_class.setUpClass = _setUpClass
