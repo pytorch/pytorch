@@ -291,3 +291,13 @@ def map_functionalize(ctx, f, xs, pos_args):
 
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)
+
+
+def _fake_map(f, x, *args):
+    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
+
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    for xp in x_pytrees:
+        zs.append(f(xp, *args))
+    return _stack_pytree(zs)
