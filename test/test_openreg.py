@@ -6,7 +6,7 @@ import psutil
 import pytorch_openreg  # noqa: F401
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class TestOpenReg(TestCase):
@@ -121,12 +121,14 @@ class TestOpenReg(TestCase):
         ms = e1.elapsed_time(e2)
         self.assertTrue(ms > 0)
 
+    @skipIfTorchDynamo()
     def test_stream_wait_event(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
         e = s1.record_event()
         s2.wait_event(e)
 
+    @skipIfTorchDynamo()
     def test_event_wait_stream(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
