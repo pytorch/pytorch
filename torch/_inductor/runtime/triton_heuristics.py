@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -815,20 +816,46 @@ class CachingAutotuner(KernelInterface):
     def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
+    @contextlib.contextmanager
+    def dynamo_timed_autotune(
+        self,
+        name: str,
+        dynamo_compile_runtime_column_us: Optional[str] = None,
+        log_waitcounter: bool = False,
+        waitcounter_name_override: Optional[str] = None,
+    ):
+        """
+        Helper to make dynamo_timed usages in this class less verbose.
+        """
+        with dynamo_timed(
+            name,
+            log_pt2_compile_event=True,
+            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+            dynamo_compile_runtime_column_us=dynamo_compile_runtime_column_us,
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
+            log_waitcounter=log_waitcounter,
+            waitcounter_name_override=waitcounter_name_override,
+        ):
+            yield
+
     def benchmark_all_configs(self, *args, **kwargs):
         with (
-            dynamo_timed(
+            self.dynamo_timed_autotune(
                 "CachingAutotuner.benchmark_all_configs",
-                log_pt2_compile_event=True,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
                 dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
                 log_waitcounter=True,
                 waitcounter_name_override="triton_autotuner",
             ),
             _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
         ):
+            if len(self.launchers) > 1:
+                # For accounting purposes, it's helpful to synchronize before benchmarking
+                # in order to separate out the overhead of the first sync from the rest of
+                # the benchmarking.
+                with self.dynamo_timed_autotune("CachingAutotuner.synchronize"):
+                    self.get_device_interface().synchronize()
+
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
                 for launcher in self.launchers
