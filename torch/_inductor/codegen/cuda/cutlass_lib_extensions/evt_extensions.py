@@ -47,7 +47,8 @@ if try_import_cutlass():
             output_type,
             fusion_callbacks,
         )
-        return "".join(collective_epilogue.emit())
+
+        return collective_epilogue.emit()
 
     # Based off of
     # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
