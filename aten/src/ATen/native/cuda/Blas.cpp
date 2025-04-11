@@ -443,6 +443,36 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   if (useLtInterface) {
 #if defined(USE_ROCM)
     bool okay = true;
+    if (is_float_output_with_half_input) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        scalar_type,
+        "addmm_cuda_lt",
+        [&] {
+          auto tuning_ctx = at::cuda::tunable::getTuningContext();
+          if (tuning_ctx->IsTunableOpEnabled()) {
+            TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+          }
+          okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
+              args.transa == 't',
+              args.transb == 't',
+              args.m,
+              args.n,
+              args.k,
+              alpha.to<at::opmath_type<scalar_t>>(),
+              args.mata->const_data_ptr<scalar_t>(),
+              args.lda,
+              args.matb->const_data_ptr<scalar_t>(),
+              args.ldb,
+              // This condition is needed for mm case on ROCm for hipblasLt path.
+              // Passing the bias ptr as null to avoid accuracy issues for mm case.
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+              args.result->data_ptr<float>(),
+              args.result_ld,
+              activation_to_gemm_and_blas_arg(activation)
+          );
+        }
+      );
+    }
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -458,26 +488,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation));
         }
         else {
-          if (is_float_output_with_half_input) {
-            okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
-                args.transa == 't',
-                args.transb == 't',
-                args.m,
-                args.n,
-                args.k,
-                alpha.to<at::opmath_type<scalar_t>>(),
-                args.mata->const_data_ptr<scalar_t>(),
-                args.lda,
-                args.matb->const_data_ptr<scalar_t>(),
-                args.ldb,
-                // This condition is needed for mm case on ROCm for hipblasLt path.
-                // Passing the bias ptr as null to avoid accuracy issues for mm case.
-                (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-                args.result->data_ptr<float>()
-                args.result_ld,
-                activation_to_gemm_and_blas_arg(activation)
-            );
-          } else {
             okay = at::cuda::blas::gemm_and_bias<scalar_t>(
                 args.transa == 't',
                 args.transb == 't',
@@ -492,11 +502,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
                 // This condition is needed for mm case on ROCm for hipblasLt path.
                 // Passing the bias ptr as null to avoid accuracy issues for mm case.
                 (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-                args.result->data_ptr<scalar_t>()
+                args.result->data_ptr<scalar_t>(),
                 args.result_ld,
                 activation_to_gemm_and_blas_arg(activation)
             );
-          }
         }});
     if (!okay) {
       // lt path failed; recurse but disable lt path
@@ -514,7 +523,35 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #endif
 
     bool okay = true;
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    if (is_float_output_with_half_input) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        scalar_type,
+        "addmm_cuda_lt",
+        [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+        }
+        else {
+          okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
+              args.transa == 't',
+              args.transb == 't',
+              args.m,
+              args.n,
+              args.k,
+              alpha.to<at::opmath_type<scalar_t>>(),
+              args.mata->const_data_ptr<scalar_t>(),
+              args.lda,
+              args.matb->const_data_ptr<scalar_t>(),
+              args.ldb,
+              self.const_data_ptr<scalar_t>(),
+              args.result->data_ptr<float>(),
+              args.result_ld,
+              activation_epilogue
+          );
+        }});
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -529,42 +566,24 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue);
         }
         else {
-          if (is_float_output_with_half_input) {
-            okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
-                args.transa == 't',
-                args.transb == 't',
-                args.m,
-                args.n,
-                args.k,
-                alpha.to<at::opmath_type<scalar_t>>(),
-                args.mata->const_data_ptr<scalar_t>(),
-                args.lda,
-                args.matb->const_data_ptr<scalar_t>(),
-                args.ldb,
-                self.const_data_ptr<scalar_t>(),
-                args.result->data_ptr<float>(),
-                args.result_ld,
-                activation_epilogue
-            );
-          } else {
-            okay = at::cuda::blas::gemm_and_bias<scalar_t>(
-                args.transa == 't',
-                args.transb == 't',
-                args.m,
-                args.n,
-                args.k,
-                alpha.to<at::opmath_type<scalar_t>>(),
-                args.mata->const_data_ptr<scalar_t>(),
-                args.lda,
-                args.matb->const_data_ptr<scalar_t>(),
-                args.ldb,
-                self.const_data_ptr<scalar_t>(),
-                args.result->data_ptr<scalar_t>(),
-                args.result_ld,
-                activation_epilogue
-            );
-          }
-        }});
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+              args.transa == 't',
+              args.transb == 't',
+              args.m,
+              args.n,
+              args.k,
+              alpha.to<at::opmath_type<scalar_t>>(),
+              args.mata->const_data_ptr<scalar_t>(),
+              args.lda,
+              args.matb->const_data_ptr<scalar_t>(),
+              args.ldb,
+              self.const_data_ptr<scalar_t>(),
+              args.result->data_ptr<scalar_t>(),
+              args.result_ld,
+              activation_epilogue
+          );
+      }});
+    }
     if (!okay) {
       // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
@@ -572,7 +591,35 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #endif
   } else
   {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+    if (is_float_output_with_half_input) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        scalar_type,
+        "addmm_cuda",
+        [&] {
+          using opmath_t = at::opmath_type<scalar_t>;
+          opmath_t alpha_val = alpha.to<opmath_t>();
+          opmath_t beta_val = beta.to<opmath_t>();
+          const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
+
+          float* result_ptr = args.result->mutable_data_ptr<float>();
+          at::cuda::blas::gemm<scalar_t, float>(
+              args.transa,
+              args.transb,
+              args.m,
+              args.n,
+              args.k,
+              alpha_val,
+              mat1_ptr,
+              args.lda,
+              mat2_ptr,
+              args.ldb,
+              beta_val,
+              result_ptr,
+              args.result_ld);
+        });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -583,40 +630,23 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           opmath_t beta_val = beta.to<opmath_t>();
           const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
           const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
-          if (is_float_output_with_half_input) {
-            float* result_ptr = args.result->mutable_data_ptr<float>();
-            at::cuda::blas::gemm<scalar_t, float>(
-                args.transa,
-                args.transb,
-                args.m,
-                args.n,
-                args.k,
-                alpha_val,
-                mat1_ptr,
-                args.lda,
-                mat2_ptr,
-                args.ldb,
-                beta_val,
-                result_ptr,
-                args.result_ld);
-          } else {
-            scalar_t* result_ptr = args.result->mutable_data_ptr<scalar_t>();
-            at::cuda::blas::gemm<scalar_t>(
-                args.transa,
-                args.transb,
-                args.m,
-                args.n,
-                args.k,
-                alpha_val,
-                mat1_ptr,
-                args.lda,
-                mat2_ptr,
-                args.ldb,
-                beta_val,
-                result_ptr,
-                args.result_ld);
-          }
+          scalar_t* result_ptr = args.result->mutable_data_ptr<scalar_t>();
+          at::cuda::blas::gemm<scalar_t>(
+              args.transa,
+              args.transb,
+              args.m,
+              args.n,
+              args.k,
+              alpha_val,
+              mat1_ptr,
+              args.lda,
+              mat2_ptr,
+              args.ldb,
+              beta_val,
+              result_ptr,
+              args.result_ld);
         });
+    }
     switch (activation) {
       case Activation::RELU:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -689,15 +719,18 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   int64_t num_batches = result_->sizes()[0];
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, batch1.scalar_type(), "baddbmm_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    opmath_t alpha_val = alpha.to<opmath_t>();
-    opmath_t beta_val = beta.to<opmath_t>();
-    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
-    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
-    const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
-    const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
-    if ((std::is_same<at::Half, scalar_t>::value || std::is_same<at::BFloat16, scalar_t>::value) && result_->scalar_type() == at::ScalarType::Float) {
+  bool is_float_output_with_half_input = (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
+
+  if (is_float_output_with_half_input) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(batch1.scalar_type(), "baddbmm_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t alpha_val = alpha.to<opmath_t>();
+      opmath_t beta_val = beta.to<opmath_t>();
+      const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+      const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+      const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+      const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
+
       float* result_ptr = result_->mutable_data_ptr<float>();
 
       // If batch is 1 call gemm rather than bgemm
@@ -721,9 +754,17 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
             result_ptr, ldc, result_->strides()[0],
             num_batches
           );
-      }
-    }
-    else {
+        }
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, batch1.scalar_type(), "baddbmm_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t alpha_val = alpha.to<opmath_t>();
+      opmath_t beta_val = beta.to<opmath_t>();
+      const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+      const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+      const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+      const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
       scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
       // If batch is 1 call gemm rather than bgemm
       if (num_batches == 1) {
@@ -746,9 +787,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
           result_ptr, ldc, result_->strides()[0],
           num_batches
         );
-    }
-    }
-  });
+      }
+    });
+  }
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
@@ -1751,7 +1792,7 @@ Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tens
     (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
     "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
-  
+
   addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
 
   return out;

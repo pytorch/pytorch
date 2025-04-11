@@ -75,12 +75,6 @@ template<>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
-template<>
-void gemm<c10::complex<float>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float));
-template<>
-void gemm<c10::complex<double>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float));
-template<>
-void gemm<double, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(double, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void gemm_internal(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
@@ -202,12 +196,6 @@ template<>
 void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
-template<>
-void bgemm<c10::complex<float>, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float));
-template<>
-void bgemm<c10::complex<double>, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float));
-template<>
-void bgemm<double, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(double, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {

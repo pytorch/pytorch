@@ -1926,22 +1926,6 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
-template bool gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<double> alpha_val,
-    const double* mat1_ptr,
-    int64_t mat1_ld,
-    const double* mat2_ptr,
-    int64_t mat2_ld,
-    const double* bias,
-    float* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
-
 void scaled_gemm(
     char transa,
     char transb,
