@@ -861,6 +861,14 @@ def _check_dynamic_shapes(
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
+            if len(shape) != len(tensor.shape):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic shape spec {shape} specified at `dynamic_shapes{keystr(path)}` "
+                    f"to have the same length as the actual tensor shape {tensor.shape} "
+                    f"(expected {len(tensor.shape)}, but got {len(shape)} instead)",
+                    case_name="dynamic_shapes_validation",
+                )
             for i, dim in enumerate(shape):
                 if isinstance(dim, Dim):
                     check_same_bounds(dim)
