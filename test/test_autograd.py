@@ -13023,7 +13023,7 @@ class TestAutogradStreamSynchronization(TestCase):
             with torch.cuda.device(0):
                 s0 = torch.cuda.Stream()
                 s1 = torch.cuda.Stream()
-            default_stream_0, = self.get_default_streams()
+            (default_stream_0,) = self.get_default_streams()
 
             # Ensure consumer node happens on non-default stream so that
             # when FuncBackward produces a gradient on a default stream
@@ -13275,7 +13275,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
             with torch.cuda.device(0):
                 s0 = torch.cuda.Stream()
-            default_stream_0, = self.get_default_streams()
+            (default_stream_0,) = self.get_default_streams()
 
             a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
             b = a.clone()  # not a leaf, does it matter?
