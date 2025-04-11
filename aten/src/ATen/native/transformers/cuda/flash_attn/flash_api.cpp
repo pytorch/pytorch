@@ -49,7 +49,7 @@ namespace FLASH_NAMESPACE {
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
-// danvm debug
+// count = how many times flash attention fwd + bwd has been called
 int count = 0;
 
 void set_params_fprop(Flash_fwd_params &params,
