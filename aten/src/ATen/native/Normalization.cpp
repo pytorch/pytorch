@@ -521,23 +521,30 @@ BatchNormBackend _select_batch_norm_backend(
     return BatchNormBackend::Cudnn;
   }
 
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
+  // See #64427
+  // non static variable is used to be able to change environment variable in runtime for testing
+  bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(false);
+
   if (
       input.is_cuda()
-      && input.dim() <= MIOPEN_DIM_MAX
-      && input.scalar_type() != at::kDouble
+      && (input.dim() <= MIOPEN_DIM_MAX)
+      && (input.scalar_type() != at::kDouble)
 #if (defined(USE_ROCM) && ROCM_VERSION < 60400)
-      && input.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kBFloat16)
 #endif
-      && (weight.scalar_type() != at::kHalf)
-      && (weight.scalar_type() != at::kBFloat16)
+      && (weight.scalar_type() == at::kFloat) // allow only fp32 and mixed fp16/bf16
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
       && (input.dim() >= 3)
       && detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+      && (input.suggest_memory_format() == MemoryFormat::Contiguous
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60500)
+        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
+#endif
+        )
   ) {
     return BatchNormBackend::Miopen;
   }
@@ -649,7 +656,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 	    std::cout << "PYTORCH_MIOPEN_EXTRA_LOGGING: ********************* _batch_norm_impl_index (calling miopen_batch_norm)" << std::endl;
     return std::tuple_cat(
              at::miopen_batch_norm(
-               input.contiguous(), weight.contiguous(), bias.contiguous(),
+               input.contiguous(input.suggest_memory_format()), weight.contiguous(), bias.contiguous(),
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
