@@ -12929,24 +12929,57 @@ class TestAutogradInferenceMode(TestCase):
 NUM_GPU_CYCLES_IN_ONE_SEC = 2_000_000_000
 
 
+@contextlib.contextmanager
+def _set_device_index(target_device):
+    orig_device = torch.accelerator.current_device_index()
+    try:
+        torch.accelerator.set_device_index(target_device)
+        yield
+    finally:
+        torch.accelerator.set_device_index(orig_device)
+
+
+def _sleep_if_cuda(cycles):
+    if "cuda" == torch.accelerator.current_accelerator().type:
+        return torch.cuda._sleep(cycles)
+    else:
+        # Update this if non-cuda accelerators support something like sleep
+        return
+
+
+def _get_device_name(idx):
+    return f"{torch.accelerator.current_accelerator().type}:{idx}"
+
+
+# Although this is written to be generic over all accelerators, non-cuda accelerators
+# are not fully tested since sleep is only supported on cuda.
 class TestAutogradStreamSynchronization(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
         for i in range(num_devices):
-            out.append(torch.cuda.default_stream(i))
+            with _set_device_index(i):
+                acc = torch.accelerator.current_accelerator()
+                out.append(torch.get_device_module(acc).default_stream())
         return tuple(out)
 
     def synchronize_all_devices(self, num_devices=1):
         for i in range(num_devices):
-            torch.cuda.synchronize(i)
+            torch.accelerator.synchronize(i)
 
     def assert_all_streams_default(self, num_devices=1):
         # Sanity check
         default_streams = self.get_default_streams(num_devices)
         for i in range(num_devices):
-            self.assertEqual(torch.cuda.current_stream(i), default_streams[i])
+            with _set_device_index(i):
+                acc = torch.accelerator.current_accelerator()
+                # Do this instead of using torch.accelerator.current_stream(i)
+                # Otherwise, e.g. in the case of cuda, we'd be trying to compare
+                # torch.cuda.Stream with torch.Stream
+                self.assertEqual(
+                    torch.get_device_module(acc).current_stream(), default_streams[i]
+                )
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_consumer_to_single_producer_case_2_correctness(self):
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
@@ -12960,7 +12993,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 out.add_(1)
                 return out
 
@@ -12968,16 +13001,12 @@ class TestAutogradStreamSynchronization(TestCase):
             self.synchronize_all_devices()
             self.assert_all_streams_default()
 
-            with torch.cuda.device(0):
-                s0 = torch.cuda.Stream()
-                s1 = torch.cuda.Stream()
-
-            with torch.cuda.stream(s0):
-                a = torch.ones(256, 256, requires_grad=True, device="cuda")
+            with torch.Stream(0) as s0:
+                a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
                 b = a * 2
 
-            s1.wait_stream(s0)
-            with torch.cuda.stream(s1):
+            with torch.Stream(0) as s1:
+                s1.wait_stream(s0)
                 out = Producer.apply(b)
 
                 with torch.autograd.grad_mode.set_multithreading_enabled(False):
@@ -12986,8 +13015,9 @@ class TestAutogradStreamSynchronization(TestCase):
             self.synchronize_all_devices()
 
             # Expected result: a.grad = (grad_out + 1) * 2 = 4
-            self.assertEqual(a.grad, torch.ones_like(a) * 4)
+            self.assertEqual(a.grad, torch.full_like(a, 4))
 
+        # Run an extra time to warm up
         for _ in range(2):
             test()
 
@@ -13003,59 +13033,60 @@ class TestAutogradStreamSynchronization(TestCase):
             def forward(ctx, x):
                 # The node's canonical stream is the current stream
                 # of the device of the first output.
-                ctx.node_stream = torch.cuda.current_stream(1)
-                return x.to("cuda:1")
+                ctx.node_stream = torch.accelerator.current_stream(1)
+                return x.to(_get_device_name(1))
 
             @staticmethod
             def backward(ctx, gO):
-                out = gO.to("cuda:0")
-                with torch.cuda.device(0):
-                    torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                out = gO.to(_get_device_name(0))
+                with _set_device_index(0):
+                    _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 # It's the node's responsibility to sync back to its canonical stream.
                 out.add_(1)
-                ctx.node_stream.wait_stream(torch.cuda.current_stream(0))
+                ctx.node_stream.wait_stream(torch.accelerator.current_stream(0))
                 return out
 
         def test():
             self.synchronize_all_devices(2)
             self.assert_all_streams_default(2)
 
-            with torch.cuda.device(0):
-                s0 = torch.cuda.Stream()
-                s1 = torch.cuda.Stream()
             (default_stream_0,) = self.get_default_streams()
 
             # Ensure consumer node happens on non-default stream so that
             # when FuncBackward produces a gradient on a default stream
             # a sync is necessary.
-            with torch.cuda.stream(s0):
+            with torch.Stream(0) as s0:
                 a = torch.ones(256, 256, requires_grad=True, device="cuda")
                 b = a * 2
 
             default_stream_0.wait_stream(s0)
             out = Producer.apply(b)
 
-            with torch.autograd.grad_mode.set_multithreading_enabled(False):
-                s1.wait_stream(default_stream_0)
-                ctx = (
-                    torch.cuda.stream(s1)
-                    if non_default_ambient_stream
-                    else contextlib.nullcontext()
-                )
-                with ctx:
-                    out.sum().backward()
+            def call_backward(x):
+                with torch.autograd.grad_mode.set_multithreading_enabled(False):
+                    x.sum().backward()
+
+            if non_default_ambient_stream:
+                with torch.Stream(0) as s1:
+                    s1.wait_stream(default_stream_0)
+                    call_backward(out)
+            else:
+                call_backward(out)
 
             self.synchronize_all_devices(2)
 
             # Expected result: a.grad = (grad_out + 1) * 2 = 4
-            self.assertEqual(a.grad, torch.ones_like(a) * 4)
+            self.assertEqual(a.grad, torch.full_like(a, 4))
 
+        # Run an extra time to warm up
         for _ in range(2):
             test()
 
     # This fails because we currently sync to the default stream
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.skipIf(torch.cuda.device_count() < 2, "GPU count is less than 2")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "accelerator count is less than 2"
+    )
     @unittest.expectedFailure
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self,
@@ -13064,15 +13095,19 @@ class TestAutogradStreamSynchronization(TestCase):
             non_default_ambient_stream=True
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.skipIf(torch.cuda.device_count() < 2, "GPU count is less than 2")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "accelerator count is less than 2"
+    )
     def test_consumer_to_single_producer_case_3_correctness(self):
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=False
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.skipIf(torch.cuda.device_count() < 2, "GPU count is less than 2")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "accelerator count is less than 2"
+    )
     def test_consumer_to_single_producer_case_4_correctness(self):
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
@@ -13086,7 +13121,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.add_(1)
 
         class Consumer(torch.autograd.Function):
@@ -13094,7 +13129,7 @@ class TestAutogradStreamSynchronization(TestCase):
             # that of its first output. This is required to induce cases 4/5.
             @staticmethod
             def forward(ctx, x):
-                return x.clone(), x.to("cuda:1")
+                return x.clone(), x.to(_get_device_name(1))
 
             @staticmethod
             def backward(ctx, gO_0, gO_1):
@@ -13103,38 +13138,38 @@ class TestAutogradStreamSynchronization(TestCase):
                 # already.)
                 # Things would work out if the engine sync'd s1 with consumer.
                 # Ignore grad wrt first arg because we don't use it.
-                return gO_1.to("cuda:0")
+                return gO_1.to(_get_device_name(0))
 
         def test():
             self.synchronize_all_devices(2)
             self.assert_all_streams_default(2)
 
-            with torch.cuda.device(1):
-                s1 = torch.cuda.Stream()
             _, default_stream_1 = self.get_default_streams(2)
-
-            a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
+            a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
             _unused, b = Consumer.apply(a)
-            s1.wait_stream(default_stream_1)
 
-            with torch.cuda.stream(s1):
+            with torch.Stream(1) as s1:
+                s1.wait_stream(default_stream_1)
                 out = Producer.apply(b)
 
-            with torch.autograd.grad_mode.set_multithreading_enabled(False):
-                out.sum().backward()
+                with torch.autograd.grad_mode.set_multithreading_enabled(False):
+                    out.sum().backward()
 
             self.synchronize_all_devices(2)
 
             # Expected result: a.grad = grad_out + 1 = 2
-            self.assertEqual(a.grad, torch.ones_like(a) * 2)
+            self.assertEqual(a.grad, torch.full_like(a, 2))
 
+        # Run an extra time to warm up
         for _ in range(2):
             test()
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.skipIf(torch.cuda.device_count() < 2, "GPU count is less than 2")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "accelerator count is less than 2"
+    )
     def test_consumer_to_multi_producer_case_4_correctness(self):
-        #            Device    Stream
+        #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
         # Producer 1: cuda:1    s1
@@ -13162,40 +13197,37 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.mul_(2)
 
         class Consumer(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                ctx.node_stream = torch.cuda.current_stream(x.device)
-                return x.clone(), x.to("cuda:1")
+                ctx.node_stream = torch.accelerator.current_stream(x.device)
+                return x.clone(), x.to(_get_device_name(1))
 
             @staticmethod
             def backward(ctx, gO_0, gO_1):
-                torch.cuda.current_stream(gO_1.device).wait_stream(ctx.node_stream)
-                return (gO_1 * 2).to("cuda:0")
+                torch.accelerator.current_stream(gO_1.device).wait_stream(
+                    ctx.node_stream
+                )
+                return (gO_1 * 2).to(_get_device_name(0))
 
         def test():
             self.synchronize_all_devices(2)
             self.assert_all_streams_default(2)
 
-            with torch.cuda.device(1):
-                s1 = torch.cuda.Stream()
-                s2 = torch.cuda.Stream()
             default_stream_0, default_stream_1 = self.get_default_streams(2)
 
-            a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
+            a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
             _unused, b = Consumer.apply(a)
 
-            s1.wait_stream(default_stream_1)
-
-            with torch.cuda.stream(s1):
+            with torch.Stream(1) as s1:
+                s1.wait_stream(default_stream_1)
                 out1 = ProducerFast.apply(b)
 
-            s2.wait_stream(default_stream_1)
-
-            with torch.cuda.stream(s2):
+            with torch.Stream(1) as s2:
+                s2.wait_stream(default_stream_1)
                 out2 = ProducerSlow.apply(b)
 
             default_stream_1.wait_stream(s1)
@@ -13212,11 +13244,14 @@ class TestAutogradStreamSynchronization(TestCase):
             #
             # Correct: (1.mul_(2) + 2) * 2 = 8
             # Incorrect: (1 + 2).mul_(2) * 2 = 12
-            self.assertEqual(a.grad, torch.ones_like(a) * 8)
+            self.assertEqual(a.grad, torch.full_like(a, 8))
 
+        # Run an extra time to warm up
         for _ in range(2):
             test()
 
+    # This test may spuriously fail on non-cuda accelerators (since we won't
+    # be calling sleep)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @unittest.expectedFailure
     def test_side_stream_backward_overlap(self):
@@ -13245,7 +13280,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 # Record when main backward starts
-                evt = torch.cuda.Event(enable_timing=True)
+                evt = torch.Event(enable_timing=True)
                 evt.record()
                 events["main_backward_start"] = evt
                 return gO
@@ -13257,14 +13292,14 @@ class TestAutogradStreamSynchronization(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                evt = torch.cuda.Event(enable_timing=True)
+                evt = torch.Event(enable_timing=True)
                 evt.record()
                 events["side_backward_start"] = evt
 
-                torch.cuda._sleep(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 result = gO.clone()
 
-                evt = torch.cuda.Event(enable_timing=True)
+                evt = torch.Event(enable_timing=True)
                 evt.record()
                 events["side_backward_end"] = evt
                 return result
@@ -13273,19 +13308,19 @@ class TestAutogradStreamSynchronization(TestCase):
             self.synchronize_all_devices()
             self.assert_all_streams_default()
 
-            with torch.cuda.device(0):
-                s0 = torch.cuda.Stream()
             (default_stream_0,) = self.get_default_streams()
 
-            a = torch.ones(256, 256, requires_grad=True, device="cuda:0")
+            a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
             b = a.clone()  # not a leaf, does it matter?
 
-            s0.wait_stream(default_stream_0)
+            evt = torch.Event()
+            evt.record()
 
             # Overlap during forward
             c_main = Main.apply(b)
 
-            with torch.cuda.stream(s0):
+            with torch.Stream(0) as s0:
+                s0.wait_event(evt)
                 c_side = Side.apply(b)
 
             default_stream_0.wait_stream(s0)
