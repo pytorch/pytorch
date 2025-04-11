@@ -924,6 +924,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
+    def test_tensor_subclass_with_non_classmethod_torch_function(self):
+        class MySubclass(torch.Tensor):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        fn_opt = compile_full_eager(fn)
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+
     def test_tensor_subclass_custom_attr(self):
         class AttrSubclass(torch.Tensor):
             x: int = 10
@@ -1056,6 +1074,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res_exp = fn(x)
             res_act = fn_opt(x)
             self.assertEqual(res_exp, res_act)
+
+    def test_parameter_subclass_with_old_torch_function(self):
+        class MySubclass(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return x + 1
+
+        fn_opt = compile_full_eager(fn)
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
 
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
