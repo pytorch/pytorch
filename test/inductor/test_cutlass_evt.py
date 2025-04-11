@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import unittest
+
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -18,53 +20,55 @@ if try_import_cutlass():
     class MockTileDescription:
         threadblock_shape = (128, 128, 8)
 
-    class TestCutlassEVT(TestCase):
-        def test_evt_codegen(self):
-            bias_code = """def example_epilogue(accum, alpha, C, beta, aux, bias):
-        F = alpha * accum + (beta * C + aux)
-        E = relu(F + 1) + bias
-        D = E + F
-        return D, F"""
 
-            type_C = DataType.f32
-            m = 4224
-            n = 2048
-            bias = CutlassTensor(
-                shape=(m, 1), element=type_C, layout_tag=LayoutType.RowMajor
-            )
+class TestCutlassEVT(TestCase):
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_evt_codegen(self):
+        bias_code = """def example_epilogue(accum, alpha, C, beta, aux, bias):
+    F = alpha * accum + (beta * C + aux)
+    E = relu(F + 1) + bias
+    D = E + F
+    return D, F"""
 
-            examples_tensors = {
-                "accum": CutlassTensor(
-                    element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-                ),
-                "bias": bias,
-                "beta": 0.5,
-                "alpha": 0.5,
-                "D": CutlassTensor(
-                    element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-                ),
-                "C": CutlassTensor(
-                    element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-                ),
-                "F": CutlassTensor(
-                    element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-                ),
-                "aux": CutlassTensor(
-                    element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-                ),
-            }
+        type_C = DataType.f32
+        m = 4224
+        n = 2048
+        bias = CutlassTensor(
+            shape=(m, 1), element=type_C, layout_tag=LayoutType.RowMajor
+        )
 
-            _, code = trace(
-                bias_code,
-                examples_tensors,
-                DataType.f32,
-                DataType.f32,
-                MockTileDescription(),
-                EpilogueScheduleType.ScheduleAuto,
-            )
-            self.assertExpectedInline(
-                code,
-                """\
+        examples_tensors = {
+            "accum": CutlassTensor(
+                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
+            ),
+            "bias": bias,
+            "beta": 0.5,
+            "alpha": 0.5,
+            "D": CutlassTensor(
+                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
+            ),
+            "C": CutlassTensor(
+                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
+            ),
+            "F": CutlassTensor(
+                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
+            ),
+            "aux": CutlassTensor(
+                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
+            ),
+        }
+
+        _, code = trace(
+            bias_code,
+            examples_tensors,
+            DataType.f32,
+            DataType.f32,
+            MockTileDescription(),
+            EpilogueScheduleType.ScheduleAuto,
+        )
+        self.assertExpectedInline(
+            code,
+            """\
 
 using EpilogueDescriptor = cutlass::epilogue::collective::detail::EpilogueDescriptor<
   cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
@@ -202,7 +206,7 @@ using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,
-            )
+        )
 
 
 if __name__ == "__main__":
