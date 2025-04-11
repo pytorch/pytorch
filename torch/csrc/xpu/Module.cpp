@@ -11,31 +11,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
 
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
 using namespace torch;
-
-static bool in_bad_fork = false; // True for children forked after xpu init
-
-#ifndef WIN32
-// Called in the forked child if xpu has already been initialized
-static void forked_child() {
-  in_bad_fork = true;
-  torch::utils::set_requires_device_init(at::kXPU, true);
-}
-#endif
-
-// Should be called before the first xpu call. It is mainly called in lazy_init.
-// Note: This is distinct from initExtension because a stub xpu implementation
-// has some working functions (e.g. device_count) but cannot fully initialize.
-static void poison_fork() {
-#ifndef WIN32
-  static auto result [[maybe_unused]] =
-      pthread_atfork(nullptr, nullptr, forked_child);
-#endif
-}
 
 // XPU management methods
 
@@ -52,7 +28,7 @@ static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
 
 static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(in_bad_fork);
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kXPU));
   END_HANDLE_TH_ERRORS
 }
 
@@ -115,7 +91,9 @@ static PyObject* THXPModule_getDeviceCount_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
+  // Note: This is distinct from initExtension because a stub xpu implementation
+  // has some working functions (e.g. device_count) but cannot fully initialize.
+  torch::utils::register_fork_handler_for_device_init(at::kXPU);
   return THPUtils_packUInt64(at::xpu::device_count());
   END_HANDLE_TH_ERRORS
 }
@@ -420,8 +398,8 @@ static void initXpuMethodBindings(PyObject* module) {
 // classes
 static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
-  poison_fork();
+  TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kXPU));
+  torch::utils::register_fork_handler_for_device_init(at::kXPU);
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
