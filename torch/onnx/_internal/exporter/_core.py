@@ -222,10 +222,12 @@ def _set_shape_type(
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
         dims = []
-        shape = meta_val.shape
+        shape: tuple[int, ...]
         if meta_val.dtype == torch.float4_e2m1fn_x2:
             # Change the shape to the unpacked shape
             shape = _type_casting.get_float4_shape(meta_val)
+        else:
+            shape = meta_val.shape
         for dim in shape:
             if isinstance(dim, int):
                 dims.append(dim)
