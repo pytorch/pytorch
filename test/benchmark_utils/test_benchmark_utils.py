@@ -33,7 +33,7 @@ def generate_callgrind_artifacts() -> None:
     """Regenerate `callgrind_artifacts.json`
 
     Unlike the expect tests, regenerating callgrind counts will produce a
-    large diff since build directories and conda/pip directories are included
+    large diff since build directories and pip directories are included
     in the instruction string. It is also not 100% deterministic (due to jitter
     from Python) and takes over a minute to run. As a result, running this
     function is manual.

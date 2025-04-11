@@ -9,9 +9,8 @@ These are a collection of scripts that are to be used for release activities.
 
 ## Requirements to actually run these scripts
 * AWS access to pytorch account
-* Access to upload conda packages to the `pytorch` conda channel
 * Access to the PyPI repositories
-
+* Access to upload conda packages to the `pytorch` conda channel
 
 ## Promote
 
