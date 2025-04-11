@@ -631,6 +631,17 @@ TEST_F(FunctionalTest, GridSample) {
 
   ASSERT_TRUE(output.allclose(expected));
 
+  // bicubic, zeros, true
+  options = F::GridSampleFuncOptions()
+                .mode(torch::kBicubic)
+                .padding_mode(torch::kZeros)
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor(
+      {{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
   // bilinear, border, true
   options = F::GridSampleFuncOptions()
                 .mode(torch::kBilinear)
