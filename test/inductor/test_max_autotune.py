@@ -1379,6 +1379,47 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @parametrize("prologue", (False, True))
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM Different layout decisions")
+    def test_conv1x1_cast(self, prologue):
+        with torch._inductor.config.patch(
+            prologue_fusion=prologue, force_layout_optimization=True
+        ):
+            conv1x1 = (
+                torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+                .to(memory_format=torch.channels_last)
+                .to(GPU_TYPE)
+                .to(dtype=torch.float16)
+            )
+            input_tensor = (
+                torch.randn(4, 3, 32, 32)
+                .contiguous(memory_format=torch.channels_last)
+                .to(GPU_TYPE)
+            )
+
+            def foo(mod, input):
+                return torch.nn.functional.conv2d(
+                    input,
+                    mod.weight.to(input.dtype),
+                    None,
+                    mod.stride,
+                    mod.padding,
+                    mod.dilation,
+                    mod.groups,
+                )
+
+            with torch.no_grad():
+                out_eager = foo(conv1x1, input_tensor)
+                foo_c = torch.compile(foo)
+                out, code = run_and_get_code(foo_c, conv1x1, input_tensor)
+
+                FileCheck().check_not("extern_kernels.convolution").run(code[0])
+                if prologue:
+                    self.check_code(
+                        code[0], num_kernels=1, num_allocs=1, num_deallocs=2
+                    )
+                self.assertEqual(out_eager, out, atol=1e-2, rtol=0)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -1621,6 +1662,17 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
+    def test_unused_symbol_y(self):
+        def foo(x, y):
+            return x @ y.expand([y.shape[0], 256])
+
+        M = 256
+        K = 256
+        N = 1
+        x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
+        self.assertEqual(torch.compile(foo)(x, y), foo(x, y), atol=0.03, rtol=0.01)
+
     def test_preserves_zero_analysis(self):
         fns = (
             (lambda x: x.relu(), False),  # preserves zero
@@ -1693,21 +1745,32 @@ class TestPrologueFusion(TestCase):
     @skipIfXpu
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
-    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
-    def test_prologue_masked_load(self, sizes):
-        M, K, N = sizes
-
+    def test_prologue_masked_load(self):
         def foo(x, y):
-            return x @ y
+            return x @ y.T
 
         x = torch.rand([250, 245], device=GPU_TYPE)
-        y = torch.rand([245, 128], device=GPU_TYPE)
+        y = torch.rand([245, 128], device=GPU_TYPE).T.contiguous()
 
         # we should not attempt prologue fusion if it turns an aligned load
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_masked_numeric(self):
+        # correctly detect upcast inside the cat mask, dont fuse
+        def foo(a, b, y):
+            return torch.cat([a, (b * 4)]) @ y.T
+
+        a = torch.rand([220, 245], device=GPU_TYPE, dtype=torch.float16)
+        b = torch.rand([20, 245], device=GPU_TYPE, dtype=torch.float16)
+        y = torch.rand([245, 128], device=GPU_TYPE, dtype=torch.float16).T.contiguous()
+
+        out, code = run_and_get_code(torch.compile(foo), a, b, y)
+
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+        self.assertEqual(out, foo(a, b, y), atol=0.05, rtol=0.05)
 
 
 if __name__ == "__main__":
