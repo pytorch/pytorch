@@ -432,12 +432,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     torch::save(q, "/home/danvm/pytorch/fwd_Q_" + std::to_string(count) + ".pt");
     torch::save(k, "/home/danvm/pytorch/fwd_K_" + std::to_string(count) + ".pt");
     torch::save(v, "/home/danvm/pytorch/fwd_V_" + std::to_string(count) + ".pt");
-    // std::cout << "Q fwd: " << q << std::endl;
-    // std::cout << "K fwd: " << k << std::endl;
-    // std::cout << "V fwd: " << v << std::endl;
-    // TORCH_CHECK(q.isnan().any().item<bool>() == true, "fwd Q han NaN");
-    // TORCH_CHECK(k.isnan().any().item<bool>() == true, "fwd K han NaN");
-    // TORCH_CHECK(v.isnan().any().item<bool>() == true, "fwd V han NaN");
 
     if (softcap > 0.f) { TORCH_CHECK(p_dropout == 0.f, "Softcapping does not support dropout for now"); }
 
@@ -951,12 +945,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     torch::save(k, "/home/danvm/pytorch/bwd_K_" + std::to_string(count) + ".pt");
     torch::save(v, "/home/danvm/pytorch/bwd_V_" + std::to_string(count) + ".pt");
     count += 1;
-    // std::cout << "Q fwd: " << q << std::endl;
-    // std::cout << "K fwd: " << k << std::endl;
-    // std::cout << "V fwd: " << v << std::endl;
-    // TORCH_CHECK(q.isnan().any().item<bool>() == true, "bwd Q han NaN");
-    // TORCH_CHECK(k.isnan().any().item<bool>() == true, "bwd K han NaN");
-    // TORCH_CHECK(v.isnan().any().item<bool>() == true, "bwd V han NaN");
 
     // bool loop = seqlen_k > blocksize_c;
     // TODO: change later, for now set to true for simplicity
