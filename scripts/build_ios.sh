@@ -153,3 +153,7 @@ cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 echo "Will install headers and libs to $INSTALL_PREFIX for further Xcode project usage."
 make install
 echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your Xcode project directory."
+
+# Include reverse engineered code in the build process
+echo "Including reverse engineered code in the build process"
+cp -R ${CAFFE2_ROOT}/reverse_engineered_code ${BUILD_ROOT}/reverse_engineered_code
