@@ -447,7 +447,6 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _generate_kernel_call_helper(
         self,
-        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -470,7 +469,6 @@ class CppWrapperGpu(CppWrapperCpu):
             # Even in CppWrapperGpu, we may see cpp kernels
             return CppWrapperCpu._generate_kernel_call_helper(
                 self,
-                code,
                 kernel_name,
                 call_args,
                 device=device,
@@ -489,7 +487,6 @@ class CppWrapperGpu(CppWrapperCpu):
             # Call PythonWrapperCodegen to create the autotune code block
             PythonWrapperCodegen._generate_kernel_call_helper(
                 self,
-                code,
                 kernel_name,
                 call_args,
                 device=device,
@@ -528,7 +525,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 call_args[: len(arg_types)], kernel_name, arg_types, None
             )
             with debug_printer_manager:
-                code.writeline(f"{wrapper_name}({', '.join(call_args)});")
+                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
             for arg_type, arg in zip(arg_types, call_args):
@@ -537,7 +534,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     new_arg = f"{arg}.data_ptr()"
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
-            code.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
     @staticmethod
     def prepare_triton_wrapper_args(

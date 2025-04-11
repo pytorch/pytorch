@@ -431,7 +431,7 @@ class ExternKernelAllocLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
         args = [*node.codegen_args(), *node.codegen_kwargs()]
-        self.wrapper._generate_extern_kernel_alloc_helper(code, self.node, args)
+        self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
 
 @dataclasses.dataclass
@@ -453,7 +453,6 @@ class ExternKernelOutLine(WrapperLine):
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
         self.wrapper._generate_extern_kernel_out_helper(
-            code,
             kernel_name,
             node.codegen_reference(),
             node.output_view.codegen_reference() if node.output_view else None,
@@ -488,7 +487,6 @@ class KernelCallLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._generate_kernel_call_helper(
-            code,
             self.kernel_name,
             self.call_args,
             triton=self.triton,
@@ -1215,9 +1213,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
 
-    def _generate_extern_kernel_alloc_helper(
-        self, code: IndentedBuffer, extern_kernel, args
-    ):
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
         # treated as if it doesn't return anything
         no_return = isinstance(extern_kernel.layout, ir.NoneLayout)
@@ -1231,9 +1227,9 @@ class PythonWrapperCodegen(CodeGen):
             ending = f".clone(){ending}"
 
         if no_return:
-            code.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
         else:
-            code.writeline(
+            self.writeline(
                 f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
             )
             if (
@@ -1242,7 +1238,7 @@ class PythonWrapperCodegen(CodeGen):
                 and origin_node is not None
             ):
                 counters["inductor"]["intermediate_hooks"] += 1
-                code.writeline(
+                self.writeline(
                     f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
                 )
 
@@ -1255,7 +1251,6 @@ class PythonWrapperCodegen(CodeGen):
 
     def _generate_extern_kernel_out_helper(
         self,
-        code: IndentedBuffer,
         kernel: str,
         out: str,
         out_view: Optional[str],
@@ -1267,7 +1262,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
         with debug_printer_manager:
-            code.writeline(f"{kernel}({', '.join(args)})")
+            self.writeline(f"{kernel}({', '.join(args)})")
 
     def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
         dims = desc.dims
@@ -2374,7 +2369,6 @@ class PythonWrapperCodegen(CodeGen):
 
     def _generate_kernel_call_helper(
         self,
-        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -2389,7 +2383,7 @@ class PythonWrapperCodegen(CodeGen):
     ):
         device = device or V.graph.get_current_device_or_throw()
         if not (triton or device.type != "cpu"):
-            code.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
@@ -2399,7 +2393,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
-            code.writeline(
+            self.writeline(
                 f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
             )
             return
@@ -2492,7 +2486,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
-            code.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+            self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
         self.write_triton_header_once()
 
     def writeline(self, line):

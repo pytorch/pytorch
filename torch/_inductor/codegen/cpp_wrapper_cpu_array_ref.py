@@ -10,7 +10,6 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
-from .common import IndentedBuffer
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
@@ -105,7 +104,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     def _generate_kernel_call_helper(
         self,
-        code: IndentedBuffer,
         kernel_name: str,
         call_args,
         *,
@@ -135,7 +133,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
                 var_name = f"var_{next(self.arg_var_id)}"
-                code.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
                 new_args.append(f"({arg_types[idx]})({var_name})")
             else:
                 # arg is a scalar
@@ -150,7 +148,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             "cpp",
         )
         with debug_printer_manager:
-            code.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -660,7 +658,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(
-        self, code: IndentedBuffer, kernel: str, args: list[str], device: str, **_
+        self, kernel: str, args: list[str], device: str, **_
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -682,7 +680,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            code, kernel, wrapped_args, device, debug_args=args
+            kernel, wrapped_args, device, debug_args=args
         )
 
     def generate_scatter_fallback(
