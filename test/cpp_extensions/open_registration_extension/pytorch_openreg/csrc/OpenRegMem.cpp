@@ -1,13 +1,13 @@
-#include <OpenReg.h>
+#include "OpenReg.h"
 
-#include <torch/library.h>
-#include <c10/core/Allocator.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/EmptyTensor.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/set_cpu_dispatch.h>
+#include <c10/core/Allocator.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/ArrayRef.h>
+#include <torch/library.h>
 
 namespace openreg {
 
@@ -22,11 +22,14 @@ struct OpenRegAllocator final : at::Allocator {
   at::DataPtr allocate(size_t nbytes) override {
     py::gil_scoped_acquire acquire;
     auto curr_device_idx = get_method("getDevice")().cast<c10::DeviceIndex>();
-    auto curr_device = c10::Device(c10::DeviceType::PrivateUse1, curr_device_idx);
+    auto curr_device =
+        c10::Device(c10::DeviceType::PrivateUse1, curr_device_idx);
     void* data = nullptr;
     if (nbytes > 0) {
-        data = reinterpret_cast<void*>(get_method("malloc")(nbytes).cast<openreg_ptr_t>());
-        TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on openreg device.");
+      data = reinterpret_cast<void*>(
+          get_method("malloc")(nbytes).cast<openreg_ptr_t>());
+      TORCH_CHECK(
+          data, "Failed to allocator ", nbytes, " bytes on openreg device.");
     }
     return {data, data, &ReportAndDelete, curr_device};
   }
@@ -62,14 +65,16 @@ struct OpenRegAllocator final : at::Allocator {
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     py::gil_scoped_acquire acquire;
-    get_method("copy_data")(reinterpret_cast<openreg_ptr_t>(dest), reinterpret_cast<openreg_ptr_t>(src), count);
+    get_method("copy_data")(
+        reinterpret_cast<openreg_ptr_t>(dest),
+        reinterpret_cast<openreg_ptr_t>(src),
+        count);
   }
 };
 
 // Register our dummy allocator
 static OpenRegAllocator global_openreg_alloc;
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_openreg_alloc);
-
 
 // Empty op needs C++ code and cannot be handled by python side fallback
 at::Tensor empty_openreg(
@@ -82,8 +87,12 @@ at::Tensor empty_openreg(
   const auto device = c10::device_or_default(device_opt);
   const auto dtype = c10::dtype_or_default(dtype_opt);
   TORCH_CHECK(device.is_privateuseone());
-  TORCH_CHECK(c10::layout_or_default(layout_opt) == c10::Layout::Strided, "Non strided layout not supported");
-  TORCH_CHECK(!c10::pinned_memory_or_default(pin_memory_opt), "Pin memory can only be on CPU");
+  TORCH_CHECK(
+      c10::layout_or_default(layout_opt) == c10::Layout::Strided,
+      "Non strided layout not supported");
+  TORCH_CHECK(
+      !c10::pinned_memory_or_default(pin_memory_opt),
+      "Pin memory can only be on CPU");
   const c10::DeviceGuard device_guard(device);
   constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_generic(
@@ -100,8 +109,12 @@ at::Tensor empty_strided_openreg(
   const auto device = c10::device_or_default(device_opt);
   const auto dtype = c10::dtype_or_default(dtype_opt);
   TORCH_CHECK(device.is_privateuseone());
-  TORCH_CHECK(c10::layout_or_default(layout_opt) == c10::Layout::Strided, "Non strided layout not supported");
-  TORCH_CHECK(!c10::pinned_memory_or_default(pin_memory_opt), "Pin memory can only be on CPU");
+  TORCH_CHECK(
+      c10::layout_or_default(layout_opt) == c10::Layout::Strided,
+      "Non strided layout not supported");
+  TORCH_CHECK(
+      !c10::pinned_memory_or_default(pin_memory_opt),
+      "Pin memory can only be on CPU");
   const c10::DeviceGuard device_guard(device);
   constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_strided_generic(
@@ -113,8 +126,8 @@ at::Tensor as_strided_openreg(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
     std::optional<int64_t> storage_offset_) {
-    // Metadata-only change so we re-use the cpu impl
-    return at::cpu::as_strided(self, size, stride, storage_offset_);
+  // Metadata-only change so we re-use the cpu impl
+  return at::cpu::as_strided(self, size, stride, storage_offset_);
 }
 
 at::Tensor& set_openreg(
@@ -123,17 +136,16 @@ at::Tensor& set_openreg(
     int64_t storage_offset,
     c10::IntArrayRef size,
     c10::IntArrayRef stride) {
-    return at::cpu::set_(result, storage, storage_offset, size, stride);
+  return at::cpu::set_(result, storage, storage_offset, size, stride);
 }
-
 
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
-    m.impl("empty.memory_format", empty_openreg);
-    m.impl("empty_strided", empty_strided_openreg);
-    m.impl("as_strided", as_strided_openreg);
-    m.impl("set_.source_Storage_storage_offset", set_openreg);
+  m.impl("empty.memory_format", empty_openreg);
+  m.impl("empty_strided", empty_strided_openreg);
+  m.impl("as_strided", as_strided_openreg);
+  m.impl("set_.source_Storage_storage_offset", set_openreg);
 }
 
-} // anonymous namspaces
+} // namespace
 
-} // openreg
+} // namespace openreg
