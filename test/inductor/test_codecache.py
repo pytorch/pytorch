@@ -8,6 +8,8 @@ import unittest
 from typing import Optional, Union
 from unittest import mock
 
+import multiprocess
+
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
@@ -1328,6 +1330,26 @@ class TestFxGraphCache(TestCase):
         )
 
 
+#########################################################################
+# Function for test_different_process need to be top level
+
+
+def writer(gm, args, path):
+    with fresh_inductor_cache():
+        compiled_artifact = torch._inductor.standalone_compile(gm, args)
+        compiled_artifact.save(path=path)
+
+
+def reader(args, path, queue):
+    with fresh_inductor_cache():
+        loaded = torch._inductor.CompiledArtifact.load(path=path)
+        compiled_out = loaded(*args)
+        queue.put(compiled_out)
+
+
+#########################################################################
+
+
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
     def setUp(self):
@@ -1371,7 +1393,7 @@ class TestStandaloneCompile(TestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_standalone_compile(self, format: str, dynamic: bool) -> None:
+    def test_basic(self, format: str, dynamic: bool) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
         if dynamic:
@@ -1396,10 +1418,47 @@ class TestStandaloneCompile(TestCase):
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
                 compiled_artifact.save(path=path, format=format)
 
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
             with fresh_inductor_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
                 compiled_out = loaded(*args)
                 self.assertEqual(eager_out, compiled_out)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_different_process(self):
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        gm, args, kwargs = self.capture(f)(x)
+        assert not kwargs
+
+        ctx = multiprocess.get_context("spawn")
+        queue = ctx.Queue()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "compiled_artifact.bin")
+
+            writer_process = ctx.Process(target=writer, args=(gm, args, path))
+            writer_process.start()
+            writer_process.join()
+
+            reader_process = ctx.Process(target=reader, args=(args, path, queue))
+            reader_process.start()
+            reader_process.join()
+
+            compiled_out = queue.get()
+            self.assertEqual(eager_out, compiled_out)
 
 
 class TestFxGraphCacheHashing(TestCase):
