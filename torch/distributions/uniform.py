@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
@@ -30,11 +31,13 @@ class Uniform(Distribution):
     """
 
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "low": constraints.dependent(is_discrete=False, event_dim=0),
         "high": constraints.dependent(is_discrete=False, event_dim=0),
     }
-    has_rsample = True
+    has_rsample: bool = True
+    low: Tensor
+    high: Tensor
 
     @property
     def mean(self) -> Tensor:
@@ -69,7 +72,7 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Uniform, _instance)
         batch_shape = torch.Size(batch_shape)
         new.low = self.low.expand(batch_shape)
@@ -79,7 +82,7 @@ class Uniform(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self):
+    def support(self) -> Constraint:
         return constraints.interval(self.low, self.high)
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
@@ -87,22 +90,22 @@ class Uniform(Distribution):
         rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
         return self.low + rand * (self.high - self.low)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         lb = self.low.le(value).type_as(self.low)
         ub = self.high.gt(value).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         result = (value - self.low) / (self.high - self.low)
         return result.clamp(min=0, max=1)
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         result = value * (self.high - self.low) + self.low
         return result
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return torch.log(self.high - self.low)
