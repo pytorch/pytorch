@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -226,9 +226,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        # TODO putting this here to avoid duplication, because we could hit this
+        # from several paths (e.g., SuperVariable or `var_getattr`s).
+        if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+            unimplemented_v2(
+                gb_type="can't handle functions not implemented in python ",
+                context=f"{fn}",
+                explanation=f"Dynamo can only handle functions defined in python",
+                hints=[
+                    "Move usage of this function out of `torch.compile` region",
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
