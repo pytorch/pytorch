@@ -5916,6 +5916,8 @@ class ShapeEnv:
         if size_oblivious and expr.has(Max):
             max_replacements = {}
             for atom in expr.atoms(Max):
+                if len(atom.args) > 2:
+                    continue
                 a, b = atom.args
                 if b == 1 or b == 0:
                     a, b = b, a
