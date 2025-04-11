@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
@@ -308,7 +308,7 @@ class ChildFailedError(Exception):
 
 def record(
     fn: Callable[P, T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[P, T | None]:
+) -> Callable[P, Union[T, None]]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -348,7 +348,7 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[P, T]) -> Callable[P, T | None]:
+    def wrap(f: Callable[P, T]) -> Callable[P, Union[T, None]]:
         @wraps(f)
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker
