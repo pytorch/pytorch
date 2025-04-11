@@ -3,6 +3,7 @@
  ******************************************************************************/
 #include <c10/core/ScalarType.h>
 #include <c10/core/DeviceType.h>
+#include <torch/serialize.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
@@ -31,7 +32,6 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-
 #include <cutlass/numeric_types.h>
 
 
@@ -49,6 +49,8 @@ namespace FLASH_NAMESPACE {
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
+// count = how many times flash attention fwd + bwd has been called
+int count = 0;
 
 void set_params_fprop(Flash_fwd_params &params,
                       // sizes
@@ -425,6 +427,11 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+
+    // danvm
+    torch::save(q, "/home/danvm/pytorch/fwd_Q_" + std::to_string(count) + ".pt");
+    torch::save(k, "/home/danvm/pytorch/fwd_K_" + std::to_string(count) + ".pt");
+    torch::save(v, "/home/danvm/pytorch/fwd_V_" + std::to_string(count) + ".pt");
 
     if (softcap > 0.f) { TORCH_CHECK(p_dropout == 0.f, "Softcapping does not support dropout for now"); }
 
@@ -933,6 +940,11 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     } else {
         dv = at::empty_like(v);
     }
+
+    torch::save(q, "/home/danvm/pytorch/bwd_Q_" + std::to_string(count) + ".pt");
+    torch::save(k, "/home/danvm/pytorch/bwd_K_" + std::to_string(count) + ".pt");
+    torch::save(v, "/home/danvm/pytorch/bwd_V_" + std::to_string(count) + ".pt");
+    count += 1;
 
     // bool loop = seqlen_k > blocksize_c;
     // TODO: change later, for now set to true for simplicity
