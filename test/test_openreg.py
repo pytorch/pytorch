@@ -70,6 +70,7 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.type, "openreg")
         self.assertEqual(generator.device.index, 1)
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
         self.assertFalse(cpu_a.is_pinned())
