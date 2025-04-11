@@ -479,6 +479,9 @@ class FileSystemBase(ABC):
     @abstractmethod
     def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
 
+    @abstractmethod
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]: ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
@@ -538,6 +541,11 @@ class FileSystem(FileSystemBase):
         if not isinstance(path, Path):
             path = Path(path)
         path.unlink()
+
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return [str(p) for p in path.iterdir()]
 
 
 class _FileSystemWriter(StorageWriter):

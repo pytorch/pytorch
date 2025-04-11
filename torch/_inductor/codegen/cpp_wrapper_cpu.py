@@ -1117,11 +1117,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
+            shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
+            if enable_kernel_profile:
+                shim_fn_codes = textwrap.dedent(
+                    f"""
+                    {{
+                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+                      {shim_fn_codes}
+                    }}
+                    """
+                )
+            self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1568,17 +1582,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         def create_new_tensor_handle() -> tuple[str, list[str]]:
-            # TODO (benjaminglass1): uncomment this and remove the call to
-            # create_reinterpret_view after the AOTI forwards compatibility window has
-            # passed.
-            #
-            # tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            # tmp_call_strs = [
-            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
-            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            # ]
-            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
-            return create_reinterpret_call(), []
+            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
@@ -2028,7 +2037,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
 
@@ -2183,7 +2192,7 @@ if (!custom_op_wrapper) {
         codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[list[str]] = None,
+        output_args: Optional[list[Optional[str]]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
@@ -2227,9 +2236,9 @@ if (!custom_op_wrapper) {
             """
         )
 
-        if len(output_args) == 1:
+        if len(output_args) == 1 and (output := output_args[0]) is not None:
             # result is a single tensor
-            lines += f"{output_args[0]} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
             for idx, output_arg in enumerate(output_args):
