@@ -5681,6 +5681,8 @@ class TestLinalg(TestCase):
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         # Test offline tuning with submatrices
+        # Covers both GEMM and ScaledGEMM case, the later
+        # implicitly due to shared code path
         ordinal = torch.cuda.current_device()
 
         with self._tunableop_ctx():
