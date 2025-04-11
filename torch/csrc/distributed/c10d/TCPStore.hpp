@@ -77,6 +77,8 @@ class TORCH_API TCPStore : public Store {
 
   ~TCPStore() override;
 
+  c10::intrusive_ptr<Store> clone() override;
+
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
   std::vector<uint8_t> compareSet(
