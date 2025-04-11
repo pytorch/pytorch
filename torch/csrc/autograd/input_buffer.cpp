@@ -154,7 +154,7 @@ void InputBuffer::add(
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   const auto device_type = device->type();
-  bool is_accelerator = device->is_cuda() || device->is_privateuseone();
+  bool is_accelerator = device->is_cuda() || device->is_mtia() || device->is_privateuseone();
 
   // [ Single producer ]
   // If there's only a single producer, there is no accumulation involved.
@@ -208,16 +208,16 @@ void InputBuffer::add(
   // [ Nth producer ]
   // At this point, the accumulation stream has been determined. For both 2/3
   // and 4/5, everytime subsequent producers call InputBuffer.add:
-  // - The accumulation stream (determined at n=1) waits for the new producer
-  // stream
+  // - The accumulation stream (determined at n=1) waits for the new
+  //   producer stream
   // - Call var.record_stream(accumution_stream)
   // - Accumulate var into buffer
+  //
   // Also, depending on whether you are in case 2/3 or 4/5, you must do
   // something extra:
   // - If you are in the 2/3 regime, you skipped synchronizing the first
-  // producer
-  //   with the consumer during the first iteration. We make this up in the
-  //   second iteration.
+  //   producer with the consumer during the first iteration. We make this
+  //   up in the second iteration.
   // - If you are in the 4/5 regime, all you've done so far is synchronize
   //   between producers. You still need to have the consumer wait for the
   //   producer.
