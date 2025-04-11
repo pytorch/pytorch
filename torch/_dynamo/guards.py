@@ -59,6 +59,7 @@ from torch._C._dynamo.guards import (
 from torch._dynamo.source import (
     IndexedSource,
     is_from_flatten_script_object_source,
+    is_from_global_source,
     is_from_local_source,
     is_from_optimizer_source,
     TensorProperty,
@@ -129,6 +130,7 @@ from .types import (  # noqa: F401
     ExtraState,
     GuardedCode,
     GuardFail,
+    GuardFilterEntry,
     GuardFn,
 )
 from .utils import (
@@ -2223,9 +2225,7 @@ class GuardBuilder(GuardBuilderBase):
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
                 if not isinstance(value, torch.nn.Parameter):
-                    self.check_fn_manager.guard_manager.diff_guard_sources.add(
-                        guard.name
-                    )
+                    self.guard_manager.diff_guard_sources.add(guard.name)
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
@@ -2464,6 +2464,9 @@ class CheckFunctionManager:
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
+        guard_filter_fn: Optional[
+            Callable[[list[GuardFilterEntry]], list[bool]]
+        ] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2471,10 +2474,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.guard_manager = GuardManagerWrapper()
-        self.guard_manager.diff_guard_sources = existing_diff_guard_sources
         self.output_graph = output_graph
-        w_builder = None
 
         # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
         # in case a set default device call was made in the graph.
@@ -2482,58 +2482,52 @@ class CheckFunctionManager:
             output_graph.torch_function_mode_stack if output_graph else None
         )
 
-        def source_ref(source):
-            guard_source = source.guard_source()
-            if guard_source is GuardSource.CONSTANT:
-                # No need to track constants
-                return source.name()
-            assert w_builder
-            r_builder = w_builder()
-            assert r_builder is not None
-            return r_builder.arg_ref(source.name())
-
-        builder = GuardBuilder(
-            f_code,
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
-            output_graph.local_scope,
-            output_graph.global_scope,
-            self.guard_manager,
-            self,
-        )
-
-        # Break retain cycle. See test_release_scope_memory
-        def cleanup_builder(weak_b):
-            b = weak_b()
-            if b:
-                b.scope = None
-
-        # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder, cleanup_builder)
-
-        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
-            "pytorch/compiler:guard_nn_modules"
-        )
-
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or (), key=Guard.sort_key):
-            if (
-                not guard_on_nn_modules
-                and guard.is_specialized_nn_module()
-                # Default func args must be guarded on.
-                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
-                and "__defaults__" not in guard.name
-                and "__kwdefaults__" not in guard.name
-                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
-            ):
-                continue
+        sorted_guards = sorted(guards or (), key=Guard.sort_key)
+        builder, guard_manager = self.build_guards(
+            sorted_guards, existing_diff_guard_sources, f_code, output_graph
+        )
 
-            guard.create(builder)
+        if guard_filter_fn:
 
-        self.compile_check_fn(builder, guards, guard_fail_fn)
+            def make_guard_filter_entry(guard):
+                name = strip_local_scope(guard.name)
+                if name == "":
+                    value = None
+                else:
+                    value = builder.get(guard.name)
+                is_global = is_from_global_source(guard.originating_source)
+                guard_fn = guard.create_fn
+                if isinstance(guard_fn, functools.partial):
+                    guard_fn = guard.create_fn.func
+                return GuardFilterEntry(
+                    name=name,
+                    value=value,
+                    guard_type=guard_fn.__name__,
+                    derived_guard_types=tuple(guard.guard_types)
+                    if guard.guard_types
+                    else (),
+                    is_global=is_global,
+                    orig_guard=guard,
+                )
+
+            filter_results = guard_filter_fn(
+                [make_guard_filter_entry(guard) for guard in sorted_guards]
+            )
+            assert len(filter_results) == len(sorted_guards)
+            assert all(type(x) == bool for x in filter_results)
+            sorted_guards = [
+                guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+            ]
+            # Redo the guards because filtering relies on the results from the last guard builder.
+            builder, guard_manager = self.build_guards(
+                sorted_guards, existing_diff_guard_sources, f_code, output_graph
+            )
+
+        self.guard_manager = guard_manager
+        self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -2601,6 +2595,67 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
+
+    def build_guards(
+        self,
+        sorted_guards,
+        existing_diff_guard_sources,
+        f_code,
+        output_graph,
+    ):
+        guard_manager = GuardManagerWrapper()
+        guard_manager.diff_guard_sources = existing_diff_guard_sources
+
+        w_builder = None
+
+        def source_ref(source):
+            guard_source = source.guard_source()
+            if guard_source is GuardSource.CONSTANT:
+                # No need to track constants
+                return source.name()
+            assert w_builder
+            r_builder = w_builder()
+            assert r_builder is not None
+            return r_builder.arg_ref(source.name())
+
+        builder = GuardBuilder(
+            f_code,
+            self.id_ref,
+            source_ref,
+            self.lookup_weakrefs,
+            output_graph.local_scope,
+            output_graph.global_scope,
+            guard_manager,
+            self,
+        )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
+        # Break retain cycle. See test_release_input_memory
+        w_builder = weakref.ref(builder, cleanup_builder)
+
+        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
+
+        for guard in sorted_guards:
+            if (
+                not guard_on_nn_modules
+                and guard.is_specialized_nn_module()
+                # Default func args must be guarded on.
+                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
+            ):
+                continue
+
+            guard.create(builder)
+        return builder, guard_manager
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
