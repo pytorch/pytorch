@@ -106,7 +106,7 @@ float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
 // Each vec3type is tuple of mean, m2 and weight
 template <typename T>
 float3 welford_combine(T a, T b) {
-  float delta = a.x - b.x;
+  float delta = b.x - a.x;
   float new_weight = a.z + b.z;
   auto w2_over_w = new_weight != 0 ? b.z / new_weight : 0.0;
   return float3(
