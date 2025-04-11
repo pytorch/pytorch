@@ -159,8 +159,9 @@ void InputBuffer::add(
 
   // [ Single producer ]
   // If there's only a single producer, there is no accumulation involved.
-  // All we need to do is (if streams are involved at all):
-  // - Have the consumer canonical stream wait for the producer canonical stream
+  // All we need to do is:
+  // - (If streams are involved) Have the consumer canonical stream wait for
+  //   the producer canonical stream
   // - Move var into the buffer.
   if (num_dependencies == 1) {
     if (is_accelerator) {
@@ -202,6 +203,7 @@ void InputBuffer::add(
           opt_accum_streams[pos] = guard.getDefaultStream(*device);
         }
       }
+      record_stream_any_impl(var, *opt_accum_streams[pos]);
     }
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
     buffer[pos] = std::move(var);
@@ -248,6 +250,7 @@ void InputBuffer::add(
       if (current_index == num_dependencies - 1) {
         // 4/5 case extra logic
         _wait_stream(opt_consumer_stream, accum_stream, device_type);
+        // I'm not sure we should record_stream here
       }
     }
   } else {
