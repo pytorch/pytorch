@@ -38,6 +38,9 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
     torch.float8_e4m3fnuz: 18,  # FLOAT8E4M3FNUZ
     torch.float8_e5m2: 19,  # FLOAT8E5M2
     torch.float8_e5m2fnuz: 20,  # FLOAT8E5M2FNUZ
+    # 21 = UINT4
+    # 22 = INT4
+    torch.float4_e2m1fn_x2: 23,  # FLOAT4E2M1
 }
 
 
