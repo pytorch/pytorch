@@ -16,7 +16,8 @@ void CosineSimilarityImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
-  return F::detail::cosine_similarity(x1, x2, options.dim(), options.eps());
+  return F::detail::cosine_similarity(
+      x1, x2, options.dim(), options.eps(), options.keepdim());
 }
 
 // ============================================================================
