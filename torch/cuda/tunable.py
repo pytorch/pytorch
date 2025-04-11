@@ -436,6 +436,68 @@ def _gather_tunableop_results() -> None:
         duplicate_file = output_file.replace("0", str(i))
         shutil.copy(output_file, duplicate_file)
 
+def _create_matrices(m, n, k, lda, ldb, ldc, transA, transB,
+                     dtypeA, deviceid, dtypeB=None,
+                     randn=True, subMatrix=False):
+    r"""Helper function for _process_single_offline_gemm.
+    Creates matrices that are then consumed by one of the Torch GEMM APIs.
+    """
+    # Fill parameters set for use with ScaledGEMM
+    fillA = 0.25
+    fillB = 0.75
+
+    if dtypeB is None:
+        dtypeB = dtypeA
+
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: rowsA = rowsB = ldc may not be necessary, but it is
+        # simplest scenario to consider
+        rowsA = rowsB = ldc
+
+        if randn:
+            matA = torch.randn(rowsA, ldb, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, lda, dtype=dtypeA, device=deviceid)
+        else:
+            matA = torch.full((rowsA, ldb), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, lda), fillB, dtype=dtypeB, device=deviceid)
+
+        subA = (
+            matA[:k, :m].t()
+            if transB
+            else matA[:m, :k]
+        )
+        subB = (
+            matB[:n, :k].t()
+            if transA
+            else matB[:k, :n]
+        )
+        return subA, subB
+    else:
+        if randn:
+            matA = (
+                torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
+                if transB
+                else torch.rand(m, k, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
+                if transA
+                else torch.rand(k, n, dtype=dtypeB, device=deviceid)
+            )
+        else:
+            matA = (
+                torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+                if transB
+                else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+                if transA
+                else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+            )
+        return matA, matB
 
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
@@ -530,37 +592,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 )
                 return
 
-        if subMatrix:
-            # TO DO: rowsA = rowsB = ldc may not be necessary, but it is
-            # simplest scenario to consider
-            rowsA = rowsB = ldc
-
-            matA = torch.randn(rowsA, ldb, dtype=dtype, device=deviceid)
-            matB = torch.randn(rowsB, lda, dtype=dtype, device=deviceid)
-
-            subA = (
-                matA[:k, :m].t()
-                if transB
-                else matA[:m, :k]
-            )
-            subB = (
-                matB[:n, :k].t()
-                if transA
-                else matB[:k, :n]
-            )
-            torch.mm(subA, subB)
-        else:
-            matA = (
-                torch.rand(k, m, dtype=dtype, device=deviceid).t()
-                if transB
-                else torch.rand(m, k, dtype=dtype, device=deviceid)
-            )
-            matB = (
-                torch.rand(n, k, dtype=dtype, device=deviceid).t()
-                if transA
-                else torch.rand(k, n, dtype=dtype, device=deviceid)
-            )
-            torch.mm(matA, matB)
+        matA, matB = _create_matrices(m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix)
+        torch.mm(matA, matB)
 
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
@@ -590,18 +623,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert transA is True
         assert transB is False
 
-        fillA = 0.25
-        fillB = 0.75
-        matA = (
-            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
-            if transB
-            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
-        )
-        matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
-            if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
-        )
+        matA, matB = _create_matrices(m, n, k, lda, ldb, ldc, transA, transB, dtypeA, deviceid,
+                                      dtypeB=dtypeB, randn=False, subMatrix=subMatrix)
 
         assert untuned_gemm_temp[8] == "rw"
         if untuned_gemm_temp[9] == "1":
