@@ -120,6 +120,12 @@ jobs:
         with:
           no-sudo: true
 
+      - name: Setup QEMU
+        if: inputs.build-environment == 'linux-noble-riscv64-py3.12-gcc14'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
