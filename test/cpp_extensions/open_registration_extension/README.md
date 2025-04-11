@@ -21,8 +21,7 @@ The codebase is split as follows:
   - imports `._aten_impl` to register our aten op implementations to torch.
   - imports `.C` to load our c++ extension that registers more ops, allocator and hooks.
   - renames the PrivateUse1 backend and register our python-side module.
-- `pytorch_openreg/_aten_impl.py` does two main things.
-  - Use the `impl_factory()` function to register hooks from c++ (like getDevice, getStream, etc) and send them to our device daemon.
+- `pytorch_openreg/_aten_impl.py`
   - Define a new `torch.Library` that registers a fallback that will be called whenever a backend kernel for PrivateUse1 is called. It contains the logic to handle all kind of native functions, computing the output metadata, allocating it and only calling into the device daemon to perform computation.
 - `pytorch_openreg/_device_daemon.py`
   - contains the Allocator (responsible for allocating memory on the device side and host side, as int8 buffers).
