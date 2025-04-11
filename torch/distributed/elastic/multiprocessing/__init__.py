@@ -79,6 +79,13 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     SubprocessContext,
     to_map,
 )
+
+from torch.distributed.elastic.events import (
+    Event,
+    EventMetadataValue,
+    EventSource,
+    record
+)
 from torch.distributed.elastic.utils.logging import get_logger
 
 
