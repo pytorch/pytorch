@@ -9,7 +9,7 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Optional
+from typing import Any, cast, Optional
 
 
 __all__ = ["SubprocessHandler"]
@@ -49,6 +49,7 @@ class SubprocessHandler:
         args_str = (entrypoint, *[str(e) for e in args])
         self.local_rank_id = local_rank_id
         self.proc: subprocess.Popen = self._popen(args_str, env_vars)
+        self.global_rank = cast(Optional[int], env.get("RANK"))
 
     def _popen(self, args: tuple, env: dict[str, str]) -> subprocess.Popen:
         kwargs: dict[str, Any] = {}
