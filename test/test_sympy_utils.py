@@ -957,20 +957,22 @@ class TestSingletonInt(TestCase):
         self.assertEqual(j1.free_symbols, set())
 
 class TestFloorDiv(TestCase):
-    def test_rewrite_floor_div_mul(self):
+    def test_rewrite_floor_div_mul_pow(self):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(x / y)
         self.assertEqual(expr.count(FloorDiv), 0)
         self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+        self.assertEqual(expr.count(sympy.Pow), 1)
 
         rewritten = FloorDiv.rewrite(expr)
         self.assertTrue(isinstance(rewritten, FloorDiv))
         self.assertEqual(rewritten.args, (x, y))
 
-    def test_rewrite_floor_div_rational(self):
+    def test_rewrite_floor_div_mul_rational(self):
         x = sympy.Symbol("x")
         expr = sympy.floor(x / 5)
         self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
         self.assertEqual(expr.count(sympy.Rational), 1)
 
         rewritten = FloorDiv.rewrite(expr)
@@ -992,6 +994,16 @@ class TestFloorDiv(TestCase):
 
         rewritten = FloorDiv.rewrite(expr)
         self.assertEqual(rewritten.count(FloorDiv), 2)
+
+    def test_rewrite_floor_div_rational_const(self):
+        expr = sympy.floor(sympy.S.One / 5, evaluate=False)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.Mul), 0)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        # Expression evaluates to a compile time constant
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertEqual(rewritten, sympy.S.Zero)
 
 class TestIdentity(TestCase):
     def test_expand_identity(self):
