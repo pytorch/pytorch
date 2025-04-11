@@ -223,6 +223,12 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"),
       QConvoneDNNXPU::run_pointwise_binary);
+  m.impl(
+    TORCH_SELECTIVE_NAME("onednn::qconv_pointwise"),
+    QConvoneDNNXPU::run_pointwise);
+    m.impl(
+        TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"),
+        QConvoneDNNXPU::run_pointwise_binary);
 }
 
 } // namespace at::native::xpu
