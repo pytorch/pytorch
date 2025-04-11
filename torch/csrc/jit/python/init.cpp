@@ -77,6 +77,7 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>

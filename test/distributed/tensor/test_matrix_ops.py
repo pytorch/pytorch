@@ -17,9 +17,9 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -504,6 +504,8 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
     def test_grouped_mm(self):
