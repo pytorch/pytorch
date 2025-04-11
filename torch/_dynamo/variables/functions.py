@@ -64,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -232,7 +232,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             unimplemented_v2(
                 gb_type="can't handle functions not implemented in python ",
                 context=f"{fn}",
-                explanation=f"Dynamo can only handle functions defined in python",
+                explanation="Dynamo can only handle functions defined in python",
                 hints=[
                     "Move usage of this function out of `torch.compile` region",
                     *graph_break_hints.INFERENCE_MODE,
