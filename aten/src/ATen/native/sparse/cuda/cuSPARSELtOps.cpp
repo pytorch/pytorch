@@ -100,7 +100,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     bool transpose_result,
     int alg_id,
     int split_k,
-    bool split_k_one_kernel,
+    int split_k_mode,
     bool search_alg_id) {
   if (!handle_initialized) {
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
