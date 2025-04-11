@@ -346,7 +346,8 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  cudaDataType_t abcType = CUDA_R_32F;
+  cudaDataType_t abType = CUDA_R_32F;
+  cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
 #ifndef USE_ROCM
@@ -356,7 +357,8 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
   if constexpr (std::is_same_v<Dtype, double>) {
-    abcType = CUDA_R_64F;
+    abType = CUDA_R_64F;
+    cType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
@@ -364,11 +366,13 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, c10::complex<double>>) {
-    abcType = CUDA_C_64F;
+    abType = CUDA_C_64F;
+    cType = CUDA_C_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_C_64F;
   } else if constexpr (std::is_same_v<Dtype, c10::complex<float>>) {
-    abcType = CUDA_C_32F;
+    abType = CUDA_C_32F;
+    cType = CUDA_C_32F;
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
@@ -381,9 +385,11 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       beta_ptr = &hbeta;
     }
 #endif
-    abcType = CUDA_R_16F;
+    abType = CUDA_R_16F;
+    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
-    abcType = CUDA_R_16BF;
+    abType = CUDA_R_16BF;
+    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
   } else {
     static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublaslt: not implemented");
   }
@@ -405,9 +411,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
   }
 #endif
-  CuBlasLtMatrixLayout Adesc(abcType, m, k, lda, opa == CUBLAS_OP_T);
-  CuBlasLtMatrixLayout Bdesc(abcType, k, n, ldb, opb == CUBLAS_OP_T);
-  CuBlasLtMatrixLayout Cdesc(abcType, m, n, ldc);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, lda, opa == CUBLAS_OP_T);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, ldb, opb == CUBLAS_OP_T);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, ldc);
 
   if (num_batches > 1) {
     int num_batches_as_int = static_cast<int>(num_batches);
@@ -492,8 +498,10 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       ldb,
       " ldc ",
       ldc,
-      " abcType ",
-      abcType,
+      " abType ",
+      abType,
+      " cType ",
+      cType,
       " computeType ",
       computeType,
       " scaleType ",
@@ -878,9 +886,9 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 }
 
-template <typename DType, typename C_Dtype = DType>
-inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
-  tunable::GemmStridedBatchedParams<DType> params;
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  tunable::GemmStridedBatchedParams<Dtype> params;
   params.transa = transa;
   params.transb = transb;
   params.m = m;
@@ -903,19 +911,19 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
+    static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
+    static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
+    static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
+    static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else {
@@ -1644,7 +1652,7 @@ template<>
 void gemm<double, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(double, float)) {}
 
 
-template <typename Dtype, typename C_Dtype = Dtype>
+template <typename Dtype, typename C_Dtype>
 bool gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -1695,18 +1703,10 @@ bool gemm_and_bias(
     }
 #endif
     abType = CUDA_R_16F;
-    if constexpr(std::is_same_v<C_Dtype, float>) {
-      cType = CUDA_R_32F;
-    } else {
-      cType = CUDA_R_16F;
-    }
+    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16F;
-    if constexpr(std::is_same_v<C_Dtype, float>) {
-      cType = CUDA_R_32F;
-    } else {
-      cType = CUDA_R_16F;
-    }
+    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);

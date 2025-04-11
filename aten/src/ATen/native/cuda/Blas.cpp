@@ -1751,7 +1751,7 @@ Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tens
     (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
     "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
-
+  
   addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
 
   return out;

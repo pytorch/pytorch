@@ -434,9 +434,11 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
-    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
+        torch.backends.cuda.preferred_blas_library(backend)
 
         def create_inputs(B=None):
             if B is None:
@@ -474,10 +476,12 @@ class TestMatmulCuda(TestCase):
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
-    @parametrize("batch_size", [1, 32])
-    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+    @parametrize("batch_size", [None, 1, 32])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
+        torch.backends.cuda.preferred_blas_library(backend)
 
         def create_inputs(B=None):
             if B is None:
