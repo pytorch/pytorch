@@ -102,7 +102,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     mode = miopenBNSpatial;
   }
 
-  auto output_t = at::empty(input->sizes(), input->options());
+  auto output_t = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getMiopenHandle();
@@ -179,8 +179,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   const Tensor& save_var_t =
       save_var_t_opt.value_or(Tensor());
 
+  auto grad_output_contig =
+      grad_output_t.contiguous(input_t.suggest_memory_format());
   TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t, "grad_output", 2 },
+            grad_output{ grad_output_contig, "grad_output", 2 },
             weight{ weight_t, "weight", 3 },
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 };
@@ -195,7 +197,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   }
   checkAllSameType(c, {input, grad_output});
   checkAllSameType(c, {weight, save_mean, save_var});
-  checkAllContiguous(c, {input, grad_output, save_mean, save_var});
+  checkAllContiguous(c, {save_mean, save_var});
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+  TORCH_CHECK(grad_output->is_contiguous(input->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
@@ -210,7 +214,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     mode = miopenBNSpatial;
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_input_t = at::empty(
+      input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
   auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
