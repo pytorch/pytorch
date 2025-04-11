@@ -1,10 +1,10 @@
-#include <OpenReg.h>
+#include "OpenReg.h"
 
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include "ATen/CPUGeneratorImpl.h"
-#include "ATen/core/GeneratorForPrivateuseone.h"
-#include "c10/core/Device.h"
 #include <c10/util/CallOnce.h>
 
 #include <iostream>
@@ -24,7 +24,8 @@ struct HostAllocator final : at::Allocator {
     py::gil_scoped_acquire acquire;
     void* data = nullptr;
     if (nbytes > 0) {
-      data = reinterpret_cast<void*>(get_method("hostMalloc")(nbytes).cast<host_ptr_t>());
+      data = reinterpret_cast<void*>(
+          get_method("hostMalloc")(nbytes).cast<host_ptr_t>());
       TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
     }
     return {data, data, &ReportAndDelete, at::Device(at::kCPU)};
@@ -37,7 +38,8 @@ struct HostAllocator final : at::Allocator {
     py::gil_scoped_acquire acquire;
     TORCH_CHECK(
         get_method("hostFree")(reinterpret_cast<host_ptr_t>(ptr)).cast<bool>(),
-        "Failed to free memory pointer at ", ptr);
+        "Failed to free memory pointer at ",
+        ptr);
   }
 
   at::DeleterFnPtr raw_deleter() const override {
@@ -46,7 +48,10 @@ struct HostAllocator final : at::Allocator {
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     py::gil_scoped_acquire acquire;
-    get_method("hostCopyData")(reinterpret_cast<host_ptr_t>(dest), reinterpret_cast<host_ptr_t>(src), count);
+    get_method("hostCopyData")(
+        reinterpret_cast<host_ptr_t>(dest),
+        reinterpret_cast<host_ptr_t>(src),
+        count);
   }
 };
 static HostAllocator global_host_alloc;
@@ -104,7 +109,8 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
 
   bool isPinnedPtr(const void* data) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data)).cast<bool>();
+    return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data))
+        .cast<bool>();
   }
 
   const at::Generator& getDefaultGenerator(
@@ -126,15 +132,26 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
 };
 
 int register_hook() {
-  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface(OpenRegHooksArgs{}));
+  at::RegisterPrivateUse1HooksInterface(
+      new OpenRegHooksInterface(OpenRegHooksArgs{}));
   return 0;
 }
 int temp_register_hook = register_hook();
 
-TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
-C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
-// Using Create function to get PrivateUse1HooksInterface point from PrivateUse1HooksRegistry class.
-C10_REGISTER_TYPED_CLASS(PrivateUse1HooksRegistry, "OpenRegHooks", OpenRegHooksInterface);
+TORCH_DECLARE_REGISTRY(
+    PrivateUse1HooksRegistry,
+    OpenRegHooksInterface,
+    OpenRegHooksArgs);
+C10_DEFINE_REGISTRY(
+    PrivateUse1HooksRegistry,
+    OpenRegHooksInterface,
+    OpenRegHooksArgs);
+// Using Create function to get PrivateUse1HooksInterface point from
+// PrivateUse1HooksRegistry class.
+C10_REGISTER_TYPED_CLASS(
+    PrivateUse1HooksRegistry,
+    "OpenRegHooks",
+    OpenRegHooksInterface);
 
 // Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -158,7 +175,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::Device exchangeDevice(c10::Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_privateuseone());
     py::gil_scoped_acquire acquire;
-    auto old_device_index = get_method("exchangeDevice")(d.index()).cast<c10::DeviceIndex>();
+    auto old_device_index =
+        get_method("exchangeDevice")(d.index()).cast<c10::DeviceIndex>();
     return c10::Device(static_type, old_device_index);
   }
 
@@ -207,9 +225,12 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Get a stream from the global pool for a given device.
    */
-  c10::Stream getStreamFromGlobalPool(c10::Device d, bool isHighPriority = false) const override {
+  c10::Stream getStreamFromGlobalPool(
+      c10::Device d,
+      bool isHighPriority = false) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("getStreamFromGlobalPool")(d.index(), isHighPriority).cast<c10::Stream>();
+    return get_method("getStreamFromGlobalPool")(d.index(), isHighPriority)
+        .cast<c10::Stream>();
   }
 
   /**
@@ -219,7 +240,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
     py::gil_scoped_acquire acquire;
-    auto stream_id = get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
+    auto stream_id =
+        get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
     return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
@@ -322,8 +344,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
    */
-  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const c10::Stream& stream)
-      const override {
+  void recordDataPtrOnStream(
+      const c10::DataPtr& data_ptr,
+      const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
     get_method("recordDataPtrOnStream")(data_ptr, stream);
   }
@@ -331,17 +354,21 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Fetch the elapsed time between two recorded events.
    */
-  double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index)
-      const override {
+  double elapsedTime(
+      void* event1,
+      void* event2,
+      const c10::DeviceIndex device_index) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")((int64_t)event1, (int64_t)event2, device_index).cast<double>();
+    return get_method("elapsedTime")(
+               (int64_t)event1, (int64_t)event2, device_index)
+        .cast<double>();
   }
 };
 
 // Register our device guard
 C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 
-} // anonymous namspaces
+} // namespace
 
 // Setter for the python dictionary with implementations
 void set_impl_factory(PyObject* factory) {
@@ -352,4 +379,4 @@ py::function get_method(const char* name) {
   auto factory = py::cast<py::function>(py_factory);
   return factory(name);
 }
-} // openreg
+} // namespace openreg
