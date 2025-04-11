@@ -594,17 +594,20 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 template <typename T>
-Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st) {
+Tensor mul_tensor_backward(
+    const Tensor& grad,
+    const T& other,
+    ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
-template Tensor mul_tensor_backward(const Tensor&, Tensor, ScalarType);
-template Tensor mul_tensor_backward(const Tensor&, Scalar, ScalarType);
+template Tensor mul_tensor_backward(const Tensor&, const Tensor&, ScalarType);
+template Tensor mul_tensor_backward(const Tensor&, const Scalar&, ScalarType);
 
 template <typename T>
 Tensor div_tensor_self_backward(
     const Tensor& grad,
-    T other,
+    const T& other,
     ScalarType self_st,
     const std::optional<std::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -616,12 +619,12 @@ Tensor div_tensor_self_backward(
 }
 template Tensor div_tensor_self_backward(
     const Tensor&,
-    Tensor,
+    const Tensor&,
     ScalarType,
     const std::optional<std::string_view>&);
 template Tensor div_tensor_self_backward(
     const Tensor&,
-    Scalar,
+    const Scalar&,
     ScalarType,
     const std::optional<std::string_view>&);
 

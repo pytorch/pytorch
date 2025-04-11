@@ -6,6 +6,8 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <algorithm>
+
 namespace at::functorch {
 
 typedef std::tuple<Tensor, std::optional<int64_t>> oneOutput;
@@ -315,7 +317,7 @@ oneOutput linalg_lu_solve_batch_rule(
   const auto LU_num_batch_dims = rankWithoutBatchDim(LU_, LU_bdim) - LU_min_rank;
   const auto pivots_num_batch_dims = rankWithoutBatchDim(pivots_, pivots_bdim) - pivots_min_rank;
   const auto B_num_batch_dims = rankWithoutBatchDim(B_, B_bdim) - B_min_rank;
-  const auto max_num_batch_dims = std::max(std::max(LU_num_batch_dims, pivots_num_batch_dims), B_num_batch_dims);
+  const auto max_num_batch_dims = std::max({LU_num_batch_dims, pivots_num_batch_dims, B_num_batch_dims});
 
   LU_ = maybePadToLogicalRank(LU_, LU_bdim, max_num_batch_dims + LU_min_rank);
   pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
