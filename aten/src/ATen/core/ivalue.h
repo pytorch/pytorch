@@ -18,6 +18,7 @@
 #include <utility>
 
 namespace torch {
+class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
 using ::torch::CustomClassHolder;
 struct Function;

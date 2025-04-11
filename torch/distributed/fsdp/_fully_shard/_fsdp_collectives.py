@@ -1,6 +1,5 @@
 import os
-from collections.abc import Generator
-from contextlib import contextmanager, ExitStack
+from contextlib import nullcontext
 from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
 
@@ -44,7 +43,6 @@ lib.define(
         SymInt rank,
         ScalarType dtype,
         Device device,
-        __torch__.torch.classes.c10.MemPool? mempool
     ) -> (Tensor, Tensor)
     """
 )
@@ -59,7 +57,6 @@ def all_gather_copy_in_meta(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
-    mempool: Optional[torch._C.ScriptObject],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
@@ -84,18 +81,13 @@ def all_gather_copy_in_cuda(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
-    mempool: Optional[torch._C.ScriptObject],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    with ExitStack() as stack:
-        if mempool is not None:
-            stack.enter_context(torch.cuda.use_mem_pool(torch.cuda.MemPool.unbox(mempool)))
-
-        all_gather_output = torch.empty(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input = all_gather_output.narrow(
-            0, all_gather_input_numel * rank, all_gather_input_numel
-        )
+    all_gather_output = torch.empty(
+        (all_gather_input_numel * world_size,), dtype=dtype, device=device
+    )
+    all_gather_input = all_gather_output.narrow(
+        0, all_gather_input_numel * rank, all_gather_input_numel
+    )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
@@ -154,7 +146,7 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.Stream,
     all_gather_stream: torch.Stream,
     device: torch.device,
-    mempool: torch.cuda.MemPool,
+    mempool: Optional[torch.cuda.MemPool],
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
@@ -173,16 +165,16 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            inp_split_sizes,
-            all_gather_input_numel,
-            world_size,
-            rank,
-            dtype,
-            device,
-            mempool.boxed() if mempool else None,
-        )
+        with torch.cuda.use_mem_pool(mempool) if mempool else nullcontext():
+            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+                all_gather_inputs,
+                inp_split_sizes,
+                all_gather_input_numel,
+                world_size,
+                rank,
+                dtype,
+                device,
+            )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
@@ -411,9 +403,7 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    with ExitStack() as stack:
-        if mempool is not None:
-            stack.enter_context(torch.cuda.use_mem_pool(mempool))
+    with torch.cuda.use_mem_pool(mempool) if mempool else nullcontext():
         reduce_scatter_input = torch.empty(
             (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
         )
@@ -426,9 +416,7 @@ def foreach_reduce(
     all_reduce_input = None
     all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
-        with ExitStack() as stack:
-            if mempool is not None:
-                stack.enter_context(torch.cuda.use_mem_pool(mempool))
+        with torch.cuda.use_mem_pool(mempool) if mempool else nullcontext():
             reduce_output = reduce_scatter_input.new_empty(
                 (reduce_scatter_output_numel,)
             )
