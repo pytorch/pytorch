@@ -190,6 +190,30 @@ class TestViewOps(DTensorTestBase):
         self.call_dt_test(op, args, {}, self.device_mesh)
 
     @with_comms
+    def test_illegal_views(self):
+        device_mesh = self.build_device_mesh()
+        # 1D mesh [6] (see above)
+        tensor = torch.randn((6, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        # view should be legal, since sharding is even and flatten includes only one sharded dim
+        shard.view(-1)
+
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten a sharded dimension"
+        ):
+            shard.view(-1)
+
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten an unevenly sharded dimension"
+        ):
+            shard.view(-1)
+
+    @with_comms
     def test_view_ops(self):
         self.device_mesh = DeviceMesh(
             self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
