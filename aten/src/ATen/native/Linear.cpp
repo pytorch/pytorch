@@ -484,7 +484,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
           if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
             // Update ellipsis size
             TORCH_SYM_CHECK(
-                ell_sizes[j].sym_eq(1) || ell_sizes[j].sym_eq(op.sym_size(dim)),
+                ell_sizes[j].sym_eq(1).sym_or(ell_sizes[j].sym_eq(op.sym_size(dim))),
                 "einsum(): dimension ",
                 dim,
                 " covered by ellipsis in operand ",
@@ -503,7 +503,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
         if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
           // Update subscript
           TORCH_SYM_CHECK(
-              label_size[s].sym_eq(1) || label_size[s].sym_eq(op.sym_size(dim)),
+              label_size[s].sym_eq(1).sym_or(label_size[s].sym_eq(op.sym_size(dim))),
               "einsum(): subscript ",
               subscript_to_label(s),
               " has size ",
