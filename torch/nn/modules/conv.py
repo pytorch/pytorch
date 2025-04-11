@@ -1149,7 +1149,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         Attributes:
             input (Tensor): The input tensor.
             output_size (list[int], optional): A list of integers representing
-                the dimensions of the output tensor. Default is None.
+                the size of the output tensor. Default is None.
         """
         if self.padding_mode != "zeros":
             raise ValueError(
