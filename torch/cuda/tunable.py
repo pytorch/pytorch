@@ -436,9 +436,22 @@ def _gather_tunableop_results() -> None:
         duplicate_file = output_file.replace("0", str(i))
         shutil.copy(output_file, duplicate_file)
 
-def _create_matrices(m, n, k, lda, ldb, ldc, transA, transB,
-                     dtypeA, deviceid, dtypeB=None,
-                     randn=True, subMatrix=False):
+
+def _create_matrices(
+    m,
+    n,
+    k,
+    lda,
+    ldb,
+    ldc,
+    transA,
+    transB,
+    dtypeA,
+    deviceid,
+    dtypeB=None,
+    randn=True,
+    subMatrix=False,
+):
     r"""Helper function for _process_single_offline_gemm.
     Creates matrices that are then consumed by one of the Torch GEMM APIs.
     """
@@ -463,16 +476,8 @@ def _create_matrices(m, n, k, lda, ldb, ldc, transA, transB,
             matA = torch.full((rowsA, ldb), fillA, dtype=dtypeB, device=deviceid)
             matB = torch.full((rowsB, lda), fillB, dtype=dtypeB, device=deviceid)
 
-        subA = (
-            matA[:k, :m].t()
-            if transB
-            else matA[:m, :k]
-        )
-        subB = (
-            matB[:n, :k].t()
-            if transA
-            else matB[:k, :n]
-        )
+        subA = matA[:k, :m].t() if transB else matA[:m, :k]
+        subB = matB[:n, :k].t() if transA else matB[:k, :n]
         return subA, subB
     else:
         if randn:
@@ -498,6 +503,7 @@ def _create_matrices(m, n, k, lda, ldb, ldc, transA, transB,
                 else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
             )
         return matA, matB
+
 
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
@@ -569,9 +575,9 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     # We cannot handle submatrices in offline tuning
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
-        subMatrix=False
+        subMatrix = False
     else:
-        subMatrix=True
+        subMatrix = True
         warnings.warn(
             "Offline tuning is not supported on submatrices. Use online tuning instead. "
             + f"Skipped tuning for: {untuned_gemm[1]}"
@@ -592,7 +598,9 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 )
                 return
 
-        matA, matB = _create_matrices(m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix)
+        matA, matB = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
+        )
         torch.mm(matA, matB)
 
     elif op_sig == "GemmStridedBatchedTunableOp":
@@ -623,8 +631,21 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert transA is True
         assert transB is False
 
-        matA, matB = _create_matrices(m, n, k, lda, ldb, ldc, transA, transB, dtypeA, deviceid,
-                                      dtypeB=dtypeB, randn=False, subMatrix=subMatrix)
+        matA, matB = _create_matrices(
+            m,
+            n,
+            k,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtypeA,
+            deviceid,
+            dtypeB=dtypeB,
+            randn=False,
+            subMatrix=subMatrix,
+        )
 
         assert untuned_gemm_temp[8] == "rw"
         if untuned_gemm_temp[9] == "1":
