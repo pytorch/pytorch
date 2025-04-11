@@ -2849,24 +2849,36 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   processGroupGloo
       .def_static(
           "create_device",
-          [](const std::string& hostname, const std::string& interface)
+          [](const std::string& hostname,
+             const std::string& interface,
+             std::optional<bool> lazyInit_)
               -> std::shared_ptr<::gloo::transport::Device> {
+            bool lazyInit =
+                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
+
             if (!hostname.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForHostname(
-                  hostname);
+                  hostname, lazyInit);
             }
             if (!interface.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                  interface);
+                  interface, lazyInit);
             }
             throw std::invalid_argument(
                 "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
-          py::arg("interface") = "")
+          py::arg("interface") = "",
+          py::arg("lazy_init") = std::nullopt)
       .def_static(
           "create_default_device",
-          &::c10d::ProcessGroupGloo::createDefaultDevice);
+          [](std::optional<bool> lazyInit_) {
+            bool lazyInit =
+                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
+
+            return ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit);
+          },
+          py::arg("lazy_init") = std::nullopt);
 
   processGroupGloo
       .def(
@@ -2898,20 +2910,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             py::gil_scoped_release nogil{};
 
             auto options = ::c10d::ProcessGroupGloo::Options::create();
+            bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
             if (ifnameEnv && strlen(ifnameEnv) > 1) {
               for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
+                    ::c10d::ProcessGroupGloo::createDeviceForInterface(
+                        iface, lazyInit));
               }
             } else {
               // If no hostname is specified, this function looks up
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
               options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice());
+                  ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
             }
 
             options->timeout = timeout;
