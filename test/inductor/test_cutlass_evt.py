@@ -54,7 +54,7 @@ if try_import_cutlass():
                 ),
             }
 
-            code = trace(
+            _, code = trace(
                 bias_code,
                 examples_tensors,
                 DataType.f32,
@@ -65,7 +65,7 @@ if try_import_cutlass():
             self.assertExpectedInline(
                 code,
                 """\
-DagCompute7
+
 using EpilogueDescriptor = cutlass::epilogue::collective::detail::EpilogueDescriptor<
   cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
   float, float,
@@ -79,22 +79,19 @@ using TensorC = cutlass::epilogue::fusion::Sm90SrcFetch<float>;
 using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
 using Alpha = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, \
-1, cutlass::multiplies
+    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
 >;
 
-using AuxDescriptor = cutlass::epilogue::collective::detail::\
-AuxLoadDescriptor<EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
+using AuxDescriptor = cutlass::epilogue::collective::detail::AuxLoadDescriptor\
+<EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
 
 using Aux = cutlass::epilogue::fusion::Sm90AuxLoad<
     AuxDescriptor::Stages, typename AuxDescriptor::EpilogueTile, float,
-    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename \
-AuxDescriptor::SmemLayoutAtom, typename AuxDescriptor::CopyOpS2R
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename AuxDescriptor::SmemLayoutAtom, typename AuxDescriptor::CopyOpS2R
 >;
 
 using Beta = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, \
-cutlass::multiplies
+    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
 >;
 
 using Bias = cutlass::epilogue::fusion::Sm90ColBroadcast<
@@ -148,8 +145,8 @@ using FDescriptor = cutlass::epilogue::collective::detail::AuxStoreDescriptor<
 
 using F = cutlass::epilogue::fusion::Sm90AuxStore<
     FDescriptor::Stages, typename FDescriptor::EpilogueTile, float,
-    cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::Int<1>, \
-cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
+    cutlass::FloatRoundStyle::round_to_nearest, \
+cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
     typename FDescriptor::CopyOpR2S
 >;
 
@@ -158,8 +155,7 @@ using EVTF = cutlass::epilogue::fusion::Sm90EVT<
     EVTCompute3>;
 
 using Imm10 = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, \
-cutlass::multiplies
+    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
 >;
 
 using Compute4 = cutlass::epilogue::fusion::Sm90Compute<
