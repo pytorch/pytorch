@@ -22,25 +22,13 @@ from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import optree
-
-from torch._vendor.packaging.version import Version
-
-
-if Version(optree.__version__) < Version("0.13.0"):  # type: ignore[attr-defined]
-    raise ImportError(
-        "torch.utils._cxx_pytree depends on optree, which is an optional dependency "
-        "of PyTorch. To use it, please upgrade your optree package to >= 0.13.0"
-    )
-
-del Version
-
-
 from optree import (  # noqa: F401  # direct import for type annotations
     PyTreeSpec as PyTreeSpec,
     PyTreeSpec as TreeSpec,
 )
 
 import torch.utils._pytree as python_pytree
+from torch.torch_version import TorchVersion
 from torch.utils._pytree import (
     Context as Context,
     DumpableContext as DumpableContext,
@@ -58,6 +46,16 @@ from torch.utils._pytree import (
     ToDumpableContextFunc as ToDumpableContextFunc,
     UnflattenFunc as UnflattenFunc,
 )
+
+
+OPTREE_REQUIRED_VERSION = "0.13.0"
+if TorchVersion(optree.__version__) < OPTREE_REQUIRED_VERSION:  # type: ignore[attr-defined]
+    raise ImportError(
+        "torch.utils._cxx_pytree depends on optree, which is an optional dependency of PyTorch. "
+        f"To use it, please upgrade your optree package to >= {OPTREE_REQUIRED_VERSION}"
+    )
+
+del TorchVersion
 
 
 __all__ = [
