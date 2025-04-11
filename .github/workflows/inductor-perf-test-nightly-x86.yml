@@ -67,6 +67,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-build

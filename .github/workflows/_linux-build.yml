@@ -68,7 +68,7 @@ on:
         description: Role to assume for downloading artifacts
         required: false
         type: string
-        default: ""
+        default: "arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only"
       max-jobs:
         description: |
           Overwrite the number of jobs to use for the build
@@ -93,6 +93,10 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -285,6 +289,14 @@ jobs:
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
+      - name: Configure AWS Credentials - Upload Build Artifacts
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        with:
+          role-to-assume: "arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts"
+          role-session-name: gha-linux-build-upload-build-artifacts
+          aws-region: us-east-1
+
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -303,6 +315,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: Configure AWS Credentials for SCCACHE
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        with:
+          role-to-assume: "arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results"
+          role-session-name: gha-linux-build-sccache
+          aws-region: us-east-1
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'

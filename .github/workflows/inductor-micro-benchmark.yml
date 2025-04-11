@@ -31,6 +31,9 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-default-label-prefix
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm80
