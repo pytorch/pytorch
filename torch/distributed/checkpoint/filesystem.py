@@ -479,9 +479,6 @@ class FileSystemBase(ABC):
     @abstractmethod
     def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
 
-    @abstractmethod
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]: ...
-
 
 class FileSystem(FileSystemBase):
     @contextmanager
