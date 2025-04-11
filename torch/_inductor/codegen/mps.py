@@ -510,7 +510,7 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: Union[str |torch.dtype],
+        dtype: Union[str | torch.dtype],
         elem_count: Optional[int] = None,
         default_value: Optional[Any] = None,
         is_threadgroup: bool = True,
@@ -649,14 +649,14 @@ class MetalKernel(SIMDKernel):
                 f"Multistage reduction not yet supported for {reduction_type}"
             )
             acc_buf = self._new_idxvar("float3", acc_buf_size)
-            self.compute.splice(f"{acc_buf}[{reduction_idx}] = float3({value[0]}, {value[1]}, {value[2]});")
+            self.compute.splice(
+                f"{acc_buf}[{reduction_idx}] = float3({value[0]}, {value[1]}, {value[2]});"
+            )
             wf_res = self.cse.generate(
                 self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
-            return OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-            )
+            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
