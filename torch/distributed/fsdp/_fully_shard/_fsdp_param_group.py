@@ -49,7 +49,7 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def lazy_init(self, device: torch.device):
+    def lazy_init(self, device: torch.device, mempool: Optional[torch.cuda.MemPool]):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
@@ -78,6 +78,7 @@ class FSDPCommContext:
         self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
+        self.mempool = mempool
 
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
@@ -271,6 +272,7 @@ class FSDPParamGroup:
                 async_op,
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
+                self.comm_ctx.mempool,
             )
 
     def wait_for_unshard(self):
@@ -456,6 +458,7 @@ class FSDPParamGroup:
                 self.all_reduce_grads,
                 self._partial_reduce_output,
                 self._all_reduce_hook,
+                self.comm_ctx.mempool,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
