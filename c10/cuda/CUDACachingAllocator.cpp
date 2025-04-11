@@ -1279,7 +1279,7 @@ class DeviceCachingAllocator {
           params.size(),
           params.stream(),
           params.device(),
-          params.pool,
+          params.pool->owner_MempoolId(),
           std::move(context));
       stats.num_ooms += 1;
 
@@ -1450,7 +1450,7 @@ class DeviceCachingAllocator {
         orig_size,
         block->stream,
         block->device,
-        block->pool,
+        block->pool->owner_MempoolId(),
         block->context_when_allocated);
 
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -1512,7 +1512,7 @@ class DeviceCachingAllocator {
         block->requested_size,
         block->stream,
         block->device,
-        block->pool,
+        block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
     if (block->size >= CUDAAllocatorConfig::max_split_size())
@@ -2024,7 +2024,7 @@ class DeviceCachingAllocator {
         });
 
     record_trace(
-        TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, nullptr, nullptr);
+        TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, mempool_id, nullptr);
     return result;
   }
 
@@ -2360,7 +2360,7 @@ class DeviceCachingAllocator {
         mapped_range.size,
         to_map->stream,
         to_map->device,
-        to_map->pool,
+        to_map->pool->owner_MempoolId(),
         ctx);
     if (!to_map->prev && !to_map->context_when_segment_allocated) {
       to_map->context_when_segment_allocated = ctx;
@@ -2416,7 +2416,7 @@ class DeviceCachingAllocator {
         block->requested_size,
         block->stream,
         block->device,
-        block->pool,
+        block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
     block->context_when_allocated = nullptr;
@@ -2813,7 +2813,7 @@ class DeviceCachingAllocator {
         p.block->size,
         p.stream(),
         p.device(),
-        p.pool,
+        p.pool->owner_MempoolId(),
         ctx);
     p.block->context_when_segment_allocated = ctx;
     return true;
@@ -2945,7 +2945,7 @@ class DeviceCachingAllocator {
         block->size,
         block->stream,
         block->device,
-        block->pool,
+        block->pool->owner_MempoolId(),
         context ? context : block->context_when_segment_allocated);
 
     auto* pool = block->pool;
@@ -3055,7 +3055,7 @@ class DeviceCachingAllocator {
         unmapped.size,
         block->stream,
         block->device,
-        block->pool,
+        block->pool->owner_MempoolId(),
         context ? context : block->context_when_segment_allocated);
   }
   void release_blocks(
@@ -3249,7 +3249,7 @@ class DeviceCachingAllocator {
       size_t size,
       cudaStream_t stream,
       c10::DeviceIndex device,
-      BlockPool* pool,
+      MempoolId_t mempool_id,
       std::shared_ptr<GatheredContext> context) {
     if (!record_history && trace_trackers_.empty())
       return;
@@ -3260,7 +3260,7 @@ class DeviceCachingAllocator {
         addr,
         size,
         stream,
-        pool != nullptr ? pool->owner_MempoolId() : MempoolId_t{0, 0},
+        mempool_id,
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
 

@@ -88,6 +88,7 @@ class FSDPState(_State):
         modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        mempool: Optional[torch.cuda.MemPool] = None,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -95,6 +96,7 @@ class FSDPState(_State):
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
+        self._mempool = mempool
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
                 self._pre_forward, prepend=True, with_kwargs=True
@@ -182,7 +184,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.lazy_init(self._device)
+        self._comm_ctx.lazy_init(self._device, self._mempool)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx

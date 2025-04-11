@@ -1074,3 +1074,7 @@ struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   }
 };
 } // namespace std
+
+namespace torch {
+  class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
+}

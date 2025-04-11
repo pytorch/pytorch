@@ -91,6 +91,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
+    mempool: Optional[torch.cuda.MemPool] = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -208,7 +209,7 @@ def fully_shard(
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
-    state.init(modules, device, mp_policy)
+    state.init(modules, device, mp_policy, mempool)
 
     managed_modules = _get_managed_modules(modules, ignored_params)
     params, buffers = _get_managed_states(managed_modules, ignored_params)

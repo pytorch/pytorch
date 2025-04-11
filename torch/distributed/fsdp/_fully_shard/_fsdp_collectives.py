@@ -19,17 +19,6 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-MEM_POOL: Optional[torch.cuda.MemPool] = None
-
-
-@contextmanager
-def maybe_mem_pool() -> Generator[None]:
-    with ExitStack() as stack:
-        if MEM_POOL is not None:
-            stack.enter_context(torch.cuda.use_mem_pool(MEM_POOL))
-        yield
-
-
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: Optional[torch.Event]
@@ -54,7 +43,8 @@ lib.define(
         SymInt world_size,
         SymInt rank,
         ScalarType dtype,
-        Device device
+        Device device,
+        __torch__.torch.classes.c10.MemPool? mempool
     ) -> (Tensor, Tensor)
     """
 )
@@ -69,6 +59,7 @@ def all_gather_copy_in_meta(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
+    mempool: Optional[torch._C.ScriptObject],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
@@ -93,8 +84,12 @@ def all_gather_copy_in_cuda(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
+    mempool: Optional[torch._C.ScriptObject],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    with maybe_mem_pool():
+    with ExitStack() as stack:
+        if mempool is not None:
+            stack.enter_context(torch.cuda.use_mem_pool(torch.cuda.MemPool.unbox(mempool)))
+
         all_gather_output = torch.empty(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
@@ -159,6 +154,7 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.Stream,
     all_gather_stream: torch.Stream,
     device: torch.device,
+    mempool: torch.cuda.MemPool,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
@@ -185,6 +181,7 @@ def foreach_all_gather(
             rank,
             dtype,
             device,
+            mempool.boxed() if mempool else None,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
@@ -375,6 +372,7 @@ def foreach_reduce(
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
     all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
+    mempool: Optional[torch.cuda.MemPool],
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -413,7 +411,9 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    with maybe_mem_pool():
+    with ExitStack() as stack:
+        if mempool is not None:
+            stack.enter_context(torch.cuda.use_mem_pool(mempool))
         reduce_scatter_input = torch.empty(
             (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
         )
@@ -426,7 +426,9 @@ def foreach_reduce(
     all_reduce_input = None
     all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
-        with maybe_mem_pool():
+        with ExitStack() as stack:
+            if mempool is not None:
+                stack.enter_context(torch.cuda.use_mem_pool(mempool))
             reduce_output = reduce_scatter_input.new_empty(
                 (reduce_scatter_output_numel,)
             )
