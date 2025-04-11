@@ -30,6 +30,7 @@ def onnx_impl(
     *,
     trace_only: bool = False,
     complex: bool = False,
+    opset_introduced: int = 18,
     no_compile: bool = False,
     private: bool = False,
 ) -> Callable[[_T], _T]:
@@ -74,6 +75,7 @@ def onnx_impl(
                         fx_target=t,
                         signature=None,
                         is_complex=complex,
+                        opset_introduced=opset_introduced,
                         skip_signature_inference=no_compile,
                     )
                 )

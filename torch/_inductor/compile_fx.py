@@ -13,10 +13,10 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager
 from inspect import currentframe
 from itertools import count
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -70,7 +70,7 @@ from torch._inductor.output_code import (
     index_expanded_dims,
     OutputCode,
 )
-from torch._inductor.runtime.cache_dir_utils import cache_dir, temporary_cache_dir
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -82,14 +82,9 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
-from torch._subclasses import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import (
-    free_unbacked_symbols,
-    ShapeEnv,
-    SymExprPrinter,
-)
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
@@ -129,7 +124,6 @@ if TYPE_CHECKING:
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
-    from torch.compiler._cache import CacheInfo
 
     from .ir import ExternKernelNode
 
@@ -626,10 +620,7 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-
-        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
-            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
-
+        stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -761,8 +752,9 @@ def _compile_fx_inner(
                 )
                 assert mb_compiled_graph is not None
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
-                cache_key = key_info[0]
+                cache_key, debug_lines = key_info
                 mb_compiled_graph._fx_graph_cache_key = cache_key
+                mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
                 (
                     triton_bundle,
                     triton_bundler_meta,
@@ -793,8 +785,9 @@ def _compile_fx_inner(
             assert cache_info["cache_state"] == "hit"
             assert mb_compiled_graph is not None
             assert key_info is not None
-            cache_key = key_info[0]
+            (cache_key, debug_lines) = key_info
             mb_compiled_graph._fx_graph_cache_key = cache_key
+            mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
         assert mb_compiled_graph is not None
         compiled_graph = mb_compiled_graph
@@ -2368,136 +2361,3 @@ def _aoti_flatten_inputs(
         }
     )
     return flat_example_inputs, options
-
-
-_ENCODING_VERSION: int = 1
-
-
-class CompiledArtifact:
-    _compiled_fn: Callable[..., Any]
-    _artifacts: Optional[tuple[bytes, CacheInfo]]
-
-    def __init__(
-        self,
-        compiled_fn: Callable[..., Any],
-        artifacts: Optional[tuple[bytes, CacheInfo]],
-    ):
-        self._compiled_fn = compiled_fn
-        self._artifacts = artifacts
-
-    def __call__(self, *args: Any) -> Any:
-        return self._compiled_fn(*args)[0]
-
-    def save(
-        self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
-    ) -> None:
-        with dynamo_timed("CompiledArtifact.save"):
-            if self._artifacts is None:
-                raise RuntimeError(
-                    "CompiledArtifact.save failed to save since there's no artifact to save"
-                )
-            artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.aot_autograd_artifacts) == 1
-            key = cache_info.aot_autograd_artifacts[0]
-
-            if format == "binary":
-                # cant assert that it is a file since it might not exist yet
-                assert not os.path.isdir(path)
-
-                from torch.utils._appending_byte_serializer import BytesWriter
-
-                writer = BytesWriter(0)
-                writer.write_uint64(_ENCODING_VERSION)
-                writer.write_str(key)
-                writer.write_bytes(artifact_bytes)
-                with open(path, "wb") as file:
-                    file.write(writer.to_bytes())
-            else:
-                assert format == "unpacked"
-                assert os.path.isdir(path)
-
-                with temporary_cache_dir(path):
-                    # This function unpacks the cache artifacts to disk
-                    torch.compiler.load_cache_artifacts(artifact_bytes)
-
-    @staticmethod
-    def load(
-        *, path: str, format: Literal["binary", "unpacked"] = "binary"
-    ) -> CompiledArtifact:
-        with dynamo_timed("CompiledArtifact.load"):
-            if format == "binary":
-                # cant assert that it is a file since it might not exist yet
-                assert not os.path.isdir(path)
-                with open(path, "rb") as file:
-                    artifacts = file.read()
-                from torch.utils._appending_byte_serializer import BytesReader
-
-                reader = BytesReader(artifacts)
-                assert reader.read_uint64() == _ENCODING_VERSION
-                key = reader.read_str()
-                artifact_bytes = reader.read_bytes()
-                assert reader.is_finished()
-
-                torch.compiler.load_cache_artifacts(artifact_bytes)
-
-                cache_dir_ctx: AbstractContextManager[None] = nullcontext()
-            else:
-                assert format == "unpacked"
-                assert os.path.isdir(path)
-                autograd_cache_dir = os.path.join(path, "aotautograd")
-                assert os.path.isdir(autograd_cache_dir)
-                files = list(os.listdir(autograd_cache_dir))
-                assert len(files) == 1
-                key = files[0]
-                cache_dir_ctx = temporary_cache_dir(path)
-
-            with cache_dir_ctx:
-                with torch._functorch.config.patch(strict_autograd_cache=True):
-                    from torch._functorch._aot_autograd.autograd_cache import (
-                        AOTAutogradCache,
-                    )
-
-                    entry = AOTAutogradCache._lookup(key, local=True, remote=False)
-
-                assert entry is not None
-
-                fx_config = _CompileFxKwargs(
-                    cudagraphs=BoxedBool(False),
-                    boxed_forward_device_index=BoxedDeviceIndex(0),
-                )
-
-                context = torch._guards.TracingContext(
-                    FakeTensorMode(shape_env=ShapeEnv())
-                )
-                with (
-                    torch._guards.tracing(context),
-                    config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-                ):
-                    compiled_fn = entry.wrap_post_compile(
-                        [], entry.sanitized_aot_config, fx_config
-                    )
-            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
-
-
-def standalone_compile(
-    gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
-) -> CompiledArtifact:
-    from torch.compiler._cache import CacheArtifactManager
-
-    shape_env = shape_env_from_inputs(example_inputs, default=True)
-    assert shape_env is not None
-
-    context = torch._guards.TracingContext(FakeTensorMode(shape_env=shape_env))
-    with torch._guards.tracing(context):
-        with CacheArtifactManager.with_fresh_cache():
-            compiled_fn = compile_fx(gm, example_inputs, **kwargs)
-            assert callable(compiled_fn)
-
-            artifacts = torch.compiler.save_cache_artifacts()
-            if artifacts is None:
-                log.warning(
-                    "standalone_compile artifact generation failed, cannot save. "
-                    "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
-                )
-
-    return CompiledArtifact(compiled_fn, artifacts)

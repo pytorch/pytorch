@@ -1327,6 +1327,45 @@ class TestFxGraphCache(TestCase):
             counters["inductor"]["fxgraph_cache_hit"], 0 if inlinable else 1
         )
 
+
+@instantiate_parametrized_tests
+class TestStandaloneCompile(TestCase):
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        PatchCaches.setUp()
+        CacheArtifactManager.clear()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    def reset(self):
+        AOTAutogradCache.clear()
+        PyCodeCache.cache_clear(purge=True)
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
+    def capture(self, fn):
+        def inner(*args):
+            gm = None
+            actual_args = None
+            kwargs = None
+
+            def backend(gm_, args_, **kwargs_):
+                nonlocal gm
+                nonlocal actual_args
+                nonlocal kwargs
+                gm = gm_
+                actual_args = args_
+                kwargs = kwargs_
+                return gm
+
+            _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
+            return gm, actual_args, kwargs
+
+        return inner
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1344,26 +1383,6 @@ class TestFxGraphCache(TestCase):
 
         eager_out = f(x)
 
-        def capture(fn):
-            def inner(*args):
-                gm = None
-                actual_args = None
-                kwargs = None
-
-                def backend(gm_, args_, **kwargs_):
-                    nonlocal gm
-                    nonlocal actual_args
-                    nonlocal kwargs
-                    gm = gm_
-                    actual_args = args_
-                    kwargs = kwargs_
-                    return gm
-
-                _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
-                return gm, actual_args, kwargs
-
-            return inner
-
         with tempfile.TemporaryDirectory() as temp_dir:
             path = (
                 temp_dir
@@ -1371,16 +1390,14 @@ class TestFxGraphCache(TestCase):
                 else os.path.join(temp_dir, "compiled_artifact.bin")
             )
             with fresh_inductor_cache():
-                gm, args, kwargs = capture(f)(x)
+                gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
                 compiled_artifact.save(path=path, format=format)
 
             with fresh_inductor_cache():
-                loaded = torch._inductor.compile_fx.CompiledArtifact.load(
-                    path=path, format=format
-                )
+                loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
                 compiled_out = loaded(*args)
                 self.assertEqual(eager_out, compiled_out)
 
