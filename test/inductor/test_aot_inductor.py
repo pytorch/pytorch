@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantization import (
+    _group_quantize_tensor,
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
 )
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    parametrize,
     skipIfRocm,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -4935,6 +4937,42 @@ class AOTInductorTestsTemplate:
             torch.randint(-10, 10, (32, 64), device=self.device, dtype=torch.int8),
         )
         self.check_model(Model(), example_inputs)
+
+    @skipIfXpu(
+        msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
+    )
+    @parametrize("m", [32])
+    @parametrize("n", [64])
+    @parametrize("q_group", [32, 64])
+    @parametrize("num_groups", [1, 2])
+    def test__weight_int4pack_mm(self, m, n, q_group, num_groups):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, weight, scale_and_zeros) -> None:
+                super().__init__()
+                self.weight = weight
+                self.scale_and_zeros = scale_and_zeros
+
+            def forward(self, a):
+                return torch._weight_int4pack_mm(
+                    a, self.weight, q_group, self.scale_and_zeros
+                )
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(b_int32, innerKTiles=2)
+            return b_int4pack, b_scales_and_zeros
+
+        k = q_group * num_groups
+        a = torch.rand((m, k), device=self.device, dtype=torch.bfloat16)
+        b = torch.rand((k, n), device=self.device, dtype=torch.bfloat16)
+        b_int4pack, b_scales_and_zeros_f32 = convert_weight_to_int4pack(b)
+        model = Model(b_int4pack, b_scales_and_zeros_f32)
+        self.check_model(model, (a,))
 
     def test_assert_tensor_meta(self):
         class Module(torch.nn.Module):
