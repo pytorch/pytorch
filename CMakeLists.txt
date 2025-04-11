@@ -1381,13 +1381,25 @@ if(DEFINED USE_CUSTOM_DEBINFO)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
 endif()
 
-# Bundle PTXAS if needed
-if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
-  if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
-    message(STATUS "Copying PTXAS into the bin folder")
-    file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
-         DESTINATION "${PROJECT_BINARY_DIR}")
+if(USE_CUDA)
+  # Bundle PTXAS if needed
+  if(BUILD_BUNDLE_PTXAS)
+    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
+      message(STATUS "Copying PTXAS into the bin folder")
+      file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
+          DESTINATION "${PROJECT_BINARY_DIR}")
+    endif()
+    install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}")
   endif()
-  install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
-          DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  # Include NVTX headers
+  if(NOT USE_SYSTEM_NVTX)
+    install(
+      DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include/nvtx3"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+      FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+    )
+  endif()
 endif()
