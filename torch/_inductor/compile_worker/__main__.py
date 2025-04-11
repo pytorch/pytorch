@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import argparse
+import base64
 import functools
 import importlib
 import logging
@@ -66,7 +67,7 @@ def main():
 
         pre_fork_setup()
 
-        torch_key.set(args.torch_key.encode("latin-1"))  # type: ignore[attr-defined]
+        torch_key.set(base64.b64decode(args.torch_key.encode("utf-8")))  # type: ignore[attr-defined]
 
         _async_compile_initializer(args.parent)
 

@@ -1,3 +1,4 @@
+import base64
 import functools
 import itertools
 import logging
@@ -116,8 +117,7 @@ class SubprocPool:
         read_fd, subproc_write_fd = os.pipe()
         self.write_pipe = os.fdopen(write_fd, "wb")
         self.read_pipe = os.fdopen(read_fd, "rb")
-        # Cant use utf8 due to invalid start byte
-        torch_key_str = torch_key().decode("latin-1")
+        torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
 
         cmd = [
             sys.executable,
