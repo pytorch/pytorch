@@ -223,14 +223,24 @@ class _KinetoProfile:
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
 
-                if inductor_config.triton.cudagraphs:
+                if inductor_config.triton.cudagraphs and not (
+                    hasattr(torch.version, "cuda")
+                    and torch.version.cuda
+                    and int(torch.version.cuda.split(".")[0]) >= 12
+                    and int(torch.version.cuda.split(".")[1]) >= 6
+                ):
                     os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
                     self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
-                    # FIXME: CUDA Graph does not work well with CUPTI teardown.
+                    # CUDA Graph does not work well with CUPTI teardown.
                     #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
                     #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
                     # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+                    # This was fixed in CUDA 12.6, but we keep the workaround for older versions.
                     os.environ["TEARDOWN_CUPTI"] = "0"
+                else:
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = os.environ.get("DISABLE_CUPTI_LAZY_REINIT", 0)
+                    os.environ["TEARDOWN_CUPTI"] = os.environ.get("TEARDOWN_CUPTI", 1)
+                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "0")
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
