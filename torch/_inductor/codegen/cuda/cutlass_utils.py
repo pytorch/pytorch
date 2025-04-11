@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import importlib.util
 import logging
 import os
 import sys
@@ -132,12 +131,11 @@ def try_import_cutlass() -> bool:
             link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
 
             for module in mock_modules:
-                if not importlib.util.find_spec(module):
-                    link_and_append(
-                        path_join(tmp_cutlass_full_path, module),  # dst_link
-                        path_join(mock_src_path, module),  # src_path
-                        tmp_cutlass_full_path,  # parent
-                    )
+                link_and_append(
+                    path_join(tmp_cutlass_full_path, module),  # dst_link
+                    path_join(mock_src_path, module),  # src_path
+                    tmp_cutlass_full_path,  # parent
+                )
 
         try:
             import cutlass  # noqa: F401
