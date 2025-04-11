@@ -4093,7 +4093,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
     def test_from_kv_blocks(self, full_indices: bool):
-        device = torch.device(self.device if HAS_GPU else "cpu")
+        device = torch.device(self.device)
         (
             kv_num_blocks,
             kv_indices,
@@ -4147,7 +4147,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_block_size(self):
-        device = torch.device(self.device if HAS_GPU else "cpu")
+        device = torch.device(self.device)
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
         block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices)
         self.assertEqual(
@@ -4175,7 +4175,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_kv(self):
-        device = torch.device(self.device if HAS_GPU else "cpu")
+        device = torch.device(self.device)
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
             True, device
         )
@@ -4197,7 +4197,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_q(self):
-        device = torch.device(self.device if HAS_GPU else "cpu")
+        device = torch.device(self.device)
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
 
         with self.assertRaises(AssertionError):
