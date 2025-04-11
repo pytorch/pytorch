@@ -1725,7 +1725,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1751,7 +1750,6 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1838,7 +1836,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
