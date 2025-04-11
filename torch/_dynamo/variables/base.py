@@ -426,6 +426,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
+    # Forces unpacking the var sequence while also applying a function to each element.
+    # Only use when it is safe to eagerly unpack this variable (like force_unpack_var_sequence).
+    # INVARIANT: variable must satisfy has_force_unpack_var_sequence() == True!
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
+        assert self.has_force_unpack_var_sequence(tx)
+        for v in self.unpack_var_sequence(tx):
+            fn(v)
+
     def inspect_parameter_names(self) -> list[str]:
         unimplemented_v2(
             gb_type="Unsupported inspect call",
