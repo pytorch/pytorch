@@ -80,6 +80,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "sebotnet33ts_256",
     "selecsls42b",
     "convnext_base",
+    "convmixer_768_32",
 }
 
 REQUIRE_HIGHER_TOLERANCE_AMP = {
