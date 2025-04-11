@@ -201,7 +201,7 @@ class TestViewOps(DTensorTestBase):
 
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
         with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten a sharded dimension"
+            RuntimeError, "Attempted to flatten sharded dimension"
         ):
             shard.view(-1)
 
@@ -209,7 +209,7 @@ class TestViewOps(DTensorTestBase):
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
         with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten an unevenly sharded dimension"
+            RuntimeError, "Attempted to flatten unevenly sharded dimension"
         ):
             shard.view(-1)
 

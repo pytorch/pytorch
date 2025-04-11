@@ -500,63 +500,61 @@ def propagate_shape_and_sharding(
         for inp in cmd.inputs():
             collect_used_inputs(inp)
 
-    # TODO: make this function throw an error if any step in the 'rule' involves flattening together dimensions that
-    # are not replicated.
-    # The 'rules' tell us which output dims will exist,
-    # and by recursing through them we learn which input dims they are built from (??)
-    # but also, we assume tensor dims that are not part of the output can not be sharded in the target sharding
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(global_input_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
-    def is_sharded(input_dim):
+    def is_sharded(input_dim: InputDim) -> bool:
         for placement in input_src_placements:
             if isinstance(placement, Shard) and placement.dim == input_dim:
                 return True
         return False
 
-    def maybe_get_shard_placement(input_dim) -> Optional[Shard]:
-        for placement in input_src_placements:
+    def get_shard_mesh_dim_and_placement(
+        input_dim: InputDim,
+    ) -> tuple[int, Shard]:
+        # if input_dim is sharded, return the mesh_dim and shard placement
+        for i, placement in enumerate(input_src_placements):
             if isinstance(placement, Shard) and placement.dim == input_dim:
-                return placement
-        return None
+                return i, placement
+        raise RuntimeError("input_dim is not sharded")
 
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
-        # This literally determines which dims should be sharded both the input_tgt and output placements
-        # - if an input dim is used in an output dim, and its sharded in the input, it will stay sharded
-        # - if an input dim is replicated and used in an output dim, ???
-        # - if an input dim is not used in an output dim, but it is sharded in the input
-        # WE HAVE TO REPLICATE IT (why? somethihng about its going to disappear?)
+        # TODO(whc) this helper is pretty hard to understand, at least it should be better documented if not refactored
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
             for i, dim in enumerate(cmd.input_dims):
                 if isinstance(dim, InputDim):
                     can_shard_dim = True
-                    maybe_shard_placement = maybe_get_shard_placement(dim.input_dim)
+                    input_sharded = is_sharded(dim)
                     if i > 0:
                         can_shard_dim = False
-                        if strict_view and maybe_shard_placement is not None:
+                        if strict_view and input_sharded:
                             raise RuntimeError(
-                                f"Attempted to flatten a sharded dimension {i}, ",
+                                f"Attempted to flatten sharded dimension {i}, ",
                                 "but only the leftmost dim of a Flatten can be sharded.",
                             )
-                    elif (
-                        strict_view
-                        and maybe_shard_placement is not None
-                        and global_input_shape[dim.input_dim]
-                        % mesh_sizes[maybe_shard_placement.dim]
-                        != 0
-                    ):
-                        raise RuntimeError(
-                            "Attempted to flatten an unevenly sharded dimension, "
-                            "which would require resharding the input. "
-                            "Please explicitly redistribute the tensor instead."
+                    elif input_sharded:
+                        shard_mesh_dim, shard_placement = (
+                            get_shard_mesh_dim_and_placement(dim)
                         )
+                        tensor_dim_size = global_input_shape[shard_placement.dim]
+                        mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                        if tensor_dim_size % mesh_dim_size != 0:
+                            can_shard_dim = False
+                            if strict_view:
+                                raise RuntimeError(
+                                    f"Attempted to flatten unevenly sharded dimension {i}, "
+                                    "which would require resharding the input. "
+                                    "Please explicitly redistribute the tensor instead."
+                                )
+
                     shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
             dim0 = cmd.input_dims[0]
-            # dim0 can be sharded or not sharded, can't it? should we only return it if its sharded in the placement?
+            # TODO(whc) dim0 can be sharded or not sharded, can't it?
+            # should we only return it if its sharded in the placement?
             return dim0 if isinstance(dim0, InputDim) else None
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
