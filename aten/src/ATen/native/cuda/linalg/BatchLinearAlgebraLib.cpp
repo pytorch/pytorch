@@ -1473,26 +1473,6 @@ if (dtype == at::kFloat) {
 #endif
 }
 
-
-void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#ifdef USE_ROCM
-  // syevj has larger numerical errors than syevd
-  linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-#else
-  if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
-    // Use syevjBatched for batched matrix operation when matrix size <= 32
-    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
-    linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  } else if (eigenvectors.scalar_type() == at::kFloat && eigenvectors.size(-1) >= 32 && eigenvectors.size(-1) <= 512) {
-    // syevj is better than syevd for float32 dtype and matrix sizes 32x32 - 512x512
-    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
-    linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  } else {
-    linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  }
-#endif
-}
-
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
