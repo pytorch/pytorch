@@ -1302,6 +1302,7 @@ class ReduceLROnPlateau(LRScheduler):
         if threshold_mode not in {"rel", "abs"}:
             raise ValueError("threshold mode " + threshold_mode + " is unknown!")
 
+        # the worse value for the chosen mode
         if mode == "min":
             self.mode_worse = inf
         else:  # mode == 'max':
