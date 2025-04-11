@@ -237,7 +237,7 @@ class DynamoExporterTest(common_utils.TestCase):
         input = torch.tensor([1.0, 2.0], dtype=torch.bfloat16)
         onnx_program = self.export(BfloatModel(), (input,), optimize=False)
         initializers = onnx_program.model.graph.initializers.values()
-        self.assertTrue(len(initializers), 2)
+        self.assertEqual(len(initializers), 2)
         for initializer in initializers:
             self.assertEqual(initializer.dtype, ir.DataType.BFLOAT16)
         self.assertEqual(onnx_program.model.graph.inputs[0].dtype, ir.DataType.BFLOAT16)
