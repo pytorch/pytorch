@@ -83,13 +83,17 @@ struct SDPALogicalParams {
       at::native::onednn::undo_broadcast(reshaped_attn_mask);
     }
 
-    if (num_head_q != num_head_kv) { // process GQA because oneDNN GQA requires
-                                     // Q/K/V to be 5D tensor.
+    if (num_head_q != num_head_kv) { // Check whether the attention is a
+                                     // Grouped-Query Attention (GQA)
       TORCH_INTERNAL_ASSERT(
           num_head_q % num_head_kv == 0,
           "Number of heads in key and value must divide the number of heads in query.");
       int group_num = num_head_kv;
       int group_size = num_head_q / num_head_kv;
+      // oneDNN requires the shape of the query tensor to be represented as
+      // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
+      // head_dim_qk]. Please refer to
+      // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
       reshaped_query = query_.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
       reshaped_key = key_.unsqueeze(2);
