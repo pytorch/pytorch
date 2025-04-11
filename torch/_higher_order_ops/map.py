@@ -132,7 +132,7 @@ def map(
     torch.stack(out)
 
     .. warning::
-        `torch.scan` is a prototype feature in PyTorch. It currently
+        `torch._higher_order_ops.map` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -159,7 +159,7 @@ def map(
         const1 = torch.randn(2, 3)
         const2 = torch.randn(2, 3)
         # returns a tensor of shape [2, 2, 3]
-        map(f, xs)
+        torch._higher_order_ops.map(f, xs)
 
     """
     flat_xs, xs_spec = pytree.tree_flatten(xs)
