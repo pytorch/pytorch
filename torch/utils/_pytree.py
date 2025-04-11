@@ -185,6 +185,7 @@ try:
 except importlib.metadata.PackageNotFoundError:
     # optree can not be imported
     _cxx_pytree_exists = False
+    _optree_version = "0.0.0"
 else:
     # optree can be imported
     _cxx_pytree_exists = True
