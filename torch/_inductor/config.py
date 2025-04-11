@@ -156,6 +156,7 @@ static_weight_shapes = True
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
+alignment_asserts = os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -500,6 +501,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -1129,7 +1133,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
