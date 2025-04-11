@@ -9,6 +9,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import xfailIfS390X
 
 
 class TestUtils(TestCase):
@@ -175,6 +176,7 @@ class TestDynamoTimed(TestCase):
         add(torch.rand([10]), torch.rand([10]))
         utils.reset_frame_count()
 
+    @xfailIfS390X
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -455,6 +457,7 @@ class TestDynamoTimed(TestCase):
  'triton_version': None}""",  # noqa: B950
         )
 
+    @xfailIfS390X
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,

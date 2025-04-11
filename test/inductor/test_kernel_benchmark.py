@@ -4,6 +4,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -15,9 +16,11 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
+from torch.testing._internal.common_utils import IS_S390X
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 class TestKernelBenchmark(TestCase):
     device_type = GPU_TYPE
 

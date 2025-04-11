@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
@@ -14,6 +16,7 @@ from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
+    IS_S390X,
     parametrize,
     subtest,
 )
@@ -81,6 +84,7 @@ def boo(x: torch.Tensor) -> None:
     x.sin_()
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
