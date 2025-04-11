@@ -2083,6 +2083,12 @@ class BuiltinVariable(VariableTracker):
         obj: VariableTracker,
         name_var: VariableTracker,
     ):
+        if isinstance(obj, UserDefinedObjectVariable):
+            try:
+                delattr_method = obj.var_getattr(tx, "__delattr__")
+                return delattr_method.call_function(tx, [name_var], {})
+            except (AttributeError, ObservedAttributeError):
+                pass
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx: "InstructionTranslator", obj: VariableTracker):
