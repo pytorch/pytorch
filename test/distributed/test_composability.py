@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skip_but_pass_in_sandcastle_if,
-    TEST_WITH_ROCM,
     skipIfRocm,
 )
 
