@@ -38,8 +38,8 @@ from torch.onnx._internal.exporter import (
     _registration,
     _reporting,
     _tensors,
-    _verification,
     _type_casting,
+    _verification,
 )
 
 
@@ -118,13 +118,18 @@ class TorchTensor(ir.Tensor):
             # The base class will set the shape to the tensor's shape
             shape = None
         super().__init__(
-            tensor, dtype=torch_dtype_to_onnx_dtype(tensor.dtype), shape=shape, name=name
+            tensor,
+            dtype=torch_dtype_to_onnx_dtype(tensor.dtype),
+            shape=shape,
+            name=name,
         )
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            return (
+                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            )
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
@@ -133,7 +138,9 @@ class TorchTensor(ir.Tensor):
         }:
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
-            return _type_casting.unpack_float4x2_as_uint8(self.raw).view(self.dtype.numpy())
+            return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                self.dtype.numpy()
+            )
 
         return self.raw.numpy(force=True)
 
