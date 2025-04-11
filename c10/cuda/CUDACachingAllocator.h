@@ -7,6 +7,7 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <atomic>
 #include <cstddef>
@@ -503,7 +504,7 @@ namespace c10::cuda {
 // An allocator pointer can be passed to the MemPool to define how the
 // allocations should be done in the pool. For example: using a different
 // system allocator such as ncclMemAlloc.
-struct C10_CUDA_API MemPool {
+struct C10_CUDA_API MemPool : torch::CustomClassHolder {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true);
