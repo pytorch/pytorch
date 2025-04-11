@@ -870,7 +870,7 @@ def cat_noop(inputs, dim=0):
 
 @register_noop_decomp(aten.view)
 def view_noop(arg, size):
-    return arg.shape == size
+    return arg.shape == tuple(size)
 
 
 # Note, we also always have a check for identical metadata, which is why these
