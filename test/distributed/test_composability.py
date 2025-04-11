@@ -291,7 +291,6 @@ class ComposabilityTest(MultiProcContinousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, ScheduleClass):
-
         device_mesh = self._build_mesh((2, 2), ("dp", "pp"))
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
