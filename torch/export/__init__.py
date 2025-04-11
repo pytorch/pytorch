@@ -51,13 +51,14 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "AdditionalInputs",
 ]
 
 # To make sure export specific custom ops are loaded
 import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
-from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
+from .dynamic_shapes import AdditionalInputs, Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
     default_decompositions,
     ExportedProgram,
@@ -77,7 +78,7 @@ def export_for_training(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    strict: bool = True,
+    strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -522,9 +523,4 @@ def register_dataclass(
         print(ep)
 
     """
-
-    from torch._export.utils import register_dataclass_as_pytree_node
-
-    return register_dataclass_as_pytree_node(
-        cls, serialized_type_name=serialized_type_name
-    )
+    pytree.register_dataclass(cls, serialized_type_name=serialized_type_name)

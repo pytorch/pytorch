@@ -172,6 +172,15 @@ class StoreTestBase:
     def test_multi_get(self):
         self._test_multi_get(self._create_store())
 
+    def test_clone(self):
+        a = self._create_store()
+        b = a.clone()
+
+        self.assertIsInstance(b, dist.Store)
+
+        a.set("foo", "bar")
+        self.assertEqual(b.get("foo"), b"bar")
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -567,33 +576,6 @@ class LibUvTCPStoreTest(TCPStoreTest):
             addr, world_size, wait_for_workers=False, use_libuv=True
         )
 
-    def test_take_over_listen_socket(self):
-        """
-        override the take_over_listen_socket test in TCPStoreTest.
-        Reason: we have not thoroughly tested libuv TCPStore initialization using
-        open Socket so we decide to not support this use for now.
-        TODO (xilunwu): enable this use case
-        """
-        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen_sock.bind(("localhost", 0))
-        addr, port, *_ = listen_sock.getsockname()
-        listen_fd = listen_sock.detach()
-
-        err_msg_reg = (
-            "^The libuv TCPStore backend does not support "
-            "initialization with an listen fd"
-        )
-
-        with self.assertRaisesRegex(NotImplementedError, err_msg_reg):
-            dist.TCPStore(
-                addr,
-                port,
-                1,
-                is_master=True,
-                master_listen_fd=listen_fd,
-                use_libuv=self._use_libuv,
-            )
-
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -654,6 +636,9 @@ class MyPythonStore(dist.Store):
         if expected == val or val is None:
             val = self.store[key] = newValue
         return val
+
+    def clone(self) -> "MyPythonStore":
+        return self
 
 
 class PythonStoreTest(TestCase):

@@ -45,21 +45,20 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    get_kernel_launch,
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_GPU,
+)
 
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
-
-def _get_func_call() -> str:
-    return "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
-
-
-def _get_kernel_launch() -> str:
-    return "call_triton_" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -672,7 +671,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -899,8 +898,8 @@ class TestMaxAutotune(TestCase):
 
         # mm kernel, and cos kernel
         count = 2 if using_triton_mm else 1
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), count, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -912,8 +911,8 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -1270,7 +1269,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to crash.
         bmreq = _TestBenchmarkRequest(0, crash=True)
@@ -1294,7 +1292,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_timeout(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to timeout.
         bmreq = _TestBenchmarkRequest(0, sleep=120)
@@ -1333,7 +1330,6 @@ class TestTuningProcessPool(TestCase):
             os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
         ):
             tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
 
         choice1 = _TestTritonTemplateCaller(_TestBenchmarkRequest(3.14))
         choice2 = _TestTritonTemplateCaller(_TestBenchmarkRequest(2.718))
@@ -1365,21 +1361,21 @@ class TestPrologueFusion(TestCase):
         )
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(),
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(),
             num_kernels,
             exactly=True,
         ).run(code_str)
 
         if num_allocs is not None:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "empty_strided", num_allocs, exactly=True
             ).run(code_str)
 
         # skip the deallocation check when using cpp_wrapper; most deallocations happen
         # outside of our control via RAIIAtenTensorHandle
         if num_deallocs is not None and not config.cpp_wrapper:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
@@ -1519,8 +1515,8 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
         self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
 
@@ -1529,8 +1525,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
@@ -1553,8 +1549,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 

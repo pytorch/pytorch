@@ -120,25 +120,24 @@ class UvTcpSocket : public UvHandle {
     if (nread > 0) {
       try {
         uv_socket->processBuf(buf, nread);
+        return; // We do free inside processBuf.
       } catch (std::exception& ex) {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
-    } else {
-      // Handle error and EOF cases
-      if (nread < 0) {
-        C10D_DEBUG(
-            "Read callback failed. code:{} name:{} desc:{}",
-            nread,
-            uv_err_name(nread),
-            uv_strerror(nread));
-      } else {
-        C10D_DEBUG("Remote peer closed the connection.");
-      }
+    } else if (nread == UV_EOF) { // Handle EOF cases
+      C10D_DEBUG("Remote peer closed the connection.");
       uv_socket->close();
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      free(buf->base);
+    } else if (nread < 0) { // Handle error and EOF cases
+      C10D_DEBUG(
+          "Read callback failed. code:{} name:{} desc:{}",
+          nread,
+          uv_err_name(nread),
+          uv_strerror(nread));
+      uv_socket->close();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    free(buf->base);
   }
 
  public:
@@ -219,8 +218,8 @@ class UvTcpServer : public UvTcpSocket {
     res->handleReady();
     try {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
-      TORCH_CHECK_WITH(
-          DistStoreError,
+      C10D_CHECK_WITH(
+          SocketError,
           uv_res == 0,
           "Failed to open existing socket. ",
           "socket: ",
@@ -232,6 +231,18 @@ class UvTcpServer : public UvTcpSocket {
           ", message: ",
           uv_strerror(uv_res));
 
+      uv_res =
+          uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
+      C10D_CHECK_WITH(
+          SocketError,
+          uv_res == 0,
+          fmt::format(
+              "The server socket has failed to listen on provided socket. "
+              "socket: {}, code: {}, name: {}, message: {}",
+              socket,
+              uv_res,
+              uv_err_name(uv_res),
+              uv_strerror(uv_res)));
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();

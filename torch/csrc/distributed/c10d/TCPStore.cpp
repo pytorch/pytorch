@@ -250,17 +250,6 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
-
-    if (opts.masterListenFd.has_value()) {
-      // TODO(xilunwu): support this init method after testing
-      constexpr auto* msg =
-          "The libuv TCPStore backend does not support initialization with an listen fd. "
-          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
-          "to \"0\".";
-      C10D_ERROR(msg);
-      C10_THROW_ERROR(NotImplementedError, msg);
-      return;
-    }
   }
 
   Socket::initialize();
@@ -360,6 +349,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 }
 
 TCPStore::~TCPStore() = default;
+
+c10::intrusive_ptr<Store> TCPStore::clone() {
+  TCPStoreOptions opts;
+  opts.port = addr_.port;
+  opts.isServer = false;
+  opts.waitWorkers = false;
+  opts.timeout = timeout_;
+  opts.useLibUV = usingLibUv_;
+
+  return c10::make_intrusive<TCPStore>(addr_.host, opts);
+}
 
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
