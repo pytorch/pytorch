@@ -300,11 +300,18 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
 
 } // namespace
 
-// Map from each communicator to its device index.
-// This map is used when register/deregister cache segments from cache
-// allocator. See design notes below:
-// - Each segment should be registered only to the communicator on the
-//   same device.
+// Map each communicator to the memory pools registered with it.
+// This map is used when the caching allocator allocates or frees segments, in
+// order to register or deregister them with the relevant NCCL communicators.
+// There are two modes to do so:
+// - If TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK=1 then *ALL* segments
+//   will be registered with *ALL* NCCL communicators (for the same device),
+//   even if they were allocated with cudaMalloc (which NCCL doesn't like).
+// - If a MemPool is explicitly registered with a ProcessGroup, then all its
+//   segments (current and future) will be registered with the NCCL communicator
+//   corresponding to the pool's device. This works best if the MemPool is set
+//   up to use ncclMemAlloc (which is exposed by the ProcessGroup).
+// Implementation notes:
 // - We cannot reuse devNCCLCommMap_ in each ProcessGroup because the key may be
 //   ranks rather than device in point-to-point case.
 // - This map has also to be maintained as global variable since the register
@@ -1191,6 +1198,8 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
     auto iter = ncclCommMemPoolMap.find(ncclComm);
     iter->second.insert(pool->id());
   }
+  // We must ensure we're listening for allocator trace events in order to
+  // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto ctx = c10::cuda::MemPoolContext(pool);
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
