@@ -110,14 +110,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  
-  // Convert the boolean parameter to the appropriate integer mode while we wait for 2-week FC window
-  int split_k_mode;
-  if (split_k_one_kernel) {
-    split_k_mode = 1; 
-  } else {
-    split_k_mode = -1;
-  }
 
   int tensor_alpha_mode = 0;
   float alpha = 1.0;
