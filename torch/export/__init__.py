@@ -132,6 +132,9 @@ def export_for_training(
          is passed here.
          WARNING: This option is experimental and use this at your own risk.
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata.
+
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
 
@@ -246,6 +249,9 @@ def export(
          errors. Note that toggling this argument does not affect the resulting IR spec to be
          different and the model will be serialized in the same way regardless of what value
          is passed here.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
