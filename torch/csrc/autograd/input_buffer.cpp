@@ -164,6 +164,7 @@ void InputBuffer::add(
   if (num_dependencies == 1) {
     if (is_accelerator) {
       _wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
+      record_stream_any_impl(var, *opt_consumer_stream);
     }
     TORCH_INTERNAL_ASSERT(current_index == 0);
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
