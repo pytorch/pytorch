@@ -613,7 +613,7 @@ class DTensorTest(DTensorTestBase):
 class DTensorMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     def sub_mesh_assert_equal(self, mesh, exp_in_mesh, exp_out_of_mesh, tensor):
         if self.rank in mesh:
@@ -930,7 +930,7 @@ class DTensorMeshTest(DTensorTestBase):
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     def _create_tensor(self, size):
         # Keep everything deterministic.
