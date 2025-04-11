@@ -12072,6 +12072,31 @@ fn
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(fn(*inputs), inputs[0])
 
+    def test_class_dict_keys(self):
+        """
+        The issue tested in this case was discovered while adding easydict
+        support. The root cause is that tracing `xx.__class__.__dict__.keys()`
+        triggers a graph break. To avoid importing easydict in the test suite,
+        we opted to test this simple case instead. For further details,
+        see https://github.com/pytorch/pytorch/pull/149851.
+        """
+
+        class Foo(dict):
+            f = "foo"
+
+            def __init__(self):
+                for k in self.__class__.__dict__.keys():
+                    if not (k.startswith("__") and k.endswith("__")):
+                        setattr(self, k, getattr(self, k))
+
+        def fn(x):
+            foo = Foo()
+            return x.sin(), foo.f
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
