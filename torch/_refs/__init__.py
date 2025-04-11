@@ -3799,7 +3799,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if guard_or_false(length == a_.shape[idx]):
+        if guard_size_oblivious(length == a_.shape[idx]):
             idx = idx + 1
             continue
 

@@ -4250,6 +4250,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
     def test_suggested_fixes_for_data_dependent_errors_basic(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
         # Just to introduce some indirection: N is a top-level module N that calls
         # module M, defined next.
         class N(torch.nn.Module):
@@ -4263,33 +4267,44 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # example input
         t = torch.tensor([1, 4, 4], dtype=torch.int32)
 
+        # We define a series of versions of M() below. Each version has
+        # raises a data-dependent error that the next version fixes, by
+        # copy-pasting a suggested fix in the error message. The fix is
+        # always a torch.check() on an unresolved condition (or its negation)
+        # on unbacked symints mentioned in the error message.
+        # Note that the suggested fixes are in terms of local variables
+        # near the location of error that "contain" the unbacked symints
+        # in the unresolved condition (either directly or indirectly, e.g.,
+        # inside a list or inside the shape of a tensor).
+
         class M_v0(torch.nn.Module):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
                 return r.view(items[0], items[2])
 
-        if is_non_strict_test(self._testMethodName):
-            error_type = ValueError
-        else:
-            error_type = torch._dynamo.exc.TorchRuntimeError
-
         M = M_v0
         with self.assertRaisesRegex(
             error_type,
-            r"Could not reshape a tensor .*u0, u1.* as a tensor .*u0, u2.*",
+            "The following call raised this error(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "To fix the error, insert one of the following checks before this call.*:\n"
+            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
+            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
         ):
-            export(N(), (t,))
+            export(N(), (t,), strict=strict)
 
         class M_v1(torch.nn.Module):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                torch._check(items[2] == r.shape[1])
+                torch._check(items[1] == items[2])
                 return r.view(items[0], items[2])
 
         M = M_v1
-        export(N(), (t,))
+        ep = export(N(), (t,), strict=strict)
+        ep.module()(t)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -13601,42 +13616,7 @@ def forward(self, q, k, v):
             args = (query, cache, torch.tensor([126]))
             self.assertEqual(ep.module()(*args), Module()(*args))
 
-    def test_successful_unbacked_reshape(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = x.item()
-                m = torch.zeros(n, 5)
-                z = torch.cat([m, y], dim=0)
-                # [5+u0, 5] -> [5, -1]
-                out = z.reshape(5, -1)
-                return out
-
-        x = torch.tensor(5)
-        y = torch.ones(5, 5)
-        ep = export(Foo(), (x, y))
-        ep.module()(x, y)
-        ep.module()(torch.tensor(0), y)
-
-    def test_failed_unbacked_reshape(self):
-        class Foo(torch.nn.Module):
-            def forward(self, xs):
-                xsl = xs.tolist()
-                a, b, c, d = xsl
-                x = torch.zeros(a, b)
-                return x.reshape(c, d)
-
-        if is_non_strict_test(self._testMethodName):
-            error_type = ValueError
-        else:
-            error_type = torch._dynamo.exc.TorchRuntimeError
-
-        xs = torch.tensor([4, 6, 4, 6])
-        with self.assertRaisesRegex(
-            error_type,
-            "Could not reshape a tensor with shape .*u0, u1.* as a tensor with shape .*u2, u3.*",
-        ):
-            export(Foo(), (xs,))
-
+    def test_unbacked_reshape(self):
         class Foov2(torch.nn.Module):
             def forward(self, xs):
                 xsl = xs.tolist()
@@ -13646,6 +13626,7 @@ def forward(self, q, k, v):
                 x = torch.zeros(a, b)
                 return x.reshape(c, d)
 
+        xs = torch.tensor([4, 6, 4, 6])
         ep = export(Foov2(), (xs,))
         ep.module()(xs)
 
