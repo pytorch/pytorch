@@ -27,6 +27,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+funcol = torch.ops.c10d_functional
+
+
 def scale_for_fp8(
     t: torch.Tensor, scale_shape: tuple[int]
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -500,6 +503,61 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_grouped_mm(self):
+        # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
+        # Here we only test the 2D x 3D Tensor Parallel use case in an MoE layer.
+        # More tests need to be added.
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        comm_mode = CommDebugMode()
+        dtype = torch.bfloat16
+
+        inp = torch.rand(
+            64, 16, device=self.device_type, dtype=dtype, requires_grad=True
+        )
+        w1 = torch.rand(
+            2, 16, 32, device=self.device_type, dtype=dtype, requires_grad=True
+        )
+        w2 = torch.rand(
+            2, 32, 16, device=self.device_type, dtype=dtype, requires_grad=True
+        )
+        offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
+
+        h = torch._grouped_mm(inp, w1, offs=offs)
+        out = torch._grouped_mm(h, w2, offs=offs)
+
+        dist_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        # colwise sharded
+        dist_w1 = distribute_tensor(w1, device_mesh, [Shard(2)])
+        # rowwise sharded
+        dist_w2 = distribute_tensor(w2, device_mesh, [Shard(1)])
+        dist_offs = distribute_tensor(offs, device_mesh, [Replicate()])
+
+        with comm_mode:
+            dist_h = torch._grouped_mm(dist_inp, dist_w1, offs=dist_offs)
+            dist_out = torch._grouped_mm(dist_h, dist_w2, offs=dist_offs)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertTrue(dist_out.placements[0].is_partial())
+            self.assertEqual(dist_out.full_tensor(), out)
+
+        out_grad = torch.ones_like(out)
+        out.backward(out_grad)
+
+        dist_out = dist_out.redistribute(device_mesh, [Shard(0)])
+        dist_out_grad = distribute_tensor(out_grad, device_mesh, [Shard(0)])
+
+        with comm_mode:
+            dist_out.backward(dist_out_grad)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                1,
+            )
+        self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
+        self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
+        self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
 
 
 if __name__ == "__main__":
