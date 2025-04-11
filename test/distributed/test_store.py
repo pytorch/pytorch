@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
 
@@ -147,6 +148,55 @@ class StoreTestBase:
 
     def test_append(self):
         self._test_append(self._create_store())
+
+    def test_queues(self):
+        store = self._create_store()
+
+        try:
+            store.queue_push("test_queue_support", "1")
+        except NotImplementedError:
+            self.skipTest("Store does not support queues")
+
+        self.assertFalse(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 0)
+
+        store.queue_push("foo", "1")
+        store.queue_push("foo", "2")
+
+        self.assertTrue(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 2)
+        store.wait(["foo"])
+
+        self.assertEqual(store.queue_pop("foo"), b"1")
+        self.assertEqual(store.queue_pop("foo"), b"2")
+
+        self.assertFalse(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 0)
+
+        store.set_timeout(timedelta(seconds=0.01))
+        with self.assertRaisesRegex(DistStoreError, "timeout"):
+            store.queue_pop("non_existant")
+
+        def worker_a():
+            local_store = store.clone()
+
+            local_store.queue_push("a", "a1")
+            self.assertEqual(local_store.queue_pop("b"), b"b1")
+
+        def worker_b():
+            local_store = store.clone()
+
+            self.assertEqual(local_store.queue_pop("a"), b"a1")
+            local_store.queue_push("b", "b1")
+
+        # test bidirectional communication
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(worker_a),
+                pool.submit(worker_b),
+            ]
+            for fut in futures:
+                fut.result()
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
