@@ -573,16 +573,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert untuned_gemm_temp[4] == "ld"
         [lda, ldb, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
-    # We cannot handle submatrices in offline tuning
+    # Detect subMatrix case
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
         subMatrix = False
     else:
         subMatrix = True
-        warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
-        )
-    #     return
 
     if op_sig == "GemmTunableOp":
         # Warnings for unsupported cases:
@@ -609,6 +604,13 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             warnings.warn(
                 "Offline tuning is not support for this GEMM. Use online tuning instead. "
                 + f"Skipped tuning for: {untuned_gemm[1]}"
+            )
+            return
+
+        if subMatrix:
+            warnings.warn(
+            "Offline tuning is not supported on submatrices. Use online tuning instead. "
+            + f"Skipped tuning for: {untuned_gemm[1]}"
             )
             return
 
@@ -687,6 +689,13 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
         assert transA != transB
+
+        if subMatrix:
+            warnings.warn(
+            "Offline tuning is not supported on submatrices. Use online tuning instead. "
+            + f"Skipped tuning for: {untuned_gemm[1]}"
+            )
+            return
 
         X = (
             torch.rand(k, m, dtype=dtype, device=deviceid).t()
