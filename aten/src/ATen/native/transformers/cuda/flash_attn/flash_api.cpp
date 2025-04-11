@@ -29,6 +29,7 @@
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/pad.h>
 #include <ATen/ops/zeros.h>
+#include <torch/serialize.h>
 #endif
 
 
@@ -425,6 +426,17 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+
+    // danvm
+    torch::save(q, "/home/danvm/pytorch/fwd_Q.pt");
+    torch::save(k, "/home/danvm/pytorch/fwd_K.pt");
+    torch::save(v, "/home/danvm/pytorch/fwd_V.pt");
+    // std::cout << "Q fwd: " << q << std::endl;
+    // std::cout << "K fwd: " << k << std::endl;
+    // std::cout << "V fwd: " << v << std::endl;
+    TORCH_CHECK(q.isnan().any().item<bool>() == true, "fwd Q han NaN");
+    TORCH_CHECK(k.isnan().any().item<bool>() == true, "fwd K han NaN");
+    TORCH_CHECK(v.isnan().any().item<bool>() == true, "fwd V han NaN");
 
     if (softcap > 0.f) { TORCH_CHECK(p_dropout == 0.f, "Softcapping does not support dropout for now"); }
 
@@ -933,6 +945,16 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     } else {
         dv = at::empty_like(v);
     }
+
+    torch::save(q, "/home/danvm/pytorch/bwd_Q.pt");
+    torch::save(k, "/home/danvm/pytorch/bwd_K.pt");
+    torch::save(v, "/home/danvm/pytorch/bwd_V.pt");
+    // std::cout << "Q fwd: " << q << std::endl;
+    // std::cout << "K fwd: " << k << std::endl;
+    // std::cout << "V fwd: " << v << std::endl;
+    TORCH_CHECK(q.isnan().any().item<bool>() == true, "bwd Q han NaN");
+    TORCH_CHECK(k.isnan().any().item<bool>() == true, "bwd K han NaN");
+    TORCH_CHECK(v.isnan().any().item<bool>() == true, "bwd V han NaN");
 
     // bool loop = seqlen_k > blocksize_c;
     // TODO: change later, for now set to true for simplicity
