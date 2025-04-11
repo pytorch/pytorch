@@ -13042,6 +13042,8 @@ def forward(self, x):
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
@@ -13117,6 +13119,13 @@ def forward(self, x):
         self.assertEqual(num_asserts, 1)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for .* Eq\(Mod\(.*\), 0\) (.*\n)*.*" + \
+            r"torch\/_prims_common\/__init__.py:(.*\n)*.*" + \
+            r"shape .* is invalid for input of size .*",
+        ):
+            ep.module()(torch.randn(9, 9))
 
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict

@@ -1514,7 +1514,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
+def expect_true(a: Union[SymBool, bool], skip: int = 0, msg: Optional[str] = None) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1523,7 +1523,7 @@ def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
+            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, msg
         )
     assert type(a) is bool, a
     return a
@@ -2285,8 +2285,9 @@ def _lru_cache(
 @dataclass(frozen=True)
 class RuntimeAssert:
     expr: SympyBoolean
-    msg: str = field(repr=False)
+    loc: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
+    msg: Optional[str] = field(repr=False)
 
 
 # Used for printing SymExprs in compile_fx
@@ -7146,7 +7147,7 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
+        self, orig_expr: SympyBoolean, loc: str, fx_node: Optional[torch.fx.Node] = None, msg: Optional[str] = None
     ) -> bool:
         """Create an assert that is checked at runtime
 
@@ -7205,8 +7206,17 @@ class ShapeEnv:
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
+
+            # find traceback for assert
             stack = CapturedTraceback.extract(skip=1)
-            ra = RuntimeAssert(expr, msg, stack)
+            if stack:
+                summary = stack.summary()
+                idx = len(summary) - 1
+                while idx > 0 and summary[idx].filename in uninteresting_files():
+                    idx -= 1
+                loc = f"{summary[idx].filename}:{summary[idx].lineno}"
+
+            ra = RuntimeAssert(expr, loc, stack, msg)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
                 (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
