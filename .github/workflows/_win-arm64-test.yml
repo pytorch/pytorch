@@ -134,7 +134,8 @@ jobs:
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
-          python -mpip install $(echo *.whl)
+          for %f in (*.whl) do python -m pip install "%f"
+
           popd
           cd pytorch
           
@@ -143,5 +144,3 @@ jobs:
 
           call "%VS_PATH%" arm64
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
-
-          
