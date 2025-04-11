@@ -216,7 +216,7 @@
 
 namespace at::meta {
 
-inline c10::MemoryFormat cat_compute_output_memory_format(
+static inline c10::MemoryFormat cat_compute_output_memory_format(
     const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
@@ -1119,7 +1119,7 @@ std::vector<Tensor> tensor_split_sections_symint(
 }
 
 template <typename T>
-std::vector<Tensor> _tensor_split_indices(
+static std::vector<Tensor> _tensor_split_indices(
     const Tensor& self,
     ArrayRef<T> indices,
     int64_t dim) {
@@ -1417,7 +1417,7 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-inline void setStridedUnchecked(
+static inline void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
@@ -1922,7 +1922,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
 template <typename Vec>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
@@ -1958,7 +1958,7 @@ Tensor alias_with_sizes_and_strides(
 // SymIntArrayRef/ArrayRef<c10::SymInt> and
 // SmallVector<c10::SymInt>/SymDimVector
 template <template <typename...> typename Container>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Container<c10::SymInt>& sizes,
     const Container<c10::SymInt>& strides) {
@@ -3290,7 +3290,7 @@ static inline std::vector<Tensor> get_stack_inputs(
   return inputs;
 }
 
-bool inline maybe_native_stack(
+static bool inline maybe_native_stack(
     Tensor& result,
     TensorList tensors,
     int64_t dim) {
@@ -4021,7 +4021,7 @@ Tensor& squeeze_(Tensor& self, IntArrayRef dims) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), inferred_size);

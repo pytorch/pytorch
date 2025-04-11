@@ -806,7 +806,7 @@ Tensor sparse_compressed_to_dense(
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_downsize(
+static inline SymDimVector compute_strides_for_view_dtype_downsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -832,7 +832,7 @@ inline SymDimVector compute_strides_for_view_dtype_downsize(
 
 // Computes the strides for view_dtype output when the view dtype is
 // larger than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_upsize(
+static inline SymDimVector compute_strides_for_view_dtype_upsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -1989,7 +1989,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
  * Modified to ensure sorted BSR column indices.
  */
 template <class index_t, class scalar_t, bool compressed_rows>
-void _compressed_to_block_compressed_cpu_kernel(
+static void _compressed_to_block_compressed_cpu_kernel(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2086,7 +2086,7 @@ void _compressed_to_block_compressed_cpu_kernel(
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  */
 template <class index_t>
-index_t compressed_count_blocks(
+static index_t compressed_count_blocks(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2110,7 +2110,7 @@ index_t compressed_count_blocks(
 }
 
 template <Layout target_layout>
-Tensor _compressed_to_block_compressed_cpu(
+static Tensor _compressed_to_block_compressed_cpu(
     const Tensor& self,
     IntArrayRef blocksize) {
   static_assert(

@@ -44,7 +44,7 @@ constexpr int64_t kReasonableMaxDim = 1000000;
 } // namespace
 
 template <int kSpatialDim = 2>
-bool ConvDimChecks(
+static bool ConvDimChecks(
     int64_t act_dims,
     int64_t stride_dims,
     int64_t padding_dims,
@@ -95,7 +95,7 @@ bool ConvDimChecks(
   return true;
 }
 
-inline int64_t compute_deconv_shape(int64_t input,
+static inline int64_t compute_deconv_shape(int64_t input,
                                     int64_t kernel,
                                     int64_t stride,
                                     int64_t input_padding,
@@ -107,7 +107,7 @@ inline int64_t compute_deconv_shape(int64_t input,
 }
 
 template <int64_t kSpatialDim>
-at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
+static at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
     int64_t N, int64_t M,
     const std::vector<int64_t>& input_shape,
     const std::vector<int64_t>& kernel,
@@ -178,7 +178,7 @@ at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
 #ifdef USE_PYTORCH_QNNPACK
 
 template <size_t kSpatialDim>
-std::array<int64_t, kSpatialDim> MakeInputShape(
+static std::array<int64_t, kSpatialDim> MakeInputShape(
     int64_t D,
     int64_t H,
     int64_t W);
