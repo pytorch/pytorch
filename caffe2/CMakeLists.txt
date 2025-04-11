@@ -1378,6 +1378,7 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/hcc/include
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
+    ${ROCM_SOURCE_DIR}/hipsparselt/include
     ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
