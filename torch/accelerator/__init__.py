@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -17,6 +17,7 @@ __all__ = [
     "current_stream",
     "device_count",
     "is_available",
+    "memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
@@ -189,3 +190,21 @@ def synchronize(device: _device_t = None, /) -> None:
     """
     device_index = _get_device_index(device, True)
     torch._C._accelerator_synchronizeDevice(device_index)
+
+
+def memory_stats(device: _device_t = None) -> dict[str, Any]:
+    r"""Return the current memory stats for a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        dict[str, int]: the current memory stats for a given device.
+    """
+    acc = current_accelerator()
+    if acc is None:
+        return {}
+    mod = torch.get_device_module(acc)
+    return mod.memory_stats(device)
