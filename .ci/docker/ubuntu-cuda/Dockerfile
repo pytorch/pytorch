@@ -91,6 +91,8 @@ RUN rm install_cmake.sh
 
 ARG TRITON
 
+ARG CUDA_VERSION
+
 FROM base as triton-builder
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
@@ -100,10 +102,37 @@ COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN bash ./install_triton.sh
 
+# Install ccache/sccache (do this last, so we get priority in PATH)
+FROM base as sccache
+COPY ./common/install_cache.sh install_cache.sh
+RUN bash ./install_cache.sh
+RUN rm install_cache.sh
+
+FROM base as nccl
+# Install NCCL
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash install_nccl.sh
+
 FROM base as final
 COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
+RUN if [ -n "${TRITON}" ]; then pip install /opt/triton/*.whl; fi
 RUN rm -rf /opt/triton
+
+COPY --from=sccache /opt/cache /opt/cache
+ENV PATH /opt/cache/bin:$PATH
+
+COPY --from=nccl /usr/local/cuda /usr/local/cuda
+
+ENV USE_SYSTEM_NCCL=1
+ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
+
+RUN chown -R jenkins:jenkins /opt/conda
+
+# Install ccache/sccache (do this last, so we get priority in PATH)
+ENV PATH /opt/cache/bin:$PATH
+ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 ARG HALIDE
 # Build and install halide
@@ -112,16 +141,6 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/halide.txt halide.txt
 RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
-
-# Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
-# See https://github.com/pytorch/pytorch/issues/82174
-# TODO(sdym@fb.com):
-# check if this is needed after full off Xenial migration
-ENV CARGO_NET_GIT_FETCH_WITH_CLI true
-RUN bash ./install_cache.sh && rm install_cache.sh
-ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh
@@ -158,15 +177,6 @@ COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash install_cusparselt.sh
 RUN rm install_cusparselt.sh
 
-# Install NCCL
-ARG CUDA_VERSION
-COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
-RUN bash install_nccl.sh
-RUN rm install_nccl.sh /ci_commit_pins/nccl-cu*
-ENV USE_SYSTEM_NCCL=1
-ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 # Install CUDSS
 ARG CUDA_VERSION

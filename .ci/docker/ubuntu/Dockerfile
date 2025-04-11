@@ -49,19 +49,63 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
-# Install cuda and cudnn
+# Needed for sccache
+COPY ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+ENV OPENSSL_DIR /opt/openssl
+RUN rm install_openssl.sh
+
+ARG TRITON
+ARG TRITON_CPU
+
+ARG SKIP_SCCACHE_INSTALL
+
 ARG CUDA_VERSION
+
+FROM base AS cuda
+# Install cuda and cudnn
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu*
+
+# Create a separate stage for building Triton and Triton-CPU.  install_triton
+# will check for the presence of env vars
+FROM base as triton-builder
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton.txt triton.txt
+COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
+RUN bash ./install_triton.sh
+
+# Install ccache/sccache (do this last, so we get priority in PATH)
+FROM base as sccache
+COPY ./common/install_cache.sh install_cache.sh
+RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
+RUN rm install_cache.sh
+
+FROM base as final
+COPY --from=triton-builder /opt/triton /opt/triton
+RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; fi
+RUN rm -rf /opt/triton
+
+COPY --from=sccache /opt/cache /opt/cache
+
+COPY --from=cuda /usr/local/cuda /usr/local/cuda
+COPY --from=cuda /usr/local/nvidia /usr/local/nvidia
+
+RUN if [ -z "${CUDA_VERSION}" ]; then rm -rf /usr/local/cuda /usr/local/nvidia; fi
+
+RUN chown -R jenkins:jenkins /opt/conda
+
 ENV DESIRED_CUDA ${CUDA_VERSION}
+
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 # No effect if cuda not installed
 ENV USE_SYSTEM_NCCL=1
 ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
-
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -100,12 +144,6 @@ COPY ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
-COPY ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
-
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
@@ -113,23 +151,6 @@ COPY ci_commit_pins/huggingface.txt huggingface.txt
 COPY ci_commit_pins/timm.txt timm.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
-
-ARG TRITON
-ARG TRITON_CPU
-
-# Create a separate stage for building Triton and Triton-CPU.  install_triton
-# will check for the presence of env vars
-FROM base as triton-builder
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/triton.txt triton.txt
-COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
-RUN bash ./install_triton.sh
-
-FROM base as final
-COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
-RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
 # Build and install executorch
@@ -160,13 +181,6 @@ RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
 
-# Install ccache/sccache (do this last, so we get priority in PATH)
-ARG SKIP_SCCACHE_INSTALL
-COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
-RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
-RUN rm install_cache.sh
-
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh
 COPY ./java/jni.h jni.h
@@ -190,6 +204,7 @@ RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; 
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 ENV CUDA_PATH /usr/local/cuda
+ENV PATH /opt/cache/bin:$PATH
 
 USER jenkins
 CMD ["bash"]
