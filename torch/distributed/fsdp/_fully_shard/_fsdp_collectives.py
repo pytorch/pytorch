@@ -42,7 +42,7 @@ lib.define(
         SymInt world_size,
         SymInt rank,
         ScalarType dtype,
-        Device device,
+        Device device
     ) -> (Tensor, Tensor)
     """
 )
@@ -578,7 +578,9 @@ def _get_gradient_divide_factors(
 ) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
-    prefer_avg = reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia"
+    prefer_avg = (
+        reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia"
+    )
     op_to_use = os.getenv("TORCH_FSDP2_REDUCE_OP", "AVG" if prefer_avg else "SUM")
     if op_to_use == "AVG":
         return None, None

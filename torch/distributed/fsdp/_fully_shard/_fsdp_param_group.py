@@ -458,7 +458,7 @@ class FSDPParamGroup:
                 self.all_reduce_grads,
                 self._partial_reduce_output,
                 self._all_reduce_hook,
-                self.comm_ctx.mempool
+                self.comm_ctx.mempool,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
