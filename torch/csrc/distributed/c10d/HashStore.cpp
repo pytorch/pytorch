@@ -9,6 +9,10 @@
 
 namespace c10d {
 
+c10::intrusive_ptr<Store> HashStore::clone() {
+  return c10::intrusive_ptr<Store>::unsafe_reclaim_from_nonowning(this);
+}
+
 void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   std::unique_lock<std::mutex> lock(m_);
   map_[key] = data;

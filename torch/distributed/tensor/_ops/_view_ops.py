@@ -15,13 +15,11 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
 )
 from torch.distributed.tensor._ops.utils import (
-    generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 
@@ -36,9 +34,6 @@ class DimSpec:
 
     def inputs(self) -> Iterable["DimSpec"]:
         return ()
-
-    def concrete_shape(self, input_shape: Shape):
-        raise NotImplementedError
 
 
 # Rules that map each dimension of the output to dimensions of the input tensor
@@ -55,9 +50,6 @@ class InputDim(DimSpec):
     """Output dimension maps directly to an input dimension."""
 
     input_dim: int
-
-    def concrete_shape(self, input_shape: Shape):
-        return input_shape[self.input_dim]
 
 
 @dataclass
@@ -126,9 +118,6 @@ class Flatten(DimSpec):
 
     def inputs(self) -> Iterable[DimSpec]:
         return self.input_dims
-
-    def concrete_shape(self, input_shape: Shape) -> Shape:
-        return (prod(s.concrete_shape(input_shape) for s in self.input_dims),)
 
 
 @dataclass
@@ -263,9 +252,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    assert (
-        len(sizes) >= ndim
-    ), f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
+    assert len(sizes) >= ndim, (
+        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
+    )
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -284,9 +273,9 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        assert (
-            total_size % size == 0
-        ), f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
+        assert total_size % size == 0, (
+            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
+        )
         return tuple(s if s != -1 else missing_size for s in sizes)
     assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
@@ -452,21 +441,6 @@ def dim_reduction(
     )
 
 
-def compute_shape(input_shape: Shape, output_rules: DimMap) -> Shape:
-    """
-    Given a DimMap describing how each output dimension is created from given input dimensions, and a concrete
-    input shape, compute the concrete output shape
-    """
-    output_shape = []
-    for rule in output_rules:
-        new_dim_shape = rule.concrete_shape(input_shape)
-        assert (
-            len(new_dim_shape) == 1
-        ), f"top level output rules should describe a single dimension, but got {rule=}"
-        output_shape.append(new_dim_shape[0])
-    return Shape(output_shape)
-
-
 dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.atleast_1d: lambda x: dim_pad_left(x.ndim, 1),
     torch.atleast_2d: lambda x: dim_pad_left(x.ndim, 2),
@@ -498,6 +472,7 @@ def propagate_shape_and_sharding(
     global_input_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
+    strict_view: bool = False,
 ) -> tuple[Sequence[Placement], Sequence[Placement]]:
     """
     Determine input target sharding and output sharding based on
@@ -525,19 +500,63 @@ def propagate_shape_and_sharding(
         for inp in cmd.inputs():
             collect_used_inputs(inp)
 
+    # TODO: make this function throw an error if any step in the 'rule' involves flattening together dimensions that
+    # are not replicated.
+    # The 'rules' tell us which output dims will exist,
+    # and by recursing through them we learn which input dims they are built from (??)
+    # but also, we assume tensor dims that are not part of the output can not be sharded in the target sharding
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(global_input_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
+    def is_sharded(input_dim):
+        for placement in input_src_placements:
+            if isinstance(placement, Shard) and placement.dim == input_dim:
+                return True
+        return False
+
+    def maybe_get_shard_placement(input_dim) -> Optional[Shard]:
+        for placement in input_src_placements:
+            if isinstance(placement, Shard) and placement.dim == input_dim:
+                return placement
+        return None
+
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
+        # This literally determines which dims should be sharded both the input_tgt and output placements
+        # - if an input dim is used in an output dim, and its sharded in the input, it will stay sharded
+        # - if an input dim is replicated and used in an output dim, ???
+        # - if an input dim is not used in an output dim, but it is sharded in the input
+        # WE HAVE TO REPLICATE IT (why? somethihng about its going to disappear?)
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
-            for dim in cmd.input_dims[1:]:
+            for i, dim in enumerate(cmd.input_dims):
                 if isinstance(dim, InputDim):
-                    shardable_dims[dim.input_dim] = [False] * mesh_ndim
+                    can_shard_dim = True
+                    maybe_shard_placement = maybe_get_shard_placement(dim.input_dim)
+                    if i > 0:
+                        can_shard_dim = False
+                        if strict_view and maybe_shard_placement is not None:
+                            raise RuntimeError(
+                                f"Attempted to flatten a sharded dimension {i}, ",
+                                "but only the leftmost dim of a Flatten can be sharded.",
+                            )
+                    elif (
+                        strict_view
+                        and maybe_shard_placement is not None
+                        and global_input_shape[dim.input_dim]
+                        % mesh_sizes[maybe_shard_placement.dim]
+                        != 0
+                    ):
+                        raise RuntimeError(
+                            "Attempted to flatten an unevenly sharded dimension, "
+                            "which would require resharding the input. "
+                            "Please explicitly redistribute the tensor instead."
+                        )
+                    shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
             dim0 = cmd.input_dims[0]
+            # dim0 can be sharded or not sharded, can't it? should we only return it if its sharded in the placement?
             return dim0 if isinstance(dim0, InputDim) else None
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
@@ -562,9 +581,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                assert (
-                    out_size % submesh_size == 0
-                ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
+                assert out_size % submesh_size == 0, (
+                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
+                )
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -608,8 +627,9 @@ def register_op_strategy_map(
       (1) define the way input dims are split/combined to form output dims (dim_maps)
       (2) register a strategy for the op schema that uses the dim_map as a sharding prop rule
 
-    strict_view: if True, we will error out if the dim_map produces an illegal sharding (see https://pytorch.org/docs/stable/distributed.tensor.html) # TODO update to correct link
-       Currently, this should be set to 'true' for any "view" ops.  We could decide to diverge behavior for "reshape" ops which could perform a redistribute to correct illegal sharding.
+    strict_view: if True, we will error out if the view-operation would require resharding the input.
+       Currently, this should be set to 'true' for any "view" ops.
+       We could diverge behavior for "reshape" ops which could perform a redistribute implicitly.
     """
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
@@ -626,30 +646,13 @@ def register_op_strategy_map(
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
 
-            expected_input_local_shape, _ = compute_local_shape_and_global_offset(
-                global_in_shape, mesh, input_src_spec.placements
-            )
-            new_global_shape = compute_shape(global_in_shape, rules)
-
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
                 input_src_spec.placements,
                 tuple(global_in_shape),
                 rules,
                 mesh.shape,
+                strict_view,
             )
-            new_local_shape, _ = compute_local_shape_and_global_offset(
-                new_global_shape, mesh, output_placements
-            )
-            if new_local_shape != expected_input_local_shape:
-                if strict_view:
-                    raise RuntimeError(
-                        f"Invalid View operation, would require resharding to match existing local_tensor shape {expected_input_local_shape} with new local_tensor shape {new_local_shape}, but View ops are not allowed to perform resharding."
-                    )
-                else:
-                    raise NotImplementedError(
-                        "Resharding not yet implemented for non-view ops like reshape"
-                    )
-            print(f"{new_local_shape=}")
 
             # TODO: optimize this. we shouldn't simply blindly replicate
             #       unshardable dims ...
@@ -660,11 +663,11 @@ def register_op_strategy_map(
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
             )
-            redistribute_costs = [
-                generate_redistribute_costs(input_strategy, input_tgt_spec)
-            ]
+            redistribute_costs: list[list[float]] = []
 
-            # TODO(whc) should attach propagated tensor_meta. we now compute the new shape, so maybe its as simple as copying the rest of tensor_meta from old tensor and changing the shape?
+            # TODO(whc) should attach propagated tensor_meta.
+            # we now compute the new shape,
+            # so maybe its as simple as copying the rest of tensor_meta from old tensor and changing the shape?
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
                 PlacementStrategy(
@@ -682,7 +685,10 @@ register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
-    aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1, strict_view=True)
+    aten.view.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)

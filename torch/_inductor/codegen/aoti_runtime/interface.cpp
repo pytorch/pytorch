@@ -205,6 +205,37 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     { *dtype = container->constant_dtype(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto constants_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { const auto ret = container->extract_constants_map(use_inactive);
+      for (const auto& pair: ret) {
+        constants_map->emplace(pair.first, pair.second);
+      }
+    })
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        *input_map, use_inactive, validate_full_update, /* user_managed = */ true);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
@@ -227,6 +258,16 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           constant_map_handle,
           /*use_inactive*/ true,
           /*validate_full_update*/ true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->free_inactive_constant_buffer();
+  })
 }
 
 AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
