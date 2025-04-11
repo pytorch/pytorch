@@ -31,6 +31,7 @@ jobs:
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "m1-24-macos15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "m1-pro-32-macos15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "m2-max-96-macos15" },
         ]}
