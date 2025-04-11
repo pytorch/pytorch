@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Optional
 
-import numpy as np
-
 import torch
 import torch.nn.functional as F
 
@@ -213,6 +211,8 @@ def conv_unfold_weight_grad_sample(
     groups,
     func,
 ):
+    import numpy as np
+
     n = input.shape[0]
     in_channels = input.shape[1]
 
@@ -318,6 +318,9 @@ def unfold3d(
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """
+
+    import numpy as np
+
     if len(tensor.shape) != 5:
         raise ValueError(
             f"Input tensor must be of the shape [B, C, D, H, W]. Got{tensor.shape}"

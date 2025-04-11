@@ -184,7 +184,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _register_fake(self, op_name, fn, _stacklevel=1, *, _allow_override=False):
+    def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
         if torch._running_with_deploy():
             _library.utils.warn_deploy()
@@ -212,7 +212,7 @@ class Library:
             func_to_register = fn
 
         handle = entry.fake_impl.register(
-            func_to_register, source, _allow_override=_allow_override
+            func_to_register, source, lib=self, allow_override=allow_override
         )
         self._registration_handles.append(handle)
 
@@ -293,7 +293,7 @@ class Library:
         self._op_impls.add(key)
 
     def impl(
-        self, op_name, fn, dispatch_key="", *, with_keyset=False, _allow_override=False
+        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=False
     ):
         r"""Registers the function implementation for an operator defined in the library.
 
@@ -305,6 +305,11 @@ class Library:
                           the dispatch key that the library was created with.
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+            allow_override: Flag controlling if we want to override an
+                         existing registered kernel implementation. This is by
+                         default off, and will error you're trying to register a
+                         kernel to a dispatch key with a kernel already
+                         registered.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -336,7 +341,7 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if (not _allow_override) and key in _impls:
+        if (not allow_override) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(
@@ -920,7 +925,7 @@ def register_fake(
     *,
     lib: Optional[Library] = None,
     _stacklevel: int = 1,
-    _allow_override: bool = False,
+    allow_override: bool = False,
 ):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
@@ -944,6 +949,18 @@ def register_fake(
 
     For a detailed guide on custom ops, please see
     https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        func: Fake tensor implementation.
+        lib (Optional[Library]): Library to register the fake tensor to.
+        allow_override: Flag controlling if we want to override an
+                        existing registered fake impl. This is by default off,
+                        and will error you're trying to register a fake impl to
+                        an operator that already has a fake impl. This also only
+                        applies if the custom operator was not created via
+                        torch.library.custom_op, as overriding and existing fake
+                        impl is already allowed.
 
     Examples:
         >>> import torch
@@ -1026,7 +1043,7 @@ def register_fake(
         else:
             use_lib = lib
         use_lib._register_fake(
-            op_name, func, _stacklevel=stacklevel + 1, _allow_override=_allow_override
+            op_name, func, _stacklevel=stacklevel + 1, allow_override=allow_override
         )
         return func
 
