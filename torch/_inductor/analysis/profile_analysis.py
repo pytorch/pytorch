@@ -720,7 +720,6 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.diff:
-        # todo add name to diff
         p1 = JsonProfile(args.diff[0], int(args.diff[1]), args.diff[2])
         p1.augment_trace()
         p2 = JsonProfile(args.diff[3], int(args.diff[4]), args.diff[5])

@@ -235,7 +235,7 @@ class TestAnalysis(TestCase):
     def test_augment_trace_helper(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
-        expected_flops = [4096000, 4096000, 223552896, 223552896,0,0,0]
+        expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
     @dtypes(torch.float, torch.double)
@@ -254,7 +254,7 @@ class TestAnalysis(TestCase):
 
     @dtypes(torch.float, torch.double)
     def test_augment_trace_against_flop_counter(self, device, dtype):
-        if device == 'cpu':
+        if device == "cpu":
             return
         om = omni_model(device, dtype)
         comp_omni = torch.compile(
@@ -301,12 +301,6 @@ class TestAnalysis(TestCase):
                     event["args"]["kernel_flop"],
                     flop_counts["Global"][torch.ops.aten.bmm],
                 )
-            # TODO fix convolution
-            # TODO transposed convolution
-            # if event['name'].startswith('aten::convolution'):
-            #     print(event['args']['kernel_flops'])
-            #     self.assertEqual(event['args']['kernel_flops'], flop_counts['Global'][torch.ops.aten.convolution])
-            # self.assertEqual(out_profile['traceEvents'][i]['args']['kernel_flops'], expected_flops[i])
 
 
 instantiate_device_type_tests(TestAnalysis, globals())
