@@ -78,7 +78,7 @@ def export_for_training(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    strict: bool = True,
+    strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
