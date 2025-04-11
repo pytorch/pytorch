@@ -1944,7 +1944,7 @@ def cpp_prefix() -> str:
 _libgomp: Optional[CDLL] = None
 
 
-def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
+def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, None]:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
     def convert_arg(arg: Any) -> Any:
@@ -1978,15 +1978,18 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         del converted_args[-len(kwargs) :]
 
     result = func(*converted_args, **kwargs)
+    if result is None:
+        return None
+
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
         for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
-    else:
-        assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
-        return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
+
+    assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
+    return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
 # Precompiled headers are persistent past program runtime, but associated with one
@@ -2007,15 +2010,16 @@ def _precompile_header(
     )
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
-    # us to properly invalidate the file cache when any header dependency changes.
+    # us to properly invalidate the file cache when any header dependency changes.  This
+    # is thread-safe, as each thread will get its own temporary directory.
     #
     # N.B. we can't use NamedTemporaryFile here because Windows errors out on attempts
     # to read from a file with an open write handle.
     with tempfile.TemporaryDirectory() as preprocessing_dir:
-        preprocessing_header = Path(preprocessing_dir) / "header.h"
+        preprocessing_header = Path(preprocessing_dir) / "header.hpp"
         preprocessing_header.write_text(f"#include <{header}>\n")
         preprocessor = CppBuilder(
-            name=str(preprocessing_header),
+            name=str(preprocessing_header)[:-4],  # strip off the .hpp extension
             sources=str(preprocessing_header),
             BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
         )
