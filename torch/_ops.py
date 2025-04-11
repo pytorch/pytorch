@@ -306,6 +306,24 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)
 
+    def py_autograd_impl(
+        self, fn: Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]
+    ) -> Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]:
+        def maybe_run_autograd(op, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+            if not torch.is_grad_enabled() or pytree.tree_all_only(
+                torch.Tensor,
+                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                (*args, kwargs),
+            ):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return self(op, *args, **kwargs)
+
+            return fn(op, *args, **kwargs)
+
+        self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)
+
+        return fn
+
     @property
     def namespace(self):
         return self._ns
