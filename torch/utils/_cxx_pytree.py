@@ -52,7 +52,6 @@ if OPTREE_VERSION < OPTREE_REQUIRED_VERSION:
         "`python3 -m pip install --upgrade optree`"
     )
 
-del TorchVersion
 
 import optree
 from optree import (  # noqa: F401  # direct import for type annotations
@@ -102,6 +101,10 @@ __all__ = [
     "is_structseq_class",
     "is_structseq_instance",
 ]
+
+
+OPTREE_VERSION = TorchVersion(optree.__version__)  # type: ignore[attr-defined]
+del TorchVersion
 
 
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
