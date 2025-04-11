@@ -1,10 +1,12 @@
 import json
+import logging
 import math
 import tempfile
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from logging import info
+from typing import Any, Optional, Union
 
 from tabulate import tabulate
 
@@ -13,8 +15,8 @@ from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.autograd import DeviceType
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.flop_counter import flop_registry
-import logging
-from logging import info
+
+
 logging.basicConfig(level=logging.DEBUG)
 
 
@@ -43,7 +45,9 @@ def parse_list(lst: str) -> list[int]:
     return [int(substring.strip()) for substring in substrings]
 
 
-def zip_dicts(dict1: dict[Any, Any], dict2: dict[Any, Any], default: Any = None):
+def zip_dicts(
+    dict1: dict[Any, Any], dict2: dict[Any, Any], default: Any = None
+) -> Generator[tuple[Any, Any, Any], None, None]:
     """
     Zip two dictionaries together, indicating missing keys.
 
@@ -105,9 +109,7 @@ def conv_adapter(
         stride = parse_list(concrete[3])
         inp = shapes[0]
         w = shapes[1]
-        out_x_y = [
-            conv_out_dims(*args) for args in zip(inp[2:], w[2:], stride)
-        ]
+        out_x_y = [conv_out_dims(*args) for args in zip(inp[2:], w[2:], stride)]
         out = [inp[0], w[0]] + out_x_y  # we only need the xy values
         kwargs["out_val"] = out
 
@@ -171,7 +173,8 @@ def _calculate_flops(event: dict[str, Any]) -> int:
     elif "kernel_flop" in event["args"]:
         return event["args"]["kernel_flop"]
     else:
-        info(f"Can't calculate flops for kernel: {name}")
+        msg = "Can't calculate flops for kernel: " + name
+        info(msg)
         return 0
 
 
@@ -300,7 +303,7 @@ class Device:
 
 
 DeviceMap = dict[int, Device]
-Table = Tuple[List[str], Dict[str, List[str]]]
+Table = tuple[list[str], dict[str, list[str]]]
 
 
 class JsonProfile:
