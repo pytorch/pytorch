@@ -90,7 +90,7 @@ class CArgumentGen:
 class CFunctionSchemaGen:
     """
     Note: [HigherOrderOperator schema generation]
-
+    Each invocation of a HigherOrderOperator will have a different schema.
     For example, the schema of torch.cond varies depending on the true_fn and
     false_fn. So we need a way to generate the schema for each invocation of a HOP.
 

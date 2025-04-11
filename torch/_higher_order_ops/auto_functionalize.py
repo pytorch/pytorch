@@ -368,7 +368,14 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 def can_auto_functionalize(op: OperatorBase) -> bool:
     if isinstance(op, HigherOrderOperator):
-        return True
+
+        def _has_gen_schema(op: HigherOrderOperator):
+            method = "gen_schema"
+            return hasattr(type(op), method) and getattr(
+                type(op), method
+            ) is not getattr(HigherOrderOperator, method)
+
+        return _has_gen_schema(op)
 
     if not isinstance(op, OpOverload):
         return False
@@ -617,6 +624,9 @@ def do_auto_functionalize_v2(
         )
     all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 
+    assert (
+        "_all_bases" not in unwrapped_kwargs and "_ops_schema" not in unwrapped_kwargs
+    ), (op, unwrapped_kwargs)
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _op_schema=schema)  # type: ignore[arg-type]
@@ -747,6 +757,26 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
     return ctx.wrap_tensors(result)
 
 
+def _invoke_op_with_kwargs_and_schema(
+    op: Union[OpOverload, HigherOrderOperator],
+    kwargs: dict[str, Any],
+    schema: torch._C.FunctionSchema,
+):
+    if isinstance(op, OpOverload):
+        return op(**kwargs)
+
+    bound_args = []
+    bound_kwargs = {}
+    for arg in schema.arguments:
+        assert arg.name in kwargs, (arg.name, kwargs)
+        val = kwargs[arg.name]
+        if not arg.kwarg_only:
+            bound_args.append(val)
+        else:
+            bound_kwargs[arg.name] = val
+    return op(*bound_args, **bound_kwargs)
+
+
 # auto_functionalized_v2 functions
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
@@ -758,8 +788,6 @@ def auto_functionalized_v2_dense(
     schema = kwargs.pop("_op_schema", None)
     assert schema is not None
 
-    # have to re-populate the schema since cannot proxied it in graph
-    # and we don't always hit functionalization key
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
@@ -800,16 +828,7 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
-    # Schema to calling convention
-    final_args = []
-    final_kwargs = {}
-    for arg in schema.arguments:
-        if not arg.kwarg_only:
-            final_args.append(new_kwargs[arg.name])
-        else:
-            final_kwargs[arg.name] = new_kwargs[arg.name]
-
-    out = _mutable_op(*final_args, **final_kwargs)
+    out = _invoke_op_with_kwargs_and_schema(_mutable_op, new_kwargs, schema)
 
     if isinstance(out, tuple):
         return (*out, *all_bases_new)  # type: ignore[return-value]
@@ -861,9 +880,7 @@ def auto_functionalized_v2_proxy(
 
         def fn(*args):
             final_args = args[:n_args]
-            final_kwargs = dict(
-                k: v for k, v in zip(new_kwargs.keys(), args[n_args:])
-            )
+            final_kwargs = dict(zip(new_kwargs.keys(), args[n_args:]))
             return _mutable_op(*final_args, **final_kwargs)
 
         hop_gm = reenter_make_fx(fn)(*args)

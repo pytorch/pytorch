@@ -724,10 +724,11 @@ def check_input_alias_and_mutation_return_ouputs(
 ]:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    new_fake_mode = torch._subclasses.FakeTensorMode(
-        shape_env=ShapeEnv(), allow_non_fake_inputs=False
-    )
-    with disable_proxy_modes_tracing():
+    # When we call this function under some TracingContext,
+    # we don't want to modify the original tracing states but instead
+    # we should create a new fake mode, a new shape_env and new inputs.
+    # and disable active functional, proxy and fake modes if any.
+    with torch.utils._python_dispatch._disable_current_modes():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
         changed after run gm once to detect mutation and checks tensor storage
@@ -744,10 +745,17 @@ def check_input_alias_and_mutation_return_ouputs(
             return StorageWeakRef(t._typed_storage())
 
         # Clone the fake args to avoid mutating the original fake args
-        with new_fake_mode, ExitStack() as ctx_stack:
+        with ExitStack() as ctx_stack:
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
+            new_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=ShapeEnv(), allow_non_fake_inputs=False
+            )
+            ctx_stack.enter_context(new_fake_mode)
+            ctx_stack.enter_context(
+                new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()  # type: ignore[union-attr]
+            )
             cloned = [
                 torch.as_strided(
                     new_fake_mode.from_tensor(arg), arg.size(), arg.stride()

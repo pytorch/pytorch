@@ -123,8 +123,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         return do_auto_functionalize_v2(ctx.mode, self, (subgraph, *operands), kwargs)
 
-    def gen_schema(self, subgraph, *operands, **kwargs):
+    def gen_schema(self, *args, **kwargs):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
+
+        subgraph, *operands = args
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
