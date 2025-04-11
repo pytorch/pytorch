@@ -15,10 +15,11 @@ from typing import Callable, Optional
 
 from torch._guards import GuardsSet
 
-from .types import GuardFail
+from .types import GuardFail, GuardFilterEntry
 
 
 @dataclasses.dataclass
 class Hooks:
     guard_export_fn: Optional[Callable[[GuardsSet], None]] = None
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None
+    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None
