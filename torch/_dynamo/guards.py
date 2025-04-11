@@ -968,28 +968,20 @@ class GuardBuilder(GuardBuilderBase):
             # duplicate names in the case of cells: a name can be both local and cell
             # and will take up 2 slots of the frame's localsplus. The correct behavior
             # is to refer to the cell, which has a higher index.
-            if config.enable_cpp_framelocals_guard_eval:
-                framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                    self.f_code
-                )
-                framelocals_idx = (
-                    len(framelocals_names_reversed)
-                    - framelocals_names_reversed.index(source.local_name)
-                    - 1
-                )
-                out = root_guard_manager.framelocals_manager(
-                    key=(source.local_name, framelocals_idx),
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-            else:
-                out = root_guard_manager.dict_getitem_manager(
-                    key=source.local_name,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+            framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                self.f_code
+            )
+            framelocals_idx = (
+                len(framelocals_names_reversed)
+                - framelocals_names_reversed.index(source.local_name)
+                - 1
+            )
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
