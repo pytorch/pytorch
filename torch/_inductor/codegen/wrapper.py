@@ -611,7 +611,7 @@ class ReinterpretLine(MemoryPlanningLine):
         assert isinstance(self.layout, ir.NonOwningLayout)
         assert isinstance(self.layout.view, ir.ReinterpretView)
         self.wrapper.codegen_deferred_allocation(
-            code, self.reused_as.get_name(), self.layout.view
+            self.reused_as.get_name(), self.layout.view
         )
 
 
@@ -2607,13 +2607,11 @@ class PythonWrapperCodegen(CodeGen):
         )
         return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
-    def codegen_deferred_allocation(
-        self, code: IndentedBuffer, name: str, view: ir.ReinterpretView
-    ) -> None:
-        code.writeline(
+    def codegen_deferred_allocation(self, name: str, view: ir.ReinterpretView) -> None:
+        self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare}{name} = {view.codegen_reference(writer=code)}{self.ending}  {self.comment} alias",
+                f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
             )
         )
 
