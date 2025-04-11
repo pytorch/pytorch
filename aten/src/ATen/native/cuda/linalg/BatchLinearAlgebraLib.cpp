@@ -1428,6 +1428,54 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #ifdef USE_ROCM
+linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#else
+int64_t batch = batchCount(eigenvectors);
+int64_t n = eigenvectors.size(-1);
+bool is_batched = batch > 1;
+auto dtype = eigenvectors.scalar_type();
+
+if (dtype == at::kFloat) {
+  if (is_batched) {
+    if (use_cusolver_syevj_batched_ && batch > 15 && n < 512) {
+      linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    } else if (use_cusolver_syevj_batched_ && batch <= 15 && n < 64) {
+      linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    } else {
+      linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    }
+  } else {
+    // syevj is better than syevd for float32 dtype and matrix sizes 32x32 - 512x512 for non-batched
+    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
+    if (n >= 32 && n <= 512) {
+      linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    } else {
+      linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    }
+  }
+} else if (dtype == at::kDouble) {
+  if (is_batched) {
+    if (use_cusolver_syevj_batched_ && batch > 15 && n < 256) {
+      linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    } else {
+      linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+    }
+  } else {
+    // syevd is better than syevj for double dtype
+    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
+    linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  }
+} else {
+  // syevd is better than syevj for complex64 and complex128
+  // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
+  linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+}
+#endif
+}
+
+
+void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+#ifdef USE_ROCM
   // syevj has larger numerical errors than syevd
   linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else
