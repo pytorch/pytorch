@@ -447,7 +447,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         return None, None, None, *grads
 
 
-@invoke_subgraph.py_impl(DispatchKey.Autograd)
+@invoke_subgraph.py_autograd_impl
 def _(subgraph, identifier, operands):
     if not torch.is_grad_enabled():
         with torch._C._AutoDispatchBelowAutograd():
