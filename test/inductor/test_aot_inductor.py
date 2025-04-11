@@ -2414,6 +2414,37 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @common_utils.parametrize("minmax", [min, max])
+    def test_sympy_cpp_printer_min_max(self, minmax):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, ranks):
+                n_elements = a.numel()
+                out = torch.empty_like(a)
+                backed = a.size(0)
+                unbacked = int(ranks.max())
+                scaling_factor = minmax(backed, unbacked, 100)
+                add_kernel_with_scaling[(n_elements,)](
+                    a,
+                    b,
+                    out,
+                    n_elements,
+                    scaling_factor,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        example_inputs = (
+            torch.randn(16, device=self.device),
+            torch.randn(16, device=self.device),
+            torch.arange(end=4, device=self.device, dtype=torch.int16),
+        )
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        torch._dynamo.mark_dynamic(example_inputs[1], 0)
+        self.check_model(Model(), example_inputs)
+
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -3372,8 +3403,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     def test_aoti_runtime_asserts(self):
-        from torch._dispatch.python import enable_python_dispatcher
-        from torch.export._draft_export import draft_export
+        from torch.export._draft_export import draft_export, FailureType
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -3403,23 +3433,23 @@ class AOTInductorTestsTemplate:
 
             example_inputs = (torch.randn(100), torch.tensor(10))
             ep = draft_export(M(), example_inputs)
+            report = ep._report
+            need_config_patch = any(
+                not f.xfail and f.failure_type == FailureType.MISMATCHED_FAKE_KERNEL
+                for f in report.failures
+            )
             m = ep.module()
-            from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
-            example_inputs = [
-                node.meta["val"] for node in m.graph.nodes if node.op == "placeholder"
-            ]
-            fake_mode = example_inputs[0].fake_mode
-            with enable_python_dispatcher(), fake_mode:
-                FakeTensorProp(m, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
-                )
+            # This should no longer be needed after #150093
+            from torch._functorch import config as functorch_config
 
-            # TODO: change to the tests below after  MetadataMismatchError is fixed
-            # pt2_file = torch._inductor.aoti_compile_and_package(ep)
-            # optimized = torch._inductor.aoti_load_package(pt2_file)
+            with functorch_config.patch(
+                {"generate_fake_kernels_from_real_mismatches": need_config_patch}
+            ):
+                pt2_file = torch._inductor.aoti_compile_and_package(ep)
+            optimized = torch._inductor.aoti_load_package(pt2_file)
 
-            # self.assertTrue(same(optimized(example_inputs), m(example_inputs)))
+            self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
@@ -3570,6 +3600,7 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @skipIfXpu(msg="Total size of kernel arguments exceeds driver limit on XPU")
     def test_runtime_checks_large(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4958,7 +4989,11 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
+            # The tuned best config on XPU is different with CUDA.
+            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            self.code_check_count(
+                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+            )
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
@@ -5002,7 +5037,11 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4095], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
+            # The tuned best config on XPU is different with CUDA.
+            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            self.code_check_count(
+                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+            )
 
     def test_composed_dynamic_size(self):
         class Model(torch.nn.Module):
