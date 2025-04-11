@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -12886,6 +12887,47 @@ class CommonTemplate:
                     fn_compiled(inps)
 
                 assert len(inps) == 0
+
+    def test_remove_noop_view(self):
+        def f(x):
+            batch_size = x.shape[0]
+            x = x.transpose(1, 2)  # (batch_size, 2, 3)
+            x = x.reshape(batch_size, 2, 3)  # noop
+            return x
+
+        f = torch.compile(f)
+
+        def run(f, shape, expected_graph):
+            x = torch.randn(shape, device="cuda")
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+            with ctx():
+                f(x)
+            post_grad_graphs = "\n".join(
+                log_stream.getvalue().strip().split("\n")[3:]
+            ).strip()
+            self.assertExpectedInline(
+                post_grad_graphs,
+                expected_graph,
+                ignore_comments=True,
+                ignore_empty_lines=True,
+            )
+
+        expected_graph1 = """\
+def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]cuda:0"):
+        permute: "f32[2, 2, 3][6, 1, 2]cuda:0" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
+        return (permute,)"""  # noqa: B950
+
+        run(f, (2, 3, 2), expected_graph1)
+
+        expected_graph2 = """\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]cuda:0"):
+        permute: "f32[s77, 2, 3][6, 1, 2]cuda:0" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
+        return (permute,)"""  # noqa: B950
+
+        # dynamic shape
+        run(f, (4, 3, 2), expected_graph2)
 
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
