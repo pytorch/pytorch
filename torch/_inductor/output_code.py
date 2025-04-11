@@ -76,6 +76,9 @@ class OutputCode:
 
     # None if the output is not remote cacheable
     _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+    _fx_graph_cache_debug_lines: Optional[list[str]] = dataclasses.field(
+        default=None, init=False
+    )
 
     # How long it took to compile this OutputCode, end to end
     _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
