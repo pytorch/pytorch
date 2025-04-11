@@ -163,9 +163,9 @@ dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
 )
 
 
-def get_qconv2d_pt2e_pattern(users=1):
+def get_qconv_pt2e_pattern(users=1):
     return CallFunction(
-        torch.ops.onednn.qconv2d_pointwise.default,
+        torch.ops.onednn.qconv_pointwise.default,
         KeywordArg("x"),
         KeywordArg("x_scale"),
         KeywordArg("x_zp"),
@@ -345,13 +345,13 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
         return actual_value == expected_value
 
 
-def _is_valid_quantized_conv2d_optimization_pattern():
+def _is_valid_quantized_conv_optimization_pattern():
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
         if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
             qconv_node_after_weight_prepack = filter_nodes(
-                match.nodes, torch.ops.onednn.qconv2d_pointwise
+                match.nodes, torch.ops.onednn.qconv_pointwise
             )[0]
             return _check_node_kwarg_arg_value(
                 qconv_node_after_weight_prepack, "output_dtype", 13, output_dtype
@@ -365,7 +365,7 @@ def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False):
     return (
         _is_valid_qconv_binary_optimization_pattern()
         if has_binary_post_op
-        else _is_valid_quantized_conv2d_optimization_pattern()
+        else _is_valid_quantized_conv_optimization_pattern()
     )
 
 
@@ -374,8 +374,8 @@ def _is_valid_qconv_lowering_pattern():
         if len(match.nodes) != 1:
             return False
         return match.nodes[0].target in (
-            torch.ops.onednn.qconv2d_pointwise.default,
-            torch.ops.onednn.qconv2d_pointwise.tensor,
+            torch.ops.onednn.qconv_pointwise.default,
+            torch.ops.onednn.qconv_pointwise.tensor,
             torch.ops.onednn.qconv2d_pointwise.binary,
             torch.ops.onednn.qconv2d_pointwise.binary_tensor,
         )
@@ -444,8 +444,8 @@ def _register_quantized_conv_lowering(
             postop_args,
             postop_algorithm,
         )
-        counters["inductor"]["qconv2d_unary_lower_count"] += 1
-        counters["inductor"]["qconv2d_unary_lower_nodes"] += len(match.nodes)
+        counters["inductor"]["qconv_unary_lower_count"] += 1
+        counters["inductor"]["qconv_unary_lower_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv
@@ -630,7 +630,7 @@ def _register_quantized_linear_binary_lowering(
 
 def _is_valid_qconv_binary_optimization_pattern():
     return _is_valid_quantized_op_binary_optimization_pattern(
-        torch.ops.onednn.qconv2d_pointwise
+        torch.ops.onednn.qconv_pointwise
     )
 
 
@@ -801,11 +801,11 @@ def _register_quantized_conv_binary_lowering(
 def _register_quantization_unary_lowering():
     # QConv2d
     for users in [1, 2]:
-        qconv_pattern = get_qconv2d_pt2e_pattern(users)
+        qconv_pattern = get_qconv_pt2e_pattern(users)
         _register_quantized_conv_lowering(
             qconv_pattern,
             2,  # pass_number
-            torch.ops.onednn.qconv2d_pointwise.default,  # computation_op
+            torch.ops.onednn.qconv_pointwise.default,  # computation_op
         )
 
     # QLinear
@@ -1375,7 +1375,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv2d_pattern(dtype):
+def _is_valid_dequant_conv_pattern(dtype):
     def _inner(match):
         # Here we do some further check to ensure:
         # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
@@ -1390,9 +1390,9 @@ def _is_valid_dequant_conv2d_pattern(dtype):
             if (
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
-                or meta_value.dim() != 4
+                or meta_value.dim() not in [3, 4]
             ):
-                # Only support conv2d now
+                # Only support conv1d/2d now
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]
@@ -1415,7 +1415,7 @@ def _is_valid_dequant_conv2d_pattern(dtype):
 def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float32):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_conv2d_pattern(dtype),
+        extra_check=_is_valid_dequant_conv_pattern(dtype),
         pass_number=pass_number,
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
@@ -1430,7 +1430,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         Insert weight prepack node and change the pattern to:
         int8 activation
           |
-        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- int8_weight
+        onednn.qconv_pointwise <- onednn.qconv_prepack <- int8_weight
         """
         assert dtype in [torch.float32, torch.bfloat16]
         conv_node = match.output_node()
@@ -1532,7 +1532,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 "",  # algorithm
             )
             new_conv_node = graph.call_function(
-                torch.ops.onednn.qconv2d_pointwise.default, args=new_args
+                torch.ops.onednn.qconv_pointwise.default, args=new_args
             )
             conv_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(conv_node.meta)
@@ -1549,8 +1549,8 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             if dtype == torch.bfloat16:
                 graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined, arg-type]
             graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
-            counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
-            counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
+            counters["inductor"]["qconv_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qconv_weight_prepack_matcher_nodes"] += len(
                 match.nodes
             )
 
@@ -2803,12 +2803,12 @@ def _register_qconv_post_op_fusion_pass(
         count_key = (
             "qconv2d_binary_matcher_count"
             if has_binary_post_op
-            else "qconv2d_unary_matcher_count"
+            else "qconv_unary_matcher_count"
         )
         nodes_key = (
             "qconv2d_binary_matcher_nodes"
             if has_binary_post_op
-            else "qconv2d_unary_matcher_nodes"
+            else "qconv_unary_matcher_nodes"
         )
         counters["inductor"][count_key] += 1
         counters["inductor"][nodes_key] += len(match.nodes)
@@ -2828,13 +2828,13 @@ def _register_qconv_unary_fusion():
             PostOpAttr(
                 "none", None, "none", [], ""
             ): generate_pattern_with_output_quant(
-                get_qconv2d_pt2e_pattern(1),
+                get_qconv_pt2e_pattern(1),
             ),
             PostOpAttr(
                 "none", None, "relu", [], ""
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
-                    get_qconv2d_pt2e_pattern(1), aten.relu.default
+                    get_qconv_pt2e_pattern(1), aten.relu.default
                 ),
             ),
             PostOpAttr(
@@ -2842,7 +2842,7 @@ def _register_qconv_unary_fusion():
             ): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
                     _hardtanh_fusion,
-                    get_qconv2d_pt2e_pattern(1),
+                    get_qconv_pt2e_pattern(1),
                     1,
                     is_bf16,
                 ),
@@ -2853,7 +2853,7 @@ def _register_qconv_unary_fusion():
             ): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
                     _hardswish_fusion,
-                    get_qconv2d_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qconv_pt2e_pattern(1 if is_bf16 else 2),
                     2,
                     is_bf16,
                 ),
@@ -2864,7 +2864,7 @@ def _register_qconv_unary_fusion():
             ): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
                     _silu_fusion,
-                    get_qconv2d_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qconv_pt2e_pattern(1 if is_bf16 else 2),
                     2,
                     is_bf16,
                 ),
@@ -2877,21 +2877,21 @@ def _register_qconv_unary_fusion():
             _register_qconv_post_op_fusion_pass(
                 patterns,
                 3,  # pass_number
-                torch.ops.onednn.qconv2d_pointwise.default,  # computation_op
+                torch.ops.onednn.qconv_pointwise.default,  # computation_op
                 unary_attr,  # unary_attr
             )
 
         # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
         conv_unary_replace_float_out_patterns = {
             PostOpAttr("none", None, "relu", [], ""): generate_pattern_with_unary(
-                get_qconv2d_pt2e_pattern(1), aten.relu.default
+                get_qconv_pt2e_pattern(1), aten.relu.default
             ),
             PostOpAttr(
                 "none", None, "hardtanh", [], ""
             ): _may_generate_pattern_with_dtype_convert(
                 _unary_fusion_pattern(
                     _hardtanh_fusion,
-                    get_qconv2d_pt2e_pattern(1),
+                    get_qconv_pt2e_pattern(1),
                     1,
                     is_bf16,
                 ),
@@ -2903,7 +2903,7 @@ def _register_qconv_unary_fusion():
             ): _may_generate_pattern_with_dtype_convert(
                 _unary_fusion_pattern(
                     _hardswish_fusion,
-                    get_qconv2d_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qconv_pt2e_pattern(1 if is_bf16 else 2),
                     2,
                     is_bf16,
                 ),
@@ -2915,7 +2915,7 @@ def _register_qconv_unary_fusion():
             ): _may_generate_pattern_with_dtype_convert(
                 _unary_fusion_pattern(
                     _silu_fusion,
-                    get_qconv2d_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qconv_pt2e_pattern(1 if is_bf16 else 2),
                     2,
                     is_bf16,
                 ),
@@ -2929,7 +2929,7 @@ def _register_qconv_unary_fusion():
             _register_qconv_post_op_fusion_pass(
                 patterns,
                 4,  # pass_number
-                torch.ops.onednn.qconv2d_pointwise.default,  # computation_op
+                torch.ops.onednn.qconv_pointwise.default,  # computation_op
                 unary_attr,  # unary_attr
             )
 
@@ -2947,7 +2947,7 @@ def _register_qconv_binary_fusion():
                     ): generate_pattern_with_output_quant(
                         generate_pattern_with_binary(
                             aten.add.Tensor,
-                            get_qconv2d_pt2e_pattern(1),
+                            get_qconv_pt2e_pattern(1),
                             dequantize_accum_pattern,
                             int8_mixed_bf16_with_inplace_add,
                             swap_inputs=swap_inputs,
@@ -2959,7 +2959,7 @@ def _register_qconv_binary_fusion():
                         generate_pattern_with_unary(
                             generate_pattern_with_binary(
                                 aten.add.Tensor,
-                                get_qconv2d_pt2e_pattern(1),
+                                get_qconv_pt2e_pattern(1),
                                 dequantize_accum_pattern,
                                 int8_mixed_bf16_with_inplace_add,
                                 swap_inputs=swap_inputs,
@@ -2986,7 +2986,7 @@ def _register_qconv_binary_fusion():
                     PostOpAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
                         generate_pattern_with_binary(
                             aten.add.Tensor,
-                            get_qconv2d_pt2e_pattern(1),
+                            get_qconv_pt2e_pattern(1),
                             KeywordArg("accum_after_dequant"),
                             int8_mixed_bf16_with_inplace_add,
                             swap_inputs=swap_inputs,
@@ -3024,7 +3024,7 @@ def _register_qconv_binary_fusion():
                         "sum", 1.0, "none", [], ""
                     ): generate_pattern_with_binary(
                         aten.add.Tensor,
-                        get_qconv2d_pt2e_pattern(1),
+                        get_qconv_pt2e_pattern(1),
                         KeywordArg("accum_after_dequant"),
                         int8_mixed_bf16_with_inplace_add,
                         swap_inputs=swap_inputs,
