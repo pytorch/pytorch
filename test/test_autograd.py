@@ -12979,6 +12979,8 @@ class TestAutogradStreamSynchronization(TestCase):
                     torch.get_device_module(acc).current_stream(), default_streams[i]
                 )
 
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_consumer_to_single_producer_case_2_correctness(self):
         #                          Device    Stream
@@ -13083,6 +13085,8 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # This fails because we currently sync to the default stream
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
@@ -13095,6 +13099,8 @@ class TestAutogradStreamSynchronization(TestCase):
             non_default_ambient_stream=True
         )
 
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
@@ -13104,6 +13110,8 @@ class TestAutogradStreamSynchronization(TestCase):
             non_default_ambient_stream=False
         )
 
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
@@ -13164,6 +13172,8 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
@@ -13250,6 +13260,8 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
+    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @skipIfMPS
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
