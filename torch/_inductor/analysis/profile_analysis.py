@@ -4,14 +4,18 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Union, Tuple, List, Dict
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from tabulate import tabulate
 
 import torch
+from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.autograd import DeviceType
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.flop_counter import flop_registry
+import logging
+from logging import info
+logging.basicConfig(level=logging.DEBUG)
 
 
 PROFILE_DIR = tempfile.gettempdir()
@@ -31,6 +35,12 @@ class ProfileEvent:
 
 # adapters convert the json trace into a format that works with flops_counter
 adapters_map: dict[str, Any] = {}
+
+
+def parse_list(lst: str) -> list[int]:
+    lst = lst.replace("[", "").replace("]", "")
+    substrings = lst.split(",")
+    return [int(substring.strip()) for substring in substrings]
 
 
 def zip_dicts(dict1: dict[Any, Any], dict2: dict[Any, Any], default: Any = None):
@@ -75,13 +85,33 @@ def register_adapter(aten: Union[str, list[str]]):  # type: ignore[no-untyped-de
     return decorator
 
 
-@register_adapter(["convolution", "_convolution"])
+@register_adapter(["convolution", "_convolution", "cudnn_convolution"])
 def conv_adapter(
-    shapes: tuple[Any], concrete: tuple[Any]
+    shapes: tuple[Any, ...], concrete: tuple[Any, ...]
 ) -> tuple[tuple[Any], dict[Any, Any]]:
     tmp = list(shapes)
-    tmp[6] = bool(tmp[6])
-    return tuple(tmp), {}
+    if len(tmp) == 4:
+        transposed = False
+
+    transposed = bool(tmp[6])
+    tmp[6] = transposed
+
+    kwargs = {}
+    if not transposed:
+        # calculate output shape if not transposed.
+        def conv_out_dims(x, kernel, stride):
+            return (x - kernel) // stride + 1
+
+        stride = parse_list(concrete[3])
+        inp = shapes[0]
+        w = shapes[1]
+        out_x_y = [
+            conv_out_dims(*args) for args in zip(inp[2:], w[2:], stride)
+        ]
+        out = [inp[0], w[0]] + out_x_y  # we only need the xy values
+        kwargs["out_val"] = out
+
+    return tuple(tmp[:-1]), kwargs
 
 
 def default_adapter(
@@ -122,28 +152,37 @@ def mm_adapter(
 
 
 def _calculate_flops(event: dict[str, Any]) -> int:
-    op_name = event["name"][len(ATEN_PREFIX) :]
-    op_obj = getattr(torch.ops.aten, op_name)
-    if op_obj not in flop_registry:
+    name = event["name"]
+    if name.startswith("aten::"):
+        op_name = name[len("aten::") :]
+        op_obj = getattr(torch.ops.aten, op_name)
+        if op_obj not in flop_registry:
+            return 0
+
+        flop_function = flop_registry[op_obj]
+
+        input_shapes = event["args"]["Input Dims"]
+        concrete = event["args"]["Concrete Inputs"]
+        if op_name in adapters_map:
+            args, kwargs = adapters_map[op_name](input_shapes, concrete)
+        else:
+            breakpoint()
+            args, kwargs = default_adapter(input_shapes, concrete)
+        return flop_function(*args, **kwargs)
+    elif "kernel_flop" in event["args"]:
+        return event["args"]["kernel_flop"]
+    else:
+        info(f"Can't calculate flops for kernel: {name}")
         return 0
 
-    flop_function = flop_registry[op_obj]
 
-    input_shapes = event["args"]["Input Dims"]
-    concrete = event["args"]["Concrete Inputs"]
-    if op_name in adapters_map:
-        args, kwargs = adapters_map[op_name](input_shapes, concrete)
-    else:
-        breakpoint()
-        args, kwargs = default_adapter(input_shapes, concrete)
-    return flop_function(*args, **kwargs)
-
-
-def _estimate_bandwidth(event: dict[str, Any]) -> float:
+def _estimate_gb(event: dict[str, Any]) -> float:
     """
     This estimate isn't the best because it doesn't know if two input buffers are the same buffer, leading to an
     overestimate of the real achieved bandwidth.
     """
+    if "Input Type" not in event["args"] or "Input Dims" not in event["args"]:
+        return 0
     sizes_and_types = zip(event["args"]["Input Dims"], event["args"]["Input type"])
     bw = 0
     for size, tipe in sizes_and_types:
@@ -152,40 +191,42 @@ def _estimate_bandwidth(event: dict[str, Any]) -> float:
         else:
             isize = getattr(torch, tipe).itemsize
         bw += isize * math.prod(flatten(size))
-    return bw
+    return bw / 1e9
 
 
-def _augment_trace_helper(data: dict[str, Any], nruns: int) -> dict[str, Any]:
+def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
+    # compute a mapping from exteral ids to non kernels, which contain the information we need to estimate flops etc
+    extern_mapping = defaultdict(list)
     for event in data["traceEvents"]:
-        if "name" not in event:
-            raise ParseException("no name element in event")
-        name = event["name"]
-        if name.startswith(ATEN_PREFIX):
-            event["args"]["kernel_flops"] = _calculate_flops(event)
-            event["args"]["kernel_bandwidth_estimate"] = _estimate_bandwidth(event)
+        if (
+            "args" not in event
+            or "External id" not in event["args"]
+            or event["cat"] != "cpu_op"
+        ):
+            continue
+        if len(extern_mapping[event["args"]["External id"]]) > 0:
+            breakpoint()
+            raise ParseException("duplicate external id in event")
+        extern_mapping[event["args"]["External id"]].append(event)
+
+    for event in data["traceEvents"]:
+        if "cat" not in event:
+            continue
+        if event["cat"] == "kernel":
+            if "args" not in event:
+                raise ParseException(f"kernel has no args: {event}")
+            try:
+                if event["args"]["External id"] not in extern_mapping:
+                    breakpoint()
+            except:
+                breakpoint()
+
+            external_op = extern_mapping[event["args"]["External id"]][0]
+            external_op["args"]["kernel_flop"] = _calculate_flops(external_op)
+            external_op["args"]["kernel_num_gb"] = _estimate_gb(external_op)
+            event["args"]["kernel_flop"] = external_op["args"]["kernel_flop"]
+            event["args"]["kernel_num_gb"] = external_op["args"]["kernel_num_gb"]
     return data
-
-
-@dataclass(frozen=True)
-class DeviceInfo:
-    flops: dict[torch.dtype, int]
-    dram_bw: float
-
-
-_device_mapping: dict[str, DeviceInfo] = {"Nvidia H100": DeviceInfo({}, 10)}
-
-
-def lookup_device_info(name: str) -> "DeviceInfo":
-    """
-    problem: when diffing profiles between amd and nvidia, we don't have access to the device information
-    of the other one. Also, since the analysis is static, we should be able to do it on another device unrelated
-    to the recorded device.
-    """
-    if name not in _device_mapping:
-        raise RuntimeError(
-            f"Unsupported device in profile: {name}, if it's a more obscure device, consider contributing to _device_mapping."
-        )
-    return _device_mapping[name]
 
 
 _dtype_map = {
@@ -193,7 +234,53 @@ _dtype_map = {
     "int": torch.int,
     "long": torch.long,
     "long int": torch.long,
+    "bfloat16": torch.bfloat16,
+    "float16": torch.float16,
 }
+
+
+@dataclass(frozen=True)
+class DeviceInfo:
+    tflops: dict[torch.dtype, float]
+    dram_bw_gbs: float
+
+    @staticmethod
+    def get_device_info() -> tuple[dict[torch.dtype, int], float]:
+        """
+        This is the info that populates DeviceInfo, but it needs to be run on each device separately.
+        For new hardware, run this function and then add the information to `_device_mapping`
+        """
+        # TODO int would probably be good to support
+        floats = [torch.float, torch.bfloat16, torch.float16]
+        return {
+            dtype: get_device_tflops(dtype) for dtype in floats
+        }, get_gpu_dram_gbps()
+
+
+_device_mapping: dict[str, DeviceInfo] = {
+    "NVIDIA H100": DeviceInfo(
+        tflops={
+            torch.float32: 0.033454080000000004,
+            torch.bfloat16: 0.5352652800000001,
+            torch.float16: 0.5352652800000001,
+        },
+        dram_bw_gbs=2446.848,
+    )
+}
+
+
+def lookup_device_info(name: str) -> "DeviceInfo":
+    """
+    problem: when diffing profiles between amd and nvidia, we don't have access to the device information
+    of the other one. Also, since the analysis is static, we should be able to do it on another device unrelated
+    to the recorded device. Therefore, _device_mapping statically contains the information for lots of devices.
+    If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
+    """
+    if name not in _device_mapping:
+        raise RuntimeError(
+            f"Unsupported device in profile: {name}, consider contributing to _device_mapping."
+        )
+    return _device_mapping[name]
 
 
 @dataclass(frozen=True)
@@ -214,6 +301,9 @@ class Device:
     index: int
     info: DeviceInfo
     stats: KernelNameMap
+
+    def __repr__(self):
+        return f"Device({self.name}, {self.index})"
 
 
 DeviceMap = dict[int, Device]
@@ -239,24 +329,34 @@ class JsonProfile:
         self.benchmark_name = benchmark_name
         self._create_devices()
 
-    def convert_dtype(
-        self, input_sizes: list[str], input_types: list[str], concrete_inputs: list[str]
-    ) -> torch.dtype:
+    def convert_dtype(self, event) -> torch.dtype:
         """
         Each op has a list of dtypes for each input arg. We need to convert these into a single dtype for flop estimation.
         Issues:
          - converting the strings to concrete torch.dtypes
          - What if we have float32, float, float16 all in the inputs? Our choice is to use the largest buffer dtype.
         """
+
+        if (
+            "Input Dims" not in event["args"]
+            or "Input type" not in event["args"]
+            or "Concrete Inputs" not in event["args"]
+        ):
+            if "bfloat16" in event["name"]:
+                return torch.bfloat16
+            elif "float16" in event["name"]:
+                return torch.float16
+            else:
+                return torch.float
+
+        input_sizes = event["args"]["Input Dims"]
+        input_types = event["args"]["Input type"]
+        concrete_inputs = event["args"]["Concrete Inputs"]
         assert len(input_sizes) == len(input_types)
         assert len(input_types) == len(concrete_inputs)
+
         if len(input_sizes) == 0:
             raise RuntimeError("Empty input_sizes and input_types")
-
-        def parse_list(lst: str) -> list[int]:
-            lst = lst.replace("[", "").replace("]", "")
-            substrings = lst.split(",")
-            return [int(substring.strip()) for substring in substrings]
 
         biggest_size = 0
         biggest_index = 0
@@ -288,66 +388,97 @@ class JsonProfile:
     def calculate_flops(self, event: dict[str, Any]) -> int:
         return _calculate_flops(event)
 
-    def estimate_bandwidth(self, event: dict[str, Any]) -> float:
+    def estimate_gb(self, event: dict[str, Any]) -> float:
         """
         This estimate isn't the best because it doesn't know if two input buffers are the same buffer, leading to an
         overestimate of the real achieved bandwidth.
         """
-        return _estimate_bandwidth(event)
+        return _estimate_gb(event)
 
     def augment_trace(self) -> None:
-        self.data = _augment_trace_helper(self.data, self.nruns)
+        self.data = _augment_trace_helper(self.data)
 
     def _compute_stats(self) -> None:
         """populates the name -> stats map"""
         for event in self.events:
-            if (
-                "args" in event
-                and event["cat"] == "kernel"
-                and "kernel_flops" in event["args"]
-                and "kernel_bandwidth" in event["args"]
-            ):
-                dev = self._devices[event["args"]["device"]]
-                latency = event["dur"]
-                op_bw = event["args"]["kernel_bandwidth"]
-                op_flops = event["args"]["kernel_flops"]
-                dtype = self.convert_dtype(
-                    event["args"]["Input Dims"],
-                    event["args"]["Input type"],
-                    event["args"]["Concrete Inputs"],
-                )
+            if "cat" not in event or "args" not in event or event["cat"] != "kernel":
+                continue
+            dev = self._devices[event["args"]["device"]]
+            dur = event["dur"]
+            if "kernel_flop" in event["args"]:
+                assert dur != 0
+                # 1000ms/s * flop / ms
+                op_flops = 1e3 * event["args"]["kernel_flop"] / dur
+                if op_flops == 0:
+                    achieved_flops = 0
+                else:
+                    dtype = self.convert_dtype(event)
+                    achieved_flops = op_flops / (1e12 * dev.info.tflops[dtype])
+            else:
+                op_flops = 0
+                achieved_flops = 0
 
-                # TODO check units here
-                # TODO this formula is wrong
-                achieved_bandwidth = op_bw * latency / dev.info.dram_bw
-                achieved_flops = op_flops * latency / dev.info.flops[dtype]
-                dev.stats[event["name"]].add(
-                    KernelStats(
-                        op_flops, op_bw, latency, achieved_bandwidth, achieved_flops
-                    )
+            if "kernel_num_gb" in event["args"]:
+                assert dur != 0
+                # 1000ms/s * gb / ms = gb/s
+                op_gbps = 1e3 * event["args"]["kernel_num_gb"] / dur
+                achieved_bandwidth = op_gbps / dev.info.dram_bw_gbs
+            else:
+                op_gbps = 0
+                achieved_bandwidth = 0
+
+            dev.stats[event["name"]].add(
+                KernelStats(
+                    flops=op_flops,
+                    bw=op_gbps,
+                    latency=dur,
+                    achieved_bandwidth=achieved_bandwidth,
+                    achieved_flops=achieved_flops,
                 )
+            )
 
     def _create_single_table(self, dev: Device) -> Table:
         """Create a table with the devices mapped to indices."""
         headers = [
             "Kernel Name",
-            "FLOPs",
-            "Bandwidth",
-            "Latency",
-            "Achieved FLOPs",
-            "Achieved Bandwidth",
+            "Kernel Count",
+            "FLOPS",
+            "bw gbps",
+            "Dur (ms)",
+            "Achieved FLOPS %",
+            "Achieved Bandwidth %",
         ]
         rows: dict[str, list[str]] = {}
 
         for kernel_name, stats_set in dev.stats.items():
+            ker_count = 0
+            flops = 0
+            flops_count = 0
+            achieved_flops = 0
+            bw = 0
+            bw_count = 0
+            achieved_bandwidth = 0
+            latency = 0
             for stats in stats_set:
-                rows[kernel_name] = [
-                    str(stats.flops),
-                    str(stats.bw),
-                    str(stats.latency),
-                    str(stats.achieved_flops),
-                    str(stats.achieved_bandwidth),
-                ]
+                if stats.flops != 0:
+                    flops += stats.flops
+                    achieved_flops += stats.achieved_flops
+                    flops_count += 1
+                if stats.bw != 0:
+                    bw += stats.bw
+                    achieved_bandwidth += stats.achieved_bandwidth
+                    bw_count += 1
+                latency += stats.latency
+                ker_count += 1
+            assert ker_count != 0
+            rows[kernel_name] = [
+                str(ker_count),
+                str(flops / flops_count if flops_count != 0 else 0),
+                str(bw / bw_count if bw_count != 0 else 0),
+                str(latency / ker_count if ker_count != 0 else 0),
+                str(achieved_flops / flops_count if flops_count != 0 else 0),
+                str(achieved_bandwidth / bw_count if bw_count != 0 else 0),
+            ]
 
         return headers, rows
 
@@ -364,11 +495,20 @@ class JsonProfile:
         )
         new_rows = {}
 
-        for key, row1, row2 in zip_dicts(table1[1], table2[1], default=([""] * 5)):
+        for key, row1, row2 in zip_dicts(table1[1], table2[1], default=(["Empty"] * 5)):
             new_rows[key] = row1 + row2
         return new_headers, new_rows
 
-    def report(self, other: Optional[tuple["JsonProfile"]] = None) -> str:
+    def report(
+        self, other: Optional["JsonProfile"] = None, name_limit: int = 40
+    ) -> str:
+        def create_ret(table_headers, table_rows):
+            table_flattened = [
+                [kernel_name[:name_limit], *kernel_vals]
+                for kernel_name, kernel_vals in table_rows.items()
+            ]
+            return tabulate(table_flattened, headers=table_headers)
+
         if other is not None:
             self._compute_stats()
             other._compute_stats()
@@ -376,15 +516,23 @@ class JsonProfile:
             self_tables = self._create_tables(self._devices)
             other_tables = self._create_tables(other._devices)
 
-            self_name = self.benchmark_name if self.benchmark_name is not None else "Table 1"
-            other_name = other.benchmark_name if other.benchmark_name is not None else "Table 2"
+            self_name = (
+                self.benchmark_name if self.benchmark_name is not None else "Table 1"
+            )
+            other_name = (
+                other.benchmark_name if other.benchmark_name is not None else "Table 2"
+            )
 
             ret = []
-            for device_idx, t1, t2 in zip_dicts(self_tables, other_tables, default=None):
-                table_headers, table_rows = self._combine_tables(t1, self_name, t2, other_name)
-                table_flattened = [[kernel_name, *kernel_vals] for kernel_name, kernel_vals in table_rows.items()]
-                table_string = tabulate(table_flattened, headers=table_headers)
-                ret.append(f"Device ({self._devices[device_idx]}, {device_idx}):\n{table_string}")
+            assert self._devices.keys() == other._devices.keys()
+            for device_idx, t1, t2 in zip_dicts(
+                self_tables, other_tables, default=None
+            ):
+                table_headers, table_rows = self._combine_tables(
+                    t1, self_name, t2, other_name
+                )
+                tab_string = create_ret(table_headers, table_rows)
+                ret.append(f"{self._devices[device_idx]}:\n{tab_string}")
             return "\n".join(ret)
         self._compute_stats()
 
@@ -392,7 +540,9 @@ class JsonProfile:
 
         ret = []
         for idx, table in self_tables.items():
-            ret.append(f"Device {idx}:\n{table}")
+            table_headers, table_rows = table
+            tab_string = create_ret(table_headers, table_rows)
+            ret.append(f"{self._devices[idx]}:\n{tab_string}")
         return "\n".join(ret)
         # print(tabulate(table, headers=headers, tablefmt="grid"))
 
@@ -550,7 +700,13 @@ def main() -> None:
     parser.add_argument(
         "--diff",
         nargs=6,
+        metavar=("input_file1", "nruns1", "name1", "input_file2", "nruns2", "name2"),
         help="Two json traces to compare with, specified as <file1> <nruns1> <name1> <file2> <nruns2> <name2>",
+    )
+    parser.add_argument(
+        "--name_limit",
+        type=int,
+        help="the maximum name size in the final report",
     )
     parser.add_argument(
         "--augment_trace",
@@ -562,7 +718,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--analysis",
-        nargs=2,
+        nargs=3,
+        metavar=("input_file", "nruns", "name"),
         help="Run analysis on a single trace, specified as <file> <nruns> <name>",
     )
     args = parser.parse_args()
@@ -573,15 +730,21 @@ def main() -> None:
         p1.augment_trace()
         p2 = JsonProfile(args.diff[3], int(args.diff[4]), args.diff[5])
         p2.augment_trace()
-        print(p1.report(p2))
+        if args.name_limit:
+            print(p1.report(p2, name_limit=args.name_limit))
+        else:
+            print(p1.report(p2))
     if args.analysis:
         p1 = JsonProfile(args.analysis[0], args.analysis[1], args.analysis[2])
         p1.augment_trace()
-        print(p1.report())
+        if args.name_limit:
+            print(p1.report(name_limit=args.name_limit))
+        else:
+            print(p1.report())
     if args.augment_trace:
-        p = JsonProfile(args.argument_trace[0], args.argument_trace[1])
+        p = JsonProfile(args.augment_trace[0], 1)
         p.augment_trace()
-        p.dump(args.argument[1])
+        p.dump(args.augment_trace[1])
 
 
 if __name__ == "__main__":

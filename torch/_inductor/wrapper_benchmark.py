@@ -5,7 +5,7 @@ from typing import Any, Optional, Protocol
 
 import torch
 
-from .analysis.profile import parse_profile_event_list, PROFILE_PATH
+from .analysis.profile_analysis import parse_profile_event_list, PROFILE_PATH
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
