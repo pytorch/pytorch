@@ -707,11 +707,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             if transA
             else torch.rand(k, n, dtype=dtype, device=deviceid).t()
         )
-        bias = (
-            torch.rand(n, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(m, dtype=dtype, device=deviceid)
-        )
+        bias = torch.rand(n, dtype=dtype, device=deviceid)
+
         torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
