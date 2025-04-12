@@ -1390,6 +1390,7 @@ def forward(self, pred_1, x_1):
                 f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5)
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_map_illegal_outputs(self):
         def f(x, y):
             return x.item()
@@ -1405,18 +1406,12 @@ def forward(self, pred_1, x_1):
         # TODO: This is currently not working properly as the HOP autograd rework does not work well
         # with the wrapper of map
         with self.assertRaisesRegex(
-            # Should be
-            # RuntimeError, r"Expect outputs of map only contains tensors or None\."
-            RuntimeError,
-            r".*",
+            RuntimeError, "map doesn't work unless it is captured completely"
         ):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            # Should be
-            # RuntimeError, r"Expect outputs of map only contains tensors or None\."
-            RuntimeError,
-            r".*",
+            RuntimeError, "Expect outputs of map only contains tensors"
         ):
             control_flow.map(f1, x, y)
 
@@ -5688,8 +5683,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -5701,12 +5694,10 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -5718,7 +5709,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
@@ -5745,8 +5736,6 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)
@@ -5758,7 +5747,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is aliasing the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is aliasing the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6130,7 +6119,7 @@ def forward(self, arg0_1, arg1_1):
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, (arg0_1,));  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
-    return [getitem]""",  # noqa: B950
+    return (getitem,)""",  # noqa: B950
         )
 
     @skipIfCrossRef  # Arg order changes with crossref

@@ -204,6 +204,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -366,7 +367,9 @@ class GraphLowering(torch.fx.Interpreter):
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
         self.extern_node_serializer: Callable[[list[ir.ExternKernelNode]], Any] = (
-            extern_node_json_serializer
+            extern_node_serializer
+            if config.is_fbcode() and extern_node_serializer
+            else extern_node_json_serializer
         )
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
