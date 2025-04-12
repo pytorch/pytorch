@@ -209,6 +209,7 @@ for test_name in [
     "test_max_min",
     "test_max_pool2d2",
     "test_multilayer_prime_size",
+    "test_multilayer_var_lowp",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_neg_max_uint8",
