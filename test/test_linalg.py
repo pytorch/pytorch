@@ -5310,8 +5310,16 @@ class TestLinalg(TestCase):
             m = 3
             n = 5
             k = 7
+            # 'TN' case
             X = torch.rand(m, k, dtype=dtype, device=device)
             matA = torch.rand(n, k, dtype=dtype, device=device)
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(X, matA, bias)
+
+            # 'NT' case
+            X = torch.rand(k, m, dtype=dtype, device=device).t()
+            matA = torch.rand(k, n, dtype=dtype, device=device).t()
             bias = torch.rand(n, dtype=dtype, device=device)
 
             torch.nn.functional.linear(X, matA, bias)
@@ -5320,7 +5328,7 @@ class TestLinalg(TestCase):
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
+            self.assertEqual((total_num_results - ref_num_results), 2)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
@@ -5340,12 +5348,19 @@ class TestLinalg(TestCase):
             m = 5
             n = 7
             k = 9
+            # 'TN' case
             X = torch.rand(m, k, dtype=dtype, device=device)
             matA = torch.rand(n, k, dtype=dtype, device=device)
             bias = torch.rand(n, dtype=dtype, device=device)
 
             torch.nn.functional.linear(X, matA, bias)
 
+            # 'NT' case
+            X = torch.rand(k, m, dtype=dtype, device=device).t()
+            matA = torch.rand(k, n, dtype=dtype, device=device).t()
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(X, matA, bias)
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
@@ -5367,7 +5382,7 @@ class TestLinalg(TestCase):
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
-            self.assertEqual(total_num_results, 1)
+            self.assertEqual(total_num_results, 2)
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
