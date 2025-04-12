@@ -1810,6 +1810,11 @@ class GraphLowering(torch.fx.Interpreter):
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
 
+            # bound_unbacked_symbols tracks the symbols that are created so far,
+            # we use it to make sure that runtime assertions are added after all
+            # symbols used in them are defined.
+            self.bound_unbacked_symbols |= new_unbacked_defs
+
             for i0 in new_unbacked_defs:
                 ras = self.ras_by_symbol.pop(i0, [])
                 # NB: size-like not needed, we won't retrace
@@ -1838,8 +1843,6 @@ class GraphLowering(torch.fx.Interpreter):
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
-
-            self.bound_unbacked_symbols |= new_unbacked_defs
 
             unbacked_bindings = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
