@@ -381,6 +381,7 @@ _ExtractValType = Optional[
         PySymType,
         _AnyScriptObjectType,
         BackwardState,
+        torch._C.FunctionSchema,
         list["_ExtractValType"],
         tuple["_ExtractValType", ...],
         dict[str, "_ExtractValType"],

@@ -2,22 +2,20 @@
 
 import abc
 
+from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_ouputs,
+    create_bw_fn,
+    materialize_as_graph,
     reenter_make_fx,
+    materialize_as_graph,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
-from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
 class BaseHOP(HigherOrderOperator, abc.ABC):
@@ -123,17 +121,27 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         return do_auto_functionalize_v2(ctx.mode, self, (subgraph, *operands), kwargs)
 
-    def gen_schema(self, *args, **kwargs):
+    def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
-
-        subgraph, *operands = args
+        if not isinstance(subgraph, torch.fx.GraphModule):
+            subgraph = materialize_as_graph(
+                subgraph,
+                operands,
+                include_key_set=torch._C._dispatch_tls_local_include_set(),
+                exclude_key_set=torch._C._dispatch_tls_local_exclude_set())
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
         ), f"NYI non GraphModule subgraph got {subgraph}"
 
+        def _try_get_fake(node: torch.fx.Node) -> Any:
+            if "example_value" in node.meta:
+                return node.meta["example_value"]
+            else:
+                return node.meta["val"]
+
         fake_args = [
-            ph.meta["example_value"]
+            _try_get_fake(ph)
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
@@ -158,17 +166,21 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             if isinstance(arg, tuple):
                 # kwargs value are treated as default argument
                 arg_name, example_value = arg
-                default = example_value
+                # TODO: cannot pass in InvokeQuant as IValue
+                default = None
+                kw_only=True
             else:
                 arg_name = f"arg{idx}"
                 example_value = arg
                 default = None
+                kw_only=False
             args.append(
                 HopArgumentInfoGen.from_example(
                     example_value=example_value,
                     name=arg_name,
                     default_value=default,
                     is_mutated=idx in mutated_inp_idx,
+                    kw_only=kw_only
                 )
             )
 
@@ -190,6 +202,8 @@ class BaseHOPFunction(torch.autograd.Function):
         ctx.subgraph = subgraph
         ctx.kwargs = kwargs
 
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         with torch._C._AutoDispatchBelowAutograd():
             return hop(subgraph, *operands, **kwargs)
 
@@ -199,35 +213,19 @@ class BaseHOPFunction(torch.autograd.Function):
         operands = ctx.operands
         kwargs = ctx.kwargs
 
-        # TODO: Something special needs to happen with min cut partitioner
-        with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
-            with disable_proxy_modes_tracing():
-                from .invoke_subgraph import create_fw_bw_graph
-                from .utils import _from_fun
+        bwd_gm = materialize_as_graph(
+            create_bw_fn(subgraph, operands),
+            (*operands, *grad_outputs),
+            include_key_set=ctx._fw_include_key_set,
+            exclude_key_set=ctx._fw_exclude_key_set,
+        )
 
-                fw_inputs = pytree.tree_map(_from_fun, operands)
-                (
-                    _,
-                    joint_graph,
-                    _,
-                ) = create_fw_bw_graph(subgraph, fw_inputs, grad_outputs)
-
-        # The joint graph returns (*grad_inputs, *fwd_outputs).
-        # We only need the grad_inputs.
-        def bwd_fn(*args):
-            operands = args[: -len(grad_outputs)]
-            grad_outs = args[-len(grad_outputs) :]
-            result = joint_graph(*operands, *grad_outs)
-            grad_inputs = result[: -len(grad_outputs)]
-            return grad_inputs
-
+        breakpoint()
         return (
             None,
             None,
             None,
-            *ctx.hop(
-                FunctionWithNoFreeVars(bwd_fn), *operands, *grad_outputs, **kwargs
-            ),
+            *ctx.hop(bwd_gm, *operands, *grad_outputs, **kwargs),
         )
 
 

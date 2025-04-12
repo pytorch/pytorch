@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch._higher_order_ops.schema import find_hop_schema
 
 
 def get_base(tensor):
@@ -778,17 +779,7 @@ def _invoke_op_with_kwargs_and_schema(
     return op(*bound_args, **bound_kwargs)
 
 
-# auto_functionalized_v2 functions
-@auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
-def auto_functionalized_v2_dense(
-    _mutable_op: Union[OpOverload, HigherOrderOperator],
-    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
-    **kwargs: Any,
-) -> tuple[Any, tuple[Tensor, ...]]:
-    all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
-    schema = kwargs.pop("_op_schema", None) if isinstance(_mutable_op, HigherOrderOperator) else _mutable_op._schema
-    assert schema is not None
-
+def _generate_new_kwargs(schema, kwargs, all_bases, _only_clone_these_bases):
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
@@ -829,6 +820,21 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
+    return new_kwargs, all_bases_new
+
+
+# auto_functionalized_v2 functions
+@auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
+def auto_functionalized_v2_dense(
+    _mutable_op: Union[OpOverload, HigherOrderOperator],
+    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
+    **kwargs: Any,
+) -> tuple[Any, tuple[Tensor, ...]]:
+    schema = kwargs.pop("_op_schema", None) if isinstance(_mutable_op, HigherOrderOperator) else _mutable_op._schema
+    all_bases = kwargs.get("_all_bases", [])
+    assert schema is not None
+
+    new_kwargs, all_bases_new = _generate_new_kwargs(schema, {k:v for k,v in kwargs.items() if k not in ("_op_schema", "_all_bases")}, all_bases, _only_clone_these_bases)
     out = _invoke_op_with_kwargs_and_schema(_mutable_op, new_kwargs, schema)
 
     if isinstance(out, tuple):
@@ -857,35 +863,21 @@ def auto_functionalized_v2_proxy(
     **kwargs: dict[str, Any],
 ) -> tuple[Any, tuple[Tensor, ...]]:
     # We need to normalize the higher order op's input fn to graph module
-    # this could happen e.g. when we are in backward of base_hop where we
-    # have FunctionWithNoFreeVars input
+    # this could happen e.g. we could receive FunctionWithNoFreeVars
     schema = kwargs.get("_op_schema", None) if isinstance(_mutable_op, HigherOrderOperator) else _mutable_op._schema
+    all_bases = kwargs.get("_all_bases", [])
+    assert schema is not None
     if isinstance(_mutable_op, HigherOrderOperator):
-        new_args = []
-        new_kwargs = {}
-        for arg in schema.arguments:
-            key = arg.name
-            if key not in kwargs:
-                assert "_" + key + "_base_index" in kwargs, (key, kwargs)
-                key = "_" + key + "_base_index"
-                val = kwargs["_all_bases"][kwargs[key]]
-            else:
-                val = kwargs[key]
-            if not arg.kwarg_only:
-                new_args.append(val)
-            else:
-                new_kwargs[arg.name] = val
+        new_kwargs, _ =  _generate_new_kwargs(schema, {k:v for k,v in kwargs.items() if k not in ("_op_schema", "_all_bases")}, all_bases, None)
+        def fn():
+            return _invoke_op_with_kwargs_and_schema(_mutable_op, new_kwargs, schema)
+        gm = reenter_make_fx(fn)()
+        hop_node = gm.graph.find_nodes(op="call_function", target=_mutable_op)[0]
+        proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
+        for proxy, arg in zip(proxies, schema.arguments):
+            if isinstance(proxy, torch.fx.Node) and  proxy.op == "get_attr" and isinstance(getattr(gm, proxy.target), torch.fx.GraphModule):
+                kwargs[arg.name] = getattr(gm, proxy.target)
 
-        args = new_args + list(new_kwargs.values())
-        n_args = len(new_args)
-
-        def fn(*args):
-            final_args = args[:n_args]
-            final_kwargs = dict(zip(new_kwargs.keys(), args[n_args:]))
-            return _mutable_op(*final_args, **final_kwargs)
-
-        hop_gm = reenter_make_fx(fn)(*args)
-        kwargs["subgraph"] = hop_gm.subgraph0
 
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
@@ -896,11 +888,11 @@ def auto_functionalized_v2_proxy(
             mode.tracer.root.register_module(graph_name, val)
             return val
         elif isinstance(val, torch._C.FunctionSchema):
-            _, name = unique_graph_id(mode, prefix="functiona_schema")
-            setattr(mode.tracer.root, name, val)
+            _, attr_name = unique_graph_id(mode, prefix="functiona_schema")
+            setattr(mode.tracer.root, attr_name, val)
             proxy = mode.tracer.create_proxy(
                 "get_attr",
-                name,
+                attr_name,
                 tuple(),
                 {},
             )
@@ -910,13 +902,13 @@ def auto_functionalized_v2_proxy(
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-    kwargs = pytree.tree_map(_maybe_create_proxy, proxy_kwargs)
+    new_proxy_kwargs = pytree.tree_map(_maybe_create_proxy, proxy_kwargs)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized_v2,
         (_mutable_op,),
-        kwargs,
+        new_proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     return result
