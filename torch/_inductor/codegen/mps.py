@@ -537,7 +537,8 @@ class MetalKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        """Codegen a reduction operation"""
+        """Codegen a reduction operation.
+        Only sum and prod operations are somewhat reasonable optimized"""
         # Establish reduction buffer size and index expression
         reduction_idx = ""
         acc_buf_size = 1
