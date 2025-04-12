@@ -1,4 +1,4 @@
-name: perf-nightly-macos
+name: inductor-perf-nightly-macos
 # Technically not an inductor test, but uses it as a template for tracking macos performance
 
 on:
