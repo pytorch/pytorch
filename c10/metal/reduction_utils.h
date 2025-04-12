@@ -92,7 +92,6 @@ opmath_t<T> threadgroup_prod(
 
 template <typename T>
 float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   float m = data[0];
   float m2 = 0;
   for (unsigned idx = 1; idx < size; ++idx) {
@@ -101,28 +100,6 @@ float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
     m2 += delta * (data[idx] - m);
   }
   return float2(m, m2);
-}
-
-// Each vec3type is tuple of mean, m2 and weight
-template <typename T>
-float3 welford_combine(T a, T b) {
-  float delta = b.x - a.x;
-  float new_weight = a.z + b.z;
-  auto w2_over_w = new_weight != 0 ? b.z / new_weight : 0.0;
-  return float3(
-      a.x + delta * w2_over_w,
-      a.y + b.y + delta * delta * a.z * w2_over_w,
-      new_weight);
-}
-
-template <typename T>
-float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  float3 rc = data[0];
-  for (unsigned idx = 1; idx < size; ++idx) {
-    rc = welford_combine(rc, data[idx]);
-  }
-  return rc;
 }
 
 template <typename T>
