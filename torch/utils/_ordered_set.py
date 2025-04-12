@@ -174,3 +174,7 @@ class OrderedSet(MutableSet[T], Reversible[T]):
 
     def __reduce__(self) -> tuple[type[OrderedSet[T]], tuple[list[T]]]:
         return (OrderedSet, (list(self),))
+
+class ErrorOnUpdateOrderedSet(OrderedSet):
+    def update(self, *others):
+        raise NotImplementedError("Update operation is not allowed for this OrderedSet subclass.")
