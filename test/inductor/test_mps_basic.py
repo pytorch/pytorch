@@ -175,6 +175,7 @@ for test_name in [
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
+    "test_batch_norm_2d_2",
     "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
