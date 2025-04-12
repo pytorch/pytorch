@@ -59,7 +59,6 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           int64_t reduction,
                                           Tensor& grad_input,
                                           const string op_name) {
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
   if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
@@ -202,7 +201,6 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  const std::optional<Tensor>& grad_output_opt,
                                  const string op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   c10::MaybeOwned<Tensor> grad_output_maybe_owned = at::borrow_from_optional_tensor(grad_output_opt);
@@ -419,8 +417,7 @@ static void nllnd_loss_forward_impl(Tensor& output,
                                     const Tensor& target_arg,
                                     const Tensor& weight,
                                     int64_t reduction,
-                                    int64_t ignore_index,
-                                    bool is2D) {
+                                    int64_t ignore_index) {
   std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
   reshapedTarget.push_back(1);
 
@@ -827,7 +824,6 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   string op_name = __func__;
   using namespace mps;
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   TORCH_CHECK(output.is_mps());
 
   if (reduction == Reduction::None)
@@ -1010,13 +1006,17 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
     return;
   }
+
+  if (!target.is_same_size(input)) { // for vmap
+    TORCH_INTERNAL_ASSERT(reduction == Reduction::None, op_name + ": reduction needs to be None when vmapped.");
+  }
+
   bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
   if (!contiguousOutput) {
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
   TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
               op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
@@ -1145,8 +1145,7 @@ TORCH_IMPL_FUNC(nll_loss_forward_out_mps)
  const Tensor& total_weight) {
   const Tensor& weight = weight_opt.getTensorRef();
 
-  mps::nllnd_loss_forward_impl(
-      (Tensor&)output, (Tensor&)total_weight, self, target, weight, reduction, ignore_index, false);
+  mps::nllnd_loss_forward_impl((Tensor&)output, (Tensor&)total_weight, self, target, weight, reduction, ignore_index);
 
   return;
 }
@@ -1186,7 +1185,7 @@ static void nll_loss2d_forward_out_mps_template(Tensor& output,
   check_inputs_nll_loss2d(input, target, weight);
   total_weight.resize_({});
 
-  mps::nllnd_loss_forward_impl(output, total_weight, input, target, weight, reduction, ignore_index, true);
+  mps::nllnd_loss_forward_impl(output, total_weight, input, target, weight, reduction, ignore_index);
 
   return;
 }

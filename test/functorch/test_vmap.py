@@ -6415,8 +6415,10 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "mps")
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfo, globals(), only_for=only_for, allow_mps=True
+)
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
