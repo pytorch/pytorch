@@ -510,22 +510,19 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: Union[str | torch.dtype],
+        dtype: torch.dtype,
         elem_count: Optional[int] = None,
         default_value: Optional[Any] = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
-        if isinstance(dtype, torch.dtype):
-            dtype = self.dtype_to_str(dtype)
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         var_def = "threadgroup " if is_threadgroup else ""
-        var_def += f"{dtype} {var_name}"
+        var_def += f"{self.dtype_to_str(dtype)} {var_name}"
         if elem_count:
             var_def += f"[{elem_count}]"
         if default_value is not None:
-            assert not is_threadgroup, "Thread group var can not have default value"
             var_def += f" = {default_value}"
         self.indexing_code.writeline(var_def + self.suffix)
         return var
@@ -644,19 +641,6 @@ class MetalKernel(SIMDKernel):
             return OpsWrapper._unwrap(
                 (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
             )
-        if reduction_type == "welford_combine":
-            assert not self.multistage_reduction, (
-                f"Multistage reduction not yet supported for {reduction_type}"
-            )
-            acc_buf = self._new_idxvar("float3", acc_buf_size)
-            self.compute.splice(
-                f"{acc_buf}[{reduction_idx}] = float3({value[0]}, {value[1]}, {value[2]});"
-            )
-            wf_res = self.cse.generate(
-                self.compute,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
-            )
-            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
