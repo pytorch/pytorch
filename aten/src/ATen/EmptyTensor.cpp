@@ -121,9 +121,9 @@ size_t computeStorageNbytes(
   // of the last element according to stride
   uint64_t size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
-      return 0;
-    }
+    // if (sizes[i] == 0) {
+    //   return 0;
+    // }
 
     size += strides[i] * (sizes[i] - 1);
   }
