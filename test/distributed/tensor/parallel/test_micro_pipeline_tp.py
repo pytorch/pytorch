@@ -123,7 +123,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(all_gathers[2].gather_dim, 0)
         self.assertEqual(
             all_gathers[2].res_node.target,
-            torch.ops.aten.view.dtype,
+            torch.ops._c10d_functional.wait_tensor.default,
         )
 
         self.assertEqual(all_gathers[3].gather_dim, 1)

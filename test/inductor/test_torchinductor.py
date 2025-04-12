@@ -12943,28 +12943,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
         f = torch.compile(f)
 
         x = torch.ones((2, 3, 2), device=self.device, dtype=torch.uint8)
-        post_grad_graph = get_post_grad_graph(f, (x,))
-        expected_graph1 = f"""\
-def forward(self, arg0_1: "u8[2, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "u8[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
-        return (permute,)"""  # noqa: B950
-        self.assertExpectedInline(
-            post_grad_graph,
-            expected_graph1,
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
 
-        # dynamic shape
-        x = torch.ones((4, 3, 2), device=self.device, dtype=torch.uint8)
         post_grad_graph = get_post_grad_graph(f, (x,))
-        expected_graph2 = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "u8[s77, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "u8[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
+        expected_graph = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
+        permute: "u8[s77, s53, s27][s27*s53, 1, s53]{str(x.device)}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
         return (permute,)"""  # noqa: B950
         self.assertExpectedInline(
             post_grad_graph,
-            expected_graph2,
+            expected_graph,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
