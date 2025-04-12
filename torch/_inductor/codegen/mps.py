@@ -537,13 +537,15 @@ class MetalKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        """Codegen a reduction operation"""
+        """Codegen a reduction operation.
+        Only sum and prod operations are somewhat reasonable optimized"""
         # Return cached reduction
         assert self.inside_reduction
         assert not self._load_mask
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
+
         # Establish reduction buffer size and index expression
         reduction_idx = ""
         acc_buf_size = 1
