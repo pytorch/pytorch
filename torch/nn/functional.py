@@ -3037,7 +3037,8 @@ def ctc_loss(
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
-            Targets cannot be blank. In the second form, the targets are assumed to be concatenated.
+                May be an empty tensor if all entries in `target_lengths` are zero.
+                In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)` or :math:`()`.
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: :math:`(N)` or :math:`()`.
