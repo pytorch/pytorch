@@ -43,9 +43,7 @@ torch.fx.experimental.symbolic_shapes
     guard_or_true
     guard_or_false
     guard_size_oblivious
-    sym_and
     sym_eq
-    sym_or
     constrain_range
     constrain_unify
     canonicalize_bool_expr
