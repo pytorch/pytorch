@@ -152,3 +152,28 @@ class CFunctionSchemaGen:
             False,
             False,
         )
+
+
+def find_hop_schema(
+    gm: torch.fx.GraphModule, target: Any
+) -> list[torch._C.FunctionSchema]:
+    import torch.utils._pytree as pytree
+
+    schemas = []
+    for node in gm.graph.find_nodes(op="call_function", target=target):
+
+        def _get_example_value(node: torch.fx.Node) -> Any:
+            if node.op == "get_attr":
+                assert isinstance(node.target, str)
+                return getattr(gm, node.target)
+            else:
+                return node.meta["example_value"]
+
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node,
+            _get_example_value,
+            (node.args, node.kwargs),
+        )
+        schema = node.target.gen_schema(*fake_args, **fake_kwargs)
+        schemas.append(schema)
+    return schemas
