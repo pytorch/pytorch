@@ -223,6 +223,7 @@ for test_name in [
     "test_rsqrt",
     "test_scalar_cpu_tensor_arg",
     "test_scalar_output",
+    "test_scheduler_vertical_fusion1",
     "test_setitem_with_int_parameter",
     "test_signbit",
     "test_silu",
