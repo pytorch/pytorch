@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
-from typing_extensions import Never
 
 from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -232,9 +232,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
