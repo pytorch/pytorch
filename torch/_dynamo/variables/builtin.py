@@ -1039,6 +1039,13 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
+            if (
+                fn in cmp_name_to_op_mapping.values()
+                and len(args) == 2
+                and isinstance(args[0], variables.TensorVariable)
+            ):
+                # Dynamo expects `__eq__`` str while operator.eq gives just `eq`
+                return args[0].call_method(tx, f"__{fn.name}__", args[1:], kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
