@@ -4634,8 +4634,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -5899,7 +5897,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
+                "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
 
@@ -6038,7 +6036,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Foo(), (torch.randn(64).cuda(),))
+        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -7304,7 +7302,6 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
-    # map_fn references module outside the module hierarchy
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
