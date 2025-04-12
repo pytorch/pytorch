@@ -534,6 +534,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     dtypeB = None
     dtypeC = None
 
+    # TODO: Role of transA and transB is counterintuitive in the code
+    # below. In many places their role should be inverted. Additionaly
+    # there are implicit transposes elsewhere. Code could be
+    # simplified further.
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
         transA = layout[0] == "T"
