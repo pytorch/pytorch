@@ -671,11 +671,11 @@ class MetalKernel(SIMDKernel):
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             if self.multistage_reduction:
                 self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
-            else:
-                self.compute.writeline(f"{acc_thread_var} = {inp_value};")
                 self.compute.writeline(
                     f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, {inp_value});"
                 )
+            else:
+                self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
