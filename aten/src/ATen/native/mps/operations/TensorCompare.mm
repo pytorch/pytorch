@@ -421,6 +421,11 @@ static void where_kernel_mps(TensorIterator& iter) {
     return;
   }
 
+  Tensor out_;
+  if (needsGather(out)) {
+    out_ = out.contiguous();
+  }
+
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -459,10 +464,18 @@ static void where_kernel_mps(TensorIterator& iter) {
         Placeholder(cachedGraph->selfTensor_, self, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, selfDataType);
     Placeholder otherPlaceholder =
         Placeholder(cachedGraph->otherTensor_, other, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, otherDataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                needsGather(out) ? out_ : out,
+                                                /*mpsShape=*/nullptr,
+                                                /*gatherTensorData=*/needsGather(out),
+                                                getMPSScalarType(out.scalar_type()));
 
     auto feeds = dictionaryFromPlaceholders(conditionPlaceholder, selfPlaceholder, otherPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  if (needsGather(out)) {
+    out.copy_(out_);
   }
 }
 
