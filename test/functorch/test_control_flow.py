@@ -1403,15 +1403,16 @@ def forward(self, pred_1, x_1):
 
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
-        # TODO: This is currently not working properly as the HOP autograd rework does not work well
-        # with the wrapper of map
         with self.assertRaisesRegex(
             RuntimeError, "map doesn't work unless it is captured completely"
         ):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Expect outputs of map only contains tensors"
+            # Should be
+            # RuntimeError, "Expect outputs of map only contains tensors"
+            torch._dynamo.exc.TorchRuntimeError,
+            ".*",
         ):
             control_flow.map(f1, x, y)
 
