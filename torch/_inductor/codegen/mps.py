@@ -648,6 +648,7 @@ class MetalKernel(SIMDKernel):
             assert not self.multistage_reduction, (
                 f"Multistage reduction not yet supported for {reduction_type}"
             )
+            assert isinstance(value, tuple), "Input to welford combine must be tuple"
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             self.compute.splice(
                 f"{acc_buf}[{reduction_idx}] = float3({value[0]}, {value[1]}, {value[2]});"
