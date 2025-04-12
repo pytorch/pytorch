@@ -126,7 +126,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
 custom_op_default_layout_constraint: Literal[
-    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+    "needs_fixed_stride_order", "flexible_layout"
 ] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.

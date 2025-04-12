@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import builtins
+import cmath
 import contextlib
 import copy
 import enum
@@ -82,6 +83,7 @@ def _register_custom_builtin(name: str, import_str: str, obj: Any):
 
 _register_custom_builtin("inf", "from math import inf", math.inf)
 _register_custom_builtin("nan", "from math import nan", math.nan)
+_register_custom_builtin("nanj", "from cmath import nanj", cmath.nanj)
 _register_custom_builtin("NoneType", "NoneType = type(None)", type(None))
 _register_custom_builtin("torch", "import torch", torch)
 _register_custom_builtin("device", "from torch import device", torch.device)
