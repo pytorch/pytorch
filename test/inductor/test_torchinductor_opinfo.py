@@ -241,9 +241,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
-    # maybe as same root cause as previous op, but haven't investigate into it yet,
-    # because I couldn't repro it on my local.
-    "linalg.eigvals": {f64},
 }
 
 
