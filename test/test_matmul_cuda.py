@@ -22,6 +22,7 @@ from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
     SM90OrLater,
+    xfailIfSM100OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -269,6 +270,7 @@ class TestMatmulCuda(TestCase):
             self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -306,6 +308,7 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -352,6 +355,7 @@ class TestMatmulCuda(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -385,6 +389,7 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -1437,6 +1442,7 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out, out_ref)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
@@ -1466,6 +1472,7 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
@@ -1499,6 +1506,7 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
@@ -1523,6 +1531,7 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
