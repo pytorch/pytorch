@@ -2981,6 +2981,17 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    def test_deferred_sym_or_assert(self):
+        torch._dynamo.config.capture_scalar_outputs = True
+
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+            return a.item() * 10
+
+        func(torch.tensor([5]), torch.tensor([100]))
+        func(torch.tensor([100]), torch.tensor([5]))
+
 
 if __name__ == "__main__":
     run_tests()
