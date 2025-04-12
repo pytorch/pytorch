@@ -235,7 +235,7 @@ void* _getUnifiedWorkspaceWithoutHandle() {
 struct CublasLtWorkspace {
   CublasLtWorkspace() {
     size = _getWorkspaceSize();
-#ifdef USE_ROCM
+#ifndef USE_ROCM
     static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
     if (unified) {
       auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
