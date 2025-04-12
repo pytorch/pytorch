@@ -103,6 +103,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
@@ -1036,6 +1037,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GenericAttrSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.generic_getattr_manager(
+                attr=source.member,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
