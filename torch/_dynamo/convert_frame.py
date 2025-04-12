@@ -926,6 +926,7 @@ def _compile(
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
         )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
