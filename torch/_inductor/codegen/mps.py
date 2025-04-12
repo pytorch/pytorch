@@ -119,6 +119,8 @@ class MetalExprPrinter(ExprPrinter_):
 
 
 class MetalOverrides(OpOverrides):
+    """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
+
     @staticmethod
     def to_dtype(
         x: CSEVariable,
@@ -458,6 +460,8 @@ MetalOverrides._initialize_pointwise_overrides("mps")
 
 
 class MetalKernel(SIMDKernel):
+    """Implement Metal codegen based on the SIMDKernel abstraction"""
+
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
