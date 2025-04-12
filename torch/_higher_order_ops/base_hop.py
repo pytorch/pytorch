@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 
 import abc
-
 from typing import Any
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -11,7 +11,6 @@ from torch._higher_order_ops.utils import (
     create_bw_fn,
     materialize_as_graph,
     reenter_make_fx,
-    materialize_as_graph,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -123,12 +122,14 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
     def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
+
         if not isinstance(subgraph, torch.fx.GraphModule):
             subgraph = materialize_as_graph(
                 subgraph,
                 operands,
                 include_key_set=torch._C._dispatch_tls_local_include_set(),
-                exclude_key_set=torch._C._dispatch_tls_local_exclude_set())
+                exclude_key_set=torch._C._dispatch_tls_local_exclude_set(),
+            )
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
@@ -141,8 +142,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 return node.meta["val"]
 
         fake_args = [
-            _try_get_fake(ph)
-            for ph in subgraph.graph.find_nodes(op="placeholder")
+            _try_get_fake(ph) for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
             mutated_inp_idx,
@@ -168,19 +168,19 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 arg_name, example_value = arg
                 # TODO: cannot pass in InvokeQuant as IValue
                 default = None
-                kw_only=True
+                kw_only = True
             else:
                 arg_name = f"arg{idx}"
                 example_value = arg
                 default = None
-                kw_only=False
+                kw_only = False
             args.append(
                 HopArgumentInfoGen.from_example(
                     example_value=example_value,
                     name=arg_name,
                     default_value=default,
                     is_mutated=idx in mutated_inp_idx,
-                    kw_only=kw_only
+                    kw_only=kw_only,
                 )
             )
 

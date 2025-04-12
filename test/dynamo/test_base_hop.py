@@ -201,7 +201,8 @@ class GraphModule(torch.nn.Module):
         torch.compile(f, backend=backend, fullgraph=True)(x.clone(), y)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
-            normalize_graph(backend.graphs[0]), """\
+            normalize_graph(backend.graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3]", L_y_: "f32[3, 3]"):
         l_x_ = L_x_
@@ -222,11 +223,11 @@ class GraphModule(torch.nn.Module):
             sin: "f32[3, 3]" = matmul.sin();  matmul = None
             cos: "f32[3, 3]" = sin.cos();  sin = None
             return (cos,)
-"""
+""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(self._find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
-            """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor(a2!) operands1, *, str scheme="nf4") -> ((Tensor))"""
+            """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor(a2!) operands1, *, str scheme="nf4") -> ((Tensor))""",
         )
 
     def test_schema_gen_pytree_in_out_with_mutation(self):
@@ -251,7 +252,8 @@ class GraphModule(torch.nn.Module):
         torch.compile(f, backend=backend, fullgraph=True)(x.clone(), y)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
-            normalize_graph(backend.graphs[0]), """\
+            normalize_graph(backend.graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3]", L_y_: "f32[3, 3]"):
         l_x_ = L_x_
@@ -278,11 +280,11 @@ class GraphModule(torch.nn.Module):
 
             child_3: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
             return (child, child_1, child_2, child_3)
-"""
+""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(self._find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
-            """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor operands1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)"""
+            """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor operands1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
     def test_none_input(self):
@@ -388,7 +390,7 @@ class GraphModule(torch.nn.Module):
 
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_, arg1_1);  add_ = arg1_1 = None
             return (add,)
-""",
+""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)

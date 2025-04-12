@@ -382,6 +382,7 @@ _ExtractValType = Optional[
         _AnyScriptObjectType,
         BackwardState,
         torch._C.FunctionSchema,
+        torch._higher_order_ops._invoke_quant.InvokeQuant,
         list["_ExtractValType"],
         tuple["_ExtractValType", ...],
         dict[str, "_ExtractValType"],
@@ -403,6 +404,8 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     elif isinstance(val, BackwardState):
         return val
     elif isinstance(val, torch._C.FunctionSchema):
+        return val
+    elif isinstance(val, torch._higher_order_ops._invoke_quant.InvokeQuant):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -681,6 +684,9 @@ def track_tensor_tree(
             set_meta(proxy, e)
             e.proxy = proxy
         elif isinstance(e, torch._C.FunctionSchema):
+            assert isinstance(proxy, Proxy)
+            set_meta(proxy, e)
+        elif isinstance(e, torch._higher_order_ops._invoke_quant.InvokeQuant):
             assert isinstance(proxy, Proxy)
             set_meta(proxy, e)
         else:

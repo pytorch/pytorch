@@ -13,7 +13,6 @@ import torch._inductor.decomposition
 from torch._higher_order_ops import InvokeQuant
 from torch._inductor import config
 from torch._inductor.pattern_matcher import (
-    Arg,
     CallFunction,
     Ignored,
     Match,
@@ -119,9 +118,10 @@ class TestInvokeQuant(TestCase):
             logs = "\n".join(r.getMessage() for r in log.records)
             f = FileCheck()
             f.check("AFTER POST GRAD")
-            f.check("subgraph0").check("subgraph1")
-            for _ in range(2):
-                f.check("torch.ops.higher_order.invoke_quant(").check_same("nf4")
+            f.check("subgraph0_1")
+            f.check("torch.ops.higher_order.invoke_quant(").check_same("nf4")
+            f.check("subgraph0_0")
+            f.check("torch.ops.higher_order.invoke_quant(").check_same("nf4")
             f.run(logs)
 
 
@@ -159,15 +159,15 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 
         @register_graph_pattern(
             CallFunction(
-                torch.ops.aten.mm,
-                CallFunction(
-                    torch.ops.higher_order.invoke_quant,
-                    Ignored(),
-                    Ignored(),
-                    Ignored(),
-                    scheme="nf4",
-                ),
-                Arg(),
+                torch.ops.higher_order.auto_functionalized_v2,
+                Ignored(),
+                subgraph=Ignored(),
+                arg0=Ignored(),
+                arg1=Ignored(),
+                scheme="nf4",
+                quant_options=Ignored(),
+                _all_bases=Ignored(),
+                _op_schema=Ignored(),
             ),
             pass_dict=test_pass,
         )
