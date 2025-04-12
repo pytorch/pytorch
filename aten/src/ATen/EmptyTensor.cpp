@@ -102,9 +102,9 @@ size_t computeStorageNbytes(
   uint64_t size = storage_offset + 1;
   bool overflowed = false;
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
-      return 0;
-    }
+    // if (sizes[i] == 0) {
+    //   return 0;
+    // }
 
     uint64_t strided_size = 0;
     overflowed |= c10::mul_overflows(strides[i], sizes[i] - 1, &strided_size);
