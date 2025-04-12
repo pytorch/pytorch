@@ -273,8 +273,12 @@ class SuperVariable(VariableTracker):
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
-            source = source and AttrSource(source, attr_name)
-            return VariableTracker.build(tx, attr_value, source)
+            attribute_source = None
+            if self.objvar.source:
+                # Since its object.__getattribute__, we can directly access the
+                # attribute without worrying about side-effects.
+                attribute_source = AttrSource(self.objvar.source, attr_name)
+            return VariableTracker.build(tx, attr_value, attribute_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
             # See `THPModule_disable_torch_function` for the C impl.
             # The signature of _disabled_torch_function_impl is similar to
