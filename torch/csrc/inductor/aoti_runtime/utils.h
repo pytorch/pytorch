@@ -169,7 +169,7 @@ class MaybeOwningAtenTensorHandle {
   // If user_managed is true, we do not steal the ownership.
   MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
     if (user_managed) {
-      handle_ = handle;
+      aoti_torch_new_tensor_handle(handle, &handle_);
     } else {
       raii_handle_ = RAIIAtenTensorHandle(handle);
       handle_ = raii_handle_.get();
