@@ -727,6 +727,34 @@ class DistMathOpsTest(DTensorTestBase):
             dtensor_result = m(input_dtensor)
             self.assertEqual(result, dtensor_result.full_tensor())
 
+    @with_comms
+    def test_cumsum(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        inp = torch.rand(3, 5, device=self.device_type)
+
+        shard_dim = 0
+        input_dtensor = distribute_tensor(
+            inp, device_mesh=mesh, placements=[Shard(shard_dim)]
+        )
+
+        cumsum_dims = [0, 1]
+        for dim in cumsum_dims:
+            output = torch.cumsum(inp, dim=dim)
+            with comm_mode:
+                output_dtensor = torch.cumsum(input_dtensor, dim=dim)
+                if dim == shard_dim:
+                    self.assertEqual(comm_mode.get_total_counts(), 1)
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
+                    self.assertTrue(output_dtensor.placements[0].is_replicate())
+                else:
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
+                self.assertEqual(output_dtensor.full_tensor(), output)
+
 
 if __name__ == "__main__":
     run_tests()

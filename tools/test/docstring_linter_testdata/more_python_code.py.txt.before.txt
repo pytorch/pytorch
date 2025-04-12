@@ -1,0 +1,31 @@
+tools/test/docstring_linter_testdata/more_python_code.py.txt:10: No docstring found for class 'LintInit' (6 lines)
+    8 |
+    9 |
+   10 | class LintInit:
+        ^
+   11 |     def __init__(self) -> None:
+   12 |         # Lots of lines!
+
+tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (4 lines)
+   15 |
+   16 |
+   17 | class LongWithoutDocstring:
+        ^
+   18 |     # A comment isn't a docstring
+   19 |
+
+tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for class 'LongWithShortDocstring' (6 lines) was too short (10 characters)
+   22 |
+   23 |
+   24 | class LongWithShortDocstring:
+        ^
+   25 |     """TODO"""
+   26 |
+
+tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found for function 'needs_docs' (12 lines)
+   69 |     """This docstring, while short, is enough"""
+   70 |
+   71 |     def needs_docs(self):
+            ^
+   72 |         def not_short():
+   73 |             class Long:
