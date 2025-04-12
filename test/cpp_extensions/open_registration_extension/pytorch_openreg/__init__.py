@@ -34,7 +34,29 @@ def _create_module():
             self.idx = driver.exec("uncheckedSetDevice", self.prev_idx)
             return False
 
-    module.device = device  # type: ignore[misc]
+    def device_count() -> int:
+        return driver.exec("deviceCount")
+
+    def is_available():
+        return True
+
+    def current_device():
+        return torch.accelerator.current_device_index()
+
+    def get_rng_state(device):
+        return torch.empty(4, 4, device="openreg")
+
+    def set_rng_state(new_state, device):
+        pass
+
+    module.device = device  # type: ignore[assignment]
+    module.device_count = device_count  # type: ignore[assignment]
+    module.is_available = is_available  # type: ignore[assignment]
+    module.current_device = current_device  # type: ignore[assignment]
+    module.get_rng_state = get_rng_state  # type: ignore[assignment]
+    module.set_rng_state = set_rng_state  # type: ignore[assignment]
+    module._lazy_init = lambda: None  # type: ignore[assignment]
+    module.is_initialized = lambda: True  # type: ignore[assignment]
 
     return module
 
