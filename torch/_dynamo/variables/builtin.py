@@ -1044,8 +1044,8 @@ class BuiltinVariable(VariableTracker):
                 and len(args) == 2
                 and isinstance(args[0], variables.TensorVariable)
             ):
-                # Dynamo expects `__eq__`` str while operator.eq gives just `eq`
-                return args[0].call_method(tx, f"__{fn.name}__", args[1:], kwargs)
+                # Dynamo expects `__eq__` str while operator.eq gives just `eq`
+                return args[0].call_method(tx, f"__{fn.__name__}__", args[1:], kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
