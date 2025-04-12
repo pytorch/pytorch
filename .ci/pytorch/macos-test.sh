@@ -225,7 +225,7 @@ test_torchbench_smoketest() {
   local device=mps
   local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152)
 
-  for backend in eager compile; do
+  for backend in eager inductor; do
     touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
     touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
 
