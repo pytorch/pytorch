@@ -945,7 +945,10 @@ def _compile(
             # they are benign and do not generate any new graphs.
             hooks.guard_export_fn(output.guards)
 
-        return wrap_guarded_code(guarded_code)
+        # Return a list of guarded codes for the C++ code to handle
+        # For now, we just return a single guarded code, but in the future
+        # we can return multiple guarded codes
+        return wrap_guarded_codes([guarded_code])
 
     metrics_context = get_metrics_context()
     with (

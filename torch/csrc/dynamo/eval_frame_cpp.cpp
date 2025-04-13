@@ -226,12 +226,30 @@ PyObject* dynamo__custom_eval_frame(
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
+  py::list callback_results;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
+
+    // Check if the result is a list
+    if (py::isinstance<py::list>(callback_result)) {
+      callback_results = callback_result;
+      // Use the last result for execution
+      if (callback_results.size() > 0) {
+        callback_result = callback_results[callback_results.size() - 1];
+      } else {
+        // Empty list, use None
+        callback_result = py::none();
+      }
+    } else {
+      // For backward compatibility, wrap single result in a list
+      callback_results = py::list();
+      callback_results.append(callback_result);
+    }
+
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
@@ -275,17 +293,33 @@ PyObject* dynamo__custom_eval_frame(
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
 
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
-    eval_custom();
+    // Save all results to the cache
+    CacheEntry* new_cache_entry = nullptr;
+
+    // Process all results in the list
+    for (size_t i = 0; i < callback_results.size(); i++) {
+      py::object result = callback_results[i];
+      PyObject* result_guarded_code = result.attr("guarded_code").ptr();
+
+      if (result_guarded_code != Py_None) {
+        // Create a cache entry for this result
+        new_cache_entry = create_cache_entry(extra, result_guarded_code, backend);
+
+        // If this is the last result, use it for execution
+        if (i == callback_results.size() - 1) {
+          cached_code = CacheEntry_get_code(new_cache_entry);
+          trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+        }
+      }
+    }
+
+    // If we have a valid cached code from the last result, use it
+    if (cached_code != nullptr) {
+      eval_custom();
+    } else {
+      eval_default();
+    }
   } else {
     eval_default();
   }

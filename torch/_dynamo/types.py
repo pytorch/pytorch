@@ -79,6 +79,20 @@ def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
         guarded_code=guarded_code,
     )
 
+def wrap_guarded_codes(guarded_codes: list[GuardedCode]) -> list[ConvertFrameReturn]:
+    """Wrap multiple guarded codes into a list of ConvertFrameReturn objects.
+    The last one will be used for execution, but all will be saved to the cache.
+    """
+    results = []
+    for guarded_code in guarded_codes:
+        results.append(
+            ConvertFrameReturn(
+                frame_exec_strategy=FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT),
+                guarded_code=guarded_code,
+            )
+        )
+    return results
+
 
 class DynamoCallbackFn(Protocol):
     def __call__(
