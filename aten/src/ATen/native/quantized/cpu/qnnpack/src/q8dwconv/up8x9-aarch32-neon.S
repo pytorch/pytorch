@@ -31,11 +31,8 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     # - r12 = quantization_params
     LDR r12, [sp, 12]
 
-    PUSH {r4, r5, r6, r7, r8, r9, r10, r11, lr}
+    PUSH {r0, r3, r4, r5, r6, r7, r8, r9, r10, r11, lr}
     VPUSH {d8-d15}
-
-    STR r0, [sp, #-8]
-    STR r3, [sp, #-4]
 
     # Load the address zero_point array.
     # For depth wise kernels the array is of single element.
@@ -43,7 +40,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     # Load o:
     # - lr = o = output
-    LDR lr, [sp, 100]
+    LDR lr, [sp, 108]
 
     # Load kernel zero point:
     # - d31 = vkernel_zero_point
@@ -90,11 +87,11 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 0:
     # Load input stride
     # - r3 = input_stride
-    LDR r3, [sp, 104]
+    LDR r3, [sp, 112]
 
     # Load c:
     # - r0 = c = channels
-    LDR r0, [sp, #-8]
+    LDR r0, [sp, 64]
 
     # Load i0, i1, i2, i3, i4, i5, i6, i7, i8
     # - r4 = i0
@@ -117,7 +114,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     # Load w:
     # - r3 = w = weights
-    LDR r3, [sp, #-4]
+    LDR r3, [sp, 68]
 
     BLO 2f
 
@@ -394,7 +391,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 5:
     # Load output increment
     # - r3 = output_increment
-    LDR r3, [sp, 108]
+    LDR r3, [sp, 116]
 
     # Decrement output width
     SUBS r1, r1, 1
@@ -406,7 +403,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     BNE 0b
 
     VPOP {d8-d15}
-    POP {r4, r5, r6, r7, r8, r9, r10, r11, pc}
+    POP {r0, r3, r4, r5, r6, r7, r8, r9, r10, r11, pc}
 END_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
 #ifdef __ELF__
