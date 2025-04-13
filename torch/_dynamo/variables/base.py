@@ -16,7 +16,7 @@ computations.
 """
 
 import collections
-from collections.abc import Sequence
+from collections.abc import ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -529,6 +529,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "__iter__",
             "__next__",
         ):
+            if isinstance(self.value, (KeysView, ItemsView, ValuesView)):
+                hints.append(
+                    "Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) "
+                    "to the compiled region, instead of passing it as an input to the compiled region."
+                )
             hints.append(
                 "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
                 "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
