@@ -1437,7 +1437,9 @@ class InstructionTranslatorBase(
     def STORE_FAST(self, inst):
         name = inst.argval
         loaded_vt = self.pop()
-        loaded_vt.set_name_hint(name)
+        if not isinstance(loaded_vt, variables.LazyVariableTracker):
+            # Prevent lazy variable tracker from being realized.
+            loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
