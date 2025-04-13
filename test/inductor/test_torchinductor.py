@@ -6339,8 +6339,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         )
 
     def test_remove_noop_slice_scatter(self):
-        def f(x, y):
+        def f(x):
             x = x + 1
+            y = torch.empty_like(x)
             size = x.shape[-1]
             out = torch.ops.aten.slice_scatter(y, x, -1, 0, size)  # noop
             return out + 1
@@ -6348,14 +6349,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         f = torch.compile(f)
 
         x = torch.ones((2, 3, 2), device=self.device)
-        y = torch.ones((2, 3, 2), device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
 
-        post_grad_graph = get_post_grad_graph(f, (x, y))
+        post_grad_graph = get_post_grad_graph(f, (x,))
         expected_graph = f"""\
-def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{x.device}", arg1_1: "f32[2, 3, 2][6, 2, 1]{x.device}"):
-        add: "f32[2, 3, 2][6, 2, 1]{x.device}" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-        add_1: "f32[2, 3, 2][6, 2, 1]{x.device}" = torch.ops.aten.add.Tensor(add, 1);  add = None
-        return (add_1,)"""  # noqa: B950
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
+        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = None
+        permute: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.permute.default(empty, [0, 1, 2]);  empty = permute = None
+        add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
+        add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_13,)"""  # noqa: B950
         self.assertExpectedInline(
             post_grad_graph,
             expected_graph,
