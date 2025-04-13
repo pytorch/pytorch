@@ -142,6 +142,27 @@ def aot_dispatch_export(
     return compiled_fn, fw_metadata
 
 
+def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
+    return AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        inference_compiler=None,
+        num_params_buffers=input.num_params_buffers,
+        aot_id=input.aot_id,
+        keep_inference_input_mutations=input.keep_inference_input_mutations,
+        is_export=input.is_export,
+        no_tangents=input.no_tangents,
+        aot_autograd_arg_pos_to_source=input.aot_autograd_arg_pos_to_source,
+        dynamic_shapes=input.dynamic_shapes,
+        enable_log=input.enable_log,
+        static_input_indices=input.static_input_indices,
+        pre_dispatch=input.pre_dispatch,
+        cache_info=None,
+    )
+
+
 def aot_dispatch_base(
     flat_fn,
     flat_args: list[Any],
@@ -251,6 +272,7 @@ def aot_dispatch_base(
                 indices_of_inps_to_detach=[],
                 forward_time_taken_ns=time_taken_ns,
                 backward_time_taken_ns=0,
+                sanitized_aot_config=sanitize_aot_config(aot_config),
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -1305,6 +1327,7 @@ def aot_dispatch_autograd(
                     _indices_of_inps_to_detach,
                     forward_time_taken_ns,
                     backward_time_taken_ns,
+                    sanitized_aot_config=sanitize_aot_config(aot_config),
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
