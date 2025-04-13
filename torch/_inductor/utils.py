@@ -1275,7 +1275,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 60  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2268,6 +2268,7 @@ def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
         and dtype == torch.bfloat16
         and torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
+        and config.bfloat16_atomic_adds_enabled
     ):
         return False
     else:
