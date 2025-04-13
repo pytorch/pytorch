@@ -384,12 +384,11 @@ endif()
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
-  if(WIN32) # Windows doesn't support Composable Kernels and Triton
+  if(WIN32) # Windows doesn't support Composable Kernels
     file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
     file(GLOB native_hip_ck "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
-      ${native_hip_bgemm} ${native_hip_ck}
-      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
+      ${native_hip_bgemm} ${native_hip_ck})
   endif()
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
@@ -408,9 +407,6 @@ endif()
     ${miopen_cpp}
     ${all_hip_cpp}
   )
-  if(WIN32) # Windows doesn't support Triton
-    exclude(all_hip_cpp "${all_hip_cpp}" ${native_transformers_hip_cpp})
-  endif()
 endif()
 
 if(USE_XPU)
