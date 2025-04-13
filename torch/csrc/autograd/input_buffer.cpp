@@ -26,7 +26,13 @@ namespace {
 // See https://github.com/pytorch/pytorch/issues/60306
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
-void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
+void mb_record_stream_any_impl(
+    Variable& var,
+    const c10::Stream& stream,
+    const c10::Stream prev_stream) {
+  if (stream == prev_stream) {
+    return;
+  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
@@ -82,6 +88,20 @@ bool can_accumulate_inplace(const Variable& v) {
       at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
       v.storage().use_count() == 1);
 }
+
+void mb_wait_stream(
+    const std::optional<c10::Stream>& lhs,
+    const std::optional<c10::Stream>& rhs,
+    c10::DeviceType device_type) {
+  TORCH_INTERNAL_ASSERT(lhs && rhs);
+  if (*lhs == *rhs) {
+    return;
+  }
+  auto event = c10::Event{device_type};
+  event.record(*rhs);
+  lhs->wait(event);
+}
+
 } // anonymous namespace
 
 static void accumulate(
@@ -126,19 +146,6 @@ static void accumulate(
   }
 }
 
-static inline void _wait_stream(
-    const std::optional<c10::Stream>& lhs,
-    const std::optional<c10::Stream>& rhs,
-    c10::DeviceType device_type) {
-  TORCH_INTERNAL_ASSERT(lhs && rhs);
-  if (*lhs == *rhs) {
-    return;
-  }
-  auto event = c10::Event{device_type};
-  event.record(*rhs);
-  lhs->wait(event);
-}
-
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
@@ -178,8 +185,9 @@ void InputBuffer::add(
   // - Move var into the buffer.
   if (num_dependencies == 1) {
     if (is_accelerator) {
-      _wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
-      record_stream_any_impl(var, *opt_consumer_stream);
+      mb_wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
+      mb_record_stream_any_impl(
+          var, *opt_consumer_stream, /*prev_stream=*/*opt_producer_stream);
     }
     TORCH_INTERNAL_ASSERT(current_index == 0);
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
@@ -214,7 +222,8 @@ void InputBuffer::add(
               at::accelerator::getCurrentStream(device->index());
         }
       }
-      record_stream_any_impl(var, *opt_accum_streams[pos]);
+      mb_record_stream_any_impl(
+          var, *opt_accum_streams[pos], /*prev_stream=*/*opt_producer_stream);
     }
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
     buffer[pos] = std::move(var);
@@ -243,24 +252,26 @@ void InputBuffer::add(
       // Case 2/3
       if (current_index == 1) {
         // 2/3 extra logic
-        _wait_stream(
+        mb_wait_stream(
             accum_stream, opt_first_producer_streams[pos], device_type);
       }
-      _wait_stream(accum_stream, opt_producer_stream, device_type);
-      record_stream_any_impl(var, *accum_stream);
+      mb_wait_stream(accum_stream, opt_producer_stream, device_type);
+      mb_record_stream_any_impl(
+          var, *accum_stream, /*prev_stream=*/*opt_producer_stream);
       c10::OptionalStreamGuard stream_guard{accum_stream};
       accumulate(buffer, pos, std::move(var));
     } else {
       // Case 4/5
-      _wait_stream(accum_stream, opt_producer_stream, device_type);
-      record_stream_any_impl(var, *accum_stream);
+      mb_wait_stream(accum_stream, opt_producer_stream, device_type);
+      mb_record_stream_any_impl(
+          var, *accum_stream, /*prev_stream=*/*opt_producer_stream);
       {
         c10::OptionalStreamGuard stream_guard{accum_stream};
         accumulate(buffer, pos, std::move(var));
       }
       if (current_index == num_dependencies - 1) {
         // 4/5 case extra logic
-        _wait_stream(opt_consumer_stream, accum_stream, device_type);
+        mb_wait_stream(opt_consumer_stream, accum_stream, device_type);
         // I'm not sure we should record_stream here
       }
     }
