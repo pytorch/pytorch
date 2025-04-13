@@ -6,6 +6,7 @@
 
 import argparse
 import ast
+import copy
 import os
 import sys
 from typing import Any  # type: ignore[attr-defined]
@@ -209,12 +210,16 @@ def build_collectives(
             errors=set(),
         )
 
-        if find_coalesced_group(pg_name, entries, _pg_guids, first_rank):
-            expected_ranks.add(first_rank)
+        maybe_coalesced_group = find_coalesced_group(
+            pg_name, entries, _pg_guids, first_rank
+        )
+        if len(maybe_coalesced_group) > 1:
+            num_coalesced_entries = len(maybe_coalesced_group)
+            candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
             all_coalesced_entries = {}
-            while expected_ranks:
-                curr = expected_ranks.pop()
+            while candidate_ranks:
+                curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
                     find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
@@ -236,10 +241,10 @@ def build_collectives(
                         )
                         peer = op._src_g
                     if peer and peer not in done_ranks:
-                        expected_ranks.add(peer)
+                        candidate_ranks.add(peer)
 
             match = match_coalesced_groups(
-                all_coalesced_entries,
+                copy.deepcopy(all_coalesced_entries),
                 pg_info=(pg_name, desc),
                 memberships=_memberships,
                 _pg_guids=_pg_guids,
@@ -269,6 +274,9 @@ def build_collectives(
                         )
                     )
                 )
+                for i, k in idx_map.items():
+                    for _ in range(1, num_coalesced_entries):
+                        all_entries[i].pop(k)
         else:
             # Iterate through all the ranks and check if there is a mis-match for the current entry.
             check_current_entry_match(

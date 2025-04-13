@@ -144,7 +144,7 @@ def match_coalesced_groups(
     for rank, op_list in all_ops.items():
         if not op_list:
             logger.error("Rank %s has an empty op list.", rank)
-        if op_list[-1].type == "coalesced" and not is_p2p:
+        if op_list[-1].type == "coalesced" and is_p2p:
             op_list.pop(-1)
 
     while all_ops:
@@ -213,6 +213,10 @@ def match_coalesced_groups(
                 pg_info[0],
             )
 
+            # TODO: For now, we only check the correctness of individual collective within a coalesced one in
+            # this script. We need to merge  (e.g, input/output sizes) together
+            # for downstream consumer.
+
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
             #  -> we create a Collective and remove the individual entries from their original lists
@@ -225,15 +229,29 @@ def match_coalesced_groups(
                     r: match_record.found_idx[r] if r != first_rank else 0
                     for r in match_record.found_ranks
                 }
-                match_record.entry_state.to_nccl_call(
-                    all_coalesced_entries, idx_map, len(nccl_calls), collectives[-1].id
-                )
+                for i, k in idx_map.items():
+                    all_rank_events[i].pop(k)
+                for r in match_record.found_ranks:
+                    if r != first_rank:
+                        all_ops[r].pop(0)
 
             # 2. we found a partial match but some ranks are missing
             # 3. we found no match
             #  -> since its not a complete collective, no entry goes into collectives but we still record a nccl call
             else:
                 logger.debug("Non-matching collective inside coalesced group")
+                idx_map = {
+                    r: match_record.candidate_idx[r] if r != first_rank else 0
+                    for r in match_record.candidate_ranks
+                }
+                collectives.append(
+                    match_record.entry_state.to_collective(
+                        len(collectives),
+                        errors=match_record.errors,
+                        idx_map=idx_map,
+                        all_entries=all_coalesced_entries,
+                    )
+                )
                 return False
 
     if is_p2p:

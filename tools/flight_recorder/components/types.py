@@ -187,6 +187,9 @@ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html.
 """
 COLLECTIVES = {
     "broadcast",
+    "_broadcast_oop",
+    "reduce",
+    "_reduce_oop",
     "all_gather",
     "all_reduce",
     "_all_gather_base",
@@ -501,9 +504,21 @@ class Op:
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'",
                 )
             if (
-                set(self.input_dtypes) != set(self.output_dtypes)
-                or set(self.input_dtypes) != set(other.input_dtypes)
-                or set(self.input_dtypes) != set(other.output_dtypes)
+                (
+                    set(self.input_dtypes) != set(self.output_dtypes)
+                    and self.input_sizes[0]
+                    and self.output_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.input_dtypes)
+                    and self.input_sizes[0]
+                    and other.input_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.output_dtypes)
+                    and self.input_sizes[0]
+                    and other.output_sizes[0]
+                )
             ):
                 return MatchInfo(
                     MatchState.COLLECTIVE_DTYPE_MISMATCH,
