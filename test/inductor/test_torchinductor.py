@@ -6291,7 +6291,7 @@ class CommonTemplate:
         def f(x):
             x = x + 1
             size = x.shape[-1]
-            y = torch.ops.aten.slice(x, -1, 0, size)
+            y = torch.ops.aten.slice(x, -1, 0, size)  # noop
             return y + 1
 
         f = torch.compile(f)
@@ -6306,6 +6306,30 @@ class CommonTemplate:
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_9: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_9,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    def test_remove_noop_slice1(self):
+        def f(x):
+            x = x + 1
+            y = torch.ops.aten.slice(x, -1, 0, -1)  # not a noop
+            return y + 1
+
+        f = torch.compile(f)
+        x = torch.ones((2, 3, 2), device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}"):
+        add: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
+        slice_1: "f32[s77, s27, 1][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.slice.Tensor(add, -1, 0, -1);  add = None
+        add_9: "f32[s77, s27, 1][s27, 1, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(slice_1, 1);  slice_1 = None
         return (add_9,)"""  # noqa: B950
         self.assertExpectedInline(
             post_grad_graph,
