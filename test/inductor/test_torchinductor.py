@@ -6338,6 +6338,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    def test_remove_noop_slice_scatter(self):
+        def f(x, y):
+            x = x + 1
+            size = x.shape[-1]
+            out = torch.ops.aten.slice_scatter(y, x, -1, 0, size)  # noop
+            return out + 1
+
+        f = torch.compile(f)
+
+        x = torch.ones((2, 3, 2), device=self.device)
+        y = torch.ones((2, 3, 2), device=self.device)
+
+        post_grad_graph = get_post_grad_graph(f, (x, y))
+        expected_graph = f"""\
+def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{x.device}", arg1_1: "f32[2, 3, 2][6, 2, 1]{x.device}"):
+        add: "f32[2, 3, 2][6, 2, 1]{x.device}" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+        add_1: "f32[2, 3, 2][6, 2, 1]{x.device}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_1,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
             def __init__(
