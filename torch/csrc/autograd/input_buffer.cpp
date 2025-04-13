@@ -157,13 +157,8 @@ void InputBuffer::add(
   bool is_accelerator =
       device->is_cuda() || device->is_mtia() || device->is_privateuseone();
 
-  if (is_accelerator) {
-    TORCH_INTERNAL_ASSERT(opt_consumer_stream);
-  }
   // Handle the case where var is on accelerator but producer node has no
-  // canonical stream (all its outputs were non-accelerator), e.g. forward is
-  // DtoH. After this we can assume that if var is on accelerator, then producer
-  // and consumer stream are both defined.
+  // canonical stream, e.g. this can happen if forward is DtoH
   const std::optional<c10::Stream>& opt_producer_stream =
       (opt_producer_stream_.has_value()
            ? opt_producer_stream_
@@ -171,6 +166,9 @@ void InputBuffer::add(
                   ? std::optional<c10::Stream>(
                         at::accelerator::getCurrentStream(device->index()))
                   : std::nullopt));
+  if (is_accelerator) {
+    TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
+  }
 
   // [ Single producer ]
   // If there's only a single producer, there is no accumulation involved.
@@ -202,7 +200,6 @@ void InputBuffer::add(
   //   See test_side_stream_backward_overlap
   if (current_index == 0) {
     if (is_accelerator) {
-      TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream)
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (opt_consumer_stream->device() == *device) {
         // Case 2/3
@@ -213,8 +210,8 @@ void InputBuffer::add(
         if (opt_producer_stream->device() == *device) {
           opt_accum_streams[pos] = opt_producer_stream;
         } else {
-          c10::impl::VirtualGuardImpl guard(device_type);
-          opt_accum_streams[pos] = guard.getDefaultStream(*device);
+          opt_accum_streams[pos] =
+              at::accelerator::getCurrentStream(device->index());
         }
       }
       record_stream_any_impl(var, *opt_accum_streams[pos]);
