@@ -214,7 +214,7 @@ def _callback_from_stance(callback):
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
-def _create_wrapped_callback(compiler_fn, dynamism=None):
+def _create_wrapped_callback(compiler_fn):
     hooks = Hooks()
     return convert_frame.catch_errors_wrapper(
         convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -254,7 +254,7 @@ def _create_delayed_compile_callback(callback, stance):
         dynamism = track_dynamism_across_examples(example_inputs)
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
         compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
-        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
+        return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
     return callback_fn
 
