@@ -125,12 +125,12 @@ def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
 
     if tensor.dtype == torch.bfloat16 or tensor.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
         if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
+            # This requires ONNX Runtime 1.21 or newer
             if tensor.dtype == torch.bfloat16:
                 uint_type = torch.uint16
             else:
                 uint_type = torch.uint8
             onnx_type = _core.torch_dtype_to_onnx_dtype(tensor.dtype)
-            # This requires ONNX Runtime 1.21 or newer
             # Make tensor contiguous to ensure view() works
             tensor = tensor.contiguous()
             return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
