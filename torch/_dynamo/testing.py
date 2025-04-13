@@ -524,3 +524,9 @@ def reset_rng_state(use_xla: bool = False) -> None:
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
+
+
+def _skipped_function_for_test_reconstruct(
+    f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    return f(*args, **kwargs)
