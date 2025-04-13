@@ -236,9 +236,10 @@ def aot_dispatch_base(
     cache_info = aot_config.cache_info
     if cache_info is not None:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
+            debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward(fw_key),
+                compiled_fw=CompiledForward((fw_key, debug_lines)),  # type: ignore[arg-type]
                 compiled_bw=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
@@ -486,7 +487,7 @@ def run_joint_graph_passes_on_hops(
 
         new_graph.lint()
 
-        out = torch.fx.GraphModule(joint_gm, new_graph)
+        out = torch.fx.GraphModule(mod, new_graph)
         return out
 
     new_hop_graphs: dict[str, InvokeSubgraphHopGraphs] = defaultdict(
@@ -549,9 +550,15 @@ def run_joint_graph_passes_on_hops(
                     joint_hop_gm, num_fw_inputs, num_fw_outputs
                 )
 
+                # TODO: invoke_subgraph should track which of its inputs static indices
+                # so it can propagate them to the partitioner (and use in cudagraphs)
+                static_lifetime_input_indices: list[int] = []
                 # Step 2) and 3) - Run joint graph passes and partitioner
                 new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
-                    joint_hop_gm, [], num_fwd_outputs=num_fw_outputs
+                    joint_hop_gm,
+                    [],
+                    num_fwd_outputs=num_fw_outputs,
+                    static_lifetime_input_indices=static_lifetime_input_indices,
                 )
 
                 # Save the new forward and backward graph modules
@@ -837,8 +844,12 @@ def aot_dispatch_autograd(
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
+            static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
-                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
+                fx_g,
+                joint_inputs,
+                num_fwd_outputs=num_inner_fwd_outputs,
+                static_lifetime_input_indices=static_lifetime_input_indices,
             )
             rng_states = [
                 n
@@ -1184,8 +1195,9 @@ def aot_dispatch_autograd(
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
                 try:
+                    # See Note: [Backward graph lazy lowering]
                     compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
+                        copy.deepcopy(bw_module), placeholder_list
                     )
                 except Exception as e:
                     exc = e
@@ -1253,7 +1265,15 @@ def aot_dispatch_autograd(
             compiled_bw_func, _fw_metadata, aot_config
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_debug_lines = getattr(
+                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+            )
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+            bw_debug_lines = getattr(
+                compiled_bw_func, "_fx_graph_cache_debug_lines", []
+            )
+            fw_info = (fw_key, fw_debug_lines)
+            bw_info = (bw_key, bw_debug_lines)
             cache_info = aot_config.cache_info
             if cache_info is not None and fw_key and bw_key:
                 assert forward_time_taken_ns is not None
@@ -1269,9 +1289,9 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_key),
+                    CompiledForward(fw_info),  # type: ignore[arg-type]
                     CompiledBackward(
-                        bw_key,
+                        bw_info,  # type: ignore[arg-type]
                         backward_state_indices,
                         num_symints_saved_for_bw,
                     ),

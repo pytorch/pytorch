@@ -45,7 +45,9 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_benchmark_name,
+    IndentedBuffer,
     LineContext,
     sympy_product,
     sympy_str,
@@ -57,7 +59,6 @@ from .common import (
     ArgName,
     CodeGen,
     DeferredLine,
-    IndentedBuffer,
     PythonPrinter,
     WorkspaceArg,
     WorkspaceZeroMode,
@@ -77,12 +78,13 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
+    alignment = node.get_name() not in V.graph.unaligned_buffers
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -90,6 +92,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # for s0 for s1, just because they happen to share the same
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
+        alignment,
     )
 
 
@@ -124,72 +127,6 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
     return False
 
 
-def convert_arg_type(arg: torch.Argument) -> str:
-    from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
-
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
-
-    if python_type == "Tensor":
-        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        if arg.alias_info is not None and arg.alias_info.is_write:
-            return f"at::{python_type}&"
-        else:
-            return f"at::{python_type} const&"
-
-    if python_type in PYTHON_TO_CPP:
-        cpp_type = PYTHON_TO_CPP[python_type]
-        return cpp_type
-
-    # Convert args of container types e.g. Optional[*]
-    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
-        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
-        if len(container_match) == 1:
-            contained_type = container_match[0]
-            assert contained_type in PYTHON_TO_CPP, (
-                f"unsupported {py_container} type in convert_arg_type: {contained_type}"
-            )
-            cpp_contained_type = PYTHON_TO_CPP[contained_type]
-            return f"{cpp_container}<{cpp_contained_type}>"
-
-    raise AssertionError(f"unsupport python_type: {python_type}")
-
-
-def convert_return_type(ret: torch.Argument) -> str:
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
-    python_to_cpp = {
-        "Tensor": "at::Tensor",
-        "List[Tensor]": "std::vector<at::Tensor>",
-    }
-
-    cpp_type = python_to_cpp.get(python_type, None)
-    assert cpp_type is not None, f"NYI return type: {python_type}"
-    # An output aliasing an input is returned by reference only when it's a
-    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
-    # aliases the input tensor, but the op returns a vector by value.
-    if python_type == "Tensor" and ret.alias_info is not None:
-        cpp_type += "&"
-    return cpp_type
-
-
-def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
-    args = kernel._schema.arguments
-    returns = kernel._schema.returns
-
-    num_returns = len(returns)
-    assert num_returns > 0, "must have at least one return value"
-
-    if num_returns == 1:
-        cpp_return_value = convert_return_type(returns[0])
-    elif num_returns > 1:
-        tuple_returns = ", ".join([convert_return_type(r) for r in returns])
-        cpp_return_value = f"std::tuple<{tuple_returns}>"
-
-    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
-    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"  # type: ignore[possibly-undefined]
-
-
 # TODO: Move to a well known place
 TritonMetaParams = dict[str, int]
 TritonGrid = Union[
@@ -202,6 +139,7 @@ def user_defined_kernel_grid_fn_code(
     configs: list[triton.Config],  # type: ignore[name-defined]
     grids: list[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
+    original_fxnode_name: Optional[str] = None,
 ) -> tuple[str, str]:
     output = IndentedBuffer()
 
@@ -210,6 +148,7 @@ def user_defined_kernel_grid_fn_code(
 
     def determine_grid(
         grid: TritonGrid,
+        example_grid: Optional[TritonGrid] = None,
     ):
         """
         This function return a tuple of two values: the first one is for the real grid
@@ -222,13 +161,15 @@ def user_defined_kernel_grid_fn_code(
             return grid, grid
         # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        if not example_grid:
+            example_grid = sympy_grid
         return (
             wrapper.codegen_python_shape_tuple(sympy_grid),
             (
                 wrapper.codegen_python_shape_tuple(
                     tuple(
                         wrapper.generate_example_arg_value(g, type(g))
-                        for g in sympy_grid
+                        for g in example_grid  # type: ignore[union-attr]
                     )
                 )
                 if config.triton.autotune_at_compile_time
@@ -253,8 +194,17 @@ def user_defined_kernel_grid_fn_code(
         else contextlib.nullcontext()
     )
     with output.indent(), kernel_autotune_calls_indent:
+        if (
+            config.triton.autotune_at_compile_time
+            and original_fxnode_name
+            and V.graph.autotuning_grids
+            and original_fxnode_name in V.graph.autotuning_grids
+        ):
+            example_grids = V.graph.autotuning_grids[original_fxnode_name]
+        else:
+            example_grids = [None] * len(grids)
         if len(grids) == 1:
-            grid, example_grid = determine_grid(grids[0])
+            grid, example_grid = determine_grid(grids[0], example_grids[0])
             writeline(f"return {grid}", f"return {example_grid}")
         else:
             assert len(grids) > 1
@@ -265,8 +215,10 @@ def user_defined_kernel_grid_fn_code(
             # TODO(aakhundov): the sorting below is generally not sufficient, so
             # maybe we'll need to restrict the supported cases to identical kwarg
             # names in all autotuning configs.
-            for grid, c in sorted(
-                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            for grid, c, example_grid in sorted(
+                zip(grids, configs, example_grids),
+                key=lambda x: len(x[1].kwargs),
+                reverse=True,
             ):
                 if c.kwargs:
                     guards = [
@@ -275,7 +227,7 @@ def user_defined_kernel_grid_fn_code(
                     guards = " and ".join(guards)
                 else:
                     guards = "True"  # for configs with empty kwargs
-                grid, example_grid = determine_grid(grid)
+                grid, example_grid = determine_grid(grid, example_grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
                     continue
@@ -667,6 +619,10 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names = OrderedSet[str]()
+        # Map key is the kernel argument name; value is a tuple of the resulting example
+        # tensor name with the kernel where that tensor was most recently used.
+        self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
+        self.kernel_autotune_tmp_arg_idx: int = 0
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -793,6 +749,7 @@ class PythonWrapperCodegen(CodeGen):
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
@@ -1293,6 +1250,11 @@ class PythonWrapperCodegen(CodeGen):
         """
         )
         scope = {}  # type: ignore[var-annotated]
+        if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
+            scope = {
+                self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
+                for idx, v in enumerate(V.graph.autotuning_inputs)
+            }
         tuning_code = (
             self.kernel_autotune_defs.getvalue()
             + "\n"
@@ -1658,8 +1620,6 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
     ):
-        from torch.utils._triton import patch_triton_dtype_repr
-
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -1674,7 +1634,6 @@ class PythonWrapperCodegen(CodeGen):
         )
         from .triton import gen_common_triton_imports, TritonKernel
 
-        patch_triton_dtype_repr()
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
@@ -2033,7 +1992,7 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -2046,8 +2005,9 @@ class PythonWrapperCodegen(CodeGen):
                 assert raw_arg is not None, (
                     "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                 )
-                buf_name = f"tmp_arg_{index}"
+                buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
                 buf = raw_arg
+                self.kernel_autotune_tmp_arg_idx += 1
 
             size = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
@@ -2132,8 +2092,10 @@ class PythonWrapperCodegen(CodeGen):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
@@ -2169,46 +2131,73 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
-            tensor_args = {}
+            def get_autotune_deletion_call() -> str:
+                """After all the autotune kernel calls have been written (i.e.
+                self.kernel_autotune_example_args is complete), returns a deletion call
+                for all autotune example tensors that are unnecessary after kernel_name
+                is called."""
+                tensors_to_delete = [
+                    tensor
+                    for tensor, kn in self.kernel_autotune_example_args.values()
+                    if kn == kernel_name
+                ]
+                if tensors_to_delete:
+                    return f"del {', '.join(tensors_to_delete)}\n"
+                return ""
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
+                assert raw_keys is None, "keys are not None but args are"
+                raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
                 assert len(raw_args) == len(call_args), (
                     "call_args and raw_args do not match"
                 )
 
-            for i, (arg, arg_type, raw_arg) in enumerate(
-                zip(call_args, arg_types, raw_args)
+            autotune_args = None
+            if original_fxnode_name and V.graph.autotuning_mapping:
+                autotune_args = V.graph.autotuning_mapping.get(
+                    original_fxnode_name, None
+                )
+            for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
+                zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
                 if isinstance(arg, str) and "=" in str(arg):
                     # arg may be passed in a kwarg style, and then we need to extract its value
                     key, arg = arg.split("=")
 
-                if isinstance(arg_type, torch_dtype):
+                triton_input: Optional[str] = None
+                if autotune_args and raw_key in autotune_args:
+                    triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                        autotune_args[raw_key]
+                    )
+
+                if triton_input:
+                    arg_str = triton_input
+                elif isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
-                        tensor_args[arg] = arg_str
-                    elif arg not in tensor_args:
+                    elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg, i
+                            arg, arg_type, raw_arg
                         )
-                        tensor_args[arg] = arg_str
                     else:
-                        arg_str = tensor_args[arg]
+                        arg_str = self.kernel_autotune_example_args[arg][0]
+                    self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
-                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+                DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
@@ -2232,7 +2221,7 @@ class PythonWrapperCodegen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_arg_str(self, s, type_=None):
-        from torch.utils._triton import dtype_to_string, has_triton_package
+        from torch.utils._triton import has_triton_package
 
         if has_triton_package():
             import triton
@@ -2259,7 +2248,7 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
-            return dtype_to_string(s)
+            return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
         else:
@@ -2590,9 +2579,11 @@ class PythonWrapperCodegen(CodeGen):
         input_deallocation = partition_signatures.input_deallocation
         output_nodes = partition_signatures.output_nodes
 
-        inputs = ", ".join(input_deallocation.keys()) + (
-            "," if len(input_deallocation) == 1 else ""
-        )
+        input_names = list(input_deallocation.keys()) + [
+            symbol_input.name for symbol_input in partition_signatures.symbol_inputs
+        ]
+
+        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
 
         output_names = [node.get_name() for node in output_nodes]
         outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
@@ -2847,7 +2838,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_input_names(self) -> list[str]:
         if signature := self.partition_signatures:
-            names = list(signature.input_nodes.keys())
+            names = list(signature.input_nodes.keys()) + [
+                symbol_input.name for symbol_input in signature.symbol_inputs
+            ]
         else:
             names = V.graph.graph_input_names
         return names

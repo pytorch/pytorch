@@ -59,6 +59,7 @@ from torch._C._dynamo.guards import (
 from torch._dynamo.source import (
     IndexedSource,
     is_from_flatten_script_object_source,
+    is_from_global_source,
     is_from_local_source,
     is_from_optimizer_source,
     TensorProperty,
@@ -102,6 +103,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
@@ -129,6 +131,7 @@ from .types import (  # noqa: F401
     ExtraState,
     GuardedCode,
     GuardFail,
+    GuardFilterEntry,
     GuardFn,
 )
 from .utils import (
@@ -199,17 +202,17 @@ class GuardManagerWrapper:
         self.id_matched_objs = {}
         self.no_tensor_aliasing_sources = []
 
-        self.print_no_tensor_aliasing_guard = True
+        self.printed_relational_guards = set()
 
         self.diff_guard_sources: OrderedSet[str] = OrderedSet()
 
     @contextmanager
-    def _preserve_print_no_tensor_aliasing_flag(self):
-        self.print_no_tensor_aliasing_guard = True
+    def _preserve_printed_relational_guards(self):
+        self.printed_relational_guards = set()
         try:
             yield
         finally:
-            self.print_no_tensor_aliasing_guard = True
+            self.printed_relational_guards = set()
 
     def collect_diff_guard_sources(self):
         # At the time of finalize, we have only marked guard managers with
@@ -312,9 +315,9 @@ class GuardManagerWrapper:
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if self.print_no_tensor_aliasing_guard:
-                        self.print_no_tensor_aliasing_guard = False
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in self.printed_relational_guards:
+                        self.printed_relational_guards.add(guard)
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -351,7 +354,7 @@ class GuardManagerWrapper:
                 else:
                     super().writeline("+- " + line)
 
-        with self._preserve_print_no_tensor_aliasing_flag():
+        with self._preserve_printed_relational_guards():
             body = IndentedBufferWithPrefix()
             body.tabwidth = 1
             body.writeline("", skip_prefix=True)
@@ -966,28 +969,20 @@ class GuardBuilder(GuardBuilderBase):
             # duplicate names in the case of cells: a name can be both local and cell
             # and will take up 2 slots of the frame's localsplus. The correct behavior
             # is to refer to the cell, which has a higher index.
-            if config.enable_cpp_framelocals_guard_eval:
-                framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                    self.f_code
-                )
-                framelocals_idx = (
-                    len(framelocals_names_reversed)
-                    - framelocals_names_reversed.index(source.local_name)
-                    - 1
-                )
-                out = root_guard_manager.framelocals_manager(
-                    key=(source.local_name, framelocals_idx),
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-            else:
-                out = root_guard_manager.dict_getitem_manager(
-                    key=source.local_name,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+            framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                self.f_code
+            )
+            framelocals_idx = (
+                len(framelocals_names_reversed)
+                - framelocals_names_reversed.index(source.local_name)
+                - 1
+            )
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1042,6 +1037,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GenericAttrSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.generic_getattr_manager(
+                attr=source.member,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1984,11 +1987,20 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         if config.enable_cpp_symbolic_shape_guards:
-            # For exporting we need the python code parts
-            python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
-                ("python", "verbose_python", "cpp")
-            )
+            try:
+                # For exporting we need the python code parts
+                python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
+                    ("python", "verbose_python", "cpp")
+                )
+                python_fallback = False
+            except OverflowError:
+                # Cannot use int64_t
+                python_fallback = True
+                python_code_parts, verbose_code_parts = _get_code_parts(
+                    ("python", "verbose_python")
+                )
         else:
+            python_fallback = True
             python_code_parts, verbose_code_parts = _get_code_parts(
                 ("python", "verbose_python")
             )
@@ -2004,11 +2016,10 @@ class GuardBuilder(GuardBuilderBase):
         if compile_context := CompileContext.try_get():
             compile_context.shape_env_guards.extend(verbose_code_parts.exprs)
 
-        if config.enable_cpp_symbolic_shape_guards:
-            import ctypes
+        int_source_to_symbol = []
+        float_source_to_symbol = []
 
-            from torch._inductor.codecache import CppCodeCache
-
+        if not python_fallback:
             assert cpp_code_parts  # type: ignore[possibly-undefined]
             code_parts, source_to_symbol = (
                 cpp_code_parts.exprs,
@@ -2018,10 +2029,6 @@ class GuardBuilder(GuardBuilderBase):
             if not code_parts:
                 return
 
-            int_source_to_symbol = []
-            float_source_to_symbol = []
-
-            python_fallback = False
             for source, symbol in source_to_symbol.items():
                 if isinstance(source, ConstantSource):
                     python_fallback = True
@@ -2039,62 +2046,78 @@ class GuardBuilder(GuardBuilderBase):
                         # int64_t/double in C++ guards for now.
                         python_fallback = True
 
-            if not python_fallback:
-                source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
-                try:
-                    guard_managers = [
-                        self.get_guard_manager_from_source(IndexedSource(source, i))
-                        for i, source in enumerate(source_to_symbol)
-                    ]
+        if not python_fallback:
+            import ctypes
 
-                    int_symbols_str = ", ".join(
-                        f"{symbol} = int_values[{i}]"
-                        for i, (_, symbol) in enumerate(int_source_to_symbol)
-                    )
-                    float_symbols_str = ", ".join(
-                        f"{symbol} = float_values[{i}]"
-                        for i, (_, symbol) in enumerate(float_source_to_symbol)
-                    )
+            from torch._inductor.codecache import CppCodeCache
 
-                    if int_symbols_str:
-                        int_symbols_str = f"int64_t {int_symbols_str};"
-                    if float_symbols_str:
-                        float_symbols_str = f"double {float_symbols_str};"
+            assert cpp_code_parts  # type: ignore[possibly-undefined]
+            code_parts, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
 
-                    func_str = textwrap.dedent(
-                        f"""
-                    #include <cstdint>
-                    #include <cmath>
-                    #include <c10/util/generic_math.h>
+            source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
+            try:
+                guard_managers = [
+                    self.get_guard_manager_from_source(IndexedSource(source, i))
+                    for i, source in enumerate(source_to_symbol)
+                ]
 
-                    extern "C" int8_t guard(int64_t *int_values, double *float_values) {{
-                      {int_symbols_str}
-                      {float_symbols_str}
-                      return ({") && (".join(code_parts)});
-                    }}
-                    """
-                    )
-                    guards_log.debug(
-                        "C++ shape guard function: %s %s",
-                        func_str,
-                        verbose_code_parts.exprs,
-                    )
-                    clib = CppCodeCache.load(func_str)
-                    cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
-                    assert cguard
-                except torch._inductor.exc.InvalidCxxCompiler:
-                    # No valid C++ compiler to compile the shape guard
-                    pass
-                else:
-                    install_symbolic_shape_guard(
-                        guard_managers,
-                        len(int_source_to_symbol),
-                        len(float_source_to_symbol),
-                        cguard,
-                        clib,
-                        verbose_code_parts.exprs,
-                    )
-                    return
+                int_symbols_str = ", ".join(
+                    f"{symbol} = int_values[{i}]"
+                    for i, (_, symbol) in enumerate(int_source_to_symbol)
+                )
+                float_symbols_str = ", ".join(
+                    f"{symbol} = float_values[{i}]"
+                    for i, (_, symbol) in enumerate(float_source_to_symbol)
+                )
+
+                if int_symbols_str:
+                    int_symbols_str = f"int64_t {int_symbols_str};"
+                if float_symbols_str:
+                    float_symbols_str = f"double {float_symbols_str};"
+
+                func_str = textwrap.dedent(
+                    f"""
+                #include <cstdint>
+                #include <cmath>
+                #include <c10/util/generic_math.h>
+
+                #if defined(_MSC_VER)
+                #  define EXTERN_DLL_EXPORT extern "C" __declspec(dllexport)
+                #else
+                #  define EXTERN_DLL_EXPORT extern "C"
+                #endif
+
+                EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {{
+                  {int_symbols_str}
+                  {float_symbols_str}
+                  return ({") && (".join(code_parts)});
+                }}
+                """
+                )
+                guards_log.debug(
+                    "C++ shape guard function: %s %s",
+                    func_str,
+                    verbose_code_parts.exprs,
+                )
+                clib = CppCodeCache.load(func_str)
+                cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
+                assert cguard
+            except torch._inductor.exc.InvalidCxxCompiler:
+                # No valid C++ compiler to compile the shape guard
+                pass
+            else:
+                install_symbolic_shape_guard(
+                    guard_managers,
+                    len(int_source_to_symbol),
+                    len(float_source_to_symbol),
+                    cguard,
+                    clib,
+                    verbose_code_parts.exprs,
+                )
+                return
 
         # Install all the symbolic guards in one python lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
@@ -2203,9 +2226,7 @@ class GuardBuilder(GuardBuilderBase):
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
                 if not isinstance(value, torch.nn.Parameter):
-                    self.check_fn_manager.guard_manager.diff_guard_sources.add(
-                        guard.name
-                    )
+                    self.guard_manager.diff_guard_sources.add(guard.name)
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
@@ -2444,6 +2465,9 @@ class CheckFunctionManager:
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
+        guard_filter_fn: Optional[
+            Callable[[list[GuardFilterEntry]], list[bool]]
+        ] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2451,10 +2475,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.guard_manager = GuardManagerWrapper()
-        self.guard_manager.diff_guard_sources = existing_diff_guard_sources
         self.output_graph = output_graph
-        w_builder = None
 
         # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
         # in case a set default device call was made in the graph.
@@ -2462,58 +2483,56 @@ class CheckFunctionManager:
             output_graph.torch_function_mode_stack if output_graph else None
         )
 
-        def source_ref(source):
-            guard_source = source.guard_source()
-            if guard_source is GuardSource.CONSTANT:
-                # No need to track constants
-                return source.name()
-            assert w_builder
-            r_builder = w_builder()
-            assert r_builder is not None
-            return r_builder.arg_ref(source.name())
-
-        builder = GuardBuilder(
-            f_code,
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
-            output_graph.local_scope,
-            output_graph.global_scope,
-            self.guard_manager,
-            self,
-        )
-
-        # Break retain cycle. See test_release_scope_memory
-        def cleanup_builder(weak_b):
-            b = weak_b()
-            if b:
-                b.scope = None
-
-        # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder, cleanup_builder)
-
-        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
-            "pytorch/compiler:guard_nn_modules"
-        )
-
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or (), key=Guard.sort_key):
-            if (
-                not guard_on_nn_modules
-                and guard.is_specialized_nn_module()
-                # Default func args must be guarded on.
-                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
-                and "__defaults__" not in guard.name
-                and "__kwdefaults__" not in guard.name
-                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
-            ):
-                continue
+        sorted_guards = sorted(guards or (), key=Guard.sort_key)
+        builder, guard_manager = self.build_guards(
+            sorted_guards, existing_diff_guard_sources, f_code, output_graph
+        )
 
-            guard.create(builder)
+        if guard_filter_fn:
 
-        self.compile_check_fn(builder, guards, guard_fail_fn)
+            def make_guard_filter_entry(guard):
+                MISSING = object()
+                name = strip_local_scope(guard.name)
+                if name == "":
+                    has_value = False
+                    value = MISSING
+                else:
+                    has_value = True
+                    value = builder.get(guard.name)
+                is_global = is_from_global_source(guard.originating_source)
+                guard_fn = guard.create_fn
+                if isinstance(guard_fn, functools.partial):
+                    guard_fn = guard.create_fn.func
+                return GuardFilterEntry(
+                    name=name,
+                    has_value=has_value,
+                    value=value,
+                    guard_type=guard_fn.__name__,
+                    derived_guard_types=tuple(guard.guard_types)
+                    if guard.guard_types
+                    else (),
+                    is_global=is_global,
+                    orig_guard=guard,
+                )
+
+            filter_results = guard_filter_fn(
+                [make_guard_filter_entry(guard) for guard in sorted_guards]
+            )
+            assert len(filter_results) == len(sorted_guards)
+            assert all(type(x) == bool for x in filter_results)
+            sorted_guards = [
+                guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+            ]
+            # Redo the guards because filtering relies on the results from the last guard builder.
+            builder, guard_manager = self.build_guards(
+                sorted_guards, existing_diff_guard_sources, f_code, output_graph
+            )
+
+        self.guard_manager = guard_manager
+        self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -2581,6 +2600,67 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
+
+    def build_guards(
+        self,
+        sorted_guards,
+        existing_diff_guard_sources,
+        f_code,
+        output_graph,
+    ):
+        guard_manager = GuardManagerWrapper()
+        guard_manager.diff_guard_sources = existing_diff_guard_sources
+
+        w_builder = None
+
+        def source_ref(source):
+            guard_source = source.guard_source()
+            if guard_source is GuardSource.CONSTANT:
+                # No need to track constants
+                return source.name()
+            assert w_builder
+            r_builder = w_builder()
+            assert r_builder is not None
+            return r_builder.arg_ref(source.name())
+
+        builder = GuardBuilder(
+            f_code,
+            self.id_ref,
+            source_ref,
+            self.lookup_weakrefs,
+            output_graph.local_scope,
+            output_graph.global_scope,
+            guard_manager,
+            self,
+        )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
+        # Break retain cycle. See test_release_input_memory
+        w_builder = weakref.ref(builder, cleanup_builder)
+
+        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
+
+        for guard in sorted_guards:
+            if (
+                not guard_on_nn_modules
+                and guard.is_specialized_nn_module()
+                # Default func args must be guarded on.
+                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
+            ):
+                continue
+
+            guard.create(builder)
+        return builder, guard_manager
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c

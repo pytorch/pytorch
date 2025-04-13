@@ -53,7 +53,8 @@ class AOTInductorModelContainer {
     }
     model->load_constants();
     constant_blob_ = model->release_constant_blob();
-    constants_internal_offset_.resize(model->num_constants());
+    constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
     model->compute_constant_blob(blob_size_, constants_internal_offset_);
 
     for (auto& model : models_) {
@@ -138,6 +139,32 @@ class AOTInductorModelContainer {
 
     model->run_single_threaded(
         input_handles, output_handles, stream, proxy_executor);
+  }
+
+  const std::unordered_map<std::string, AtenTensorHandle> extract_constants_map(
+      bool use_inactive) const {
+    size_t n_consts = this->num_constants();
+    std::unordered_map<std::string, AtenTensorHandle> ret;
+    ret.reserve(n_consts);
+
+    std::shared_ptr<ConstantMap> extract_map = constants_map_;
+    // Essentially a XOR
+    if (use_inactive != use_secondary_) {
+      extract_map = constants_map_secondary_;
+    }
+    for (size_t idx = 0; idx < n_consts; idx++) {
+      if (this->constant_from_folded(idx)) {
+        continue;
+      }
+
+      auto it = extract_map->find(this->constant_name(idx));
+      if (it != extract_map->end()) {
+        ret.emplace(this->constant_original_fqn(idx), it->second);
+        continue;
+      }
+    }
+
+    return ret;
   }
 
   size_t num_constants() const {
@@ -322,7 +349,8 @@ class AOTInductorModelContainer {
         tensor = it->second;
       }
 
-      constants_map_to_update->insert_or_assign(constant_name, tensor);
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor));
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -334,7 +362,8 @@ class AOTInductorModelContainer {
   void update_constant_buffer(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
       bool use_inactive,
-      bool validate_full_update) {
+      bool validate_full_update,
+      bool user_managed = false) {
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
@@ -361,6 +390,15 @@ class AOTInductorModelContainer {
       } else {
         tensor = it->second;
       }
+
+      if (user_managed) {
+        // If user managed, we pass in the pointer directly, and skip the copy.
+        constants_map_to_update->insert_or_assign(
+            constant_name,
+            MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
+        continue;
+      }
+
       auto* constants_blob_ptr =
           static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
 
@@ -410,7 +448,8 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->insert_or_assign(constant_name, tensor_handle);
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -448,10 +487,23 @@ class AOTInductorModelContainer {
   }
 
   void free_inactive_constant_buffer() {
-    if (use_secondary_ && constant_blob_) {
+    if (use_secondary_) {
       constant_blob_.reset();
-    } else if (constant_blob_secondary_) {
+    } else {
       constant_blob_secondary_.reset();
+    }
+    // Free the internally held constants
+    int num_constants = static_cast<int>(models_[0]->num_constants());
+    std::shared_ptr<ConstantMap> to_free_map =
+        use_secondary_ ? constants_map_ : constants_map_secondary_;
+
+    for (int i = 0; i < num_constants; i++) {
+      if (models_[0]->constant_from_folded(i)) {
+        auto it = to_free_map->find(models_[0]->constant_name(i));
+        if (it != to_free_map->end()) {
+          it->second.reset();
+        }
+      }
     }
   }
 

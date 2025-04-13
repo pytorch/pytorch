@@ -1,4 +1,5 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
@@ -16,11 +17,13 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   AOTIModelPackageLoaderPybind(
       const std::string& model_package_path,
       const std::string& model_name,
-      const bool run_single_threaded)
+      const bool run_single_threaded,
+      const size_t num_runners)
       : AOTIModelPackageLoader(
             model_package_path,
             model_name,
-            run_single_threaded) {}
+            run_single_threaded,
+            num_runners) {}
 
   py::list boxed_run(py::list& inputs, void* stream_handle = nullptr) {
     std::vector<at::Tensor> input_tensors;
@@ -43,13 +46,15 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   }
 };
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
-
   py::class_<AOTIModelPackageLoaderPybind>(m, "AOTIModelPackageLoader")
-      .def(py::init<const std::string&, const std::string&, const bool>())
+      .def(py::init<
+           const std::string&,
+           const std::string&,
+           const bool,
+           const size_t>())
       .def("get_metadata", &AOTIModelPackageLoaderPybind::get_metadata)
       .def(
           "run",

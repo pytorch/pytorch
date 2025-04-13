@@ -61,8 +61,8 @@ class VerificationInfo:
     def from_tensors(
         cls,
         name: str,
-        expected: torch.Tensor | torch.types.Number,
-        actual: torch.Tensor | torch.types.Number,
+        expected: torch.Tensor | float | int | bool,
+        actual: torch.Tensor | float | int | bool,
     ) -> VerificationInfo:
         """Create a VerificationInfo object from two tensors.
 
@@ -97,6 +97,28 @@ class VerificationInfo:
             expected_dtype=expected.dtype,
             actual_dtype=actual.dtype,
         )
+
+    def asdict(self) -> dict[str, Any]:
+        """Convert the VerificationInfo object to a dictionary.
+
+        Returns:
+            A dictionary representation of the VerificationInfo object.
+        """
+        return {
+            "name": self.name,
+            "max_abs_diff": self.max_abs_diff,
+            "max_rel_diff": self.max_rel_diff,
+            "abs_diff_hist": [
+                self.abs_diff_hist[0].tolist(),
+                self.abs_diff_hist[1].tolist(),
+            ],
+            "rel_diff_hist": [
+                self.rel_diff_hist[0].tolist(),
+                self.rel_diff_hist[1].tolist(),
+            ],
+            "expected_dtype": str(self.expected_dtype),
+            "actual_dtype": str(self.actual_dtype),
+        }
 
 
 def _compare_tensors(

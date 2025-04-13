@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -61,8 +62,9 @@ def munge_shape_guards(s: str) -> str:
 
     if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
         # Since we can have multiple guard accessors for one guard, the shape guard
-        # printing will have duplicates. We remove duplicates whie preserving order.
-        lines = list(dict.fromkeys(lines))
+        # printing will have just SYMBOLIC_SHAPE_GUARD in one line for the second
+        # guard accessor and onwards. We remove those lines
+        lines = [line for line in lines if "__SHAPE_GUARD__:" in line]
 
     return "\n".join(lines)
 
@@ -817,6 +819,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
+    @xfailIfS390X
     def test_logs_out(self):
         import tempfile
 
