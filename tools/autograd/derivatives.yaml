@@ -1201,6 +1201,17 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
+- name: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
+  self:  |
+    scale_grad_by_count(restore_reduced_dims(grad_min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim),
+      restore_reduced_dims(min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim) == self,
+      dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}) +
+    scale_grad_by_count(restore_reduced_dims(grad_max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim),
+      restore_reduced_dims(max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim) == self,
+      dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}) 
+  min: 'amaxamin_jvp(self_p, self_t, min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim)'
+  max: 'amaxamin_jvp(self_p, self_t, max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim)'
+
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), 1)
