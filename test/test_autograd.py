@@ -11417,6 +11417,53 @@ class TestAutogradDeviceType(TestCase):
 
             gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
 
+    def test_aminmax_backprops_to_all_values(self, device):
+        # Tests that gradients are evenly distributed when there are multiple min/max values
+        # Similar to test_min_max_median_backprops_to_all_values but specifically for aminmax
+        x = torch.tensor(
+            [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
+        )
+
+        # Get both min and max values using aminmax
+        with torch.no_grad():
+            min_val, max_val = torch.aminmax(x)
+            min_mask = x == min_val
+            max_mask = x == max_val
+
+        # Test gradient distribution for minimum values
+        x.grad = None
+        min_out = x[min_mask].sum() / min_mask.sum()  # Average of min values
+        min_out.backward(retain_graph=True)
+        self.assertEqual(x.grad[min_mask].sum(), 1.0)
+        self.assertEqual((x.grad[min_mask] == 1.0 / 3.0).all().item(), True)
+        self.assertEqual(x.grad[~min_mask].sum(), 0.0)
+
+        # Test gradient distribution for maximum values
+        x.grad = None
+        max_out = x[max_mask].sum() / max_mask.sum()  # Average of max values
+        max_out.backward()
+        self.assertEqual(x.grad[max_mask].sum(), 1.0)
+        self.assertEqual((x.grad[max_mask] == 1.0 / 3.0).all().item(), True)
+        self.assertEqual(x.grad[~max_mask].sum(), 0.0)
+
+        # Test with NaN values
+        x = torch.tensor(
+            [float("nan"), float("nan"), float("nan")],
+            requires_grad=True,
+            device=device,
+        )
+        min_val, max_val = torch.aminmax(x)
+        min_out = x.sum() / 3.0  # Average of all values for NaN case
+        min_out.backward(retain_graph=True)
+        self.assertEqual(x.grad.sum(), 1.0)
+        self.assertEqual((x.grad == 1.0 / 3.0).all().item(), True)
+
+        x.grad = None
+        max_out = x.sum() / 3.0  # Average of all values for NaN case
+        max_out.backward()
+        self.assertEqual(x.grad.sum(), 1.0)
+        self.assertEqual((x.grad == 1.0 / 3.0).all().item(), True)
+
     def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
         # are scattered to the same position in self
