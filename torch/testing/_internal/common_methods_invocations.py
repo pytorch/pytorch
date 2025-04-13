@@ -7796,6 +7796,10 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     # NOTE that the OpInfo for where takes samples of the form a, cond, b
     yield SampleInput(a, args=(c, b))
 
+    # MPS does not support float64, which causes issues in the following tests
+    if torch.device(device).type == "mps":
+        return
+
     # type promoting
     # FIXME(rec): shouldn't other_dtype be used two lines below?
     other_dtype = torch.double if dtype is not torch.double else torch.long  # noqa: F841
