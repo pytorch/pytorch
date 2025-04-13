@@ -3,12 +3,12 @@ import functools
 import os
 import pickle
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from typing import Optional, Union
 from unittest import mock
-
-import multiprocess
 
 import torch
 from torch._dynamo import reset
@@ -1330,26 +1330,6 @@ class TestFxGraphCache(TestCase):
         )
 
 
-#########################################################################
-# Function for test_different_process need to be top level
-
-
-def writer(gm, args, path):
-    with fresh_inductor_cache():
-        compiled_artifact = torch._inductor.standalone_compile(gm, args)
-        compiled_artifact.save(path=path)
-
-
-def reader(args, path, queue):
-    with fresh_inductor_cache():
-        loaded = torch._inductor.CompiledArtifact.load(path=path)
-        compiled_out = loaded(*args)
-        queue.put(compiled_out)
-
-
-#########################################################################
-
-
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
     def setUp(self):
@@ -1431,34 +1411,48 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_different_process(self):
-        mod = torch.nn.Linear(1, 3)
-        x = torch.randn(4, 1)
+        x = torch.ones(4, 1)
 
         def f(x):
-            with torch.no_grad():
-                return mod(x)
-
-        eager_out = f(x)
+            return x.sin() * 2
 
         gm, args, kwargs = self.capture(f)(x)
         assert not kwargs
 
-        ctx = multiprocess.get_context("spawn")
-        queue = ctx.Queue()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "compiled_artifact.bin")
 
-            writer_process = ctx.Process(target=writer, args=(gm, args, path))
-            writer_process.start()
-            writer_process.join()
+            with fresh_inductor_cache():
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact.save(path=path)
 
-            reader_process = ctx.Process(target=reader, args=(args, path, queue))
-            reader_process.start()
-            reader_process.join()
+            script = f"""
+import torch
+from torch._inductor.utils import fresh_inductor_cache
 
-            compiled_out = queue.get()
-            self.assertEqual(eager_out, compiled_out)
+arg = torch.ones(4, 1)
+with fresh_inductor_cache():
+    loaded = torch._inductor.CompiledArtifact.load(path="{path}")
+    compiled_result = loaded(arg)
+
+eager_result = arg.sin() * 2
+
+if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
+    raise RuntimeError("tensors do not match")
+"""
+            try:
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                )
+            except subprocess.CalledProcessError as e:
+                self.fail(
+                    msg=(
+                        "Subprocess exception while attempting to run test: "
+                        + e.output.decode("utf-8")
+                    )
+                )
 
 
 class TestFxGraphCacheHashing(TestCase):
