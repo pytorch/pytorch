@@ -142,7 +142,7 @@ static inline void _wait_stream(
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
-    const std::optional<c10::Stream>& opt_producer_stream,
+    const std::optional<c10::Stream>& opt_producer_stream_,
     const std::optional<c10::Stream>& opt_consumer_stream,
     int num_dependencies) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
@@ -156,6 +156,21 @@ void InputBuffer::add(
   const auto device_type = device->type();
   bool is_accelerator =
       device->is_cuda() || device->is_mtia() || device->is_privateuseone();
+
+  if (is_accelerator) {
+    TORCH_INTERNAL_ASSERT(opt_consumer_stream);
+  }
+  // Handle the case where var is on accelerator but producer node has no
+  // canonical stream (all its outputs were non-accelerator), e.g. forward is
+  // DtoH. After this we can assume that if var is on accelerator, then producer
+  // and consumer stream are both defined.
+  const std::optional<c10::Stream>& opt_producer_stream =
+      (opt_producer_stream_.has_value()
+           ? opt_producer_stream_
+           : (is_accelerator
+                  ? std::optional<c10::Stream>(
+                        at::accelerator::getCurrentStream(device->index()))
+                  : std::nullopt));
 
   // [ Single producer ]
   // If there's only a single producer, there is no accumulation involved.
@@ -187,7 +202,6 @@ void InputBuffer::add(
   //   See test_side_stream_backward_overlap
   if (current_index == 0) {
     if (is_accelerator) {
-      // Try assuming that these devices all have non-opt streams
       TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream)
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (opt_consumer_stream->device() == *device) {
