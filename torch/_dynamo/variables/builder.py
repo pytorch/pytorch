@@ -2607,7 +2607,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         # For newly constructed objects that have mutable attributes, we usually
         # construct their VariableTracker via `track_object_new`, but since
         # tensor variable construction is a bit different, we handle them
-        # speically here. This ensures that codegen will actually generate the
+        # specially here. This ensures that codegen will actually generate the
         # attribute mutations on this tensor.
         #
         # NOTE we pass a dummy object as the `item` argument to avoid
