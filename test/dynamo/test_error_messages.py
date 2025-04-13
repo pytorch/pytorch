@@ -150,6 +150,33 @@ from user code:
     return [x + 1 for x in it]""",
         )
 
+    def test_dict_items_input(self):
+        def fn(x, items):
+            it = iter(items)
+            return next(it), x.sin()
+
+        x = torch.randn(3)
+        dct = {"a": 3, "b": 3}
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
+            """\
+Unsupported method call
+  Explanation: Dynamo does not know how to trace method `__iter__` of class `dict_items`
+  Hint: Avoid calling `dict_items.__iter__` in your code.
+  Hint: Please report an issue to PyTorch.
+  Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
+  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+
+  Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    it = iter(items)""",
+        )
+
     def test_super_call_function(self):
         def fn(it):
             return [x + 1 for x in it()]
