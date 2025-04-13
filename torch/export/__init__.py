@@ -133,7 +133,8 @@ def export_for_training(
          WARNING: This option is experimental and use this at your own risk.
 
         preserve_module_call_signature: A list of submodule paths for which the original
-         calling conventions are preserved as metadata.
+         calling conventions are preserved as metadata. The metadata will be used when calling 
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -251,7 +252,8 @@ def export(
          is passed here.
 
         preserve_module_call_signature: A list of submodule paths for which the original
-         calling conventions are preserved as metadata.
+         calling conventions are preserved as metadata. The metadata will be used when calling 
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
