@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ExpandUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -823,14 +824,18 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
   string op_name = __func__;
   using namespace mps;
-  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  TORCH_CHECK(delta > 0, op_name + ": huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(output.is_mps());
-
+  
+  if (!target.is_same_size(input)) { // for vmap
+    TORCH_INTERNAL_ASSERT(reduction == Reduction::None, op_name + ": reduction needs to be None when vmapped.");
+  }
+  
   if (reduction == Reduction::None)
-    output.resize_(target.sizes());
-  if (reduction == Reduction::Sum)
+    output.resize_(infer_size_dimvector(input.sizes(), target.sizes()));
+  else if (reduction == Reduction::Sum)
     output.resize_({});
-  if (reduction == Reduction::Mean)
+  else if (reduction == Reduction::Mean)
     output.resize_({});
 
   struct CachedGraph : public MPSCachedGraph {
@@ -892,7 +897,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
 
 Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
-  Tensor output = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor output = at::empty({}, input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   return huber_loss_out_mps(input, target, reduction, delta, output);
 }
 
