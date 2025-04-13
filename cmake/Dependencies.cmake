@@ -92,7 +92,7 @@ endif()
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(NOT PYTORCH_FOUND_XPU)
-    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    message(WARNING "Not compiling with XPU. Could NOT find SYCL. "
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
@@ -737,6 +737,12 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # TODO: Remove next two lines after fbgemm pin is updated
+
+    # For more details see https://github.com/pytorch/pytorch/issues/150846
+    target_compile_options_if_supported(fbgemm_avx512 -Wno-maybe-uninitialized)
+    target_compile_options_if_supported(fbgemm_avx512 -Wno-uninitialized)
+
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
       target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
