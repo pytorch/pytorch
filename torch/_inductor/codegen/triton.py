@@ -4089,7 +4089,7 @@ class TritonScheduling(SIMDScheduling):
         wrapper = V.graph.wrapper_code
         origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
-            wrapper.make_comment(origins)
+            wrapper.writeline(origins)
 
         if config.debug_fusion:
             from torch._inductor.scheduler import (
@@ -4107,7 +4107,7 @@ class TritonScheduling(SIMDScheduling):
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
-                wrapper.make_comment(
+                wrapper.writeline(
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 
