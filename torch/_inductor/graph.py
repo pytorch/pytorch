@@ -1806,6 +1806,9 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env = V.graph.sizevars.shape_env
 
             def make_assert(expr: SympyBoolean, msg: str) -> None:
+                if shape_env._maybe_evaluate_static(expr):
+                    return
+
                 assert_op = ir.AssertScalar(expr, msg)
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
@@ -1814,35 +1817,6 @@ class GraphLowering(torch.fx.Interpreter):
             # we use it to make sure that runtime assertions are added after all
             # symbols used in them are defined.
             self.bound_unbacked_symbols |= new_unbacked_defs
-
-            for i0 in new_unbacked_defs:
-                ras = self.ras_by_symbol.pop(i0, [])
-                # NB: size-like not needed, we won't retrace
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
-
-                    def is_convertible(s: Expr) -> bool:
-                        if s in (int_oo, -int_oo):
-                            return False
-                        try:
-                            int(s)
-                            return True
-                        except TypeError:
-                            return False
-
-                    if is_convertible(vr.lower):
-                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                    if is_convertible(vr.upper):
-                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
-
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
 
             unbacked_bindings = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
@@ -1871,6 +1845,36 @@ class GraphLowering(torch.fx.Interpreter):
                 f"fx node is: {n.format_node()}\n"
                 f"new operations are:\n\n{format_new_defs()}"
             )
+
+            # Emit code for runtime asserts that can be inserted at this point.
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def is_convertible(s: Expr) -> bool:
+                        if s in (int_oo, -int_oo):
+                            return False
+                        try:
+                            int(s)
+                            return True
+                        except TypeError:
+                            return False
+
+                    if is_convertible(vr.lower):
+                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                    if is_convertible(vr.upper):
+                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = min(missing, key=str)
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        make_assert(ra.expr, f"{ra.expr}")
 
         return result
 
