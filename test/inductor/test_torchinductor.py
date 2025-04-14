@@ -3778,6 +3778,7 @@ class CommonTemplate:
             torch.compile(fn)(t1, t2)
 
     @skipIfXpu
+    @xfail_if_mps_unimplemented  # linear for non-float inputs
     def test_linear_mixed_dtype(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -4016,6 +4017,7 @@ class CommonTemplate:
             )
 
     @skipIfRocm
+    @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest(f"{GPU_TYPE} only test")
@@ -4162,6 +4164,7 @@ class CommonTemplate:
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
 
+    @xfail_if_mps_unimplemented  # Sparse not supported
     def test_gather3(self):
         def fn(a, b):
             return torch.gather(a, 1, b, sparse_grad=True)
@@ -5821,6 +5824,7 @@ class CommonTemplate:
             ),
         )
 
+    @xfail_if_mps  # Expected `value` to be on same device as `a`
     def test_masked_fill_promotion(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, torch.tensor(3.5))
@@ -5840,6 +5844,7 @@ class CommonTemplate:
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
 
+    @xfail_if_mps  # 'NullHandler' object has no attribute 'wrapper_code'
     def test_masked_scatter(self):
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
@@ -5936,6 +5941,7 @@ class CommonTemplate:
             )
 
     @xfail_if_triton_cpu
+    @xfail_if_mps  # float64 is not MPS type
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -7858,6 +7864,7 @@ class CommonTemplate:
             ),
         )
 
+    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback1(self):
         def fn(a, b, c, d):
             a = a.clone()
@@ -7884,6 +7891,7 @@ class CommonTemplate:
             ),
         )
 
+    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback2(self):
         def fn(a, b, c, d, e):
             a = a.clone()
@@ -8815,6 +8823,7 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
+    @xfail_if_mps_unimplemented  # rng_prims not supported for MPS
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -9008,6 +9017,7 @@ class CommonTemplate:
         self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
+    @xfail_if_mps  # 100% are not close
     def test_like_rands(self):
         def fn(x):
             return torch.rand_like(x), torch.randn_like(x)
@@ -10438,6 +10448,7 @@ class CommonTemplate:
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
+    @xfail_if_mps  # Missing op in printer
     @expectedFailureXPU  # Remmove this after the known issue of Intel Triton #3871 resolved.
     def test_pow_by_natural_log2_dynamic_shapes(self):
         @torch.compile(dynamic=True)
@@ -11242,6 +11253,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
+    @xfail_if_mps  # Missing lowering
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
@@ -12494,6 +12506,7 @@ class CommonTemplate:
 
         self.common(forward, ())
 
+    @xfail_if_mps
     def test_flip_cat(self):
         def forward(unsqueeze, unsqueeze_1):
             cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
