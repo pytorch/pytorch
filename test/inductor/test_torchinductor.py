@@ -2591,6 +2591,7 @@ class CommonTemplate:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
 
+    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
@@ -2617,6 +2618,7 @@ class CommonTemplate:
             rtol=1e-5,
         )
 
+    @xfail_if_mps_unimplemented
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(-1)
@@ -4299,6 +4301,7 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    @xfail_if_mps_unimplemented
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (2, 3))
     def test_low_memory_max_pool(self, dilation: int, dim: int):
@@ -5124,7 +5127,6 @@ class CommonTemplate:
             (torch.randn([2, 2, 3, 6]),),
         )
 
-    @xfail_if_mps
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -5264,7 +5266,6 @@ class CommonTemplate:
             atol=1e-4,
         )
 
-    @xfail_if_mps
     def test_tan(self):
         def fn(x):
             return aten.tan(x) + 2, aten.tan(x + 1)
@@ -5380,6 +5381,7 @@ class CommonTemplate:
             (torch.randn([4, 12, 2, 64]),),
         )
 
+    @xfail_if_mps_unimplemented
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -6387,6 +6389,7 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    @xfail_if_mps  # float64 is not MPS type
     def test_expm1(self):
         def fn(x):
             return torch.expm1(x), torch.expm1(x) * 2
@@ -6422,6 +6425,7 @@ class CommonTemplate:
             ):
                 model(x)
 
+    @xfail_if_mps_unimplemented
     def test_adaptive_avg_pool_errors_with_long(self):
         class Model(torch.nn.Module):
             def __init__(self, pool_operator):
@@ -6455,6 +6459,7 @@ class CommonTemplate:
                 ):
                     c_op(x, kernel_size=2, stride=2)
 
+    @xfail_if_mps  # float64 is not MPS type
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -6469,6 +6474,7 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
+    @xfail_if_mps_unimplemented
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
@@ -8205,6 +8211,7 @@ class CommonTemplate:
             ],
         )
 
+    @xfail_if_mps
     def test_scatter2(self):
         if self.device == "cuda":
             raise unittest.SkipTest("unstable on sm86")
@@ -8227,6 +8234,7 @@ class CommonTemplate:
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps
     def test_scatter3(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -8271,6 +8279,7 @@ class CommonTemplate:
                     check_lowp=check_lowp,
                 )
 
+    @xfail_if_mps
     def test_scatter5(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -8337,6 +8346,7 @@ class CommonTemplate:
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps  # All elements are wrong
     def test_scatter_add2(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8356,6 +8366,7 @@ class CommonTemplate:
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8380,6 +8391,7 @@ class CommonTemplate:
                     check_lowp=check_lowp,
                 )
 
+    @xfail_if_mps
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -8399,6 +8411,7 @@ class CommonTemplate:
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps # 50% of elements are wrong
     def test_scatter_reduce2(self):
         def fn(a, dim, index, b, reduce):
             return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
@@ -8420,6 +8433,7 @@ class CommonTemplate:
                 check_lowp=check_lowp,
             )
 
+    @xfail_if_mps
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -9311,6 +9325,7 @@ class CommonTemplate:
             ],
         )
 
+    @xfail_if_mps_unimplemented
     @skip_if_halide  # compiles for 5+ minutes
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
@@ -9333,6 +9348,7 @@ class CommonTemplate:
             ],
         )
 
+    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9356,6 +9372,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward4(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9713,7 +9730,6 @@ class CommonTemplate:
     @parametrize(
         "use_block_ptr",
         [
-            subtest(False, decorators=[xfail_if_mps]),
             subtest(True, decorators=[skip_if_not_triton]),
         ],
     )
@@ -9995,7 +10011,6 @@ class CommonTemplate:
 
         self.assertEqual(y, compiled_y)
 
-    @xfail_if_mps
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
             def __init__(self) -> None:
@@ -11177,6 +11192,7 @@ class CommonTemplate:
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x, y), opt_fn(x_clone, y))
 
+    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     def test_erfc(self):
         def fn(x):
@@ -12415,6 +12431,7 @@ class CommonTemplate:
 
         self.common(forward, (a, b))
 
+    @xfail_if_mps_unimplemented
     def test_isin_tensor_scalar(self):
         for invert in [True, False]:
             torch._dynamo.reset()
@@ -12941,6 +12958,7 @@ class CommonTemplate:
 
                 assert len(inps) == 0
 
+    @xfail_if_mps
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
