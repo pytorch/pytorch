@@ -164,6 +164,7 @@ SymInt computeStorageNbytes(
       return 0;
     }
 
+    TORCH_SYM_CHECK(sizes[i].sym_ge(1));
     size += strides[i] * (sizes[i] - 1);
   }
   return itemsize_bytes * (storage_offset + size);
