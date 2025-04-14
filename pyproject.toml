@@ -163,6 +163,11 @@ select = [
 "__init__.py" = [
     "F401",
 ]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
+]
 "functorch/notebooks/**" = [
     "F401",
 ]
