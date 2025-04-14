@@ -68,7 +68,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
  private:
   CUDAAllocatorConfig() = default;
 
-  c10::CachingAllocator::AllocatorConfig getAllocatorConfig() {
+  c10::CachingAllocator::AllocatorConfig& getAllocatorConfig() {
     return c10::CachingAllocator::getAllocatorConfig();
   }
 };
