@@ -3768,8 +3768,10 @@ def lookup_inner(
         is_direct_call=is_direct_call,
         reasons=reasons,
     )
-    # there are still some modules we should absolutely NOT trace into - e.g. torch._dynamo, as this
-    # can result in really weird tracing behaviors.
+    # There are still some modules we should absolutely NOT trace into - e.g. most of torch._dynamo,
+    # as this can result in really weird tracing behaviors.
+    # Note that if a torch._dynamo function is already not skipped (e.g. functions in external_utils.py),
+    # then this branch does not apply.
     if config.dont_skip_tracing and result is SkipFunctionVariable:
         if filename is None:
             filename = getfile(obj)

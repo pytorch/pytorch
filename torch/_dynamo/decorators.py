@@ -796,7 +796,7 @@ def _patch_dynamo_config_check(changes: dict[str, Any]):
             )
 
 
-# TODO: nonrecursive patch_dynamo_config/dont_skip_tracing?
+# TODO: also implement nonrecursive patch_dynamo_config/dont_skip_tracing.
 # Unlike config.patch, we also need to accept tuple as input in order to
 # deal with context manager reconstruction.
 def patch_dynamo_config(
