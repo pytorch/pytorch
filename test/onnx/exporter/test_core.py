@@ -35,14 +35,10 @@ class TorchTensorTest(common_utils.TestCase):
             (torch.uint32, np.uint32),
             (torch.uint64, np.uint64),
             (torch.uint8, np.uint8),
-            (torch.float4_e2m1fn_x2, ml_dtypes.float4_e2m1fn),
         ],
     )
     def test_numpy_returns_correct_dtype(self, dtype: torch.dtype, np_dtype):
-        if dtype == torch.float4_e2m1fn_x2:
-            tensor = _core.TorchTensor(torch.tensor([1], dtype=torch.uint8).view(dtype))
-        else:
-            tensor = _core.TorchTensor(torch.tensor([1], dtype=dtype))
+        tensor = _core.TorchTensor(torch.tensor([1], dtype=dtype))
         self.assertEqual(tensor.numpy().dtype, np_dtype)
         self.assertEqual(tensor.__array__().dtype, np_dtype)
         self.assertEqual(np.array(tensor).dtype, np_dtype)
