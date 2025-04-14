@@ -7548,8 +7548,8 @@ class GraphModule(torch.nn.Module):
             s94_1 = s94
 
             add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
-            slice_1: "f32[s17 - 2, s94]" = torch.ops.aten.slice(add, 0, 2, None, 1);  add = None
-            clone: "f32[s17 - 2, s94]" = slice_1.clone();  getitem = None
+            getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
+            clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
@@ -7559,8 +7559,8 @@ class GraphModule(torch.nn.Module):
 
             mul: "f32[s17, s94]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
             add: "f32[s17, s94]" = l_x__1 + mul;  l_x__1 = mul = None
-            slice_1: "f32[2, s94]" = torch.ops.aten.slice(add, 0, None, 2, 1);  add = None
-            clone: "f32[2, s94]" = slice_1.clone();  getitem = None
+            getitem: "f32[2, s94]" = add[slice(None, 2, None)];  add = None
+            clone: "f32[2, s94]" = getitem.clone();  getitem = None
             return (clone,)
 """,  # noqa: B950
             )

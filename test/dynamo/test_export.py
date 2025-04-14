@@ -1923,8 +1923,8 @@ def forward(self, l_x_):
                 """\
 def forward(self, l_x_):
     l_x__1 = l_x_
-    slice_1 = torch.ops.aten.slice(l_x__1, 0, None, 2, 1);  l_x__1 = None
-    return (slice_1,)""",
+    getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
+    return (getitem,)""",
             )
             # We could successfully export branches that return different sizes
             torch._dynamo.export(mod)(torch.randn(3, 2))

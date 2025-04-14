@@ -3607,8 +3607,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)
@@ -3654,8 +3654,8 @@ class GraphModule(torch.nn.Module):
 
         tensor_1: "i64[1]" = torch.tensor((12,))
         cumsum_1: "i64[1]" = tensor_1.cumsum(dim = 0);  tensor_1 = None
-        slice_2: "i64[0]" = torch.ops.aten.slice(cumsum_1, 0, None, -1, 1);  cumsum_1 = None
-        neg_1: "i64[0]" = slice_2.neg();  slice_2 = None
+        getitem_1: "i64[0]" = cumsum_1[slice(None, -1, None)];  cumsum_1 = None
+        neg_1: "i64[0]" = getitem_1.neg();  getitem_1 = None
         unbind_1 = neg_1.unbind();  neg_1 = unbind_1 = None
 
         chunk_1: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
@@ -3735,8 +3735,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
@@ -3784,8 +3784,8 @@ class GraphModule(torch.nn.Module):
 
         tensor_1: "i64[1]" = torch.tensor((12,))
         cumsum_1: "i64[1]" = tensor_1.cumsum(dim = 0);  tensor_1 = None
-        slice_2: "i64[0]" = torch.ops.aten.slice(cumsum_1, 0, None, -1, 1);  cumsum_1 = None
-        neg_1: "i64[0]" = slice_2.neg();  slice_2 = None
+        getitem_1: "i64[0]" = cumsum_1[slice(None, -1, None)];  cumsum_1 = None
+        neg_1: "i64[0]" = getitem_1.neg();  getitem_1 = None
         unbind_1 = neg_1.unbind();  neg_1 = unbind_1 = None
 
         chunk_1: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
@@ -3882,8 +3882,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
@@ -3960,8 +3960,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
@@ -4040,8 +4040,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
@@ -5099,8 +5099,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)
@@ -5180,8 +5180,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
@@ -5262,8 +5262,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
@@ -5311,7 +5311,7 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        aux_3: "f32[4, 3]" = torch.select(aux_2, 0, 0);  aux_2 = None
+        aux_3: "f32[4, 3]" = aux_2[0];  aux_2 = None
 
         movedim: "f32[3, 4, 12]" = results.movedim(0, -1);  results = None
         split = movedim.split((12,), dim = -1);  movedim = None
@@ -5349,8 +5349,8 @@ class GraphModule(torch.nn.Module):
 
         tensor: "i64[1]" = torch.tensor((12,))
         cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        slice_1: "i64[0]" = torch.ops.aten.slice(cumsum, 0, None, -1, 1);  cumsum = None
-        neg: "i64[0]" = slice_1.neg();  slice_1 = None
+        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
+        neg: "i64[0]" = getitem.neg();  getitem = None
         unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)

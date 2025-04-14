@@ -937,39 +937,48 @@ class TensorVariable(VariableTracker):
 
         items = args[0].items if isinstance(args[0], variables.TupleVariable) else [args[0]]
 
+        has_symnode = False
         index_ellipsis = None
         n_none_slices = self.ndim + 1
         for i, item in enumerate(items):
+            if isinstance(item, variables.SymNodeVariable) or (
+                isinstance(item, variables.SliceVariable) and any(
+                    isinstance(x, variables.SymNodeVariable) for x in item.items
+                )
+            ):
+                has_symnode = True
+            elif isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
+                index_ellipsis = i
             if not (isinstance(item, variables.ConstantVariable) and item.value == None):
                 n_none_slices -= 1
-            if isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
-                index_ellipsis = i
-        if index_ellipsis is not None:
-            none_slice = variables.SliceVariable((variables.ConstantVariable.create(None),))
-            items[index_ellipsis: index_ellipsis + 1] = [none_slice] * n_none_slices
 
-        dim = 0
-        # Sequence rewrites.
-        sequence = []
-        for item in items:
-            if (r := rewrite(dim, item)) is not None:
-                dim, call_spec = r
-                sequence.append(call_spec)
+        if has_symnode:
+            if index_ellipsis is not None:
+                none_slice = variables.SliceVariable((variables.ConstantVariable.create(None),))
+                items[index_ellipsis: index_ellipsis + 1] = [none_slice] * n_none_slices
 
-        if len(sequence) == len(items):
-            *rest, last = sequence
+            dim = 0
+            # Sequence rewrites.
+            sequence = []
+            for item in items:
+                if (r := rewrite(dim, item)) is not None:
+                    dim, call_spec = r
+                    sequence.append(call_spec)
 
-            # Run rest.
-            for _method, _args in rest:
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    _method,
-                    *proxy_args_kwargs([t, *_args], {}),
-                )
-                t = wrap_fx_proxy(tx, proxy)
+            if len(sequence) == len(items):
+                *rest, last = sequence
 
-            # Return last.
-            fn, args = last
+                # Run rest.
+                for _method, _args in rest:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        _method,
+                        *proxy_args_kwargs([t, *_args], {}),
+                    )
+                    t = wrap_fx_proxy(tx, proxy)
+
+                # Return last.
+                fn, args = last
 
         proxy = tx.output.create_proxy(
             "call_function",
