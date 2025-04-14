@@ -1960,7 +1960,6 @@ class CommonTemplate:
         self.common(fn, (torch.rand((10, 10)),))
         self.common(fn, (torch.rand((1, 2050)),))
 
-    @xfail_if_mps
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -2009,7 +2008,6 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
-    @xfail_if_mps  # multistage reduction
     @skip_if_gpu_halide
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var(self):
