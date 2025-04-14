@@ -126,6 +126,33 @@ from user code:
     return torch.equal(x, x)""",
             )
 
+    def test_sort_with_nonconstant_keys(self):
+        lst = [
+            torch.tensor(4),
+            torch.tensor(1),
+            torch.tensor(2),
+            torch.tensor(3),
+        ]
+
+        def fn(lst):
+            return sorted(lst)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(lst),
+            """\
+sort with non-constant keys
+  Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
+  Hint: Use something else as the key.
+
+  Developer debug context: TensorVariable()
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return sorted(lst)""",
+        )
+
     def test_super_call_method(self):
         def fn(it):
             return [x + 1 for x in it]
