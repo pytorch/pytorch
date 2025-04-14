@@ -21,7 +21,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
-    empty_line_normalizer,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
@@ -4357,23 +4356,20 @@ class GraphModule(torch.nn.Module):
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
-        l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
-        l_buffers_buffer_ = L_buffers_buffer_
-        l_inputs_ = L_inputs_
-
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
-
-        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
-        return (add,)
-"""
-            # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
             self.assertExpectedInline(
-                empty_line_normalizer(actual),
-                empty_line_normalizer(normalize_gm(expected)),
+                actual,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
+        l_inputs_ = L_inputs_
+        l_model_modules_l1_parameters_weight_ = L_model_modules_l1_parameters_weight_
+        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
+        l_model_buffers_buffer_ = L_model_buffers_buffer_
+
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_model_modules_l1_parameters_weight_, l_model_modules_l1_parameters_bias_);  l_inputs_ = l_model_modules_l1_parameters_weight_ = l_model_modules_l1_parameters_bias_ = None
+        add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
+        return (add,)
+""",
             )
         else:
             self.assertExpectedInline(
