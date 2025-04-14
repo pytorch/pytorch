@@ -805,7 +805,7 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -860,7 +860,7 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -5636,7 +5636,7 @@ Args:
     {input}
     k (int): k for the k-th smallest element
     dim (int, optional): the dimension to find the kth value along
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor)
@@ -5656,7 +5656,7 @@ Example::
             [ 4.,  5.,  6.]])
     >>> torch.kthvalue(x, 2, 0, True)
     torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6256,7 +6256,7 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 Args:
     {input}
     {opt_dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -6610,7 +6610,7 @@ dimension(s) :attr:`dim`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -6665,7 +6665,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim}
+    {opt_keepdim}
 
 Example::
 
@@ -6677,7 +6677,7 @@ Example::
             [-1.6092,  0.5419, -0.2993,  0.3195]])
     >>> torch.argmax(a, dim=1)
     tensor([ 0,  2,  0,  1])
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6757,7 +6757,7 @@ reduce over all of them.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6803,7 +6803,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 Args:
     input (Tensor): the input tensor, either of floating point or complex dtype
     {opt_dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6886,7 +6886,7 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6903,7 +6903,7 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6943,7 +6943,7 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6960,7 +6960,7 @@ Example::
     torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
     >>> a.nanmedian(0)
     torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6991,7 +6991,7 @@ Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7032,7 +7032,7 @@ Example::
     tensor(2.)
     >>> torch.quantile(a, 0.4, interpolation='nearest')
     tensor(1.)
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -7049,7 +7049,7 @@ Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7072,7 +7072,7 @@ Example::
     tensor([1., 2.])
     >>> t.nanquantile(0.5, dim=1)
     tensor([   nan, 1.5000])
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -7112,7 +7112,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the tuple of two output tensors (min, min_indices)
@@ -7132,7 +7132,7 @@ Example::
    :noindex:
 
 See :func:`torch.minimum`.
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -7215,7 +7215,7 @@ dimension(s) :attr:`dim`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -7312,7 +7312,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim}
+    {opt_keepdim}
 
 Example::
 
@@ -7331,7 +7331,7 @@ Example::
             [1],
             [3],
             [1]])
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -7502,7 +7502,7 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
@@ -7518,7 +7518,7 @@ Example::
     torch.return_types.mode(
     values=tensor([0, 2, 0, 0, 0, 0, 2]),
     indices=tensor([1, 3, 4, 4, 2, 4, 4]))
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -8589,7 +8589,7 @@ dimension :attr:`dim`.
 Args:
     {input}
     {dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -8604,7 +8604,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -10495,7 +10495,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -10550,7 +10550,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -10649,7 +10649,7 @@ reduce over all of them.
 Args:
     {input}
     {opt_dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10701,7 +10701,7 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 Args:
     {input}
     {opt_dim}
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -11841,7 +11841,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -11895,7 +11895,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
