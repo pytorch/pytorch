@@ -215,6 +215,7 @@ def build_collectives(
         )
         if len(maybe_coalesced_group) > 1:
             num_coalesced_entries = len(maybe_coalesced_group)
+            # We need a copy of the original expected ranks to avoid modifying it.
             candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
             all_coalesced_entries = {}
@@ -244,7 +245,9 @@ def build_collectives(
                         candidate_ranks.add(peer)
 
             match = match_coalesced_groups(
-                copy.deepcopy(all_coalesced_entries),
+                copy.deepcopy(
+                    all_coalesced_entries
+                ),  # We want to keep a copy for cleanup.
                 pg_info=(pg_name, desc),
                 memberships=_memberships,
                 _pg_guids=_pg_guids,
