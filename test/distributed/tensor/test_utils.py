@@ -7,6 +7,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
+    _compute_local_shape_and_global_offset,
     _explicit_order_placements,
     compute_local_shape_and_global_offset,
 )
@@ -101,6 +102,32 @@ class LocalTest(TestCase):
                 _explicit_order_placements(
                     test_case["mesh_shape"], test_case["placements"]
                 )
+
+    def test_compute_local_shape_and_global_offset_uneven(self):
+        # This case is not only 'uneven' bug also has an empty shard
+        # (e.g. most DP ranks have local shape 18,4096, one has 8,4096, one has 0,4096
+        global_shape = (4096, 4096)
+        DP = 30
+        TP = 8
+        mesh_shape = (DP, TP)
+        placements = [_StridedShard(0, split_factor=8), Shard(0)]
+        TP_shard_size = global_shape[0] / TP
+        for my_coordinate in itertools.product(range(DP), range(TP)):
+            local_shape, global_offset = _compute_local_shape_and_global_offset(
+                global_shape, mesh_shape, list(my_coordinate), placements
+            )
+            dp_rank, tp_rank = my_coordinate
+            expected_shard_size = 18
+            expected_shard_offset = tp_rank * TP_shard_size + 18 * dp_rank
+            if dp_rank == 28:
+                expected_shard_size = 8
+            elif dp_rank == 29:
+                expected_shard_size = 0
+                # we define the offset value of a zero-sized shard as the dim size
+                # this actually matters, because DCP uses offset to deduplicate shards when saving
+                expected_shard_offset = 4096
+            self.assertEqual(local_shape, (expected_shard_size, 4096))
+            self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
 class UtilTest(DTensorTestBase):
@@ -197,6 +224,25 @@ class UtilTest(DTensorTestBase):
         expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
         self.assertEqual(local_shape, expected_local_shape)
         self.assertEqual(global_offset, expected_global_offset)
+
+    @with_comms
+    def test_uneven_fsdp_tp_meta_compute(self):
+        # FSDP + TP uneven sharding
+        tp_size = 2
+        dp_size = self.world_size // tp_size
+        global_mesh = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        global_tensor_shape = torch.Size([15, 5])
+        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
+        rank = global_mesh.get_rank()
+        expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
+        expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
+        self.assertEqual(local_shape[0], expected_shapes[rank])
+        self.assertEqual(global_offset[0], expected_offsets[rank])
 
     @with_comms
     def test_hsdp_tp_meta_compute(self):
