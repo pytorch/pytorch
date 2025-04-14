@@ -5365,6 +5365,19 @@ class TestLearnableBiases(InductorTestCase):
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
 
+    def test_inspect_bug(self):
+        # https://github.com/pytorch/pytorch/issues/139374
+        def sliding_window(b, h, q_idx, kv_idx, val):
+            return (q_idx - kv_idx).abs() < val
+
+        sliding_window2 = functools.partial(
+            sliding_window, val=torch.randn((), device="cuda")
+        )
+        opt_fn = torch.compile(create_block_mask, fullgraph=True)
+        create_block_mask(sliding_window2, None, None, 1024, 1024)
+        # checks that the compile is working
+        opt_fn(sliding_window2, None, None, 1024, 1024)
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
