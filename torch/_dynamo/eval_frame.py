@@ -1018,11 +1018,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    backend = get_compiler_fn(backend)
-
-    # Find if backend has any extra context manager
-    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
-
     if nopython:
         return optimize_assert(
             backend,
@@ -1030,6 +1025,12 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
         )
+
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
