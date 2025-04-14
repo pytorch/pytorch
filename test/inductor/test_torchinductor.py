@@ -12964,7 +12964,7 @@ class CommonTemplate:
         x = torch.randn(1024, 1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
-    @config.patch(implicit_fallbacks=True)
+    @config.patch(implicit_fallbacks=True, alignment_asserts=True)
     @skip_if_cpp_wrapper(
         "Inductor does not generate alignment assertion for cpp_wrapper right now"
     )
