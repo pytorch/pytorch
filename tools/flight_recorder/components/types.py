@@ -187,6 +187,7 @@ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html.
 """
 COLLECTIVES = {
     "broadcast",
+    "reduce",
     "all_gather",
     "all_reduce",
     "_all_gather_base",
@@ -197,6 +198,9 @@ COLLECTIVES = {
     "scatter",
     "all_to_all",
     "all_reduce_barrier",
+    "allreduce_coalesced",
+    "ALLGATHER_coalesced",
+    "REDUCESCATTER_coalesced",
 }
 
 P2P = {
@@ -522,16 +526,19 @@ class Op:
                     f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
                     f"'{other.output_sizes}'",
                 )
-            if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
+            if (
+                self.type in ["all_reduce", "allreduce_coalesced"]
+                and self.input_sizes != other.output_sizes
+            ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            # TODO: need to consider uneven sharding for all-gather.
-            # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
             if self.type in [
                 "all_gather",
                 "all_gather_base",
+                "all_gather_into_tensor_coalesced",
+                "ALLGATHER_coalesced",
             ] and not (
                 math.prod(other.output_sizes[0])
                 == math.prod(self.input_sizes[0]) * self.pg_size
@@ -544,6 +551,8 @@ class Op:
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
+                "reduce_scatter_tensor_coalesced",
+                "REDUCESCATTER_coalesced",
             ] and not (
                 math.prod(other.input_sizes[0])
                 == math.prod(self.output_sizes[0]) * self.pg_size
