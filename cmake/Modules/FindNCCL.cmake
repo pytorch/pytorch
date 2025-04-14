@@ -57,7 +57,9 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
   include(CheckCXXSymbolExists)
   check_cxx_symbol_exists(NCCL_VERSION_CODE nccl.h NCCL_VERSION_DEFINED)
 
-  if (NCCL_VERSION_DEFINED)
+  if (CMAKE_CROSSCOMPILING)
+    message(STATUS "NCCL version not checked - cross compiling")
+  elseif (NCCL_VERSION_DEFINED)
     set(file "${PROJECT_BINARY_DIR}/detect_nccl_version.cc")
     file(WRITE ${file} "
       #include <iostream>
