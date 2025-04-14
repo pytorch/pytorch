@@ -114,7 +114,7 @@ inline double Round(const double x) {
 }
 #else
 template <class T>
-static inline T Round(const T x) {
+inline T Round(const T x) {
   return std::nearbyint(x);
 }
 #endif
