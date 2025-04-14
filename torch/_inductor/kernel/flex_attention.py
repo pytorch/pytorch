@@ -2672,7 +2672,11 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        inputs_for_autotuning,
+        [
+            x
+            for x in inputs_for_autotuning
+            if isinstance(x, torch._inductor.ir.IRNode)
+        ],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]

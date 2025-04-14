@@ -5335,6 +5335,9 @@ class TestLearnableBiases(InductorTestCase):
         query = torch.randn(2, 16, 512, 64, device="cuda")
         key = torch.randn(2, 16, 512, 64, device="cuda")
         value = torch.randn(2, 16, 512, 64, device="cuda")
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
 
         shape = (2, 16, 512, 16, 512, 64)
         B, Hq, M, Hkv, N, D = shape
@@ -5360,6 +5363,7 @@ class TestLearnableBiases(InductorTestCase):
             enable_gqa=True,
             kernel_options=None,
         )
+        out.sum().backward()
 
         self.assertEqual(
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
