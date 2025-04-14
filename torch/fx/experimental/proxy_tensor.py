@@ -14,9 +14,8 @@ import operator
 import traceback
 import typing
 import typing_extensions
-import warnings
 import weakref
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -52,7 +51,11 @@ from torch._subclasses.fake_tensor import (
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
-from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
+from torch.fx.node import (
+    _side_effectful_need_to_be_preserved_pre_dispatch,
+    Argument,
+    Target,
+)
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -127,6 +130,13 @@ pytree.register_pytree_node(
     ),
     serialized_type_name="torch.Size",
 )
+# Ideally unflattening should not lose info, but we unflatten
+# torch.Size to tuple (see above). This is necessary because the
+# torch.Size constructor only accepts ints whereas our infra often
+# transforms them to non-ints, e.g. symint proxies. Anyway, losing
+# such info can cause pytree mapping or spec matching to fail, so
+# work around this problem using the following dict as needed.
+_pytree_subclasses_that_lose_info = {torch.Size: tuple}
 
 
 def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
@@ -802,6 +812,12 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
+            from .symbolic_shapes import guard_size_oblivious
+
+            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    "Boolean value of Tensor with more than one value is ambiguous"
+                )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
@@ -1087,6 +1103,75 @@ class PythonKeyTracer(Tracer):
         else:
             return e
 
+    def create_node(
+        self,
+        kind: str,
+        target: Target,
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
+    ) -> torch.fx.Node:
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
+
+        def map_fn(v: Any) -> Optional[_ExtractValType]:
+            if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
+                return None
+            val = v.meta["val"]
+            # other subclasses like FunctionalTensor error on `extract_val`
+            # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
+            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
+                return None
+            return extract_val(v.meta["val"])
+
+        if _should_save_eager_input_vals(target, (args, kwargs)):
+            # NOTE "eager_input_vals"
+            # We save the original (args, kwargs) FakeTensor values for nodes
+            # that have exact stride requirements. This is useful downstream.
+            # We use this information inside Inductor to ensure that inputs to
+            # stride-sensitive operators have the correct strides.
+            arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
+            node.meta["eager_input_vals"] = (arg_inp, kwarg_inp)
+
+        return node
+
+
+def _should_save_eager_input_vals(
+    target: Any,
+    args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
+) -> bool:
+    if not callable(target):
+        return False
+    if isinstance(
+        target,
+        (
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ),
+    ):
+        return True
+    if args_kwargs is not None and (
+        target is torch.ops.higher_order.auto_functionalized
+        or target is torch.ops.higher_order.auto_functionalized_v2
+    ):
+        args = args_kwargs[0]
+        assert isinstance(args[0], torch._ops.OpOverload)
+        return _should_save_eager_input_vals(args[0], None)
+    if target is torch.ops.higher_order.with_effects:
+        # TODO: inductor lowering for with_effects needs to be updated to propagate
+        # the arg_kwarg_vals
+        return False
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
+            raise RuntimeError(
+                f"NYI: The HOP {target} has an input that is an OpOverload that "
+                f"needs exact strides. We probably need special logic to "
+                f"propagate the FakeTensor vals. Please file an issue."
+            )
+    if isinstance(target, torch._ops.OpOverload):
+        return torch._C.Tag.needs_exact_strides in target.tags
+    return False
+
 
 def _make_temp_remove_mode_context_manager(
     mode_ty: type[TorchFunctionMode],
@@ -1186,7 +1271,7 @@ def wrap_key(
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
-            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
+            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)  # type: ignore[attr-defined]
 
         out = f(*tensors)  # type:ignore[call-arg]
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
@@ -1319,10 +1404,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
-        self.decomp_layers = 0
+        self.decomp_layers: int = 0
         from torch._inductor import config
 
-        self.emulate_precision_casts = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(
@@ -1569,6 +1654,11 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
             if m in self.submodule_paths:
+                log.info(
+                    "Shared module found between %s and %s, AttrProxy is enabled.",
+                    self.submodule_paths[m],
+                    name,
+                )
                 self.enable_attr_proxy = True
             else:
                 self.submodule_paths[m] = name
@@ -1588,7 +1678,11 @@ class _ModuleStackTracer(PythonKeyTracer):
         tracer = self
 
         class AttrProxy(_AttrProxy):
-            def __init__(self, base: Module, path: str) -> None:
+            def __init__(self, base: Union[Module, _AttrProxy], path: str) -> None:
+                if isinstance(base, _AttrProxy):
+                    base = base.get_base()  # type: ignore[attr-defined]
+
+                assert isinstance(base, Module)
                 # Class is modified to be a subclass of torch.nn.Module
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
@@ -1600,9 +1694,8 @@ class _ModuleStackTracer(PythonKeyTracer):
                 self.__dict__ = base.__dict__
                 self.__class__.__module__ = base.__class__.__module__
                 self.__class__.__qualname__ = base.__class__.__qualname__
-                self.reset_proxy_mapping(base, path)
 
-            def reset_proxy_mapping(self, base: Module, path: str) -> None:
+                # This overwrites any existing paths if `base` is an AttrProxy
                 tracer.proxy_paths[self] = path
                 tracer.proxy_modules[self] = base
 
@@ -1612,28 +1705,28 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # That __getattr__ is patched to be module_getattr_wrapper in _symbolic_trace.py.
                 # which then calls into _ModuleStackTracer.getattr
                 attr_val = super().__getattr__(name)  # type: ignore[misc]
-                if isinstance(attr_val, AttrProxy):
-                    attr_val = tracer.proxy_modules[attr_val]
-                elif not isinstance(attr_val, Module):
+                if not isinstance(attr_val, Module):
                     return attr_val
-                if attr_val not in tracer.attr_proxy_map:
-                    tracer.attr_proxy_map[attr_val] = AttrProxy(
-                        attr_val, tracer.proxy_paths[self] + "." + name
-                    )
-                else:
-                    # NOTE [caching AttrProxy]. Caching ensures a 1-1 mapping between AttrProxy and the actual attr_val.
-                    # 1. We reset the proxy_mapping to solve the diamond shape reference problem: we want to record the
-                    # path as A.B.D instead of A.C.D (the purpose of _ModuleStackTracer).
-                    # 2. Instead of creating a new AttrProxy, we just reset the proxy_mapping of existing one. This is to avoid
-                    # dynamo creating multiple guards for the same attr_val but different AttrProxy when exporting
-                    # a model that calls torch.compile (e.g when a model uses torch.cond.)
-                    tracer.attr_proxy_map[attr_val].reset_proxy_mapping(
-                        attr_val, tracer.proxy_paths[self] + "." + name
-                    )
-                return tracer.attr_proxy_map[attr_val]
+
+                return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
                 return tracer.proxy_modules[self]
+
+            def __getitem__(self, idx: Union[int, slice]) -> AttrProxy:
+                if isinstance(idx, slice):
+                    if isinstance(self, torch.nn.Sequential):
+                        # Copied from nn/modules/container.py
+                        res = torch.nn.Sequential(
+                            OrderedDict(list(self._modules.items())[idx])
+                        )
+                        return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
+                    elif isinstance(self, torch.nn.ModuleList):
+                        # Copied from nn/modules/container.py
+                        res = torch.nn.ModuleList(list(self._modules.values())[idx])
+                        return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
+
+                return super().__getitem__(idx)  # type: ignore[misc]
 
             @property
             def _modules(self) -> dict[str, AttrProxy]:
@@ -1761,11 +1854,12 @@ class _ModuleStackTracer(PythonKeyTracer):
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
         except _ModuleNotInstalledAsSubmoduleError:
-            warnings.warn(
-                f"Unable to find the path of the module {m}. "
+            log.debug(
+                "Unable to find the path of the module %s. "
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
-                "through the module without recording stack information."
+                "through the module without recording stack information.",
+                str(m),
             )
             return forward(*args, **kwargs)
 

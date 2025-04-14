@@ -16,19 +16,21 @@ computations.
 """
 
 import collections
+from collections.abc import Sequence
 from enum import Enum
-from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
-    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
+    from ..codegen import PyCodegen
+    from ..symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class SourceType(Enum):
@@ -87,7 +89,15 @@ class MutationType:
         elif typ is SourceType.New:
             self.scope = current_scope_id()
         else:
-            unimplemented(f"Unsupported SourceType: {typ}")
+            unimplemented_v2(
+                gb_type="Unsupported SourceType",
+                context=f"MutationType.__init__ {self} {typ}",
+                explanation=f"Dynamo does not support the type `{typ}`",
+                hints=[
+                    "This branch is not supposed to be reachable.",
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
 
 
 class ValueMutationNew(MutationType):
@@ -191,6 +201,17 @@ def is_side_effect_safe(m: MutationType):
         return True
     # Otherwise, only allow local mutation of variables created in the current scope
     return m.scope == scope_id
+
+
+# This helps users of `as_python_constant` to catch unimplemented error with
+# more information; it inherits `NotImplementedError` for backward
+# compatibility reasons.
+class AsPythonConstantNotImplementedError(NotImplementedError):
+    vt: "VariableTracker"
+
+    def __init__(self, vt: "VariableTracker"):
+        super().__init__(self, f"{vt} is not a constant")
+        self.vt = vt
 
 
 class VariableTrackerMeta(type):
@@ -310,16 +331,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             raise NotImplementedError(f"{self} has no type") from None
 
+    def python_type_name(self):
+        try:
+            return self.python_type().__name__
+        except NotImplementedError:
+            return "<unknown type>"
+
     def as_python_constant(self):
         """For constants"""
-        raise NotImplementedError(f"{self} is not a constant")
+        raise AsPythonConstantNotImplementedError(self)
 
     def guard_as_python_constant(self):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
         try:
             return self.as_python_constant()
-        except NotImplementedError as e:
-            unimplemented(str(e))
+        except NotImplementedError:
+            unimplemented_v2(
+                gb_type="Not a Python constant",
+                context=f"guard_as_python_constant {self}",
+                explanation=f"Failed to convert {self} into a Python constant.",
+                hints=[],
+            )
 
     def is_python_constant(self):
         try:
@@ -368,7 +400,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return None
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
@@ -394,13 +426,34 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
+    # Forces unpacking the var sequence while also applying a function to each element.
+    # Only use when it is safe to eagerly unpack this variable (like force_unpack_var_sequence).
+    # INVARIANT: variable must satisfy has_force_unpack_var_sequence() == True!
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
+        assert self.has_force_unpack_var_sequence(tx)
+        for v in self.unpack_var_sequence(tx):
+            fn(v)
+
     def inspect_parameter_names(self) -> list[str]:
-        unimplemented(f"inspect_parameter_names: {self}")
+        unimplemented_v2(
+            gb_type="Unsupported inspect call",
+            context=f"inspect_parameter_names {self}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[],
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        unimplemented(f"hasattr {self.__class__.__name__} {name}")
+        unimplemented_v2(
+            gb_type="Unsupported hasattr call",
+            context=f"call_obj_hasattr {self} {name}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call_function(
         self,
@@ -408,7 +461,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"call_function {self} {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="Unsupported function call",
+            context=f"call_function {self} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `{self.debug_repr()}` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def call_method(
         self,
@@ -443,14 +504,40 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 not other.is_python_constant()
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
-                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+                unimplemented_v2(
+                    gb_type="Builtin `operator.*` comparison with constant `self` failed",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=f"Failed to compare {self} with {other}, "
+                    + f"because {other} is not a Python constant or its mutation check fails.",
+                    hints=[],
+                )
 
             return variables.ConstantVariable.create(
                 cmp_name_to_op_mapping[name](
                     self.as_python_constant(), other.as_python_constant()
                 )
             )
-        unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        hints = [
+            f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
+            "Please report an issue to PyTorch.",
+        ]
+        # additional hint for method calls on improperly constructed iterators
+        if isinstance(self, variables.UserDefinedObjectVariable) and name in (
+            "__iter__",
+            "__next__",
+        ):
+            hints.append(
+                "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
+                "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
+                "This can happen unintentionally if a previous graph break happens with a builtin iterator "
+                "in the local scope."
+            )
+        unimplemented_v2(
+            gb_type="Unsupported method call",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
+            hints=hints,
+        )
 
     def set_name_hint(self, name):
         pass
@@ -468,7 +555,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return True
 
     def next_variable(self, tx):
-        unimplemented(f"next({self})")
+        unimplemented_v2(
+            gb_type="Unsupported next() call",
+            context=f"next({self})",
+            explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)

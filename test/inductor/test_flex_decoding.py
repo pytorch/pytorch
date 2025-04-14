@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import skipIfRocm
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -1031,7 +1030,6 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(bias_mod, dtype, device=device)
         self.run_test_with_paged_attention(bias_mod, dtype, device=device)
 
-    @skipIfRocm
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, device, dtype):
@@ -1062,6 +1060,34 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(
             score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d, device=device
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    def test_head_dependent_mask_mod(self, device, dtype: torch.dtype, score_mod, head_dims):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        def head_attention_mod(kv_head_num):
+            head_type = torch.tensor(
+                [False if i % kv_head_num == 0 else True for i in range(kv_head_num)],
+                dtype=torch.bool,
+                device=device,
+            )
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                bi_mask = head_type[h]
+                causal_mask = q_idx >= kv_idx
+
+                return bi_mask & causal_mask
+
+            return mask_mod
+
+        mask_mod = head_attention_mod(Hq)
+        mask = create_block_mask(mask_mod, 1, Hq, 1, S, device=device)
+        self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, block_mask=mask, device=device)
+        self.run_test_with_paged_attention(score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1172,7 +1198,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(

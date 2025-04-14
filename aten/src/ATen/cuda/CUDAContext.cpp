@@ -47,17 +47,36 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 
 cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
   initCUDAContextVectors();
-  if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus, "device=", static_cast<int>(device), ", num_gpus=", num_gpus);
+  if (device == -1)
+    device = c10::cuda::current_device();
+  AT_ASSERT(
+      device >= 0 && device < num_gpus,
+      "device=",
+      static_cast<int>(device),
+      ", num_gpus=",
+      static_cast<int>(num_gpus));
   c10::call_once(device_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
 
-bool canDeviceAccessPeer(c10::DeviceIndex device, c10::DeviceIndex peer_device) {
+bool canDeviceAccessPeer(
+    c10::DeviceIndex device,
+    c10::DeviceIndex peer_device) {
   initCUDAContextVectors();
-  if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus, "device=", static_cast<int>(device), ", num_gpus=", num_gpus);
-  AT_ASSERT(peer_device >= 0 && peer_device < num_gpus, "peer_device=", static_cast<int>(peer_device), ", num_gpus=", num_gpus);
+  if (device == -1)
+    device = c10::cuda::current_device();
+  AT_ASSERT(
+      device >= 0 && device < num_gpus,
+      "device=",
+      static_cast<int>(device),
+      ", num_gpus=",
+      static_cast<int>(num_gpus));
+  AT_ASSERT(
+      peer_device >= 0 && peer_device < num_gpus,
+      "peer_device=",
+      static_cast<int>(peer_device),
+      ", num_gpus=",
+      static_cast<int>(num_gpus));
   int can_access = 0;
   AT_CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, device, peer_device));
   return can_access != 0;

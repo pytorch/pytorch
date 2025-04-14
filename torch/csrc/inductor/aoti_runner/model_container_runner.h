@@ -37,19 +37,24 @@ class TORCH_API AOTIModelContainerRunner {
       const;
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
 
+  const std::unordered_map<std::string, at::Tensor> extract_constants_map(
+      bool use_inactive) const;
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
       std::unordered_map<std::string, at::Tensor>& tensor_map,
       bool use_inactive,
-      bool validate_full_updates);
+      bool validate_full_updates,
+      bool user_managed = false);
   void update_constant_buffer(
       const TensorConstantMap& const_map,
       bool use_inactive,
-      bool validate_full_updates);
+      bool validate_full_updates,
+      bool user_managed = false);
   void run_const_fold(
       bool use_inactive,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
   void swap_constant_buffer();
+  void free_inactive_constant_buffer();
 
   std::vector<std::string> get_call_spec();
 
@@ -58,7 +63,8 @@ class TORCH_API AOTIModelContainerRunner {
       const std::string& model_so_path,
       size_t num_models,
       const std::string& device_str,
-      const std::string& cubin_dir);
+      const std::string& cubin_dir,
+      const bool run_single_threaded);
 
   virtual std::vector<at::Tensor> run_impl(
       std::vector<AtenTensorHandle>& input_handles,
@@ -78,6 +84,10 @@ class TORCH_API AOTIModelContainerRunner {
       get_constant_original_fqn_func_{nullptr};
   decltype(&AOTInductorModelContainerGetConstantDtype) get_constant_dtype_func_{
       nullptr};
+  decltype(&AOTInductorModelContainerExtractConstantsMap)
+      extract_constants_map_func_{nullptr};
+  decltype(&AOTInductorModelContainerUpdateUserManagedConstantBuffer)
+      update_user_managed_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
@@ -86,6 +96,8 @@ class TORCH_API AOTIModelContainerRunner {
       nullptr};
   decltype(&AOTInductorModelContainerSwapConstantBuffer)
       swap_constant_buffer_func_{nullptr};
+  decltype(&AOTInductorModelContainerFreeInactiveConstantBuffer)
+      free_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
@@ -100,7 +112,8 @@ using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& bin_dir);
+    const std::string& bin_dir,
+    const bool run_single_threaded);
 
 // Return a global map "device name" -> "aoti model runner create function" for
 // all registered in AOTI external backends

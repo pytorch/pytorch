@@ -797,6 +797,23 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
+@register_op_impl(torch.ops.aten.bincount.default)
+def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_size, min=minlength)
+    return inputs.new_empty(new_size)
+
+
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
 def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
     if (
@@ -873,7 +890,9 @@ def infer_size(a, b):
     return tuple(expandedSizes)
 
 
-def make_fast_binary_impl(slow_ref):
+def make_fast_binary_impl(
+    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def fast_binary_impl(mode, *args, **kwargs):
         def slow(msg):
             count_label(f"slow {msg}")
@@ -940,7 +959,7 @@ def make_fast_binary_impl(slow_ref):
             # compute promotion
             # TODO: we don't need the compute type
             _, common_dtype = elementwise_dtypes(
-                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                *operands, type_promotion_kind=type_promotion_kind
             )
 
         # check all tensors on same device
@@ -1010,7 +1029,7 @@ def make_fast_binary_impl(slow_ref):
 def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
@@ -1025,7 +1044,10 @@ def get_fast_op_impls():
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
-        make_fast_binary_impl(torch._refs.div)
+        make_fast_binary_impl(
+            torch._refs.div,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

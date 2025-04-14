@@ -112,6 +112,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -130,6 +131,10 @@
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
+#endif
+
+#ifdef USE_ITT
+#include <torch/csrc/itt.h>
 #endif
 
 namespace py = pybind11;
@@ -947,6 +952,33 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setAllowTF32OneDNN(
+    PyObject* _unsued,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "_set_onednn_allow_tf32 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowTF32OneDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowTF32OneDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
+#ifdef USE_XPU
+  if (at::globalContext().allowTF32OneDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+#else
+  Py_RETURN_NONE;
+#endif
+}
+
 static PyObject* THPModule_deterministicAlgorithms(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1527,6 +1559,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
+    {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
+    {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -1727,12 +1761,6 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
-#ifdef USE_ITT
-namespace torch::profiler {
-void initIttBindings(PyObject* module);
-} // namespace torch::profiler
-#endif
-
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1856,6 +1884,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#if defined(USE_CUDA) && !defined(USE_ROCM)
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
@@ -2214,6 +2245,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
       .value("Ck", at::BlasBackend::Ck);
@@ -2235,6 +2267,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def(
+      "_set_sm_carveout_experimental", [](std::optional<int32_t> val) {
+        at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
+      });
+  py_module.def("_get_sm_carveout_experimental", []() {
+    return at::globalContext()._SMCarveout_EXPERIMENTAL();
   });
 
   py_module.def(
@@ -2322,10 +2362,17 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_accelerator",
       [](std::optional<bool> check = std::nullopt) {
-        return c10::Device(
-            at::getAccelerator(check.value_or(false))
-                .value_or(c10::DeviceType::CPU),
-            -1);
+        auto acc = at::getAccelerator(check.value_or(false));
+        if (acc.has_value()) {
+          bool is_available = at::globalContext()
+                                  .getAcceleratorHooksInterface(acc.value())
+                                  .isAvailable();
+
+          if (!is_available) {
+            acc = std::nullopt;
+          }
+        }
+        return c10::Device(acc.value_or(c10::DeviceType::CPU), -1);
       },
       py::arg("check") = nullptr);
 
@@ -2355,12 +2402,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
-#ifdef _GLIBCXX_USE_CXX11_ABI
-  ASSERT_TRUE(set_module_attr(
-      "_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
-#else
-  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
 // See note [Pybind11 ABI constants]
 #define SET_STR_DEFINE(name) \

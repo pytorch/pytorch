@@ -20,10 +20,31 @@ from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
 
 import optree
+
+from torch._vendor.packaging.version import Version
+
+
+if Version(optree.__version__) < Version("0.13.0"):  # type: ignore[attr-defined]
+    raise ImportError(
+        "torch.utils._cxx_pytree depends on optree, which is an optional dependency "
+        "of PyTorch. To use it, please upgrade your optree package to >= 0.13.0"
+    )
+
+del Version
+
+
 from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
 
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import KeyEntry as KeyEntry
+from torch.utils._pytree import (
+    is_namedtuple as is_namedtuple,
+    is_namedtuple_class as is_namedtuple_class,
+    is_namedtuple_instance as is_namedtuple_instance,
+    is_structseq as is_structseq,
+    is_structseq_class as is_structseq_class,
+    is_structseq_instance as is_structseq_instance,
+    KeyEntry as KeyEntry,
+)
 
 
 __all__ = [
@@ -39,6 +60,7 @@ __all__ = [
     "keystr",
     "key_get",
     "register_pytree_node",
+    "tree_is_leaf",
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
@@ -58,6 +80,12 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -556,17 +584,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
 def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
-
-
-@overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -662,6 +690,17 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only(
     type_or_types_or_pred: Callable[[Any], bool],
     /,
     func: FnAny[Any],
@@ -708,6 +747,17 @@ def tree_map_only_(
     type_or_types_or_pred: Type3[T, S, U],
     /,
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:

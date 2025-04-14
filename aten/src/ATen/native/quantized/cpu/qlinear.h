@@ -18,7 +18,7 @@ class QLinearOnednn final {
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
       std::string_view post_op_name,
-      torch::List<std::optional<at::Scalar>> post_op_args,
+      c10::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm);
 
 C10_API static Tensor run_pointwise_binary_tensor(
@@ -38,7 +38,7 @@ C10_API static Tensor run_pointwise_binary_tensor(
       std::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
       std::string_view unary_post_op, // e.g. "none", "relu"
-      torch::List<std::optional<at::Scalar>> unary_post_op_args,
+      c10::List<std::optional<at::Scalar>> unary_post_op_args,
       std::string_view unary_post_op_algorithm);
 };
 

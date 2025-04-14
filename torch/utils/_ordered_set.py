@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, MutableSet, Set as AbstractSet
+from collections.abc import (
+    Iterable,
+    Iterator,
+    MutableSet,
+    Reversible,
+    Set as AbstractSet,
+)
 from typing import Any, cast, Optional, TypeVar
 
 
@@ -10,7 +16,7 @@ T_co = TypeVar("T_co", covariant=True)
 __all__ = ["OrderedSet"]
 
 
-class OrderedSet(MutableSet[T]):
+class OrderedSet(MutableSet[T], Reversible[T]):
     """
     Insertion ordered set, similar to OrderedDict.
     """
@@ -37,6 +43,9 @@ class OrderedSet(MutableSet[T]):
 
     def __len__(self) -> int:
         return len(self._dict)
+
+    def __reversed__(self) -> Iterator[T]:
+        return reversed(self._dict)
 
     def add(self, elem: T) -> None:
         self._dict[elem] = None
