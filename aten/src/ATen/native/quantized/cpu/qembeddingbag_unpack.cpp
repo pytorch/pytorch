@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -16,8 +17,6 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/resize_native.h>
 #endif
-
-int register_embedding_params();
 
 at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;

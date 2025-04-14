@@ -498,9 +498,21 @@ class Op:
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'",
                 )
             if (
-                set(self.input_dtypes) != set(self.output_dtypes)
-                or set(self.input_dtypes) != set(other.input_dtypes)
-                or set(self.input_dtypes) != set(other.output_dtypes)
+                (
+                    set(self.input_dtypes) != set(self.output_dtypes)
+                    and self.input_sizes[0]
+                    and self.output_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.input_dtypes)
+                    and self.input_sizes[0]
+                    and other.input_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.output_dtypes)
+                    and self.input_sizes[0]
+                    and other.output_sizes[0]
+                )
             ):
                 return MatchInfo(
                     MatchState.COLLECTIVE_DTYPE_MISMATCH,
@@ -560,3 +572,26 @@ class Op:
                 else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             )
         return MatchInfo(MatchState.FULLY_MATCHED)
+
+
+class MatchStateRecord:
+    def __init__(
+        self,
+        expected_ranks: set[int],
+        other_ranks: list[int],
+        entry_state: EntryState,
+        candidate_ranks: set[int],
+        candidate_idx: dict[int, int],
+        found_ranks: set[int],
+        found_idx: dict[int, int],
+        errors: set[tuple[int, MatchInfo]],
+    ) -> None:
+        self.expected_ranks = expected_ranks
+        self.other_ranks = other_ranks
+        self.entry_state = entry_state
+        self.candidate_ranks = candidate_ranks
+        self.candidate_idx = candidate_idx
+        self.found_ranks = found_ranks
+        self.found_idx = found_idx
+        self.errors = errors
+        self.has_undecided_case = False

@@ -3,7 +3,7 @@
 
 namespace torch::dynamo::autograd {
 
-std::unique_ptr<PyCompilerInterface> kActivePyCompilerInterface;
+static std::unique_ptr<PyCompilerInterface> kActivePyCompilerInterface;
 
 const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface() {
   TORCH_INTERNAL_ASSERT(kActivePyCompilerInterface != nullptr);
