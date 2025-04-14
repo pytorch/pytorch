@@ -804,7 +804,7 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -859,7 +859,7 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6609,7 +6609,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6664,7 +6664,7 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmax of the flattened input is returned.
+    {opt_dim} If ``None``, the argmax of the flattened input is returned.
     {opt_keepdim}
 
 Example::
@@ -6756,7 +6756,7 @@ reduce over all of them.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6885,7 +6885,7 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6942,7 +6942,7 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6990,7 +6990,7 @@ equal to the size of :attr:`q`, the remaining dimensions are what remains from t
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword arguments:
@@ -7048,7 +7048,7 @@ that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword arguments:
@@ -7111,7 +7111,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -7214,7 +7214,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -7311,7 +7311,7 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmin of the flattened input is returned.
+    {opt_dim} If ``None``, the argmin of the flattened input is returned.
     {opt_keepdim}
 
 Example::
@@ -7501,7 +7501,7 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -8588,7 +8588,7 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {opt_keepdim}
 
 Keyword args:
@@ -10485,7 +10485,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
