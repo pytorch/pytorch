@@ -465,9 +465,10 @@ def _create_matrices(
     if subMatrix:
         # User reference for understanding leading dimension:
         # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
-        # TO DO: rowsA = rowsB = ldc may not be necessary, but it is
-        # simplest scenario to consider
-        rowsA = rowsB = ldc
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
 
         if randn:
             matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
