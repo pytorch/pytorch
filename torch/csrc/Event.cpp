@@ -82,6 +82,8 @@ static void THPEvent_dealloc(THPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
+  if (self->weakreflist != nullptr)
+    PyObject_ClearWeakRefs((PyObject*)self);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -275,6 +277,8 @@ static PyMethodDef THPEvent_methods[] = {
     {(char*)"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
 PyTypeObject THPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Event", /* tp_name */
@@ -300,7 +304,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
@@ -315,6 +319,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_alloc */
     THPEvent_pynew, /* tp_new */
 };
+#pragma GCC diagnostic pop
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
