@@ -132,15 +132,9 @@ jobs:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
-        run: |
-          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
-          for %f in (*.whl) do python -m pip install "%f"
+        run: |         
+          call ./ci/pytorch/windows/arm64/bootstrap_tests.bat
 
-          popd
-          cd pytorch
-          
           set GIT_BASH=%DEPENDENCIES_DIR%\git\usr\bin\bash.exe
-          set VS_PATH=%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat
 
-          call "%VS_PATH%" arm64
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
