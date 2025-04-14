@@ -22,6 +22,10 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.pipelining.stage import PipelineStage
 
+import copy
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+
 
 def get_schedule_ops(
     schedule: Union[str, _PipelineSchedule],
@@ -56,14 +60,14 @@ def get_schedule_ops(
             num_stages_per_rank = 1
         assert num_stages_per_rank == 1
         stages = mock_pipeline_stage
-        stages.num_stages = num_stages_per_rank
+        stages.num_stages = num_stages_per_rank * pp_degree
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
         assert num_stages_per_rank >= 2
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
-            stage.num_stages = num_stages_per_rank
+            stage.num_stages = num_stages_per_rank * pp_degree
 
     else:
         raise ValueError(f"Invalid schedule: {schedule_class}")
@@ -73,6 +77,7 @@ def get_schedule_ops(
 
     # Convert to List[List[_Action]]
     all_actions = []
+
     for rank in range(pp_degree):
         all_actions.append(schedule_instance.pipeline_order[rank])
 
@@ -93,7 +98,7 @@ class _ComputationTypeColor:
 
 
 # Update the mapping to use _ComputationTypeColor instances
-action_type_to_color_mapping = {
+legend = {
     _ComputationType.FORWARD: _ComputationTypeColor("blue", "Forward"),
     _ComputationType.BACKWARD_INPUT: _ComputationTypeColor("teal", "Backward Input"),
     _ComputationType.BACKWARD_WEIGHT: _ComputationTypeColor("green", "Backward Weight"),
@@ -102,17 +107,19 @@ action_type_to_color_mapping = {
 
 
 def visualize_schedule(
-    schedule: list[list[Optional[_Action]]], filename: Optional[str] = None
-) -> None:
+    schedule: list[list[Optional[_Action]]],
+    filename: Optional[str] = None,
+    legend: dict[
+        _ComputationType, _ComputationTypeColor
+    ] = legend,
+    base_width: float = 1,
+) -> tuple:
     """
     Visualize the schedule using matplotlib.
     The schedule is a list of lists where each inner list represents a rank and each element in the inner list represents an action.
     The actions are represented as rectangles with different colors based on their computation type.
     The filename is optional and if provided, the plot will be saved to that file.
     """
-
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
 
     plt.rcParams["font.family"] = (
         "DejaVu Sans"  # or any other font available on your system
@@ -121,7 +128,7 @@ def visualize_schedule(
     max_actions = max(len(rank) for rank in schedule)
 
     # Increase the figure size to provide more space for the legend
-    fig, ax = plt.subplots(figsize=(max_actions + 2, num_ranks + 2))
+    _, ax = plt.subplots(figsize=(max_actions + 2, num_ranks + 2))
     max_draw_position = -1
     # Calculate dynamic font size based on figure size
     font_size = min(max_actions, num_ranks) + 4
@@ -130,16 +137,17 @@ def visualize_schedule(
         draw_position = 0  # Initialize drawing position for each rank
         for action in actions:
             if action is not None:
-                comp_type_color = action_type_to_color_mapping.get(
+                comp_type_color = legend.get(
                     action.computation_type, _ComputationTypeColor("black")
                 )
                 used_computation.add(action.computation_type)
                 color = comp_type_color.color
                 width = comp_type_color.width
+                total_width = width * base_width
                 # Draw the rectangle to represent the action duration
                 rect = Rectangle(
                     (draw_position, num_ranks - rank_idx - 1),
-                    width,
+                    total_width,
                     1,
                     facecolor=color,
                     edgecolor="black",
@@ -147,7 +155,7 @@ def visualize_schedule(
                 ax.add_patch(rect)
                 # Draw the text centered within the rectangle
                 ax.text(
-                    draw_position + width / 2,
+                    draw_position + total_width / 2,
                     num_ranks - rank_idx - 1 + 0.5,
                     str(action),
                     ha="center",
@@ -156,9 +164,9 @@ def visualize_schedule(
                     color="white",
                 )
                 # Increment the drawing position by the width of the current action
-                draw_position += width
+                draw_position += total_width
             else:
-                draw_position += 1  # Move to the next
+                draw_position += base_width  # Move to the next
             max_draw_position = max(max_draw_position, draw_position)
     ax.set_xlim(-0.5, max_draw_position + 1)
     ax.set_ylim(-0.5, num_ranks + 0.5)  # Add extra space at the top
@@ -175,9 +183,9 @@ def visualize_schedule(
             (0, 0),
             1,
             1,
-            facecolor=action_type_to_color_mapping[comp_type].color,
+            facecolor=legend[comp_type].color,
             edgecolor="black",
-            label=action_type_to_color_mapping[comp_type].text,
+            label=legend[comp_type].text,
         )
         for comp_type in used_computation
     ]
@@ -187,3 +195,171 @@ def visualize_schedule(
         plt.savefig(filename, bbox_inches="tight")
     else:
         plt.show()
+
+    return ax
+
+def plot_two_schedules(ax1, ax2, legend, title1: str = "Schedule 1", title2: str = "Schedule 2", filename: Optional[str] = None):
+    # Create a new figure to combine the two plots
+    fig, (ax_combined1, ax_combined2) = plt.subplots(2, 1, sharex=True, figsize=(12, 10))
+    # Copy the patches from the first axis to the combined axis
+    for patch in ax1.patches:
+        new_patch = Rectangle(
+            patch.get_xy(),
+            patch.get_width(),
+            patch.get_height(),
+            facecolor=patch.get_facecolor(),
+            edgecolor=patch.get_edgecolor()
+        )
+        ax_combined1.add_patch(new_patch)
+    ax_combined1.set_ylim(ax1.get_ylim())
+    ax_combined1.set_yticks(ax1.get_yticks())
+    ax_combined1.set_yticklabels(ax1.get_yticklabels())
+    ax_combined1.set_title(title1)
+    ax_combined1.set_xticks([])  # Remove x-axis labels
+    ax_combined1.grid(False)  # Remove grid marks
+
+    # Copy the patches from the second axis to the combined axis
+    for patch in ax2.patches:
+        new_patch = Rectangle(
+            patch.get_xy(),
+            patch.get_width(),
+            patch.get_height(),
+            facecolor=patch.get_facecolor(),
+            edgecolor=patch.get_edgecolor()
+        )
+        ax_combined2.add_patch(new_patch)
+    ax_combined2.set_ylim(ax2.get_ylim())
+    ax_combined2.set_yticks(ax2.get_yticks())
+    ax_combined2.set_yticklabels(ax2.get_yticklabels())
+    ax_combined2.set_title(title2)
+    ax_combined2.set_xticks([])  # Remove x-axis labels
+    ax_combined2.grid(False)  # Remove grid marks
+
+    # Determine the maximum x-limit from both axes
+    xlim1 = ax1.get_xlim()
+    xlim2 = ax2.get_xlim()
+    max_xlim = max(xlim1[1], xlim2[1])
+    # Set the x-limits to the maximum value
+    ax_combined1.set_xlim(0, max_xlim)
+    ax_combined2.set_xlim(0, max_xlim)
+
+    # Combine legends from both axes
+    handles1 = ax1.get_legend().legend_handles
+    labels1 = ax1.get_legend().get_texts()
+    handles2 = ax2.get_legend().legend_handles
+    labels2 = ax2.get_legend().get_texts()
+    combined_handles = handles1 + handles2
+    combined_labels = labels1 + labels2
+    unique_legend = set()
+    legend_elements = [
+        Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor=legend[comp_type].color,
+            edgecolor="black",
+            label=legend[comp_type].text,
+        )
+        for comp_type in (_ComputationType.FORWARD, _ComputationType.FULL_BACKWARD)
+    ]
+    fig.legend(handles=legend_elements, loc="upper right")
+
+    legend_elements = [
+        Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor=legend[comp_type].color,
+            edgecolor="black",
+            label=legend[comp_type].text,
+        )
+        for comp_type in (_ComputationType.FORWARD, _ComputationType.BACKWARD_INPUT, _ComputationType.BACKWARD_WEIGHT)
+    ]
+    fig.legend(handles=legend_elements, loc="lower right")
+
+    # Adjust the layout to prevent overlap
+    plt.tight_layout()
+    # Save to file if filename is provided, otherwise display the plot
+    if filename:
+        plt.savefig(filename, bbox_inches="tight")
+    else:
+        plt.show()
+
+
+def remove_none_ops(schedule: list[list[Optional[_Action]]]) -> list[list[Optional[_Action]]]:
+    """
+    Only remove none ops after the last forward
+    """
+    new_schedule = copy.deepcopy(schedule)
+    for rank in range(len(new_schedule)):
+        # Iterate in reverse to find the last Forward action
+        for i in range(len(new_schedule[rank]) - 1, -1, -1):
+            action = new_schedule[rank][i]
+            if action is not None and action.computation_type == _ComputationType.FORWARD:
+                break
+            if action is None:
+                new_schedule[rank].pop(i)
+    return new_schedule
+
+if __name__ == "__main__":
+    # single microbatch forward and backward schedule
+    model_parallel = [
+        [
+            _Action(0, _ComputationType.FORWARD, 0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _Action(0, _ComputationType.FULL_BACKWARD, 0),
+        ],
+        [
+            None,
+            _Action(1, _ComputationType.FORWARD, 0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _Action(1, _ComputationType.FULL_BACKWARD, 0),
+            None,
+        ],
+        [
+            None,
+            None,
+            _Action(2, _ComputationType.FORWARD, 0),
+            None,
+            None,
+            None,
+            _Action(2, _ComputationType.FULL_BACKWARD, 0),
+            None,
+            None,
+        ],
+        [
+            None,
+            None,
+            None,
+            _Action(3, _ComputationType.FORWARD, 0),
+            _Action(3, _ComputationType.FULL_BACKWARD, 0),
+            None,
+            None,
+            None,
+        ],
+    ]
+
+
+    # Example usage:
+    ops1 = get_schedule_ops("interleaved1f1b", 4, 8)
+    ops2 = get_schedule_ops("InterleavedZeroBubble", 4, 8)
+
+    # remove all None ops after last forward 
+
+
+    ax1 = visualize_schedule(ops1)
+    ax2 = visualize_schedule(ops2)
+    plot_two_schedules(ax1, ax2, legend, "Interleaved 1F1B", "Interleaved Zero Bubble", filename="compare2.png")
