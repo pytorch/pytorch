@@ -231,6 +231,7 @@ for test_name in [
     "test_sum_keepdims",
     "test_tanh",
     "test_vectorized_ops_masked",
+    "test_var_mean_tile_reduction_True",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",
