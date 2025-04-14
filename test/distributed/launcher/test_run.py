@@ -658,6 +658,61 @@ class ElasticLaunchTest(TestCase):
         for i in range(nproc_per_node):
             self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
+    def test_elastic_restart(self):
+        """Test that rendezvous is restarted when a node fails."""
+
+        run_id = str(uuid.uuid4().int)
+        rdzv_endpoint = f"localhost:{get_free_port()}"
+
+        stable_node_cmd = f'echo "Stable: creating marker file"; timestamp=$(date +%s%N); touch {self.test_dir}/stable_run_$timestamp; sleep 20; echo done'
+        faulty_node_cmd = "echo Faulty start; sleep 1; kill -9 $$PPID"
+
+        # Common arguments for both processes
+        common_args = [
+            "--nnodes=1:2",
+            "--nproc-per-node=1",
+            f"--rdzv-id={run_id}",
+            "--rdzv-backend=c10d",
+            f"--rdzv-endpoint={rdzv_endpoint}",
+            "--rdzv-conf=last_call_timeout=3",
+            "--max-restarts=0",
+            "--no-python",
+            "bash",
+            "-c",
+        ]
+
+        stable_process = mp.Process(
+            target=launch.main,
+            args=[[*common_args, stable_node_cmd]],
+        )
+        faulty_process = mp.Process(
+            target=launch.main,
+            args=[[*common_args, faulty_node_cmd]],
+        )
+
+        try:
+            stable_process.start()
+            faulty_process.start()
+            faulty_process.join(timeout=5)
+            stable_process.join(timeout=80)
+            self.assertEqual(
+                0, stable_process.exitcode, "Stable node finished successfully in time"
+            )
+            # Should have at least 2 marker files: one from initial run and one after restart
+            marker_files = len(
+                [f for f in os.listdir(self.test_dir) if f.startswith("stable_run_")]
+            )
+            self.assertGreaterEqual(marker_files, 2)
+        finally:
+            # Ensure processes are terminated
+            for process in [stable_process, faulty_process]:
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
+
 
 if __name__ == "__main__":
     run_tests()
