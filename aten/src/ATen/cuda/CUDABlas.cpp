@@ -248,17 +248,6 @@ namespace at::cuda::blas {
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
-#define BGEMM_CHECK_ARGVALUES_C_DTYPE(Dtype, C_Dtype)           \
-  do {                                        \
-    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, m); \
-    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, n); \
-    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, k); \
-    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, lda);  \
-    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldb);  \
-    CUDABLAS_POSINT_CHECK(bgemm<C_Dtype>, ldc);  \
-    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
-  } while (0)
-
 namespace {
 // Following the pattern of CuSparseDescriptor
 // Defined here for now because this is the only place cublas_lt interface is
