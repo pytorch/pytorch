@@ -357,3 +357,17 @@ class MaskedTensor(torch.Tensor):
     @property
     def is_sparse(self):
         return self.is_sparse_coo() or self.is_sparse_csr()
+
+    def to(self, *args, **kwargs):
+        current_device = self._masked_data.device
+        device_to = current_device
+        if len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, (torch.device, str, int)):
+                device_to = torch.device(arg)
+            elif isinstance(arg, torch.Tensor):
+                device_to = arg.device
+        else:
+            device_to = kwargs.get("device", current_device)
+        self._masked_mask = self._masked_mask.to(device=device_to)
+        return super().to(*args, **kwargs)
