@@ -227,7 +227,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
             (default).
 
     Returns:
-        Dict[str, Any]: the xpu capability dictionary of the device
+        dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
     # pybind service attributes are no longer needed and their presence breaks
