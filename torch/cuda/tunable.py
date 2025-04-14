@@ -438,20 +438,20 @@ def _gather_tunableop_results() -> None:
 
 
 def _create_matrices(
-    m,
-    n,
-    k,
-    lda,
-    ldb,
-    ldc,
-    transA,
-    transB,
-    dtypeA,
-    deviceid,
-    dtypeB=None,
-    randn=True,
-    subMatrix=False,
-):
+    m: int,
+    n: int,
+    k: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtypeA: torch.dtype,
+    deviceid: str,
+    dtypeB: Optional[torch.dtype] = None,
+    randn: bool = True,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Helper function for _process_single_offline_gemm.
     Creates matrices that are then consumed by one of the Torch GEMM APIs.
     """
@@ -597,6 +597,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 )
                 return
 
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
         matA, matB = _create_matrices(
             m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
@@ -636,6 +640,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # Only combination supported by PyTorch
         assert transA is True
         assert transB is False
+
+        # Resolve linter issue
+        if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
 
         matA, matB = _create_matrices(
             m,
@@ -693,6 +701,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
         assert transA != transB
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
 
         bias = torch.rand(n, dtype=dtype, device=deviceid)
 
