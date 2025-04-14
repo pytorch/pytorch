@@ -311,7 +311,7 @@ class FloorDiv(sympy.Function):
                         numerator = other_arg * frac.numerator
                         return FloorDiv(numerator, frac.denominator)
                     elif isinstance(frac, sympy.Pow):
-                        # Look for x * (y ** -n). This becomes FloorDiv(x, y ^ n).
+                        # Look for x * (y ** -n). This becomes FloorDiv(x, y ** n).
                         base, power = frac.args
                         if power.is_negative:
                             return FloorDiv(other_arg, base**-power)
