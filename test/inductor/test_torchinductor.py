@@ -13244,7 +13244,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1024, 1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
-    @config.patch(implicit_fallbacks=True)
+    @config.patch(implicit_fallbacks=True, alignment_asserts=True)
     @skip_if_cpp_wrapper(
         "Inductor does not generate alignment assertion for cpp_wrapper right now"
     )
