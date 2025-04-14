@@ -1039,6 +1039,15 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
+            if (
+                fn is operator.eq
+                and len(args) == 2
+                and isinstance(args[0], variables.TensorVariable)
+            ):
+                # Dynamo expects `__eq__` str while operator.eq gives just `eq`
+                # TODO - supporting all comparison operators could also work but
+                # it fails lots of tests because graph str changes.
+                return args[0].call_method(tx, "__eq__", args[1:], kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
@@ -2272,6 +2281,9 @@ class BuiltinVariable(VariableTracker):
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
             return SetVariable(list(a.set_items | b.set_items))
+        # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
+        if isinstance(a, ConstDictVariable):
+            return a.call_method(tx, "__or__", args=[b], kwargs={})
         # None no-ops this handler and lets the driving function proceed
         return None
 
