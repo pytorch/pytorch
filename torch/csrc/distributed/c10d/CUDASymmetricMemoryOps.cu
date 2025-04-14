@@ -1093,4 +1093,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "nvshmem_reduce_scatter_out",
       c10d::nvshmem_extension::nvshmem_reduce_scatter_out);
+  m.impl("nvshmem_sendrecv", c10d::nvshmem_extension::nvshmem_sendrecv);
 }

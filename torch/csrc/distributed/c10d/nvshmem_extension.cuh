@@ -22,4 +22,10 @@ at::Tensor nvshmem_reduce_scatter_out(
     std::string group_name,
     at::Tensor& out);
 
+at::Tensor nvshmem_sendrecv(
+    at::Tensor& input,
+    at::Tensor& out,
+    std::string group_name);
+
+
 } // namespace c10d::nvshmem_extension
