@@ -460,7 +460,8 @@ class TestFoo(TestCase):
         raise RuntimeError(cls.stored_thing)
 
     def test_bar(self, device):
-        pass
+        # make sure the test can access the stored thing
+        print(self.stored_thing)
 
 instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
 

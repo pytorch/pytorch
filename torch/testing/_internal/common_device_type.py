@@ -892,20 +892,7 @@ def instantiate_device_type_tests(
     # are not discoverable.
     del scope[generic_test_class.__name__]
 
-    # Creates an 'empty' version of the generic_test_class
-    # Note: we don't inherit from the generic_test_class directly because
-    #   that would add its tests to our test classes and they would be
-    #   discovered (despite not being runnable). Inherited methods also
-    #   can't be removed later, and we can't rely on load_tests because
-    #   pytest doesn't support it (as of this writing).
-    empty_name = generic_test_class.__name__ + "_base"
-    empty_class = type(empty_name, generic_test_class.__bases__, {})
-
-    # Acquires members names
-    # See Note [Overriding methods in generic tests]
-    generic_members = set(generic_test_class.__dict__.keys()) - set(
-        empty_class.__dict__.keys()
-    )
+    generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
 
     # Creates device-specific test cases
@@ -916,30 +903,12 @@ def instantiate_device_type_tests(
 
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any = type(class_name, (base, empty_class), {})
-
-        for name in generic_members:
-            if name in generic_tests:  # Instantiates test member
-                test = getattr(generic_test_class, name)
-                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
-                sig = inspect.signature(device_type_test_class.instantiate_test)
-                if len(sig.parameters) == 3:
-                    # Instantiates the device-specific tests
-                    device_type_test_class.instantiate_test(
-                        name, copy.deepcopy(test), generic_cls=generic_test_class
-                    )
-                else:
-                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
-            else:  # Ports non-test member
-                assert (
-                    name not in device_type_test_class.__dict__
-                ), f"Redefinition of directly defined member {name}"
-                nontest = getattr(generic_test_class, name)
-                setattr(device_type_test_class, name, nontest)
+        device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test
         # classes to support setup and teardown.
+        # NB: This should be done before instantiate_test() is called as that invokes setup.
         @classmethod
         def _setUpClass(cls):
             base.setUpClass()
@@ -957,12 +926,36 @@ def instantiate_device_type_tests(
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
 
+        for name in generic_members:
+            if name in generic_tests:  # Instantiates test member
+                test = getattr(generic_test_class, name)
+                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
+                sig = inspect.signature(device_type_test_class.instantiate_test)
+                if len(sig.parameters) == 3:
+                    # Instantiates the device-specific tests
+                    device_type_test_class.instantiate_test(
+                        name, copy.deepcopy(test), generic_cls=generic_test_class
+                    )
+                else:
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+            # Ports non-test member. Setup / teardown have already been handled above
+            elif name not in device_type_test_class.__dict__:
+                nontest = getattr(generic_test_class, name)
+                setattr(device_type_test_class, name, nontest)
+
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
         # the module to the given scope.
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
+
+    # Delete the generic form of the test functions so they're not discoverable.
+    # At this point, device-specific tests have already been created based on these
+    # (e.g. TestFooCUDA.test_foo_cuda). This mutates the original class (TestFoo),
+    # which has already been removed from scope.
+    for name in generic_tests:
+        delattr(generic_test_class, name)
 
 
 # Category of dtypes to run an OpInfo-based test for
