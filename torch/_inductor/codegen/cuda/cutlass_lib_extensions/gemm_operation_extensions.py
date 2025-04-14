@@ -15,7 +15,7 @@ if try_import_cutlass():
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
 
-        def __init__(self, operation_suffix="", render_evt_fn=None):
+        def __init__(self, operation_suffix="", evt_name=None):
             self.operation_suffix = operation_suffix
             self.includes = [
                 "cutlass/cutlass.h",
@@ -32,10 +32,8 @@ if try_import_cutlass():
             ${element_epilogue}
             >"""
 
-            self.render_evt_fn = render_evt_fn
+            self.evt_name = evt_name
             self.gemm_template = """
-${epilogue_visitor_tree_code}
-
 using ${operation_name}_epilogue =
 typename cutlass::epilogue::collective::CollectiveBuilder<
     ${arch}, ${opcode_class_epi},
@@ -357,13 +355,8 @@ cute::Layout<cute::Shape<int,int,int>, {operation_name_str}_StrideNarrow>{{}}));
                 else:
                     element_b = narrow_element
 
-            if self.render_evt_fn:
-                evt_name, evt_code = self.render_evt_fn(
-                    operation.tile_description, operation.epilogue_schedule
-                )
-                epilogue_functor = evt_name
-            else:
-                evt_code = ""
+            if self.evt_name:
+                epilogue_functor = self.evt_name
 
             values = {
                 "operation_name": operation_name_str,
@@ -421,7 +414,6 @@ cute::Layout<cute::Shape<int,int,int>, {operation_name_str}_StrideNarrow>{{}}));
                 "element_epilogue": str(DataTypeTag[operation.element_epilogue]),
                 "tile_scheduler": str(TileSchedulerTag[operation.tile_scheduler]),
                 "mixed_dtype_prepare_code": mixed_dtype_prepare_code,
-                "epilogue_visitor_tree_code": evt_code,
             }
 
             return SubstituteTemplate(self.gemm_template, values)
