@@ -6,7 +6,6 @@ import shutil
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
