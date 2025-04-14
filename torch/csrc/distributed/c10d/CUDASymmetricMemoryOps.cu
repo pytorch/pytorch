@@ -463,6 +463,10 @@ at::Tensor one_shot_all_reduce_out_impl(
         local_input->numel() <= input.numel(),
         "one_shot_all_reduce: local input size must be smaller than symm buffer size.");
   }
+  if (input.numel() == 0) {
+    TORCH_CHECK(input.scalar_type() == out.scalar_type());
+    return out;
+  }
   auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
@@ -555,9 +559,14 @@ at::Tensor one_shot_all_reduce_copy(
 }
 
 constexpr size_t two_shot_all_reduce_max_num_blocks = 24;
-constexpr size_t two_shot_all_reduce_max_num_threads = 512;
+constexpr size_t two_shot_all_reduce_max_num_threads = 1024;
 
-template <typename T, int alignment, int k_world_size>
+template <
+    typename T,
+    int alignment,
+    int k_world_size,
+    bool reduce_scatter = false,
+    bool split_last_dim = false>
 static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     void two_shot_all_reduce_kernel(
         T** input_ptrs,
@@ -566,31 +575,48 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         size_t numel,
         uint32_t** signal_pads,
         size_t rank,
-        size_t world_size) {
+        size_t world_size,
+        size_t last_dim_size = 0) {
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
-
+  int32_t N_last_dim =
+      last_dim_size / world_size; // used only for split_last_dim reduce_scatter
   sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
-      at::round_up(numel, alignment * world_size) / world_size;
-  const size_t start = numel_per_rank * rank;
+      at::round_up(numel, numel_per_thread * world_size) / world_size;
+  const size_t start = split_last_dim ? last_dim_size / world_size * rank
+                                      : numel_per_rank * rank;
 
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   for (size_t i = offset; i < numel_per_rank; i += stride) {
-    if (start + i >= numel) {
-      continue;
+    if constexpr (!reduce_scatter) {
+      // we call reduce-scatter only with evenly divisible number of elements
+      if (start + i >= numel) {
+        continue;
+      }
+    }
+    size_t idx = i;
+    if constexpr (split_last_dim) {
+      idx = i / N_last_dim * last_dim_size + i % N_last_dim;
     }
     auto vec = load_and_reduce<T, alignment, k_world_size>(
-        input_ptrs, rank, world_size, input_offset + start + i);
-    // store to local buffer
-    st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+        input_ptrs, rank, world_size, input_offset + start + idx);
+    // store to local buffer or to output
+    if constexpr (reduce_scatter) {
+      st_vec<alignment>(output_ptr + i, vec);
+    } else {
+      st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+    }
   }
 
   __syncthreads();
   sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  if constexpr (reduce_scatter) {
+    return;
+  }
   __syncthreads();
   for (size_t i = offset; i < numel_per_rank; i += stride) {
     Vec<alignment> tmp[k_world_size];
@@ -611,8 +637,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      st_vec<alignment>(
-          output_ptr + remote_start + i, tmp[step]);
+      st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
@@ -679,11 +704,28 @@ at::Tensor two_shot_all_reduce_impl(
       get_and_verify_alignment(input, "two_shot_all_reduce");
 
   if (output.has_value()) {
+    TORCH_CHECK(
+        output->is_contiguous(),
+        "two_shot_all_reduce: output must be contiguous.");
     const size_t output_alignment =
         get_and_verify_alignment(*output, "two_shot_all_reduce");
     TORCH_CHECK(
         alignment <= output_alignment,
         "two_shot_all_reduce: output alignment must be equal to or larger than input.");
+    TORCH_CHECK(
+        output->sizes() == input.sizes(),
+        "two_shot_all_reduce: input/output size mismatch, input.sizes(): ",
+        input.sizes(),
+        ", output.sizes(): ",
+        output->sizes());
+    if (input.numel() == 0) {
+      TORCH_CHECK(output->scalar_type() == input.scalar_type());
+      return *output;
+    }
+  } else {
+    if (input.numel() == 0) {
+      return input;
+    }
   }
 
   int num_blocks = 0, num_threads = 0;
@@ -763,6 +805,146 @@ at::Tensor two_shot_all_reduce_out(
     std::string group_name,
     at::Tensor output) {
   return two_shot_all_reduce_impl(input, output, reduce_op, group_name);
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(
+      input.is_contiguous(), "reduce_scatter: input must be contiguous.");
+  TORCH_CHECK(
+      output.is_contiguous(), "reduce_scatter: output must be contiguous.");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "reduce_scatter: input must be allocated with empty_strided_p2p().");
+
+  const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
+
+  const size_t output_alignment =
+      get_and_verify_alignment(input, "reduce_scatter");
+
+  TORCH_CHECK(
+      input.numel() %
+              (symm_mem->get_world_size() *
+               (alignment / input.element_size())) ==
+          0,
+      "expected number of elements to be divisible by world_size * alignment, number of elements ",
+      input.numel(),
+      " world size ",
+      symm_mem->get_world_size(),
+      "alignment ",
+      alignment);
+
+  if (split_last_dim) {
+    TORCH_CHECK(input.dim() == output.dim());
+    bool are_equal_except_last = std::equal(
+        input.sizes().begin(), input.sizes().end() - 1, output.sizes().begin());
+    TORCH_CHECK(
+        are_equal_except_last,
+        "reduce_scatter expected input and output to have same sizes except in the last dimension");
+    TORCH_CHECK(
+        output.size(-1) == input.size(-1) / symm_mem->get_world_size(),
+        "reduce_scatter expected output last dim size to be input last dim size / world_size");
+
+    TORCH_CHECK(
+        input.size(-1) %
+                (symm_mem->get_world_size() *
+                 (alignment / input.element_size())) ==
+            0,
+        "expected last dimension to be divisible by world_size * alignment, last dimension ",
+        input.size(-1),
+        " world size ",
+        symm_mem->get_world_size(),
+        "alignment ",
+        alignment);
+  } else {
+    TORCH_CHECK(input.dim() == 1, "reduce_scatter expected 1D input");
+    TORCH_CHECK(output.dim() == 1, "reduce_scatter expected 1D output");
+    TORCH_CHECK(output.numel() == input.numel() / symm_mem->get_world_size());
+  }
+  if (input.numel() == 0) {
+    TORCH_CHECK(input.scalar_type() == output.scalar_type());
+    return output;
+  }
+
+  TORCH_CHECK(
+      output_alignment >= alignment,
+      "reduce_scatter: output alignment should be not smaller than input alignment");
+
+  int num_blocks = 0, num_threads = 0;
+  init_elementwise_launch_config(
+      input.numel(),
+      input.element_size(),
+      alignment,
+      symm_mem->get_world_size(),
+      two_shot_all_reduce_max_num_blocks,
+      two_shot_all_reduce_max_num_threads,
+      num_blocks,
+      num_threads);
+  if (split_last_dim) {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  true>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output.data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size(),
+                      input.size(-1));
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+  } else {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  false>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output.data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size(),
+                      input.size(-1));
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+  }
+  return output;
 }
 } // namespace
 #endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
@@ -899,6 +1081,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
   m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
   m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
+  m.impl("reduce_scatter_out", ::reduce_scatter_out);
 
   m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif

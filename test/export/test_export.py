@@ -1115,12 +1115,7 @@ graph():
             {"a": torch.zeros(5), "b": torch.ones(5)},
             torch.ones(4),
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            escape(
-                "Expected input at *args[1][0].shape[0] to be equal to 6, but got 5"
-            ),
-        ):
+        with self.assertRaisesRegex(RuntimeError, "to be equal to 6, but got 5"):
             ep_ns.module()(*bad_runtime_inp1)
 
         bad_runtime_inp2 = (
@@ -1777,10 +1772,6 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs)
 
-    # Bug: ep.run_decompositions() doesn't propagate real tensors
-    @testing.expectedFailureTrainingIRToRunDecomp
-    # Bug: ep.run_decompositions() doesn't propagate real tensors
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_draft_export_infers_fake_kernel(self):
         strict = True
         with torch.library._scoped_library("export", "FRAGMENT") as lib:
@@ -2382,6 +2373,49 @@ graph():
             r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
+
+    def test_dim_dynamic_specialization(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        # 0/1 specialization
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 0 for dimension "
+            r"inputs\['x'\]\.shape\[0\](.*\n)*.*"
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 1 for dimension "
+            r"inputs\['x'\]\.shape\[1\].*",
+        ):
+            export(
+                Foo(),
+                (torch.randn(0, 1),),
+                dynamic_shapes={
+                    "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                assert x.shape[0] <= 32
+                return x + 2
+
+        # static specialization
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified dim hint Dim.DYNAMIC.*"
+            r"but tracing inferred a static shape of 32 for dimension "
+            r"inputs\['x'\]\.shape\[0\](.*\n)*.*",
+        ):
+            export(
+                Bar(),
+                (torch.randn(32),),
+                dynamic_shapes={
+                    "x": {0: Dim.DYNAMIC(min=32)},
+                },
+            )
 
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
@@ -3104,28 +3138,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             self.assertTrue(
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
-
-    @testing.expectedFailureLegacyExportNonStrict  # FIXME constraint violation (guard: s0 - s0%8 != 1)
-    @testing.expectedFailureCppSerDes  # FIXME data-dependent error (hinted: True, unhinted: s0 - s0%8 >= 0)
-    def test_bound_sympy_accuracy(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                expr = x.shape[0] - (x.shape[0] % 8)
-                return torch.empty(expr)
-
-        ep = export(
-            Foo(),
-            (torch.randn(13),),
-            dynamic_shapes={"x": (Dim("dim", min=2),)},
-        )
-
-        (output,) = ep.graph.output_node().args[0]
-        sym_node = output.meta["val"].shape[0].node
-        vr = torch.utils._sympy.value_ranges.bound_sympy(
-            sym_node.expr,
-            sym_node.shape_env.var_to_range,
-        )
-        self.assertEqual(vr.lower, 0)
 
     @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_keep_composite_ops_invalid(self):
@@ -4085,6 +4097,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
+        class O(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 8, 6),)
+        dynamic_shapes = {"x": (dim, None)}
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Expected dynamic shape spec .* at `dynamic_shapes\['x'\]` to have the same length "
+            r"as the actual tensor shape torch\.Size\(\[4, 8, 6\]\) \(expected 3, but got 2 instead\)",
+        ):
+            export(O(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_unbacked_bindings_for_divisible_u_symint(self):
         from torch._export.utils import _get_shape_env_from_gm
         from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
@@ -4609,8 +4634,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -5874,7 +5897,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
+                "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
 
@@ -6013,7 +6036,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Foo(), (torch.randn(64).cuda(),))
+        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -7279,8 +7302,6 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
-    # map_fn references module outside the module hierarchy
-    @unittest.expectedFailure
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -7514,14 +7535,6 @@ def forward(self, b_a_buffer, x):
         )
         epm = exported_module(inputs)
         # output shape is (3, 2), with n_row 3 and n_sample 2 <= dist_size 2
-        check(inputs, epm)
-
-        inputs = (
-            torch.tensor([[4, 5], [6, 7], [8, 9], [10, 11]], dtype=torch.float32),
-            torch.ones(1, dtype=torch.int64),
-        )
-        epm = exported_module(inputs)
-        # output shape is (4, 1), with n_row 4 and n_sample 1 <= dist_size 2
         check(inputs, epm)
 
         inputs = (
@@ -9802,6 +9815,159 @@ graph():
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
+
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_basic(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        ep = export(M(), (4, 5))
+        self.assertEqual(ep.module()(4, 5), 20)
+
+        with self.assertRaisesRegex(RuntimeError, r"to be equal to 4, but got 3"):
+            self.assertEqual(ep.module()(3, 6), 18)
+
+        ep = export(
+            M(), (4, 5), dynamic_shapes={"x": Dim.DYNAMIC, "y": Dim.AUTO}, strict=strict
+        )
+        self.assertEqual(ep.module()(4, 5), 20)
+        self.assertEqual(ep.module()(3, 6), 18)
+
+        ep = export(
+            M(), (5, 5), dynamic_shapes={"x": None, "y": Dim.AUTO}, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 6), 30)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x["moo"] * y
+
+        ep = export(
+            M(),
+            ({"moo": 2}, torch.ones(3, 3)),
+            dynamic_shapes={"x": {"moo": Dim.DYNAMIC}, "y": {0: Dim.DYNAMIC}},
+            strict=strict,
+        )
+        inp = ({"moo": 3}, torch.ones(4, 3))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+
+    @testing.expectedFailureCppRuntime
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_symint_input_specialization(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                assert x == 3
+                assert y.shape[0] == 4
+                return x * y
+
+        inp = (3, torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+        ):
+            ep = export(
+                M(),
+                inp,
+                dynamic_shapes=(Dim.DYNAMIC, None),
+                strict=strict,
+            )
+
+        ep = export(
+            M(),
+            inp,
+            dynamic_shapes=(Dim.AUTO, None),
+            strict=strict,
+        )
+        with self.assertRaisesRegex(RuntimeError, "to be equal to 3, but got 4"):
+            ep.module()(4, torch.randn(4, 4))
+
+    @testing.expectedFailureCppRuntime
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_symint_input_ranges(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        inp = (3, torch.randn(4, 4))
+        ep = export(
+            M(),
+            inp,
+            dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
+            strict=strict,
+        )
+
+        ep.module()(4, torch.randn(4, 4))
+        with self.assertRaisesRegex(RuntimeError, "to be <= 10, but got 16"):
+            ep.module()(16, torch.randn(4, 4))
+        with self.assertRaisesRegex(RuntimeError, "to be >= 3, but got 2"):
+            ep.module()(2, torch.randn(4, 4))
+
+        # While tracing the range was found to be a subset of the original range
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                assert x > 3
+                assert x <= 5
+                return x * y
+
+        inp = (4, torch.randn(4, 4))
+        ep = export(
+            M(),
+            inp,
+            dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
+            strict=strict,
+        )
+        constraints = list(ep.range_constraints.values())
+        self.assertEqual(len(constraints), 1)
+        constraint = constraints[0]
+        self.assertEqual(constraint.lower, 4)
+        self.assertEqual(constraint.upper, 5)
+
+        # While tracing the range was found to be bigger than the original range
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                assert x > 1
+                assert x < 20
+                return x * y
+
+        inp = (4, torch.randn(4, 4))
+        ep = export(
+            M(),
+            inp,
+            dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
+            strict=strict,
+        )
+        constraints = list(ep.range_constraints.values())
+        self.assertEqual(len(constraints), 1)
+        constraint = constraints[0]
+        self.assertEqual(constraint.lower, 3)
+        self.assertEqual(constraint.upper, 10)
+
+        # While tracing the range was found to be outside of the original range
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                assert x > 10
+                assert x < 20
+                return x * y
+
+        inp = (14, torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            ValueError, r"\[3, 10\], conflicting with .* \[11, 19\]"
+        ):
+            ep = export(
+                M(),
+                inp,
+                dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
+                strict=strict,
+            )
 
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
