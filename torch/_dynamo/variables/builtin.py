@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1026,77 +1027,7 @@ class BuiltinVariable(VariableTracker):
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
             if fn is operator.getitem and isinstance(args[0], variables.TensorVariable):
-                def rewrite(dim, item):
-                    if isinstance(item, variables.ConstantVariable) and item.value == None:
-                        return dim + 1, (
-                            torch.unsqueeze,
-                            [variables.ConstantVariable.create(dim)],
-                        )
-                    if isinstance(item, (variables.ConstantVariable, SymNodeVariable)):
-                        # Standard indexing will force specialization due to
-                        # __index__.  Rewrite as a regular torch op which will
-                        # trace fine
-                        return dim, (
-                            torch.select,
-                            [
-                                variables.ConstantVariable.create(dim),
-                                item,
-                            ],
-                        )
-                    if isinstance(item, variables.SliceVariable):
-                        # Standard slicing will force specialization due to
-                        # __index__.  Rewrite as a regular torch op which will
-                        # trace fine
-                        start, stop, step = item.items
-                        if step.as_python_constant() is None:
-                            step = variables.ConstantVariable.create(1)
-                        return dim + 1, (
-                            torch.ops.aten.slice,
-                            [
-                                variables.ConstantVariable.create(dim),
-                                start,
-                                stop,
-                                step,
-                            ],
-                        )
-
-                items = args[1].items if isinstance(args[1], variables.TupleVariable) else [args[1]]
-
-                index_ellipsis = None
-                n_none_slices = args[0].ndim + 1
-                for i, item in enumerate(items):
-                    if not (isinstance(item, variables.ConstantVariable) and item.value == None):
-                        n_none_slices -= 1
-                    if isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
-                        index_ellipsis = i
-                if index_ellipsis is not None:
-                    none_slice = variables.SliceVariable((variables.ConstantVariable.create(None),))
-                    items[index_ellipsis: index_ellipsis + 1] = [none_slice] * n_none_slices
-
-                dim = 0
-                # Sequence rewrites.
-                sequence = []
-                for item in items:
-                    if (r := rewrite(dim, item)) is not None:
-                        dim, call_spec = r
-                        sequence.append(call_spec)
-
-                if len(sequence) == len(items):
-                    *rest, last = sequence
-
-                    # Run rest.
-                    t = args[0]
-                    for _method, _args in rest:
-                        proxy = tx.output.create_proxy(
-                            "call_function",
-                            _method,
-                            *proxy_args_kwargs([t, *_args], {}),
-                        )
-                        t = wrap_fx_proxy(tx, proxy)
-
-                    # Return last.
-                    _method, _args = last
-                    fn, args = _method, [t, *_args]
+                return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
             proxy = tx.output.create_proxy(
                 "call_function",
@@ -1717,7 +1648,10 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
-        return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        try:
+            return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        except AttributeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
@@ -1931,6 +1865,30 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and issubclass(obj.value.__class__, unittest.TestCase)
+                and config.enable_trace_unittest
+                and name
+                in (
+                    "assertRaisesRegex",
+                    "assertNotWarns",
+                    "assertWarnsRegex",
+                    "assertDictEqual",
+                    "assertSequenceEqual",
+                    "assertWarns",
+                )
+            ):
+                unimplemented_v2(
+                    gb_type="Failed to trace builtin operator",
+                    context=f"function: unittest.TestCase.{name}",
+                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    hints=[
+                        f"Avoid calling builtin `{name}`. "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
@@ -2304,6 +2262,9 @@ class BuiltinVariable(VariableTracker):
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
             return SetVariable(list(a.set_items | b.set_items))
+        # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
+        if isinstance(a, ConstDictVariable):
+            return a.call_method(tx, "__or__", args=[b], kwargs={})
         # None no-ops this handler and lets the driving function proceed
         return None
 

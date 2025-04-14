@@ -4,8 +4,8 @@ import _codecs
 import io
 import os
 import sys
+import tempfile
 import unittest
-from typing import Union
 from unittest.mock import patch
 
 import numpy as np
@@ -34,36 +34,6 @@ def generate_faked_module():
         pass
 
     return _OpenRegMod()
-
-
-def generate_faked_module_methods():
-    def device_count() -> int:
-        return 1
-
-    def get_rng_state(
-        device: Union[int, str, torch.device] = "openreg",
-    ) -> torch.Tensor:
-        # create a tensor using our custom device object.
-        return torch.empty(4, 4, device="openreg")
-
-    def set_rng_state(
-        new_state: torch.Tensor, device: Union[int, str, torch.device] = "openreg"
-    ) -> None:
-        pass
-
-    def is_available():
-        return True
-
-    def current_device():
-        return 0
-
-    torch.openreg.device_count = device_count
-    torch.openreg.get_rng_state = get_rng_state
-    torch.openreg.set_rng_state = set_rng_state
-    torch.openreg.is_available = is_available
-    torch.openreg.current_device = current_device
-    torch.openreg._lazy_init = lambda: None
-    torch.openreg.is_initialized = lambda: True
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
@@ -105,7 +75,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         )
 
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        generate_faked_module_methods()
 
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
@@ -150,7 +119,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # check whether torch.openreg have been registered correctly
         self.assertTrue(
-            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1
+            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2
         )
         with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
             torch.utils.backend_registration._get_custom_mod_func("func_name_")
@@ -345,22 +314,23 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("openreg")
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("openreg"))
 
+    @unittest.skip(
+        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
+    )
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
-        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg")
 
         self.module.set_custom_device_index(0)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
 
-        # TODO(FFFrog): Comment this because openreg.device is missing
-        # Uncomment this after improving openreg
-        # cpu_storage = torch.empty(4, 4).storage()
-        # openreg_storage = torch.serialization.default_restore_location(
-        #     cpu_storage, "openreg:0"
-        # )
-        # self.assertTrue(openreg_storage.is_openreg)
+        cpu_storage = torch.empty(4, 4).storage()
+        openreg_storage = torch.serialization.default_restore_location(
+            cpu_storage, "openreg:0"
+        )
+        self.assertTrue(openreg_storage.is_openreg)
 
         # test tensor MetaData serialization
         x = torch.empty(4, 4).long()
@@ -369,24 +339,22 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.module.custom_set_backend_meta(y)
         self.assertTrue(self.module.check_backend_meta(y))
 
-        # TODO(FFFrog): Comment this because openreg.device is missing
-        # Uncomment this after improving openreg
-        # self.module.custom_serialization_registry()
-        # with tempfile.TemporaryDirectory() as tmpdir:
-        # path = os.path.join(tmpdir, "data.pt")
-        # torch.save(y, path)
-        # z1 = torch.load(path)
-        # loads correctly onto the openreg backend device
-        # self.assertTrue(z1.is_openreg)
-        # loads BackendMeta data correctly
-        # self.assertTrue(self.module.check_backend_meta(z1))
+        self.module.custom_serialization_registry()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(y, path)
+            z1 = torch.load(path)
+            # loads correctly onto the openreg backend device
+            self.assertTrue(z1.is_openreg)
+            # loads BackendMeta data correctly
+            self.assertTrue(self.module.check_backend_meta(z1))
 
-        # cross-backend
-        # z2 = torch.load(path, map_location="cpu")
-        # loads correctly onto the cpu backend device
-        # self.assertFalse(z2.is_openreg)
-        # loads BackendMeta data correctly
-        # self.assertFalse(self.module.check_backend_meta(z2))
+            # cross-backend
+            z2 = torch.load(path, map_location="cpu")
+            # loads correctly onto the cpu backend device
+            self.assertFalse(z2.is_openreg)
+            # loads BackendMeta data correctly
+            self.assertFalse(self.module.check_backend_meta(z2))
 
     def test_open_device_storage_resize(self):
         cpu_tensor = torch.randn([8])

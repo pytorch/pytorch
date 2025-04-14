@@ -898,24 +898,83 @@ class TensorVariable(VariableTracker):
         from .builder import wrap_fx_proxy
 
         tx = InstructionTranslator.current_tx()
-        if isinstance(args[0], SymNodeVariable):
-            # Standard indexing will force specialization due to
-            # __index__.  Rewrite as a regular torch op which will
-            # trace fine
-            fn, args = (
-                torch.select,
-                [
-                    variables.ConstantVariable.create(0),
-                    args[0],
-                ],
-            )
-        else:
-            fn = operator.getitem
+        fn = operator.getitem
+        t = self
+
+        def rewrite(dim, item):
+            if isinstance(item, variables.ConstantVariable) and item.value == None:
+                return dim + 1, (
+                    torch.unsqueeze,
+                    [variables.ConstantVariable.create(dim)],
+                )
+            if isinstance(item, (variables.ConstantVariable, SymNodeVariable)):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                return dim, (
+                    torch.select,
+                    [
+                        variables.ConstantVariable.create(dim),
+                        item,
+                    ],
+                )
+            if isinstance(item, variables.SliceVariable):
+                # Standard slicing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                start, stop, step = item.items
+                if step.as_python_constant() is None:
+                    step = variables.ConstantVariable.create(1)
+                return dim + 1, (
+                    torch.ops.aten.slice,
+                    [
+                        variables.ConstantVariable.create(dim),
+                        start,
+                        stop,
+                        step,
+                    ],
+                )
+
+        items = args[0].items if isinstance(args[0], variables.TupleVariable) else [args[0]]
+
+        index_ellipsis = None
+        n_none_slices = self.ndim + 1
+        for i, item in enumerate(items):
+            if not (isinstance(item, variables.ConstantVariable) and item.value == None):
+                n_none_slices -= 1
+            if isinstance(item, variables.ConstantVariable) and item.value == Ellipsis:
+                index_ellipsis = i
+        if index_ellipsis is not None:
+            none_slice = variables.SliceVariable((variables.ConstantVariable.create(None),))
+            items[index_ellipsis: index_ellipsis + 1] = [none_slice] * n_none_slices
+
+        dim = 0
+        # Sequence rewrites.
+        sequence = []
+        for item in items:
+            if (r := rewrite(dim, item)) is not None:
+                dim, call_spec = r
+                sequence.append(call_spec)
+
+        if len(sequence) == len(items):
+            *rest, last = sequence
+
+            # Run rest.
+            for _method, _args in rest:
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    _method,
+                    *proxy_args_kwargs([t, *_args], {}),
+                )
+                t = wrap_fx_proxy(tx, proxy)
+
+            # Return last.
+            fn, args = last
 
         proxy = tx.output.create_proxy(
             "call_function",
             fn,
-            *proxy_args_kwargs([self] + list(args), kwargs),
+            *proxy_args_kwargs([t, *args], kwargs),
         )
 
         return wrap_fx_proxy(tx, proxy)
