@@ -819,16 +819,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         # Product
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
 
-        # math package don't have math.perm until python 3.8, so
-        # we implement a naive version here.
-        def perm(n, k):
-            prod_val = n
-            for val in range(n - k + 1, n):
-                prod_val *= val
-            return prod_val
-
         for i in range(num_gpus):
-            prod_val = perm(self.rank + self.world_size, self.world_size)
+            prod_val = math.perm(self.rank + self.world_size, self.world_size)
 
             expected = torch.tensor([prod_val])
             self.assertEqual(expected, output[i])

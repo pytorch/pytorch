@@ -321,6 +321,9 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
 
+def xfailIfSM100OrLater(func):
+    return func if not SM100OrLater else unittest.expectedFailure(func)
+
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
