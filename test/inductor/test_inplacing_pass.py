@@ -17,9 +17,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
-from torch.testing._internal.triton_utils import HAS_GPU
 
 
 aten = torch.ops.aten
