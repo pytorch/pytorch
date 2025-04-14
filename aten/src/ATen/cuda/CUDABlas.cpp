@@ -1711,7 +1711,7 @@ void scaled_gemm(
                 all_algos[i].algo,
                 ret_workspace_size);
         if (is_valid_status == HIPBLAS_STATUS_SUCCESS) {
-            if (ret_workspace_size <= workspaceSize) {
+            if (ret_workspace_size <= ltworkspace.size) {
                 heuristicResult = all_algos[i];
                 found = true;
                 break;
