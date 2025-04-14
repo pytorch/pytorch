@@ -217,6 +217,14 @@ else
 fi
 
 ###############################################################################
+# Check XPU configured correctly
+###############################################################################
+if [[ "$DESIRED_CUDA" == 'xpu' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
+  echo "Checking that xpu is compiled"
+  python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'
+fi
+
+###############################################################################
 # Check CUDA configured correctly
 ###############################################################################
 # Skip these for Windows machines without GPUs
