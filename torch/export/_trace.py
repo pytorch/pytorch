@@ -500,11 +500,12 @@ def _produce_aten_artifact(
 
     It does:
     1. Applies runtime assertion pass
-    2. Populate meta val when missing
-    3. Lift constants as placeholders
-    4. Replace raw autograd and autocast ops with HOPs
-    5. Prettify names for placeholders
-    6. Preserve requires_grad value on node meta val
+    2. Recompute unbacked_bindings pass
+    3. Populate meta val when missing
+    4. Lift constants as placeholders
+    5. Replace raw autograd and autocast ops with HOPs
+    6. Prettify names for placeholders
+    7. Preserve requires_grad value on node meta val
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.

@@ -1004,17 +1004,9 @@ def forward(self, x_1):
         b = s3 + s4 + s5
         assert_optimized(a)
         assert_optimized(b)
-        assert_optimized(a + b)
-        assert_optimized(b + a)
-
-        # same as above but b does not have ordered_summation_of_unique_symbols.
-        s6 = create_symint(shape_env, 11)
-        s7 = create_symint(shape_env, 21)
-        s8 = create_symint(shape_env, 31)
-        b = torch.sym_sum([s6, s7, s8])
-        assert_optimized(a)
-        assert_not_optimized(b)
         assert_not_optimized(a + b)
+        assert_not_optimized(b + a)
+        assert_not_optimized(b + a + b)
 
     def test_max_of_unique_summation_opt(self):
         shape_env = ShapeEnv()
@@ -1328,6 +1320,22 @@ class f(torch.nn.Module):
         for Tensor in legacy_ctors:
             res = Tensor(sym_args)
             self.assertEqual(res, expected, exact_dtype=False)
+
+    def test_backed_size_oblivious_01_spec(self):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        @torch.compile(dynamic=True, fullgraph=True)
+        def f(a, b):
+            if guard_size_oblivious(a.size(0) == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            # always go to the >= 2 branch.
+            self.assertEqual(
+                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+            )
 
 
 @skipIfTorchDynamo(
@@ -2814,6 +2822,136 @@ class TestGuardsExpressions(TestCase):
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_true(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_true(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*10
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_true(x != x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*20
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_true(a.size()[0] != 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 20)
+            self.assertEqual(compiled(a, b), b * 10)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_false(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_false(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*20
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_false(x == x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*10
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_false(a.size()[0] == 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 10)
+            self.assertEqual(compiled(a, b), b * 20)
 
     def test_guards_float_div(self):
         shape_env = ShapeEnv()

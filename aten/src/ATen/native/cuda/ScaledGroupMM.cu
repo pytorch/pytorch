@@ -22,16 +22,15 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
+#include <ATen/native/cuda/GroupMMCommon.cuh>
 #include <ATen/native/cuda/cutlass_utils.cuh>
 
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
-#include <cutlass/half.h>
 #include <cutlass/numeric_types.h>
 #include <cutlass/trace.h>
-#include <cutlass/util/host_tensor.h>
 #include <cutlass/version.h>
 
 #include <cutlass/epilogue/collective/collective_builder.hpp>
@@ -51,101 +50,7 @@ C10_DIAGNOSTIC_POP()
 
 namespace {
 
-using Strides = std::array<int64_t, 3>;
-
-template <
-    typename DtypeA,
-    typename DtypeB,
-    typename DtypeOutput,
-    typename DtypeScale,
-    typename ProblemShape,
-    typename StrideA,
-    typename StrideB,
-    typename StrideOutput>
-__global__ void prepare_gemm_data(
-    DtypeA* A,
-    DtypeB* B,
-    DtypeOutput* output,
-    DtypeScale* scale_A,
-    DtypeScale* scale_B,
-    DtypeA** A_ptrs,
-    DtypeB** B_ptrs,
-    DtypeOutput** output_ptrs,
-    DtypeScale** inputA_scale_ptrs,
-    DtypeScale** inputB_scale_ptrs,
-    ProblemShape* problem_sizes,
-    // Strides for cutlass, cute::Stride
-    StrideA* stride_A,
-    StrideB* stride_B,
-    StrideOutput* stride_output,
-    const int32_t* offs,
-    int32_t M,
-    int32_t N,
-    int32_t K,
-    // Original strides of the input tensors
-    Strides tensor_StrideA,
-    Strides tensor_StrideB,
-    Strides tensor_StrideOutput,
-    int64_t a_scale_stride,
-    int64_t b_scale_stride) {
-  int32_t tid = threadIdx.x;
-  int32_t delta = 0;
-  if (offs != nullptr) {
-    int32_t start = tid == 0 ? 0 : offs[tid - 1];
-    delta = offs[tid] - start;
-    CUDA_KERNEL_ASSERT(delta % 16 == 0 && "expected dynamic dimension to be multiple of 16\n");
-  }
-  int64_t lda, ldb, ldoutput;
-  if (M < 0) {
-    // A and output is 2d
-    M = delta;
-    lda = tensor_StrideA[0];
-    ldb = tensor_StrideB[2]; // B is transposed
-    ldoutput = tensor_StrideOutput[0];
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * lda;
-    inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
-    output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1] * ldoutput;
-    B_ptrs[tid] = B + tid * tensor_StrideB[0];
-    inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
-  } else if (N < 0) {
-    N = delta;
-    lda = tensor_StrideA[1];
-    ldb = tensor_StrideB[1]; // B is transposed
-    ldoutput = tensor_StrideOutput[0];
-    A_ptrs[tid] = A + tid * tensor_StrideA[0];
-    inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
-    output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1];
-    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * ldb;
-    inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
-  } else if (K < 0) {
-    // A, B is 2d, output is 3d
-    K = delta;
-    lda = tensor_StrideA[0];
-    ldb = tensor_StrideB[1]; // B is transposed
-    ldoutput = tensor_StrideOutput[1];
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1];
-    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
-    inputA_scale_ptrs[tid] = scale_A + tid * M;
-    inputB_scale_ptrs[tid] = scale_B + tid * N;
-    output_ptrs[tid] = output + tid * tensor_StrideOutput[0];
-  } else {
-    // A, B, output are 3D
-    lda = tensor_StrideA[1];
-    ldb = tensor_StrideB[2];
-    ldoutput = tensor_StrideOutput[1];
-    A_ptrs[tid] = A + tid * tensor_StrideA[0];
-    B_ptrs[tid] = B + tid * tensor_StrideB[0];
-    inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
-    inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
-    output_ptrs[tid] = output + tid * tensor_StrideOutput[0];
-  }
-  problem_sizes[tid] = ProblemShape(M, N, K);
-
-  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {M, lda, 1});
-  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {N, ldb, 1});
-  stride_output[tid] =
-      cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
-}
+using Strides = at::cuda::detail::Strides;
 
 using DtypeScale = float;
 using DtypeAccum = float;
@@ -205,7 +110,6 @@ struct Schedule {
   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
 };
 
-
 int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
@@ -257,8 +161,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
           EpilogueSchedule;
   // TODO remove *BroadcastPtrArrays and replace with just Broadcast
-  // when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass version
-  // Implement rowwise scaling epilogue.
+  // when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass
+  // version Implement rowwise scaling epilogue.
   using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcastPtrArray<
       0,
       TileShape,
@@ -345,6 +249,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
     group_count = mat_a.size(0);
   }
 
+  TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
+
   const int64_t problem_shape_size =
       group_count * ((int64_t)sizeof(ProblemShape::UnderlyingProblemShape));
 
@@ -383,7 +289,6 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
           stride_output + group_count);
 
-  TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
   auto stream = at::cuda::getCurrentCUDAStream().stream();
 
   auto make_strides = [](at::IntArrayRef strides) -> Strides {
@@ -400,7 +305,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   int64_t a_scale_stride = scale_a.stride(0);
   int64_t b_scale_stride = scale_b.stride(0);
 
-  prepare_gemm_data<<<1, group_count, 0, stream>>>(
+  at::cuda::detail::prepare_grouped_gemm_data<<<1, group_count, 0, stream>>>(
       reinterpret_cast<DtypeA*>(mat_a.data_ptr()),
       reinterpret_cast<DtypeB*>(mat_b.data_ptr()),
       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
@@ -427,46 +332,50 @@ void f8f8bf16_grouped_gemm_impl_sm90(
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-//   auto buf_cpu = mat_a.new_empty(
-//       input_args_size, at::TensorOptions().dtype(at::kByte).device(at::kCPU));
-//   AT_CUDA_CHECK(cudaMemcpy(
-//       (char*)buf_cpu.data_ptr(),
-//       buf_ptr,
-//       input_args_size,
-//       cudaMemcpyDeviceToHost));
-//   char* buf_ptr_cpu = (char*)buf_cpu.data_ptr();
-//   DtypeA** inputA_ptrs_h = reinterpret_cast<DtypeA**>(buf_ptr_cpu);
-//   DtypeB** inputB_ptrs_h =
-//       reinterpret_cast<DtypeB**>(inputA_ptrs_h + aligned_group_count);
-//   DtypeOutput** output_ptrs_h =
-//       reinterpret_cast<DtypeOutput**>(inputB_ptrs_h + aligned_group_count);
-//   DtypeScale** inputA_scale_ptrs_h =
-//       reinterpret_cast<DtypeScale**>(output_ptrs_h + aligned_group_count);
-//   DtypeScale** inputB_scale_ptrs_h =
-//       reinterpret_cast<DtypeScale**>(inputA_scale_ptrs_h + aligned_group_count);
-//   StrideA* stride_A_h =
-//       reinterpret_cast<StrideA*>(inputB_scale_ptrs_h + aligned_group_count);
-//   StrideB* stride_B_h = reinterpret_cast<StrideB*>(stride_A_h + group_count);
-//   StrideOutput* stride_output_h =
-//       reinterpret_cast<StrideOutput*>(stride_B_h + group_count);
-//   ProblemShape::UnderlyingProblemShape* problem_sizes_h =
-//       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
-//           stride_output_h + group_count);
+  //   auto buf_cpu = mat_a.new_empty(
+  //       input_args_size,
+  //       at::TensorOptions().dtype(at::kByte).device(at::kCPU));
+  //   AT_CUDA_CHECK(cudaMemcpy(
+  //       (char*)buf_cpu.data_ptr(),
+  //       buf_ptr,
+  //       input_args_size,
+  //       cudaMemcpyDeviceToHost));
+  //   char* buf_ptr_cpu = (char*)buf_cpu.data_ptr();
+  //   DtypeA** inputA_ptrs_h = reinterpret_cast<DtypeA**>(buf_ptr_cpu);
+  //   DtypeB** inputB_ptrs_h =
+  //       reinterpret_cast<DtypeB**>(inputA_ptrs_h + aligned_group_count);
+  //   DtypeOutput** output_ptrs_h =
+  //       reinterpret_cast<DtypeOutput**>(inputB_ptrs_h + aligned_group_count);
+  //   DtypeScale** inputA_scale_ptrs_h =
+  //       reinterpret_cast<DtypeScale**>(output_ptrs_h + aligned_group_count);
+  //   DtypeScale** inputB_scale_ptrs_h =
+  //       reinterpret_cast<DtypeScale**>(inputA_scale_ptrs_h +
+  //       aligned_group_count);
+  //   StrideA* stride_A_h =
+  //       reinterpret_cast<StrideA*>(inputB_scale_ptrs_h +
+  //       aligned_group_count);
+  //   StrideB* stride_B_h = reinterpret_cast<StrideB*>(stride_A_h +
+  //   group_count); StrideOutput* stride_output_h =
+  //       reinterpret_cast<StrideOutput*>(stride_B_h + group_count);
+  //   ProblemShape::UnderlyingProblemShape* problem_sizes_h =
+  //       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
+  //           stride_output_h + group_count);
 
-//   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << " "
-//             << out.data_ptr() << " " << scale_a.data_ptr() << " "
-//             << scale_b.data_ptr() << "\n";
-//   for (int i = 0; i < group_count; i++) {
-//     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";
-//     std::cout << "B " << (void*)inputB_ptrs_h[i] << "\n";
-//     std::cout << "O " << (void*)output_ptrs_h[i] << "\n";
-//     std::cout << "A_scale " << (void*)inputA_scale_ptrs_h[i] << "\n";
-//     std::cout << "B_scale " << (void*)inputB_scale_ptrs_h[i] << "\n";
-//     std::cout << "sizes " << problem_sizes_h[i] << "\n";
-//     std::cout << "strideA" << stride_A_h[i] << "\n";
-//     std::cout << "strideB" << stride_B_h[i] << "\n";
-//     std::cout << "stride_output" << stride_output_h[i] << "\n";
-//   }
+  //   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << "
+  //   "
+  //             << out.data_ptr() << " " << scale_a.data_ptr() << " "
+  //             << scale_b.data_ptr() << "\n";
+  //   for (int i = 0; i < group_count; i++) {
+  //     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";
+  //     std::cout << "B " << (void*)inputB_ptrs_h[i] << "\n";
+  //     std::cout << "O " << (void*)output_ptrs_h[i] << "\n";
+  //     std::cout << "A_scale " << (void*)inputA_scale_ptrs_h[i] << "\n";
+  //     std::cout << "B_scale " << (void*)inputB_scale_ptrs_h[i] << "\n";
+  //     std::cout << "sizes " << problem_sizes_h[i] << "\n";
+  //     std::cout << "strideA" << stride_A_h[i] << "\n";
+  //     std::cout << "strideB" << stride_B_h[i] << "\n";
+  //     std::cout << "stride_output" << stride_output_h[i] << "\n";
+  //   }
   //   int device_id = 0;
   //   cutlass::KernelHardwareInfo kernel_hw_info =
   //   cutlass::KernelHardwareInfo::make_kernel_hardware_info<Gemm::GemmKernel>(device_id);
@@ -484,7 +393,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        output_ptrs,
        stride_output}};
 
-  int sm_count = at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
+  int sm_count =
+      at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     sm_count -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
   }
