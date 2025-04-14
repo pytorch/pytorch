@@ -5723,8 +5723,8 @@ class TestLinalg(TestCase):
             # 'TN'
             matA = torch.rand(ldc, lda, dtype=dtype, device=device)
             matB = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
-            subA = matA[:m,:k]
-            subB = matB[:k,:n]
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
             torch.mm(subA, subB)
 
             # 'NN'
