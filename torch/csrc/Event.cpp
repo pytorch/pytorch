@@ -28,7 +28,7 @@ static PyObject* THPEvent_pynew(
   unsigned char interprocess = 0;
 
   static torch::PythonArgParser parser({
-      "Event(Device device=None, *, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
+      "Event(Device device=None, *, bool enable_timing=False, bool blocking=False, bool interprocess=False)",
   });
 
   torch::ParsedArgs<4> parsed_args;
