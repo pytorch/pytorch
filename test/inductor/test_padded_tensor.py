@@ -95,7 +95,7 @@ class PaddedTensorFunctionalTests(TestCase):
 
         torch._dynamo.config.error_on_recompile = False
 
-    def test_bucketize(self):
+    def test_bucketing(self):
         """
         Test that we compile a new graph on a shape that is larger than the original bucket.
         """
@@ -185,7 +185,7 @@ class ModelTests(TestCase):
     def setUp(self):
         super().setUp()
 
-    def test_transformer(self):
+    def test_transformer_eqiv(self):
         with torch.device("cuda"):
             bsz, seqlen_max = 2, 32
             seqlen_multiple = 16
@@ -202,7 +202,6 @@ class ModelTests(TestCase):
             for seqlen in range(3, 15):
                 print("seqlen =", seqlen)
                 # Set error_on_recompile to True after 3rd iteration.
-                # TODO: We don't need this if we mark padded dimensions as dynamic.
                 if seqlen == 5:
                     torch._dynamo.config.error_on_recompile = True
 
@@ -234,6 +233,52 @@ class ModelTests(TestCase):
 
                 # Check
                 self.assertEqual(out, out_p.unpad())
+
+        torch._dynamo.config.error_on_recompile = False
+
+    def test_transformer_bucketing(self):
+        with torch.device("cuda"):
+            bsz, seqlen_max = 2, 64
+            seqlen_multiple = 16
+
+            # Set up transformer
+            args = ModelArgs.from_name("mini")
+            transformer = Transformer(args)
+            transformer.setup_caches(bsz, seqlen_max)
+
+            transformer = torch.compile(
+                transformer, fullgraph=True, mode="reduce-overhead"
+            )
+
+            for seqlen in range(3, 60):
+                print("seqlen =", seqlen)
+
+                # Set error_on_recompile to True after 3rd or 5th iteration for each bucket.
+                if seqlen % 16 > 5:
+                    torch._dynamo.config.error_on_recompile = True
+                else:
+                    torch._dynamo.config.error_on_recompile = False
+
+                # Run unpadded
+                inputs = (
+                    torch.randint(0, 3, (bsz, seqlen)),
+                    torch.arange(0, seqlen, dtype=torch.int32),
+                )
+
+                # Run padded
+                inputs_p = [
+                    PaddedTensor.from_tensor(
+                        inputs[0], multipliers={0: 1, 1: seqlen_multiple}
+                    ),
+                    PaddedTensor.from_tensor(
+                        inputs[1], multipliers={0: seqlen_multiple}, neutral_element=-1
+                    ),
+                ]
+
+                torch.compiler.cudagraph_mark_step_begin()
+
+                out_p = transformer(*inputs_p)
+                out_p = out_p.clone()
 
         torch._dynamo.config.error_on_recompile = False
 
