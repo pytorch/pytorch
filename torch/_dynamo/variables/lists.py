@@ -491,12 +491,17 @@ class ListVariable(CommonListMethodsVariable):
                         first_non_constant_key = k
                 assert first_non_constant_key is not None
 
+                try:
+                    python_type = first_non_constant_key.python_type()
+                except NotImplementedError:
+                    python_type = "unknown"
+
                 unimplemented_v2(
                     gb_type="sort with non-constant keys",
                     context=str(first_non_constant_key),
                     explanation=(
                         f"Cannot perform sort with non-constant key. "
-                        f"First non-constant key type: {first_non_constant_key.python_type()}. "
+                        f"First non-constant key type: {python_type}. "
                         f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
                         f"sort ints."
                     ),
