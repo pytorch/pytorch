@@ -1016,7 +1016,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = (128, 128, 16)
         A = torch.randn(M, K).cuda().half()
         B = torch.randn(K, N).cuda().half()
-        
+
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
