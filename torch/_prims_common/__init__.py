@@ -933,7 +933,13 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
             torch._check(dim is None, lambda: "only one dimension can be inferred")
             dim = i
         else:
-            torch._check(d >= 0, lambda: f"invalid shape dimension {d}")
+            torch._check(
+                d >= 0,
+                lambda: (
+                    f"invalid shape dimension {d}. If this was symbolic, it was assumed to not be -1."
+                    "If this was meant to be inferred, please explicitly pass in -1."
+                ),
+            )
             newsize *= d
     if dim is None:
         torch._check(
