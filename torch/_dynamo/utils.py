@@ -1227,6 +1227,7 @@ class CompilationMetrics:
     duration_us: Optional[int] = None
     dynamo_cumulative_compile_time_us: Optional[int] = None
     aot_autograd_cumulative_compile_time_us: Optional[int] = None
+    aot_autograd_cumulative_collect_metadata_compile_time_us: Optional[int] = None
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
@@ -1267,6 +1268,8 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):

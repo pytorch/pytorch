@@ -1089,6 +1089,125 @@ class TestAutocastMPS(TestCase):
             y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
             self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    def test_gradscaler_mps(self):
+        # big model to force chunking/depth in the gradscaler dispatch
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 2048)
+                self.fc2 = nn.Linear(2048, 2048)
+                self.fc3 = nn.Linear(2048, 2048)
+                self.fc4 = nn.Linear(2048, 2048)
+                self.fc5 = nn.Linear(2048, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                x = self.relu(self.fc3(x))
+                x = self.relu(self.fc4(x))
+                return self.fc5(x)
+        torch.manual_seed(42)
+
+        def helper(model_cpu, model_mps, dtype, iterations, batch_size, atol=3e-4, rtol=1e-5):
+            if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+                raise unittest.SkipTest("bfloat16 needs MacOS14+")
+            optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), lr=0.01)
+            optimizer_mps = torch.optim.SGD(model_mps.parameters(), lr=0.01)
+            loss_fn = nn.MSELoss()
+
+            input_cpu = torch.randn(batch_size, 10)
+            target_cpu = torch.randn(batch_size, 5)
+            input_mps = input_cpu.to('mps')
+            target_mps = target_cpu.to('mps')
+
+            scaler_cpu = torch.amp.GradScaler(device="cpu")
+            scaler_mps = torch.amp.GradScaler(device="mps")
+            for _ in range(iterations):
+                optimizer_cpu.zero_grad()
+                optimizer_mps.zero_grad()
+
+                with torch.amp.autocast(device_type="cpu", dtype=dtype):
+                    output_cpu = model_cpu(input_cpu)
+                    loss_cpu = loss_fn(output_cpu, target_cpu)
+                scaler_cpu.scale(loss_cpu).backward()
+                scaler_cpu.step(optimizer_cpu)
+                scaler_cpu.update()
+
+                with torch.autocast(device_type="mps", dtype=dtype):
+                    output_mps = model_mps(input_mps)
+                    loss_mps = loss_fn(output_mps, target_mps)
+                scaler_mps.scale(loss_mps).backward()
+                scaler_mps.step(optimizer_mps)
+                scaler_mps.update()
+
+            for p_cpu, p_mps in zip(model_cpu.parameters(), model_mps.parameters()):
+                self.assertEqual(p_mps.cpu(), p_cpu, rtol=rtol, atol=atol)
+
+        model_cpu = Model().to('cpu')
+        model_mps = Model().to('mps')
+        model_mps.load_state_dict(model_cpu.state_dict())
+
+        helper(model_cpu, model_mps, torch.float16, iterations=5, batch_size=4)
+        helper(model_cpu, model_mps, torch.bfloat16, iterations=5, batch_size=4)
+
+    def test_non_fast_path_amp_unscale(self):
+        torch.manual_seed(42)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(10, 10)
+                self.linear2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = F.relu(x)
+                x = self.linear2(x)
+                x = x.mean(dim=1)
+                return x
+
+        cpu_model = Model().to("cpu")
+        mps_model = copy.deepcopy(cpu_model).to("mps")
+
+        cpu_optimizer = torch.optim.SGD(cpu_model.parameters(), lr=0.01)
+        mps_optimizer = torch.optim.SGD(mps_model.parameters(), lr=0.01)
+        cpu_scaler = torch.amp.GradScaler(device="cpu")
+        mps_scaler = torch.amp.GradScaler(device="mps")
+
+        def helper(model, optimizer, scaler, device, input, target, apply_grad_transform=False):
+            optimizer.zero_grad()
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                output = model(input)
+                loss = nn.MSELoss()(output, target)
+            scaler.scale(loss).backward()
+
+            if apply_grad_transform:
+                for p in model.parameters():
+                    if p.grad is not None and p.grad.dim() >= 2:
+                        p.grad = p.grad.as_strided(p.grad.size(), (1,) * p.grad.dim())
+
+            scaler.unscale_(optimizer)
+            scaler.step(optimizer)
+            scaler.update()
+
+        # CPU forward/backward pass
+        input_cpu = torch.randn(32, 10, device="cpu")
+        target_cpu = torch.randn(32, device="cpu")
+        helper(cpu_model, cpu_optimizer, cpu_scaler, "cpu", input_cpu, target_cpu)
+
+        # MPS forward/backward pass
+        input_mps = input_cpu.to("mps")
+        target_mps = target_cpu.to("mps")
+        helper(mps_model, mps_optimizer, mps_scaler, "mps", input_mps, target_mps, apply_grad_transform=True)
+
+        updated_linear1_weight_cpu = cpu_model.linear1.weight.detach()
+        updated_linear2_weight_cpu = cpu_model.linear2.weight.detach()
+        updated_linear1_weight_mps = mps_model.linear1.weight.detach().cpu()
+        updated_linear2_weight_mps = mps_model.linear2.weight.detach().cpu()
+
+        self.assertEqual(updated_linear1_weight_cpu, updated_linear1_weight_mps, atol=6e-4, rtol=1e-6)
+        self.assertEqual(updated_linear2_weight_cpu, updated_linear2_weight_mps, atol=6e-4, rtol=1e-6)
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
@@ -7815,18 +7934,19 @@ class TestMPS(TestCaseMPS):
 
     # Test inverse
     def test_inverse(self):
-        def helper(n):
+        def helper(n, atol=1e-5, rtol=1e-6):
             cpu_input = torch.randn(n, n, device='cpu')
             mps_input = cpu_input.to('mps')
 
             cpu_result = torch.linalg.inv(cpu_input)
             mps_result = torch.linalg.inv(mps_input)
-            self.assertEqual(cpu_result, mps_result)
+            self.assertEqual(cpu_result, mps_result, atol=atol, rtol=rtol)
 
         helper(2)
         helper(6)
         helper(3)
         helper(8)
+        helper(1025, atol=1e-4)
 
     # Test tril
     def test_tril(self):
@@ -12817,15 +12937,9 @@ class TestCommon(TestCase):
     def test_numpy_ref_mps(self, device, dtype, op):
         # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
         # does not support float64 Tensors.
-        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-        # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        inputs = (
-            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
-            else op.sample_inputs(device, dtype, set_seed=False)
-        )
+        inputs = op.reference_inputs(device, dtype, set_seed=False)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
@@ -12937,6 +13051,50 @@ class TestMetalLibrary(TestCaseMPS):
         lib = torch.mps.compile_shader("#include <c10/metal/special_math.h>")
         self.assertIsNotNone(lib)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int64])
+    def test_reduction_utils(self, dtype):
+        if dtype == torch.int64 and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Using simd_shuffle_down_and_fill results in ICE on MacOS-13")
+        from torch._inductor.codegen.mps import DTYPE_TO_METAL
+        lib = torch.mps.compile_shader(f"""
+            #include <c10/metal/reduction_utils.h>
+            kernel void do_sum(device {DTYPE_TO_METAL[dtype]}* out,
+                               constant {DTYPE_TO_METAL[dtype]}* inp,
+                               uint idx [[thread_position_in_grid]]) {{
+                out[idx] = c10::metal::simd_sum(inp[idx]);
+            }}
+        """)
+        x = torch.testing.make_tensor(28, device="mps", dtype=dtype)
+        y = torch.empty_like(x)
+        lib.do_sum(y, x)
+        x_sum = x.sum()
+        max_err = (y - x_sum).abs().max().item()
+        self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
+                        f"results are {y}, but all elements should have been {x_sum.item()}")
+
+    def test_argument_buffers(self):
+        lib = torch.mps.compile_shader("""
+        constant constexpr auto nbuffers = 64;
+        struct Inputs {
+          metal::array<device float *, nbuffers> args;
+        };
+
+        kernel void sum_all(device float* output, constant Inputs& inputs, uint idx [[thread_position_in_grid]]) {
+          auto rc = inputs.args[0][idx];
+          for(auto i = 1; i < nbuffers; ++i) {
+            rc += inputs.args[i][idx];
+          }
+          output[idx] = rc;
+        }
+        """)
+        inputs = torch.rand(64, 32, device="mps").unbind(0)
+        output = torch.empty_like(inputs[0])
+        lib.sum_all(output, inputs)
+        correct = torch.zeros_like(inputs[0])
+        for inp in inputs:
+            correct += inp
+        self.assertEqual(correct, output)
+
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
@@ -12968,6 +13126,7 @@ instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
+instantiate_parametrized_tests(TestMetalLibrary)
 
 if __name__ == "__main__":
     run_tests()
