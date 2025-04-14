@@ -70,6 +70,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
     {
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
         If ``None``, all dimensions are reduced.
 """
     },
@@ -804,7 +809,7 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -859,7 +864,7 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6255,7 +6260,7 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {opt_dim}
+    {dim}
     {opt_keepdim}
 
 Keyword args:
@@ -6496,7 +6501,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6609,7 +6614,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6756,7 +6761,7 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6802,7 +6807,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     input (Tensor): the input tensor, either of floating point or complex dtype
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6885,7 +6890,7 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6942,7 +6947,7 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -7048,7 +7053,7 @@ that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword arguments:
@@ -7111,7 +7116,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -7214,7 +7219,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -8588,7 +8593,7 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -10485,7 +10490,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10540,7 +10545,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10648,7 +10653,7 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -10700,7 +10705,7 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -11831,7 +11836,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11885,7 +11890,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
