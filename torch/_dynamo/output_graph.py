@@ -79,6 +79,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
+from .device_interface import get_interface_for_device
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
@@ -309,7 +310,6 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
-        super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -1347,8 +1347,14 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
+            device_types = compile_pg._device_types
+            assert len(device_types) == 1, (
+                "Expect only one device type but got {}".format("+".join(device_types))
+            )
             with (
-                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
+                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
+                    compile_pg.rank() % torch.accelerator.device_count()
+                ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states = [None] * compile_pg.size()

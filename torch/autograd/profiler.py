@@ -160,16 +160,16 @@ class profile:
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
 
-    .. warning:
+    .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
 
-    .. warning:
+    .. warning::
         This context managers should not be called recursively, i.e. no nested
         instances are allowed
 
-    .. warning:
-        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+    .. warning::
+        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
         one cannot use the profiler with ``use_device = 'cuda'`` to benchmark
         DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
         please use ``use_device = None`` or ``num_workers = 0``.

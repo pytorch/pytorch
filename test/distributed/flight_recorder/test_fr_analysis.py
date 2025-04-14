@@ -117,6 +117,29 @@ class FlightRecorderEventTest(TestCase):
             MatchState.COLLECTIVE_DTYPE_MISMATCH,
         )
 
+        e11 = create_one_event(
+            "gather",
+            ("0", "default"),
+            [[4, 4]],
+            [[4, 4], [4, 4]],
+            "completed",
+            1,
+            output_dtypes="float32",
+        )
+        e12 = create_one_event(
+            "gather",
+            ("0", "default"),
+            [[4, 4]],
+            [[]],
+            "completed",
+            1,
+            output_dtypes="",
+        )
+        self.assertEqual(
+            match_one_event(e11, e12, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
+
     def test_all_events(self):
         for collective in sorted(COLLECTIVES):
             input_sizes = [[4, 4]]
