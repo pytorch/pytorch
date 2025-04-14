@@ -120,7 +120,7 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
     if (
         isinstance(obj, torch.nn.Module)
         and config.inline_inbuilt_nn_modules
-        and not config.install_params_as_graph_attr
+        and (not is_export or not config.install_params_as_graph_attr)
     ):
         return True
 

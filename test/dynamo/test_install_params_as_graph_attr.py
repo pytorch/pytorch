@@ -232,9 +232,9 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
 
     def test_transformer(self) -> None:
         # needs eval mode - must disable dropout
-        transformer = torch.nn.Transformer(d_model=64).eval()
-        src = torch.rand(10, 32, 64)
-        tgt = torch.rand(20, 32, 64)
+        transformer = torch.nn.Transformer(d_model=32).eval()
+        src = torch.rand(10, 32, 32)
+        tgt = torch.rand(20, 32, 32)
 
         self.check_num_inputs_and_equality_no_install(transformer, 186, (src, tgt))
         self.check_num_inputs_and_equality_install(transformer, 2, (src, tgt))
@@ -389,9 +389,9 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         self.check_export_matches_expectation(test_fn, 1, (tensor,))
 
     def test_transformer(self) -> None:
-        transformer = torch.nn.Transformer(d_model=64).eval()
-        src = torch.rand(10, 32, 64)
-        tgt = torch.rand(20, 32, 64)
+        transformer = torch.nn.Transformer(d_model=32).eval()
+        src = torch.rand(10, 32, 32)
+        tgt = torch.rand(20, 32, 32)
 
         self.check_export_matches_expectation(transformer, 2, (src, tgt))
 
@@ -457,9 +457,31 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         # Now, param and buf are input so should not be inlined
         self.check_export_matches_expectation(test_linear_explicit, 3, (x, param, buf))
 
-    # NOTE: Previously, this was not supported, because modifying state
-    # but with these changes this should be enabled
-    @unittest.expectedFailure  # TODO: Investigate how to fix
+    def test_global_tensor_export(self) -> None:
+        global x
+        x = torch.randn((5, 5))
+
+        def fn(a: torch.Tensor) -> torch.Tensor:
+            return a + x
+
+        inp = torch.randn(5, 5)
+        self.check_export_matches_expectation(fn, 1, (inp,))
+
+    # NOTE; the `should_install_graph_params` does not include 
+    # nonlocal, only globals and params/bufs so as of now this
+    # should fail; we may want to support other sources in the 
+    # near future though so let's leave this testcase for now
+    @unittest.expectedFailure
+    def test_nonlocal_closure(self) -> None:
+        x = torch.randn((5, 5))
+        
+        def fn(a: torch.Tensor) -> torch.Tensor:
+            return a + x
+        
+        inp = torch.randn((5, 5))
+        self.check_export_matches_expectation(fn, 1, (inp,))
+
+    
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_modify_net_state(self) -> None:
         class Mod(torch.nn.Module):
@@ -474,10 +496,14 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
                 return self.linear(x) + self.a
 
         mod = Mod()
-        ep = torch.export.export(mod, (torch.rand(5, 5),), strict=True)
-
-        print(ep)
-
+        inp = torch.randn(5, 5)
+        # NOTE: since this fn modifies original class, 
+        # need to get reference value before tracing
+        res = mod(inp)
+        mod.a = None
+        ep = torch._dynamo.export(mod)
+        graph, _ = ep(inp)
+        self.assertEqual(graph(inp), res)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
