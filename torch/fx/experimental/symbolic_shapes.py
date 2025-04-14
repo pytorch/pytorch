@@ -143,11 +143,14 @@ __all__ = [
     "CURRENT_NODE_KEY",
     "has_free_symbols",
     "has_free_unbacked_symbols",
+    "sym_and",
     "sym_eq",
+    "sym_or",
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
     "SubclassSymbolicContext",
+    "SymIntSymbolicContext",
     "statically_known_true",
     "guard_size_oblivious",
     "check_consistent",
@@ -1195,20 +1198,30 @@ def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return False
+    if torch.fx.experimental._config.backed_size_oblivious:
+        return statically_known_true(a)
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    try:
-        return bool(guard_bool(a))
-    except GuardOnDataDependentSymNode:
-        return True
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval(a)
+        if result is not None:
+            return result
+        else:
+            return True
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1253,6 +1266,23 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
+def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+            else:
+                return None
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+            return None
+    assert isinstance(x, bool)
+    return x
+
+
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
@@ -1264,17 +1294,25 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    if isinstance(x, SymBool):
-        expr = x.node.expr
-        shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-        except Exception:
-            log.debug("Could not simplify %s", expr)
+    result = _static_eval(x)
+    if result is None:
         return False
-    assert isinstance(x, bool)
+    else:
+        return result
+
+
+def sym_and(
+    x: Union[bool, SymBool], *others: Union[bool, SymBool]
+) -> Union[bool, SymBool]:
+    """
+    and, but for symbolic expressions, without bool casting.
+    """
+    assert isinstance(x, (bool, SymBool))
+    if len(others) == 0:
+        return x
+    for y in others:
+        assert isinstance(y, (bool, SymBool))
+        x = operator.and_(x, y)
     return x
 
 
@@ -1293,6 +1331,21 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         return x == y
     else:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
+
+
+def sym_or(
+    x: Union[bool, SymBool], *others: Union[bool, SymBool]
+) -> Union[bool, SymBool]:
+    """
+    or, but for symbolic expressions, without bool casting.
+    """
+    assert isinstance(x, (bool, SymBool))
+    if len(others) == 0:
+        return x
+    for y in others:
+        assert isinstance(y, (bool, SymBool))
+        x = operator.or_(x, y)
+    return x
 
 
 def guard_scalar(
@@ -1811,6 +1864,15 @@ class SymbolicContext:
     another version of this that says "use exactly these SymInts, don't
     allocate fresh symbols."
     """
+
+
+@dataclass(frozen=True)
+class SymIntSymbolicContext(SymbolicContext):
+    """
+    Data structure specifying any constraints on a SymInt input
+    """
+
+    constraint: DimConstraint
 
 
 @dataclass(frozen=True)
@@ -5099,7 +5161,10 @@ class ShapeEnv:
             if t is None:
                 continue
             if isinstance(t, (SymInt, int)):
-                track_symint(source, t)
+                constraint = (
+                    None if context is None else getattr(context, "constraint", None)
+                )
+                track_symint(source, t, constraint)
                 continue
             elif isinstance(t, (SymFloat, float)):
                 track_symfloat(source, t)

@@ -671,6 +671,13 @@ class BaseSchedulerNode:
         ):
             # todo: Calculate this - it's kinda annoying.
             return {}
+        if (
+            isinstance(self, ExternKernelSchedulerNode)
+            and isinstance(self.node, ir.FallbackKernel)
+            and self.node.op_overload
+            is torch._prims.rng_prims.graphsafe_run_with_rng_state
+        ):
+            return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -981,6 +988,7 @@ kernel_name_to_op = {
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
     "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
+    "extern_kernels._scaled_grouped_mm": torch.ops.aten._scaled_grouped_mm,
 }
 
 
@@ -3493,6 +3501,24 @@ class Scheduler:
             why("prologue fusion will not increase amount of bytes read in kernel")
             return False
 
+        # we want to avoid attempting to fuse predictably unprofitable prologues
+        # such as increasing the unaligned reads or writes.
+        # TODO - would be nice to generalize this, however, we would need more explicit
+        # knowledge of memory access patterns in the TritonTemplate in order to know
+        # the stride order to check alignment.
+        origins = tuple(
+            e.target
+            for n in prologue_node.get_nodes()
+            if n.node is not None
+            for e in n.node.get_origins()
+            if e.op == "call_function"
+        )
+        if origins == (torch.ops.aten.constant_pad_nd.default,):
+            why(
+                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
+            )
+            return False
+
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
@@ -3890,6 +3916,8 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
+                elif isinstance(inp, ir.GeneratorState):
+                    continue
                 else:
                     storage = inp.data
                     assert (
