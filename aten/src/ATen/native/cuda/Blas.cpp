@@ -444,36 +444,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #if defined(USE_ROCM)
     bool okay = true;
     if (is_float_output_with_half_input) {
-      AT_DISPATCH_REDUCED_FLOATING_TYPES(
-        scalar_type,
-        "addmm_cuda_lt",
-        [&] {
-          auto tuning_ctx = at::cuda::tunable::getTuningContext();
-          if (tuning_ctx->IsTunableOpEnabled()) {
-            TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
-          }
-          okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
-              args.transa == 't',
-              args.transb == 't',
-              args.m,
-              args.n,
-              args.k,
-              alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->const_data_ptr<scalar_t>(),
-              args.lda,
-              args.matb->const_data_ptr<scalar_t>(),
-              args.ldb,
-              // This condition is needed for mm case on ROCm for hipblasLt path.
-              // Passing the bias ptr as null to avoid accuracy issues for mm case.
-              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-              args.result->data_ptr<float>(),
-              args.result_ld,
-              activation_to_gemm_and_blas_arg(activation)
-          );
-        }
-      );
-    }
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+      TORCH_CHECK(false, "float output with half input is not enabled for ROCm");
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -487,26 +460,27 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
               activation_to_gemm_and_blas_arg(activation));
         }
-        else {
-            okay = at::cuda::blas::gemm_and_bias<scalar_t>(
-                args.transa == 't',
-                args.transb == 't',
-                args.m,
-                args.n,
-                args.k,
-                alpha.to<at::opmath_type<scalar_t>>(),
-                args.mata->const_data_ptr<scalar_t>(),
-                args.lda,
-                args.matb->const_data_ptr<scalar_t>(),
-                args.ldb,
-                // This condition is needed for mm case on ROCm for hipblasLt path.
-                // Passing the bias ptr as null to avoid accuracy issues for mm case.
-                (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-                args.result->data_ptr<scalar_t>(),
-                args.result_ld,
-                activation_to_gemm_and_blas_arg(activation)
-            );
-        }});
+
+        okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+            args.transa == 't',
+            args.transb == 't',
+            args.m,
+            args.n,
+            args.k,
+            alpha.to<at::opmath_type<scalar_t>>(),
+            args.mata->const_data_ptr<scalar_t>(),
+            args.lda,
+            args.matb->const_data_ptr<scalar_t>(),
+            args.ldb,
+            // This condition is needed for mm case on ROCm for hipblasLt path.
+            // Passing the bias ptr as null to avoid accuracy issues for mm case.
+            (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+            args.result->data_ptr<scalar_t>(),
+            args.result_ld,
+            activation_to_gemm_and_blas_arg(activation)
+        );
+      });
+    }
     if (!okay) {
       // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);

@@ -1705,8 +1705,8 @@ bool gemm_and_bias(
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
-    abType = CUDA_R_16F;
-    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+    abType = CUDA_R_16BF;
+    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
