@@ -244,6 +244,30 @@ class AttrSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class GenericAttrSource(ChainedSource):
+    member: str
+
+    def __post_init__(self):
+        assert self.base, "Can't construct an AttrSource without a valid base source"
+        if "." in self.member:
+            member_parts = self.member.split(".")
+            object.__setattr__(
+                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
+            )
+            object.__setattr__(self, "member", member_parts[-1])
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"object.__getattribute__({self.base.name()}, {self.member!r})"
+
+
+@dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """
     Conceptually, this class is `LocalSource` for cell objects implicitly
