@@ -1808,6 +1808,7 @@ def norm(  # noqa: F811
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
+        "xpu",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):

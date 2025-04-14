@@ -61,7 +61,7 @@ HAS_XPU = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU or HAS_MPS
+HAS_GPU = HAS_CUDA or HAS_XPU
 
 GPU_TYPE = get_gpu_type()
 
@@ -209,6 +209,12 @@ def maybe_skip_size_asserts(op):
         return torch._inductor.config.patch(size_asserts=False)
     else:
         return contextlib.nullcontext()
+
+def get_func_call() -> str:
+    return "void inductor_entry_impl(" if torch._inductor.config.cpp_wrapper else "def call("
+
+def get_kernel_launch() -> str:
+    return "call_triton_" if torch._inductor.config.cpp_wrapper else ".run("
 
 def clone_preserve_strides_offset(x, device=None):
     if not isinstance(x, torch.Tensor):
