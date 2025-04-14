@@ -119,6 +119,8 @@ class MetalExprPrinter(ExprPrinter_):
 
 
 class MetalOverrides(OpOverrides):
+    """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
+
     @staticmethod
     def to_dtype(
         x: CSEVariable,
@@ -458,6 +460,8 @@ MetalOverrides._initialize_pointwise_overrides("mps")
 
 
 class MetalKernel(SIMDKernel):
+    """Implement Metal codegen based on the SIMDKernel abstraction"""
+
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
@@ -510,19 +514,22 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: torch.dtype,
+        dtype: Union[str | torch.dtype],
         elem_count: Optional[int] = None,
         default_value: Optional[Any] = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
+        if isinstance(dtype, torch.dtype):
+            dtype = self.dtype_to_str(dtype)
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         var_def = "threadgroup " if is_threadgroup else ""
-        var_def += f"{self.dtype_to_str(dtype)} {var_name}"
+        var_def += f"{dtype} {var_name}"
         if elem_count:
             var_def += f"[{elem_count}]"
         if default_value is not None:
+            assert not is_threadgroup, "Thread group var can not have default value"
             var_def += f" = {default_value}"
         self.indexing_code.writeline(var_def + self.suffix)
         return var
@@ -534,7 +541,15 @@ class MetalKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        """Codegen a reduction operation"""
+        """Codegen a reduction operation.
+        Only sum and prod operations are somewhat reasonable optimized"""
+        # Return cached reduction
+        assert self.inside_reduction
+        assert not self._load_mask
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
         # Establish reduction buffer size and index expression
         reduction_idx = ""
         acc_buf_size = 1
@@ -629,18 +644,52 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            assert not self.multistage_reduction, (
-                f"Multistage reduction not yet supported for {reduction_type}"
+            if not self.multistage_reduction:
+                acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
+                self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
+                wf_res = self.cse.generate(
+                    self.compute,
+                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                )
+                self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
+                    (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
+                )
+                return result_tuple
+            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_thread_var = f"{acc_buf}[{reduction_idx}]"
+            self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
+            self.compute.writeline(
+                f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, float3({value}, 0.0, 1.0));"
             )
-            acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
-            self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
             wf_res = self.cse.generate(
-                self.compute,
+                self.stores,
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
+            )
+            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
+            )
+            return result_tuple
+        if reduction_type == "welford_combine":
+            assert isinstance(value, tuple), "Input to welford combine must be tuple"
+            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_thread_var = f"{acc_buf}[{reduction_idx}]"
+            inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
+            self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
+            if self.multistage_reduction:
+                self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
+                self.compute.writeline(
+                    f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, {inp_value});"
+                )
+            else:
+                self.compute.writeline(f"{acc_thread_var} = {inp_value};")
+            wf_res = self.cse.generate(
+                self.stores if self.multistage_reduction else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
-            return OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
+            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
             )
+            return result_tuple
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:

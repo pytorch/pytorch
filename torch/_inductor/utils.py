@@ -37,13 +37,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeGuard,
-)
 from unittest import mock
 
 import sympy
@@ -52,6 +45,13 @@ import torch
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
+from typing_extensions import (
+    Concatenate,
+    dataclass_transform,
+    ParamSpec,
+    Self,
+    TypeGuard,
+)
 
 
 if TYPE_CHECKING:
@@ -301,9 +301,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
-    )
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return runtime_ceildiv(numer, denom)
 
 
@@ -1275,7 +1275,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 60  # 3080
+    min_sms = 16 if device.type == "xpu" else 58  # L4 Ada
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1440,9 +1440,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> tuple[
-    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
-]:
+def try_import_ck_lib() -> (
+    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
+):
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1649,8 +1649,8 @@ def run_and_get_code(
 
 
 def run_and_get_kernels(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> tuple[Any, list[str]]:
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> tuple[_T, list[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1667,7 +1667,7 @@ def run_fw_bw_and_get_code(fn: Callable[..., Any]) -> tuple[Any, list[str]]:
     return run_and_get_code(run_with_backward)
 
 
-def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
+def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str]:
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
@@ -1711,26 +1711,28 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
     return source_codes
 
 
-def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
-def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+def run_and_get_triton_code(
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
 def run_and_get_graph_lowering(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[Any, list[GraphLowering]]:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.output_code import CompiledFxGraph
@@ -1851,9 +1853,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(val, sympy.Expr), (
-        "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    )
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -2386,8 +2388,8 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
 
 
 def run_and_get_cpp_code(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> tuple[Any, str]:
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> tuple[_T, str]:
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.
@@ -2431,9 +2433,9 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[list[InputType]], Any],
+    model: Callable[[list[InputType]], _T],
     inputs_to_check: Sequence[int],
-) -> Callable[[list[InputType]], Any]:
+) -> Callable[[list[InputType]], _T]:
     if len(inputs_to_check) == 0:
         return model
 

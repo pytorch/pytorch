@@ -21,6 +21,7 @@ from torch._higher_order_ops.flex_attention import (
 from torch._higher_order_ops.foreach_map import _foreach_map, foreach_map
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+from torch._higher_order_ops.map import map
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
@@ -64,4 +65,5 @@ __all__ = [
     "wrap_activation_checkpoint",
     "strict_mode",
     "aoti_call_delegate",
+    "map",
 ]
