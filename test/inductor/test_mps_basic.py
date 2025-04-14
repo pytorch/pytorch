@@ -242,6 +242,7 @@ for test_name in [
     "test_views6",
     "test_views7",
     "test_zero_dim_reductions",
+    "test_zero_element_mutation",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
