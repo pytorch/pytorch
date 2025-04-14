@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
+from torch.fx.node import Target
 
 
 # Below is an implementation of generating FunctionSchema from example values.
@@ -155,7 +156,7 @@ class CFunctionSchemaGen:
 
 
 def find_hop_schema(
-    gm: torch.fx.GraphModule, target: Any
+    gm: torch.fx.GraphModule, target: Target
 ) -> list[torch._C.FunctionSchema]:
     import torch.utils._pytree as pytree
 
