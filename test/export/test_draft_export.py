@@ -243,6 +243,15 @@ class TestDraftExport(TestCase):
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
 
+        # the fake tensors on node.meta["val"] should have real_tensor
+        gm = ep.module()
+        tensors = [
+            node.meta.get("val").real_tensor
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertTrue(all(isinstance(t, torch.Tensor) for t in tensors))
+
     def test_complex_data_dependent_expr(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
