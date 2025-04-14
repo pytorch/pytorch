@@ -127,7 +127,7 @@ def _enqueue(queue, item):
 
 def can_reach_amplified_node(graph, amplifier_node, is_fwd):
     """
-    A amplified node means a node with the same numel as `amplified_node`
+    A amplified node means a node with the same numel as `amplifier_node`
     """
     filter_obj: dict[Node, bool] = {}
     nodelist = reversed(graph.nodes) if is_fwd else graph.nodes
@@ -137,6 +137,9 @@ def can_reach_amplified_node(graph, amplifier_node, is_fwd):
         reach = False
         if node.op == "output":
             # output node does not have a meta['val']
+            reach = False
+
+        elif get_fake_tensor_from_node_arg(node) is None:
             reach = False
 
         # for the back propagation, we should continue propagate if we can
