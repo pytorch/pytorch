@@ -250,7 +250,7 @@ _CT = TypeVar("_CT")
 class CompileCounterWithBackend:
     def __init__(
         self,
-        backend: Union[str | Callable[_CP, _CT]],
+        backend: Union[str, Callable[_CP, _CT]],
         mode: Optional[str] = None,
         options: Optional[dict[str, Union[str, int, bool]]] = None,
         dynamic: Optional[bool] = None,
