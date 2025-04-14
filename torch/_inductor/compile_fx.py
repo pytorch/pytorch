@@ -70,7 +70,7 @@ from torch._inductor.output_code import (
     index_expanded_dims,
     OutputCode,
 )
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -620,10 +620,7 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-
-        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
-            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
-
+        stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -755,8 +752,9 @@ def _compile_fx_inner(
                 )
                 assert mb_compiled_graph is not None
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
-                cache_key = key_info[0]
+                cache_key, debug_lines = key_info
                 mb_compiled_graph._fx_graph_cache_key = cache_key
+                mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
                 (
                     triton_bundle,
                     triton_bundler_meta,
@@ -787,8 +785,9 @@ def _compile_fx_inner(
             assert cache_info["cache_state"] == "hit"
             assert mb_compiled_graph is not None
             assert key_info is not None
-            cache_key = key_info[0]
+            (cache_key, debug_lines) = key_info
             mb_compiled_graph._fx_graph_cache_key = cache_key
+            mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
         assert mb_compiled_graph is not None
         compiled_graph = mb_compiled_graph

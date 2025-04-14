@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +21,8 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
+
+CUTLASS_OPERATION_KIND: str = "gemm"
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -148,8 +151,8 @@ class CUTLASSArgs:
     architectures: Optional[str] = None
     cuda_version: Optional[str] = None
     instantiation_level: Optional[str] = None
+    operations: Optional[str] = None
 
-    operations = "all"
     build_dir = ""
     curr_build_dir = ""
     generator_target = ""
@@ -173,7 +176,7 @@ class CUTLASSArgs:
 
 @clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
-def _gen_ops_cached(arch, version) -> list[Any]:
+def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -189,16 +192,18 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             arch,
             version,
         )
-        return []
+        return {}
     arch = _normalize_cuda_arch(arch)
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
+        operations=CUTLASS_OPERATION_KIND,
     )
     manifest = cutlass_manifest.Manifest(args)
 
+    start_time = time.time()
     if arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
@@ -215,10 +220,16 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
+
+    log.info(
+        "CUTLASS library generated a dict of %d operation kinds in %.2f seconds",
+        len(manifest.operations),
+        time.time() - start_time,
+    )
     return manifest.operations
 
 
-def gen_ops() -> list[Any]:
+def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
