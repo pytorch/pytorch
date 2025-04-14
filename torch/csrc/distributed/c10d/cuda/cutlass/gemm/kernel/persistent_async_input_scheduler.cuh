@@ -138,6 +138,20 @@ public:
   using RasterOrderOptions = typename Params::RasterOrderOptions;
   static constexpr bool IsDynamicPersistent = false;
 
+  using Pipeline = PipelineEmpty;
+  using PipelineStorage = typename Pipeline::SharedStorage;
+  using ThrottlePipeline = PipelineEmpty;
+  using ThrottlePipelineStorage = typename ThrottlePipeline::SharedStorage;
+
+  struct CLCResponse {};
+
+  class SharedStorage {
+  public:
+    CUTLASS_DEVICE PipelineStorage pipeline() { return PipelineStorage{}; }
+    CUTLASS_DEVICE ThrottlePipelineStorage throttle_pipeline() { return ThrottlePipelineStorage{}; }
+    CUTLASS_DEVICE CLCResponse* data() { return nullptr; }
+  };
+
 public:
   // ==============================
   // CUSTOM LOGIC BEGIN
@@ -410,6 +424,17 @@ public:
     return cute::make_tuple(get_current_work(), true);
   }
 
+  // Kernel helper function to get next work tile
+  template <class TileSchedulerPipeline, class TileSchedulerPipelineState>
+  CUTLASS_DEVICE
+  auto
+  fetch_next_work(
+      WorkTileInfo work_tile_info,
+      TileSchedulerPipeline& scheduler_pipeline,
+      TileSchedulerPipelineState scheduler_pipe_consumer_state) {
+    return fetch_next_work(work_tile_info);
+  }
+
   // Given the inputs, computes the total number of output blocks over which this problem will compute.
   // Note that this is only the logical size of our grid, not the physical grid we will actually launch.
   template<class ProblemShapeMNKL, class TileShape, class AtomThrShape, class ClusterShape>
@@ -655,13 +680,17 @@ public:
 template <
   class KernelSchedule,
   class TileShape,
-  class ClusterShape
+  class ClusterShape,
+  uint32_t SchedulerPipelineStageCount,
+  class ProblemShapeType
 >
 struct TileSchedulerSelector<
   PersistentAsyncInputScheduler<KernelSchedule>,
   arch::Sm90,
   TileShape,
-  ClusterShape
+  ClusterShape,
+  SchedulerPipelineStageCount,
+  ProblemShapeType
   > {
   using Scheduler = PersistentTileSchedulerSm90AsyncInput;
 };
