@@ -161,7 +161,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.cuda.Stream,
             torch.cuda.Event,
             torch.Event,
-            torch.Stream
+            torch.Stream,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
