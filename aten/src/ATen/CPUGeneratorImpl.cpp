@@ -1,7 +1,12 @@
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <algorithm>
+
+#if AT_MKL_ENABLED()
+#include <ATen/mklrng/MKLGeneratorImpl.h>
+#endif
 
 namespace at {
 
@@ -42,6 +47,11 @@ struct CPUGeneratorImplState {
   CPUGeneratorImplStateLegacy legacy_pod;
   float next_float_normal_sample;
   bool is_next_float_normal_sample_valid;
+#if AT_MKL_ENABLED()
+  uint64_t mkl_seed;
+  uint64_t mkl_offset;
+  bool mkl_lock_seed;
+#endif
 };
 
 /**
@@ -168,6 +178,15 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   this->next_double_normal_sample_ = legacy_pod->normal_is_valid
       ? std::optional<double>(legacy_pod->normal_y)
       : std::optional<double>();
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(rng_state->mkl_seed);
+    mkl_gen->skip_ahead(rng_state->mkl_offset);
+    mkl_gen->set_lock_seed(rng_state->mkl_lock_seed);
+  }
+#endif
 }
 
 /**
@@ -205,6 +224,16 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
     accum_state->is_next_float_normal_sample_valid = true;
     accum_state->next_float_normal_sample = *(this->next_float_normal_sample_);
   }
+
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    accum_state->mkl_seed = mkl_gen->current_seed();
+    accum_state->mkl_offset = mkl_gen->get_offset();
+    accum_state->mkl_lock_seed = mkl_gen->get_lock_seed();
+  }
+#endif
 
   memcpy(rng_state, accum_state.get(), size);
   return state_tensor.getIntrusivePtr();
