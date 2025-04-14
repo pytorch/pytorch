@@ -117,9 +117,6 @@ bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_de
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
-# Unsafe way to skip dynamic shape guards to get faster cache load
-unsafe_skip_cache_dynamic_shape_guards: bool = False
-
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
