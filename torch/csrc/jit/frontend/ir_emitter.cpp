@@ -624,11 +624,6 @@ static Value* materializeConstant(
   return new_constant;
 }
 
-inline bool isSupportedListElementType(const TypePtr& type) {
-  return type->isSubtypeOf(*TensorType::get()) ||
-      type->isSubtypeOf(*NumberType::get());
-}
-
 // Information for each def being emitted.
 // Defs can be nested to support closures so we need a stack of this information
 // Currently records information about the functions return type.

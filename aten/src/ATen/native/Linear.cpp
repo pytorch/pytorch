@@ -5,6 +5,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -831,6 +832,14 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   auto output_device = result.device();
   auto input1_device = input1.device();
   auto input2_device = input2.device();
+
+  if(result.defined()) {
+    TORCH_CHECK(
+      !(result.requires_grad() && at::GradMode::is_enabled() && result.sizes() != result_tmp.sizes()),
+      "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
+      "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output."
+    );
+  }
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
     (output_device == input1_device) && (input1_device == input2_device),

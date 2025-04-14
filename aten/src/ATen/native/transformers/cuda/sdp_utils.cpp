@@ -730,6 +730,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto ck_mem_efficient_dtypes =
+      c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
@@ -788,6 +790,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
       return false;
     }
+  }
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    return check_tensor_dtype(params, ck_mem_efficient_dtypes, debug);
   }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else
