@@ -120,7 +120,11 @@ if(INTERN_BUILD_ATEN_OPS)
       "89;90a;100a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
-      "89;90a")
+      "90a")
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
+      "90a")
+
   endif()
 
   set(GEN_ROCM_FLAG)

@@ -372,7 +372,7 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
   });
 }
 
-AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qconv_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,

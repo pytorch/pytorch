@@ -149,7 +149,12 @@ class Verifier(metaclass=_VerifierMeta):
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
+        return (
+            torch.fx.GraphModule,
+            torch.nn.parameter.Parameter,
+            torch.Tensor,  # for buffer and constant tensor
+            torch.utils._pytree.TreeSpec
+        )
 
     def check_valid_op(self, op):
         pass
@@ -276,7 +281,7 @@ class Verifier(metaclass=_VerifierMeta):
 
                     if not isinstance(attr, _allowed_getattr_types(is_toplevel_gm)):
                         raise SpecViolationError(
-                            f"Invalid get_attr type {type(attr)}. \n"
+                            f"Invalid get_attr type {type(attr)} on target {node.target}. \n"
                             f"Valid get_attr types: {_allowed_getattr_types(is_toplevel_gm)}"
                         )
 
