@@ -540,13 +540,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
+        self.force_apply_to_var_sequence(tx, result.append)
+        return result
+
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
         while True:
             try:
-                result.append(self.next_variable(tx))
+                fn(self.next_variable(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
-        return result
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
@@ -1632,6 +1635,8 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
