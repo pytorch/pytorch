@@ -259,6 +259,8 @@ def build_collectives(
             )
 
             if match and mismatch[pg_name] == 0:
+                # We treat coalesced collectives as a single collective.
+                # TODO: we need to surface a merged collective info like input/output sizes to users.
                 collectives.append(
                     match_record.entry_state.to_collective(len(collectives))
                 )
@@ -276,6 +278,7 @@ def build_collectives(
                         )
                     )
                 )
+                # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
                 for i, k in idx_map.items():
                     for _ in range(1, num_coalesced_entries):
                         all_entries[i].pop(k)
