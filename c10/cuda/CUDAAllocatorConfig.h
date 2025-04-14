@@ -9,8 +9,6 @@ namespace c10::cuda::CUDACachingAllocator {
 // Keep this for backwards compatibility
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
-  using c10::CachingAllocator::getAllocatorConfig;
-
   static size_t max_split_size() {
     return getAllocatorConfig().max_split_size();
   }
@@ -69,6 +67,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
  private:
   CUDAAllocatorConfig() = default;
+
+  c10::CachingAllocator::AllocatorConfig getAllocatorConfig() {
+    return c10::CachingAllocator::getAllocatorConfig();
+  }
 };
 
 // Keep this for backwards compatibility
