@@ -252,7 +252,6 @@ def build_collectives(
                 dumps_ranks=dumps_ranks,
                 version=version,
                 collectives=collectives,
-                nccl_calls=nccl_calls,
                 match_record=match_record,
             )
 

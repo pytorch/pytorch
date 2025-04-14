@@ -17,7 +17,6 @@ from tools.flight_recorder.components.types import (
     MatchState,
     MatchStateRecord,
     Membership,
-    NCCLCall,
     Op,
     P2P,
 )
@@ -66,7 +65,6 @@ def match_coalesced_groups(
     dumps_ranks: set[int],
     version: str,
     collectives: list[Collective],
-    nccl_calls: list[NCCLCall],
     match_record: MatchStateRecord,
 ) -> bool:
     """
