@@ -125,12 +125,12 @@ class TestLinalg(TestCase):
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
 
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
-        super(self.__class__, self).tearDown()
+        super().tearDown()
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
