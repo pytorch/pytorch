@@ -4,16 +4,12 @@ import warnings
 from collections.abc import Sequence
 from typing import Optional, Union
 
-import torch
+import torch.cuda
 
 
 __all__ = ["all_reduce", "reduce", "broadcast", "all_gather", "reduce_scatter"]
 
-
-# ncclRedOp_t
-SUM = 0  # ncclSum
-
-VALID_OPS = {SUM}
+SUM = 0  # ncclRedOp_t
 
 
 def is_available(tensors):
@@ -73,17 +69,7 @@ def _check_sequence_type(inputs: Union[torch.Tensor, Sequence[torch.Tensor]]) ->
         raise TypeError("Inputs should be a collection of tensors")
 
 
-def _check_op_type(op: int):
-    if not isinstance(op, int):
-        raise TypeError(f"Expected op type int, got {type(op).__name__}")
-    if op not in VALID_OPS:
-        raise ValueError(
-            f"Invalid op: {op}. Valid options are {', '.join(map(str, VALID_OPS))}"
-        )
-
-
 def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
-    _check_op_type(op)
     _check_sequence_type(inputs)
     if outputs is None:
         outputs = inputs
@@ -103,7 +89,6 @@ def reduce(
     *,
     outputs: Optional[Sequence[torch.Tensor]] = None,
 ) -> None:
-    _check_op_type(op)
     _check_sequence_type(inputs)
     _output: torch.Tensor
     if outputs is not None:
@@ -162,7 +147,6 @@ def reduce_scatter(
     streams=None,
     comms=None,
 ) -> None:
-    _check_op_type(op)
     _check_sequence_type(inputs)
     _check_sequence_type(outputs)
     torch._C._nccl_reduce_scatter(inputs, outputs, op, streams, comms)
