@@ -3376,6 +3376,11 @@ def gather(x, dim, index, sparse_grad=False):
 
 @register_lowering(aten.embedding, type_promotion_kind=None)
 def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False):
+    if sparse:
+        return fallback_handler(aten.embedding.default)(
+            weight, indices, padding_idx, scale_grad_by_freq, sparse
+        )
+
     assert not sparse
     assert isinstance(weight, TensorBox)
     assert isinstance(indices, TensorBox)
