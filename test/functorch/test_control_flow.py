@@ -1436,10 +1436,7 @@ def forward(self, pred_1, x_1):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            # Should be
-            # RuntimeError, "Expect outputs of map only contains tensors"
-            torch._dynamo.exc.TorchRuntimeError,
-            ".*",
+            RuntimeError, r"Expect outputs of map only contains tensors or None\."
         ):
             control_flow.map(f1, x, y)
 
