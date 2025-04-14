@@ -12937,15 +12937,9 @@ class TestCommon(TestCase):
     def test_numpy_ref_mps(self, device, dtype, op):
         # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
         # does not support float64 Tensors.
-        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-        # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        inputs = (
-            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
-            else op.sample_inputs(device, dtype, set_seed=False)
-        )
+        inputs = op.reference_inputs(device, dtype, set_seed=False)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
