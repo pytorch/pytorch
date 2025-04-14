@@ -6744,10 +6744,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_guard_sym_node_fstring_when_used(self):
         def fn(x):
-            # assign fstring to a variable causes the fstring to be used,
-            # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            if "10" in f_str:
+                return x.sin()
+            return x.cos()
 
         guard_failure = None
 
