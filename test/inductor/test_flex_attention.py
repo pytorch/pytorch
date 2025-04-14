@@ -2238,7 +2238,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
-        self.run_test(_rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim, device=device)
+        self.run_test(
+            _rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim, device=device
+        )
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
@@ -3858,6 +3860,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_validate_small_embedding_size_error_message(self):
         # eager support for small embedding size
         q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]

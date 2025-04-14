@@ -1065,7 +1065,9 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
-    def test_head_dependent_mask_mod(self, device, dtype: torch.dtype, score_mod, head_dims):
+    def test_head_dependent_mask_mod(
+        self, device, dtype: torch.dtype, score_mod, head_dims
+    ):
         Hq, Hkv = head_dims
         assert Hq % Hkv == 0
 
@@ -1086,8 +1088,12 @@ class TestFlexDecoding(InductorTestCase):
 
         mask_mod = head_attention_mod(Hq)
         mask = create_block_mask(mask_mod, 1, Hq, 1, S, device=device)
-        self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, block_mask=mask, device=device)
-        self.run_test_with_paged_attention(score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device)
+        self.run_test(
+            score_mod, dtype, Q_H=Hq, KV_H=Hkv, block_mask=mask, device=device
+        )
+        self.run_test_with_paged_attention(
+            score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
