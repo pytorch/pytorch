@@ -115,15 +115,6 @@ class TestFullyShard2DTraining(FSDPTest):
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
 
-    # TODO: remove this test when uneven sharding is supported for FSDP+TP
-    @skip_if_lt_x_gpu(2)
-    def test_2d_uneven_shard_raise_error(self):
-        global_mesh = self.init_global_mesh()
-        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-        model = MLPStack(3)
-        with self.assertRaisesRegex(NotImplementedError, "uneven sharding"):
-            model.parallelize(tp_mesh, dp_mesh, False)
-
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     def test_train_parity_2d_mlp(self):
@@ -132,9 +123,7 @@ class TestFullyShard2DTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 16, 17],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
         )

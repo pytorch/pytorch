@@ -585,14 +585,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
             func(args)
 
 
-"""
-A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
-directly outside of it. For passing around internal state representations of this object,
-prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
-"""
-
-
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
@@ -639,6 +631,14 @@ class GuardsSet:
         }
 
 
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
+
+
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
@@ -672,12 +672,19 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_identifiers: dict[str, str] = {}
+        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
@@ -696,6 +703,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
+        self.lazy_bwd_cache[identifier] = gmod
+
+    def get_lazy_bwd_entry(self, identifier: str):
+        return self.lazy_bwd_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:

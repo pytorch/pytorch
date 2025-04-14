@@ -1709,34 +1709,6 @@ class InstructionTranslatorBase(
         self.popn(2)
         self.push(None)
 
-    def CALL_FINALLY(self, inst):
-        """
-        pushes the address of the next instruction onto the stack and increments
-        bytecode counter by delta
-        """
-        # Python 3.8 only
-        addr = self.indexof[self.next_instruction]
-        self.push(ConstantVariable.create(addr))
-        self.jump(inst)
-
-    def END_FINALLY(self, inst):
-        # Python 3.8 only
-        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
-        tos = self.pop()
-        if isinstance(tos, ConstantVariable):
-            self.instruction_pointer = tos.as_python_constant()
-        else:
-            pass
-
-    def POP_FINALLY(self, inst):
-        # Python 3.8 only
-        preserve_tos = inst.argval
-        if preserve_tos:
-            tos = self.pop()
-        _ = self.pop()
-        if preserve_tos:
-            self.push(tos)  # type: ignore[possibly-undefined]
-
     def FOR_ITER(self, inst):
         it = self.pop().realize()
         try:
@@ -1757,18 +1729,22 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, val) -> NoReturn:
-        # User can raise exception in 2 ways
-        #   1) raise exception type - raise NotImplementedError
-        #   2) raise execption instance - raise NotImplemetedError("foo")
-
-        # 1) when user raises exception type
+    def _create_exception_type(self, val):
         if isinstance(
             val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
         ):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+        return val
+
+    def _raise_exception_variable(self, val) -> NoReturn:
+        # User can raise exception in 2 ways
+        #   1) raise exception type - raise NotImplementedError
+        #   2) raise execption instance - raise NotImplemetedError("foo")
+
+        # 1) when user raises exception type
+        val = self._create_exception_type(val)
 
         # Handle https://peps.python.org/pep-0479/
         # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
@@ -1795,6 +1771,10 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
+            if not len(self.exn_vt_stack):
+                msg = ConstantVariable("No active exception to reraise")
+                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
             assert len(self.exn_vt_stack)
@@ -1806,24 +1786,16 @@ class InstructionTranslatorBase(
             val = self.stack[-1]
             self._raise_exception_variable(val)
         else:
-            # raise .. from None
+            # raise .. from ...
             from_vt = self.pop()
-            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
-                val = self.pop()
-                try:
-                    self._raise_exception_variable(val)
-                finally:
-                    # Update __cause__/__supppress_context__ in the raised exception
-                    curr_exc = self.exn_vt_stack.get_current_exception()
-                    curr_exc.call_setattr(
-                        self, ConstantVariable("__cause__"), ConstantVariable(None)
-                    )
-            unimplemented_v2(
-                gb_type="Re-raise with 2 arguments",
-                context=str(from_vt),
-                explanation="Dynamo does not support `raise ... from [not-None]`",
-                hints=[],
-            )
+            val = self.pop()
+            try:
+                self._raise_exception_variable(val)
+            finally:
+                # Update __cause__/__supppress_context__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                cause = self._create_exception_type(from_vt)
+                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)
 
     def CLEANUP_THROW(self, inst):
         # https://github.com/python/cpython/pull/96010

@@ -97,6 +97,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -1220,12 +1221,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
                         )
 
-                    from .builder import SourcelessUserDefinedObjectBuilder
-
-                    # This means that we are calling a method of some other object here.
-                    object_vt = SourcelessUserDefinedObjectBuilder.create(
-                        tx, dynamic_subobj.__self__
+                    # Use the __self__ attribute of the method to find the
+                    # source of the new self object.
+                    self_source = None
+                    if source is not None:
+                        self_source = AttrSource(source, "__self__")
+                    object_vt = VariableTracker.build(
+                        tx, dynamic_subobj.__self__, self_source
                     )
+
                     return variables.UserMethodVariable(
                         dynamic_subobj.__func__, object_vt
                     )
@@ -1507,7 +1511,7 @@ class RemovableHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
             codegen.add_push_null(

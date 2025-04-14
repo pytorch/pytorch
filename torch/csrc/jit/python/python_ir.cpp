@@ -26,13 +26,13 @@
 namespace torch::jit {
 
 // Controls whether graph source ranges are printed by default
-bool global_print_source_ranges = true;
+static bool global_print_source_ranges = true;
 
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
 
-std::string getPythonName(const PyObject* obj_) {
+static std::string getPythonName(const PyObject* obj_) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
@@ -41,7 +41,7 @@ std::string getPythonName(const PyObject* obj_) {
   return py::str(v);
 }
 
-std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
+static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
@@ -81,7 +81,7 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
-Node* findNode(
+static Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -101,7 +101,7 @@ Node* findNode(
   return nullptr;
 }
 
-Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+static Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
 }

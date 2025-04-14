@@ -333,13 +333,14 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
+template <bool requires_same_num_heads=true>
 inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
   const auto q_num_heads = params.query.sym_size(-3);
   const auto k_num_heads = params.key.sym_size(-3);
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (!(same_kv_heads)){
+  if (requires_same_num_heads && !(same_kv_heads)){
     if (debug) {
       TORCH_WARN(
           "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
@@ -355,10 +356,10 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   }
   // Check if grouped query attention is supported and validate the number of
   // heads
-  if (q_num_heads % k_num_heads != 0) {
+  if (q_num_heads % k_num_heads != 0 || (!requires_same_num_heads && (q_num_heads % v_num_heads != 0))) {
     if (debug) {
       TORCH_WARN(
-          "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
+          "The number of heads in key/value must divide number of heads in query.",
           "Got input Key sizes(): ",
           params.key.sym_size(-3),
           ", Value sizes(): ",
@@ -372,7 +373,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   return true;
 }
 
-template <bool supports_gqa>
+template <bool supports_gqa, bool requires_same_num_heads=true>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -407,9 +408,10 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   }
 
   if(params.enable_gqa && supports_gqa){
-    return check_grouped_query_attention(params, debug);
+    return check_grouped_query_attention<requires_same_num_heads>(params, debug);
   }
 
+  // same num heads condition for non-gqa case
   if (!same_num_heads){
     if (debug) {
       TORCH_WARN(
