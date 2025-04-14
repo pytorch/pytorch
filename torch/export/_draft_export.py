@@ -11,10 +11,11 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._logging._internal
 import torch._logging.structured
+import torch.utils._pytree as pytree
 from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
 from torch.export import ExportedProgram
 from torch.export._trace import _export
-from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
+from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
 
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ log = logging.getLogger(__name__)
 class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
-    CONSTRAINT_VIOLATION_ERROR = 3
+    GUARD_ADDED = 3
     MISMATCHED_FAKE_KERNEL = 4
 
     def __str__(self) -> str:
@@ -94,17 +95,19 @@ class FailureReport:
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
 """  # noqa: B950
 
-        elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
+        elif self.failure_type == FailureType.GUARD_ADDED:
             locals_info = (
                 prettify_frame_locals(**self.data["frame_locals"])
                 if self.data["frame_locals"]
                 else ""
             )
-            return f"""Constraint violation error.
-    The specified input dynamic_shapes spec was found to be incorrect during tracing.
+            return f"""Guard Added.
+    A guard was added during tracing, which might've resulted in some incorrect
+    tracing or constraint violation error.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+    This occurred at the following stacktrace: {prettify_stack(self.data["user_stack"], str_to_filename)}:
         {locals_info}
+    And the following framework stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}\n
     Because of this, we have modified the dynamic shapes structure to be the
     following. You can also use torch.export.Dim.AUTO instead to specify your
     dynamic shapes, and we will automatically infer the dynamism for you.
@@ -215,6 +218,8 @@ class LogRecord:
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
         elif key == "propagate_real_tensors_provenance":
+            return hash((key, json.dumps(data["user_stack"])))
+        elif key == "guard_added":
             return hash((key, json.dumps(data["user_stack"])))
         elif key == "create_unbacked_symbol":
             return hash((key, json.dumps(data["user_stack"])))
@@ -377,10 +382,16 @@ def draft_export(
                 pre_dispatch=pre_dispatch,
                 preserve_module_call_signature=preserve_module_call_signature,
             )
-        except torch._dynamo.exc.UserError as exc:
-            new_shapes = refine_dynamic_shapes_from_suggested_fixes(
-                exc.msg, dynamic_shapes
-            )
+        except torch._dynamo.exc.UserError:
+
+            def convert_dim_to_auto(dim: Any) -> Any:
+                if isinstance(dim, Dim):
+                    return Dim.AUTO(min=dim.min, max=dim.max)
+                elif isinstance(dim, _DimHint) and dim.type == _DimHintType.DYNAMIC:
+                    return Dim.AUTO(min=dim.min, max=dim.max)
+                return dim
+
+            new_shapes = pytree.tree_map(convert_dim_to_auto, dynamic_shapes)
             ep = _export(
                 mod,
                 args,
@@ -420,7 +431,7 @@ def draft_export(
                 if new_shapes is None:
                     continue
 
-                failure_type = FailureType.CONSTRAINT_VIOLATION_ERROR
+                failure_type = FailureType.GUARD_ADDED
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
