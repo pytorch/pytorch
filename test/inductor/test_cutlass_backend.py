@@ -135,6 +135,15 @@ class TestCutlassBackend(TestCase):
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
             torch.testing.assert_close(Y_compiled, Y)
 
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_import_cutlass(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+
+        import cutlass  # noqa: F401
+        import cutlass_library  # noqa: F401
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
