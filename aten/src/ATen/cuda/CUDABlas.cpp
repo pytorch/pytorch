@@ -574,8 +574,13 @@ void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::com
       reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
 }
 
-template <>
-void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+template <typename C_Dtype>
+void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
+  #ifdef USE_ROCM
+  if (std::is_same_v<C_Dtype, float>)
+    TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported for ROCm");
+  #endif
+
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -620,7 +625,7 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
       handle, opa, opb, m, n, k,
       alpha_ptr, a, CUDA_R_16F, lda, stridea,
       b, CUDA_R_16F, ldb, strideb, beta_ptr,
-      c, CUDA_R_16F, ldc, stridec,
+      c, std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16F, ldc, stridec,
       num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
@@ -635,69 +640,12 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 #endif // USE_ROCM
 }
 
-template <>
-void bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cublasOperation_t opa = _cublasOpFromChar(transa);
-  cublasOperation_t opb = _cublasOpFromChar(transb);
-  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  BGEMM_CHECK_ARGVALUES_C_DTYPE(at::Half, float);
-  float falpha = alpha;
-  float fbeta = beta;
-#ifndef USE_ROCM
-  at::Half halpha;
-  at::Half hbeta;
-  auto compute_type = CUDA_R_32F;
-#endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
-#ifdef USE_ROCM
-  int flag = 0;
-#if USE_GEMM_FLAGS_FP16_ALT_IMPL
-  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
-#endif
-  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
-                                   hipOperationToRocOperation(opa),
-                                   hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
-                                   (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
-                                   b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
-                                   c, rocblas_datatype_f16_r, (int)ldc, stridec,
-                                   (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
-                                   0, flag)));
-#else
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-    halpha = alpha;
-    hbeta = beta;
-    compute_type = CUDA_R_16F;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
-  if (prop->major >= 5){
-    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
-      handle, opa, opb, m, n, k,
-      alpha_ptr, a, CUDA_R_16F, lda, stridea,
-      b, CUDA_R_16F, ldb, strideb, beta_ptr,
-      c, CUDA_R_32F, ldc, stridec,
-      num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  } else {
-    for (const auto i : c10::irange(num_batches)) {
-      at::cuda::blas::gemm<at::Half, float>(
-        transa, transb,
-        m, n, k,
-        alpha, (a + i * stridea), lda,
-        (b + i * strideb), ldb, beta,
-        (c + i * stridec), ldc);
-    }
-  }
-#endif // USE_ROCM
-}
-
-template <>
-void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+template <typename C_Dtype>
+void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
+  #ifdef USE_ROCM
+  if (std::is_same_v<C_Dtype, float>)
+    TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #endif
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   BGEMM_CHECK_ARGVALUES(at::BFloat16);
@@ -717,38 +665,31 @@ void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) 
                                   opa, opb, (int)m, (int)n, (int)k,
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
-                                  (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
-                                  (int)num_batches,
+                                  (void*)&fbeta, c, std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF,
+                                  (int)ldc, stridec, (int)num_batches,
                                   compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+}
+
+template <>
+void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+  bgemm_internal_cublas_half_helper<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+}
+
+template <>
+void bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  bgemm_internal_cublas_half_helper<float>(CUDABLAS_BGEMM_ARGS(at::Half));
+}
+
+template <>
+void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+  bgemm_internal_cublas_bfloat16_helper<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
 }
 
 
 template <>
 void bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  BGEMM_CHECK_ARGVALUES(at::BFloat16);
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cublasOperation_t opa = _cublasOpFromChar(transa);
-  cublasOperation_t opb = _cublasOpFromChar(transb);
-  const float falpha = alpha;
-  const float fbeta = beta;
-  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-
-#if defined(USE_ROCM)
-  auto compute_type = CUBLAS_COMPUTE_32F;
-#else
-  auto compute_type = CUDA_R_32F;
-#endif
-  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
-                                  opa, opb, (int)m, (int)n, (int)k,
-                                  (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
-                                  b, CUDA_R_16BF, (int)ldb, strideb,
-                                  (void*)&fbeta, c, CUDA_R_32F, (int)ldc, stridec,
-                                  (int)num_batches,
-                                  compute_type,
-                                  CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  bgemm_internal_cublas_bfloat16_helper<float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
 }
 
 
@@ -1073,8 +1014,13 @@ void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::compl
       reinterpret_cast<cuComplex*>(c), ldc));
 }
 
-template <>
-void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+template <typename C_Dtype>
+inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
+  #ifdef USE_ROCM
+  if (std::is_same_v<C_Dtype, float>)
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+  #endif
+
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -1153,7 +1099,7 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         ldb,
         beta_ptr,
         c,
-        CUDA_R_16F,
+        std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16F,
         ldc,
         compute_type,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -1175,14 +1121,19 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         ldb,
         &fbeta,
         c,
-        CUDA_R_16F,
+        std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16F,
         ldc));
   }
 #endif
 }
 
-template <>
-void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+template <typename C_Dtype>
+inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
+  #ifdef USE_ROCM
+  if (std::is_same_v<C_Dtype, float>)
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #endif
+
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -1219,164 +1170,31 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       ldb,
       &fbeta,
       c,
-      CUDA_R_16BF,
+      std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF,
       ldc,
       compute_type,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+}
+
+template <>
+void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  gemm_internal_cublas_half_helper<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
 }
 
 template <>
 void gemm_internal_cublas<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cublasOperation_t opa = _cublasOpFromChar(transa);
-  cublasOperation_t opb = _cublasOpFromChar(transb);
-  float falpha = alpha;
-  float fbeta = beta;
-#ifndef USE_ROCM
-  at::Half halpha;
-  at::Half hbeta;
-  auto compute_type = CUDA_R_32F;
-#endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
-  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  GEMM_CHECK_ARGVALUES(at::Half);
-#ifdef USE_ROCM
-  int flag = 0;
-#if USE_GEMM_FLAGS_FP16_ALT_IMPL
-  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
-#endif
-  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_ex(
-      (rocblas_handle)handle,
-      hipOperationToRocOperation(opa),
-      hipOperationToRocOperation(opb),
-      m,
-      n,
-      k,
-      alpha_ptr,
-      a,
-      rocblas_datatype_f16_r,
-      lda,
-      b,
-      rocblas_datatype_f16_r,
-      ldb,
-      beta_ptr,
-      c,
-      rocblas_datatype_f16_r,
-      ldc,
-      c,
-      rocblas_datatype_f16_r,
-      ldc,
-      rocblas_datatype_f32_r,
-      rocblas_gemm_algo_standard,
-      0,
-      flag)));
-#else
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-    compute_type = CUDA_R_16F;
-    halpha = alpha;
-    hbeta = beta;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
-  if (prop->major >= 5) {
-    cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
-    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
-      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
-    }
-    // Disallow fp16 reductions that could lead to unexpected overflow issues.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
-    TORCH_CUDABLAS_CHECK(cublasGemmEx(
-        handle,
-        opa,
-        opb,
-        m,
-        n,
-        k,
-        alpha_ptr,
-        a,
-        CUDA_R_16F,
-        lda,
-        b,
-        CUDA_R_16F,
-        ldb,
-        beta_ptr,
-        c,
-        CUDA_R_32F,
-        ldc,
-        compute_type,
-        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasSgemmEx(
-        handle,
-        opa,
-        opb,
-        m,
-        n,
-        k,
-        &falpha,
-        a,
-        CUDA_R_16F,
-        lda,
-        b,
-        CUDA_R_16F,
-        ldb,
-        &fbeta,
-        c,
-        CUDA_R_32F,
-        ldc));
-  }
-#endif
+  gemm_internal_cublas_half_helper<float>(CUDABLAS_GEMM_ARGS(at::Half));
+}
+
+template <>
+void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  gemm_internal_cublas_bfloat16_helper<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
 
 template <>
 void gemm_internal_cublas<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cublasOperation_t opa = _cublasOpFromChar(transa);
-  cublasOperation_t opb = _cublasOpFromChar(transb);
-  float falpha = alpha;
-  float fbeta = beta;
-  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  GEMM_CHECK_ARGVALUES(at::BFloat16);
-#ifndef USE_ROCM
-  cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
-  if (!at::globalContext().allowBF16ReductionCuBLAS()) {
-    cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
-  }
-#endif
-#if defined(USE_ROCM)
-  auto compute_type = CUBLAS_COMPUTE_32F;
-#else
-  auto compute_type = CUDA_R_32F;
-#endif
-  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
-  TORCH_CUDABLAS_CHECK(cublasGemmEx(
-      handle,
-      opa,
-      opb,
-      m,
-      n,
-      k,
-      &falpha,
-      a,
-      CUDA_R_16BF,
-      lda,
-      b,
-      CUDA_R_16BF,
-      ldb,
-      &fbeta,
-      c,
-      CUDA_R_32F,
-      ldc,
-      compute_type,
-      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  gemm_internal_cublas_bfloat16_helper<float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
 
 template <typename Dtype, typename C_Dtype = Dtype>
