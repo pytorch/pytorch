@@ -25,7 +25,6 @@ import textwrap
 # sys.path.insert(0, os.path.abspath('.'))
 import pytorch_sphinx_theme2
 
-
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
