@@ -234,6 +234,7 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
+    "test_unroll_small_reduction",
     "test_vectorized_ops_masked",
     "test_var_mean_tile_reduction_True",
     "test_view_as_complex",
