@@ -2349,7 +2349,9 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
     for dim in range(max_dim):
         tensors = []
         for size in different_ndim_case:
-            tensors.append(make_arg(size).transpose(-2, -1))  # transpose the last 2 dims, to make it non-contiguous
+            # make the last 2 dims column-major (i.e. non-contiguous)
+            t = make_arg(size).transpose(-2, -1).contiguous().transpose(-2, -1)
+            tensors.append(t)
         yield SampleInput(tensors, args=(dim, num_chunks))
 
 def error_inputs_chunk_cat(op_info, device, **kwargs):
