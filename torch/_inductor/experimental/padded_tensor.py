@@ -89,7 +89,7 @@ class PaddedTensor(torch.Tensor):
         kwargs["storage_offset"] = 0
         kwargs["device"] = tensor.device
         kwargs["layout"] = tensor.layout
-        kwargs["requires_grad"] = kwargs.get("requires_grad", False)
+        kwargs["requires_grad"] = tensor.requires_grad
         kwargs["dtype"] = tensor.dtype
 
         out = torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
@@ -215,7 +215,6 @@ class PaddedTensor(torch.Tensor):
             "split_with_sizes",
             "flatten",
             "scaled_dot_product_attention",
-            "grad",
             "contiguous",
             "reshape",
             "cross_entropy",

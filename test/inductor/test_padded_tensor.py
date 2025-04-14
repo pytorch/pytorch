@@ -185,8 +185,8 @@ class ModelTests(TestCase):
     def setUp(self):
         super().setUp()
 
-    def test_transformer_eqiv(self):
-        with torch.device("cuda"):
+    def test_transformer_equiv(self):
+        with torch.device("cuda"), torch.no_grad():
             bsz, seqlen_max = 2, 32
             seqlen_multiple = 16
 
@@ -237,7 +237,7 @@ class ModelTests(TestCase):
         torch._dynamo.config.error_on_recompile = False
 
     def test_transformer_bucketing(self):
-        with torch.device("cuda"):
+        with torch.device("cuda"), torch.no_grad():
             bsz, seqlen_max = 2, 64
             seqlen_multiple = 16
 
