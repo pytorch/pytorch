@@ -478,6 +478,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
 or equal to the number of stages ({self._num_stages})."
             )
 
+        self.pipeline_order: Optional[dict[int, list[Optional[_Action]]]] = (
+            self.get_pipeline_order()
+        )
+
     def _initialize_stage(self, args, kwargs):
         self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
         if self._has_backward:
@@ -516,6 +520,12 @@ or equal to the number of stages ({self._num_stages})."
             return self._merge_outputs(self._stage.output_chunks)
         else:
             return None
+
+    def get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
+        """
+        Returns the pipeline order of the schedule.
+        """
+        return None
 
 
 class _ScheduleForwardOnly(PipelineScheduleSingle):
@@ -658,6 +668,31 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
             work.wait()
+
+    def get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
+        """
+        Returns the pipeline order for gpipe
+        """
+        pipeline_order = {}
+        pp_group_size = self._num_stages
+
+        for rank in range(pp_group_size):
+            actions: list[Optional[_Action]] = []
+            warmup = rank
+            # time it takes for first microbatch backward to get back
+            wait_for_backward = 3 * (pp_group_size - 1 - rank)
+            # warmup
+            actions.extend([None] * warmup)
+            # forward
+            for i in range(self._n_microbatches):
+                actions.append(_Action(rank, _ComputationType.FORWARD, i))
+            # wait for backward to be ready
+            actions.extend([None] * wait_for_backward)
+            # backward
+            for i in range(self._n_microbatches):
+                actions.append(_Action(rank, _ComputationType.FULL_BACKWARD, i))
+            pipeline_order[rank] = actions
+        return pipeline_order
 
 
 class Schedule1F1B(PipelineScheduleSingle):
@@ -812,6 +847,62 @@ class Schedule1F1B(PipelineScheduleSingle):
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
+
+    def get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
+        """
+        Returns the pipeline order for 1f1b (TODO: make the code cleaner)
+        """
+        pipeline_order = {}
+        pp_group_size = self._num_stages
+
+        for rank in range(pp_group_size):
+            total_forward = total_backward = self._n_microbatches
+            actions: list[Optional[_Action]] = []
+            warmup = rank
+
+            # warmup
+            actions.extend([None] * warmup)
+            # number of forwards to run before 1f1b
+            num_forward = (pp_group_size - 1) - rank
+
+            # forward state
+            forward_mb = 0
+            for i in range(num_forward):
+                actions.append(_Action(rank, _ComputationType.FORWARD, i))
+                total_forward -= 1
+                forward_mb = i
+
+            # wait for 1f1b to be ready
+            wait_for_1f1b = max(0, 2 * (pp_group_size - 1 - rank))
+            actions.extend([None] * wait_for_1f1b)
+
+            # 1f1b
+            backward_mb = 0
+            while total_forward > 0:
+                # 1f
+                actions.append(_Action(rank, _ComputationType.FORWARD, forward_mb))
+                total_forward -= 1
+                forward_mb += 1
+                # 1b
+                actions.append(
+                    _Action(rank, _ComputationType.FULL_BACKWARD, backward_mb)
+                )
+                total_backward -= 1
+                backward_mb += 1
+
+            wait_for_backward = pp_group_size - rank
+            # backward
+            while total_backward > 0:
+                if wait_for_backward > 0:
+                    actions.append(None)
+                    wait_for_backward -= 1
+                actions.append(
+                    _Action(rank, _ComputationType.FULL_BACKWARD, backward_mb)
+                )
+                backward_mb += 1
+                total_backward -= 1
+            pipeline_order[rank] = actions
+        return pipeline_order
 
 
 def _add_unshard_reshard(
