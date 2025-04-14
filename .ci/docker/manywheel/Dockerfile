@@ -64,7 +64,9 @@ FROM base as cuda
 ARG BASE_CUDA_VERSION=10.2
 # Install CUDA
 ADD ./common/install_cuda.sh install_cuda.sh
-RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu*
 
 FROM base as intel
 # MKL
@@ -195,6 +197,6 @@ RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 # cmake3 is needed for the MIOpen build
 RUN ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh

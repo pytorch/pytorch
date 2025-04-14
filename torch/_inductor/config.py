@@ -422,12 +422,12 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
-# Max time that a a valid benchmark result may take during autotuning
+# Max time that a valid benchmark result may take during autotuning
 max_autotune_subproc_result_timeout_seconds = 60.0
-# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
-max_autotune_subproc_graceful_timeout_seconds = 1.0
-# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
-max_autotune_subproc_terminate_timeout_seconds = 2.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_graceful_timeout_seconds = 0.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -500,6 +500,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -1129,7 +1132,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required

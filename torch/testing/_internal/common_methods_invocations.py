@@ -1933,6 +1933,10 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     if torch.cuda.is_available():
         inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
 
+    if not dtype.is_signed:
+        # For unsigned dtypes, negative values are converted.
+        inputs.append(((S,), -get_val(dtype), {}))
+
     for shape, fill_value, kwargs in inputs:
         t = make_tensor(shape, dtype=dtype, device=device,
                         low=None, high=None,
@@ -2775,7 +2779,7 @@ def error_inputs_ormqr(op_info, device, **kwargs):
     bool_3 = True
     bool_4 = True
     yield ErrorInput(SampleInput(tensor_0, args=(tensor_1, tensor_2, bool_3, bool_4)), error_type=RuntimeError,
-                     error_regex=r"tau.shape\[-1\] must be less than or equal to input.shape\[-1\]")
+                     error_regex=r"tau.shape\[-1\] must be equal to min\(other.shape\[-2\], input.shape\[-1\]\)")
 
 
 def error_inputs_diag(op_info, device, **kwargs):
@@ -7647,6 +7651,7 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
              ((S, S, S), (-1, 2)),
              ((S, S, S), (-1, -1)),
              ((S, S, S), (1, -1)),
+             ((S, S), (-1, 2)),
              ((S,), (0, 2))
              )
 
@@ -18385,6 +18390,7 @@ op_db: list[OpInfo] = [
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
+           inplace_variant=torch.Tensor.index_fill_,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18420,6 +18426,7 @@ op_db: list[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           inplace_variant=torch.Tensor.index_add_,
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18908,12 +18915,12 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('full_like',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16,
+                                            torch.uint16, torch.uint32),
            supports_out=False,
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
-           skips=(
-           )),
+           ),
     OpInfo('new_zeros',
            op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -19341,6 +19348,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           inplace_variant=torch.Tensor.scatter_add_,
            sample_inputs_func=sample_inputs_scatter_add,
            error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_forward_ad=True,
@@ -21505,6 +21513,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         'scatter_reduce',
         variant_test_name='sum',
+        inplace_variant=torch.Tensor.scatter_reduce_,
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),

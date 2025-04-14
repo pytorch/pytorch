@@ -30,7 +30,9 @@ RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
 # Install cuda and cudnn
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu*
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 

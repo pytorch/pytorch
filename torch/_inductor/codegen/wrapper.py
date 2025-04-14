@@ -78,12 +78,13 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
+    alignment = node.get_name() not in V.graph.unaligned_buffers
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -91,6 +92,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # for s0 for s1, just because they happen to share the same
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
+        alignment,
     )
 
 
@@ -620,6 +622,7 @@ class PythonWrapperCodegen(CodeGen):
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
+        self.kernel_autotune_tmp_arg_idx: int = 0
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -1616,8 +1619,6 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
     ):
-        from torch.utils._triton import patch_triton_dtype_repr
-
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -1632,7 +1633,6 @@ class PythonWrapperCodegen(CodeGen):
         )
         from .triton import gen_common_triton_imports, TritonKernel
 
-        patch_triton_dtype_repr()
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
@@ -1991,7 +1991,7 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -2004,8 +2004,9 @@ class PythonWrapperCodegen(CodeGen):
                 assert raw_arg is not None, (
                     "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                 )
-                buf_name = f"tmp_arg_{index}"
+                buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
                 buf = raw_arg
+                self.kernel_autotune_tmp_arg_idx += 1
 
             size = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
@@ -2182,13 +2183,13 @@ class PythonWrapperCodegen(CodeGen):
                         arg_str = arg
                     elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg, i
+                            arg, arg_type, raw_arg
                         )
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             self.kernel_autotune_calls.writeline(
@@ -2219,7 +2220,7 @@ class PythonWrapperCodegen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_arg_str(self, s, type_=None):
-        from torch.utils._triton import dtype_to_string, has_triton_package
+        from torch.utils._triton import has_triton_package
 
         if has_triton_package():
             import triton
@@ -2246,7 +2247,7 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
-            return dtype_to_string(s)
+            return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
         else:

@@ -4075,41 +4075,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(mod, backend="eager", fullgraph=True)(**inputs)
         self.assertEqual(ref, res)
 
-    def test_call_finally_python_3_8(self):
-        # Issue - https://github.com/pytorch/pytorch/issues/97811
-        def make_fn(g):
-            def fn():
-                while True:
-                    try:
-                        print(g)
-                        break
-                    except Exception as _:
-                        break
-
-            return torch.compile(fn, backend="eager")
-
-        make_fn(None)()
-
-    def test_call_finally_python_3_8_2(self):
-        def f(x):
-            while x:
-                try:
-                    pass
-                except Exception as _:
-                    continue
-
-        torch.compile(f, backend="eager")(0)
-
-    def test_call_finally_opcode_python_3_8(self):
-        def fn():
-            try:
-                return torch.zeros(4)
-            finally:
-                return torch.ones(4)  # noqa: SIM107, B012
-
-        result = torch.compile(fn, backend="aot_eager")()
-        self.assertEqual(result, torch.ones(4))
-
     def test_string_format(self):
         s = "temp{i}"
 
@@ -4768,7 +4733,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(graph.code).strip(),
             """\
-def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
+def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
@@ -6649,6 +6614,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch.manual_seed(54321)
         torch.cuda.manual_seed_all(54321)
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+
+        # https://github.com/pytorch/pytorch/issues/147171
+        torch._inductor.config.fallback_random = True
 
         for backend in ["eager", "aot_eager"]:
             torch.manual_seed(54321)

@@ -340,6 +340,8 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'python_version': None,
@@ -430,6 +432,8 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'python_version': None,
@@ -495,11 +499,7 @@ class TestDynamoTimed(TestCase):
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
 
-    @dynamo_config.patch(
-        {
-            "log_compilation_metrics": True,
-        }
-    )
+    @dynamo_config.patch({"log_compilation_metrics": True})
     def test_num_params(self):
         import torch.nn as nn
         import torch.nn.functional as F
@@ -549,21 +549,22 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(m)(torch.randn(4, 4))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].param_numel, 24)
-        self.assertEqual(compilation_events[0].param_bytes, 96)
-        self.assertEqual(compilation_events[0].param_count, 3)
+        self.assertEqual(compilation_events[0].param_numel, 40)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
+        self.assertEqual(compilation_events[0].param_count, 4)
 
         # Test tied weights
         l1 = nn.Linear(4, 4)
         l2 = nn.Linear(4, 4)
         l1.weight = l2.weight
         m = nn.Sequential(l1, nn.Sequential(l2))
+        self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(m)(torch.randn(4, 4))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].param_numel, 24)  # 24
-        self.assertEqual(compilation_events[0].param_bytes, 96)  # 96
-        self.assertEqual(compilation_events[0].param_count, 3)  # 3
+        self.assertEqual(compilation_events[0].param_numel, 24)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
+        self.assertEqual(compilation_events[0].param_count, 3)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

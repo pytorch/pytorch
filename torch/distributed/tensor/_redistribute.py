@@ -73,7 +73,7 @@ def _gen_transform_infos_non_cached(
             if i < device_mesh.ndim - 1:
                 # calculate and save the logical shape for this sharding
                 mesh_dim_size = device_mesh.size(mesh_dim=i)
-                local_shard_size, _ = src._local_shard_size_on_dim(
+                local_shard_size, _ = src._local_shard_size_and_offset(
                     current_logical_shape[src.dim],
                     mesh_dim_size,
                     my_coordinate[i],
