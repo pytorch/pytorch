@@ -349,10 +349,10 @@ class PyCodegen:
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
                     hints=[
-                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
                         "that Dynamo cannot reconstruct, then remove it from the return statement.",
                         *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
                 )

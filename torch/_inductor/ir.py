@@ -87,6 +87,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    GPU_ALIGN_BYTES,
     ir_dataclass,
     is_dynamic,
     is_gpu,
@@ -95,6 +96,7 @@ from .utils import (
     sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
+    tensor_is_aligned,
 )
 from .virtualized import ops, OpsValue, V
 
@@ -4481,19 +4483,7 @@ class TemplateBuffer(OperationBuffer):
         )
 
         for inp in self.inputs:
-            layout = inp.layout
-
-            # we dont know what the iteration order is of the template,
-            # so we just want to make a single, contiguous dependency
-            if not layout.is_contiguous():
-                layout = FixedLayout(
-                    device=layout.device,
-                    dtype=layout.dtype,
-                    size=layout.size,
-                    stride=FlexibleLayout.contiguous_strides(layout.size),
-                    offset=layout.offset,
-                )
-            indexer = layout.make_indexer()
+            indexer = inp.layout.make_indexer()
 
             def dummy(index, rindex):  # type: ignore[no-untyped-def]
                 assert len(rindex) == 0
@@ -5714,6 +5704,15 @@ class ExternKernel(InputsKernel):
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
 
+    def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if config.alignment_asserts and not V.graph.cpp_wrapper:
+            name = self.get_name()
+            aligned = name not in V.graph.unaligned_buffers
+            if aligned:
+                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+            else:
+                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
         get output sizes and strides, for template_codegen
@@ -5998,6 +5997,49 @@ class TMADescriptor(ExternKernel):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_tma_descriptor(self)
+
+
+class SubgraphBuffer(ExternKernel):
+    def __init__(
+        self,
+        layout: Layout,
+        input_nodes: list[Buffer],
+        gm: torch.fx.GraphModule,
+        example_inputs: list[Any],
+        subgraph_name: str,
+    ):
+        super().__init__(None, layout, input_nodes)
+        self.gm = gm
+        self.example_inputs = example_inputs
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+        self.subgraph = V.graph.make_subgraph(
+            self.gm, self.example_inputs, subgraph_name
+        )
+
+        import torch._inductor.config as inductor_config
+
+        with V.set_graph_handler(self.subgraph):
+            # Don't bother autotuning on Triton here
+            with inductor_config.patch(  # type: ignore[no-untyped-def]
+                max_autotune=False,
+                max_autotune_gemm=False,
+                max_autotune_gemm_backends="ATEN",
+            ):
+                self.subgraph.run(*self.example_inputs)
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        class CodegenGraph:
+            def __init__(self, graph: GraphLowering):
+                self.graph = graph
+                self.name = graph.name
+
+        wrapper.codegen_subgraph(
+            CodegenGraph(self.subgraph),
+            [*[buffer.get_name() for buffer in self.inputs]],
+            [self.name],
+        )
 
 
 class UserDefinedTritonKernel(ExternKernel):
@@ -6696,6 +6738,18 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+
+        if self.op_overload is torch._prims.rng_prims.graphsafe_run_with_rng_state:
+            for arg in self.constant_args:
+                if isinstance(arg, GeneratorState):
+                    read_writes = read_writes.with_read(
+                        dependencies.StarDep(arg.get_name())
+                    )
+
+        return read_writes
+
     def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
@@ -6928,6 +6982,7 @@ class FallbackKernel(ExternKernelAlloc):
                 V.graph.wrapper_code.generate_fallback_kernel(self, args)
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
+                    self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -6954,6 +7009,12 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        # We need this extra check for input alignment since the example
+        # inputs we created are always aligned.
+        has_unaligned_input = any(
+            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
+        )
 
         device = cls.find_device(tensor_args, example_output)
 
@@ -6996,11 +7057,18 @@ class FallbackKernel(ExternKernelAlloc):
                     for key, val in output.items()
                 }
             elif isinstance(output, torch.Tensor):
-                return MultiOutput(
+                buf = MultiOutput(
                     cls.tensor_to_layout(output),
                     packed,
                     indices,
                 )
+                if (
+                    config.assume_unaligned_fallback_output
+                    or has_unaligned_input
+                    or not tensor_is_aligned(output)
+                ):
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
+                return buf
             elif isinstance(output, int):
                 return output
             elif isinstance(output, torch.SymInt):
@@ -7089,6 +7157,7 @@ class MultiOutput(ExternKernel):
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
         self.codegen_size_asserts(wrapper)
+        self.codegen_alignment_asserts(wrapper)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -8051,6 +8120,11 @@ class _CollectiveKernel(FallbackKernel):
                 )
                 for i, tensor in enumerate(example_output)
             ]
+            for buf, tensor in zip(packed.outputs, example_output):
+                if config.assume_unaligned_fallback_output or not tensor_is_aligned(
+                    tensor
+                ):
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
             return packed.outputs
         else:
             packed = cls(
@@ -8060,6 +8134,10 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            if config.assume_unaligned_fallback_output or not tensor_is_aligned(
+                example_output
+            ):
+                V.graph.unaligned_buffers.add(packed.name)  # type: ignore[arg-type]
             packed.outputs = [packed]
             return packed
 

@@ -314,7 +314,7 @@ __device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
 
 template <int Alignment, typename T>
 __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
-#if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
 #else
   if constexpr (Alignment == 16) {
