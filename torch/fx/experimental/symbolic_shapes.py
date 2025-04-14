@@ -5703,6 +5703,7 @@ class ShapeEnv:
             for guard in self.guards
         )
 
+    @_lru_cache
     def bound_sympy(
         self, expr: sympy.Expr, size_oblivious: bool = False
     ) -> ValueRanges:
