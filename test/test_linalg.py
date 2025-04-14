@@ -5777,6 +5777,76 @@ class TestLinalg(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.bfloat16)
+    def test_gemm_bias_submatrix_offline_tunableop(self, device, dtype):
+        # Test offline tuning with submatrices for GEMM and bias.
+        ordinal = torch.cuda.current_device()
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+
+            # record GEMM
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            lda = 12
+            ldb = 10
+            ldc = 14
+            m = 5
+            n = 7
+            k = 9
+            # 'TN' case
+            X = torch.rand(ldc, lda, dtype=dtype, device=device)
+            matA = torch.rand(ldc, ldb, dtype=dtype, device=device)
+
+            subX = X[:m, :k]
+            subA = matA[:n, :k]
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(subX, subA, bias)
+
+            # 'NT' case
+            X = torch.rand(ldc, lda, dtype=dtype, device=device).t()
+            matA = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
+
+            subX = X[:m, :k]
+            subA = matA[:n, :k]
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(subX, subA, bias)
+
+            self.assertTrue(torch.cuda.tunable.is_enabled())
+            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
+
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # tuning the untuned GEMMs in file
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_results = len(torch.cuda.tunable.get_results())
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+            new_results = len(torch.cuda.tunable.get_results())
+
+            # This stores total number of cummulative results
+            total_num_results = new_results - ref_results
+
+            # There must be a new tuning results
+            self.assertEqual(total_num_results, 2)
+
+            self.assertTrue(torch.cuda.tunable.write_file())
+
+            # Compare Param Signature of untuned and tuned results
+            ok = self._compare_untuned_tuned_entries()
+            self.assertTrue(ok)
+
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)
