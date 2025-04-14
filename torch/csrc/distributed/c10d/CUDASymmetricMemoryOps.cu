@@ -20,6 +20,7 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+#include <torch/csrc/distributed/c10d/nvshmem_extension.cuh>
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -1087,4 +1088,9 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
+
+  m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl(
+      "nvshmem_reduce_scatter_out",
+      c10d::nvshmem_extension::nvshmem_reduce_scatter_out);
 }
