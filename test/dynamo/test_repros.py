@@ -4758,6 +4758,59 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
 
+    def test_dont_generate_unncessary_detach(self):
+        record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        # A way of using tensor subclass to propagate metadata across torch ops.
+        # It's a minimized version of
+        # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
+        class MySubclass(torch.nn.Parameter):
+            def __new__(cls, data, metadata=None, requires_grad=False):
+                self = torch.Tensor._make_subclass(cls, data, requires_grad)
+                self.metadata = 42
+                return self
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                result = super().__torch_function__(func, types, args, kwargs)
+
+                # Propagate metadata.
+                metadata = None
+                for arg in args:
+                    if isinstance(arg, list) and isinstance(arg[0], MySubclass):
+                        metadata = arg[0].metadata
+                        break
+                    if isinstance(arg, MySubclass):
+                        metadata = arg.metadata
+                        break
+                if isinstance(result, torch.Tensor):
+                    return cls(result, metadata=metadata)
+                elif isinstance(result, (tuple, list)):
+                    wrapped = [
+                        cls(x, metadata=metadata) if isinstance(x, torch.Tensor) else x
+                        for x in result
+                    ]
+                    return type(result)(wrapped)
+                else:
+                    return result
+
+        @torch.compile(backend=record_graph, fullgraph=True)
+        def f(x):
+            res = x + 1
+            return res
+
+        f(MySubclass(torch.ones(1), metadata=42))
+
+        # We don't want any `detach` node from this simple `x + 1`, else it
+        # could blow up the Dynamo graph and slow down compilation.
+        graph = record_graph.graphs[0]
+        for node in graph.graph.nodes:
+            if node.op == "call_method":
+                self.assertTrue(node.target != "detach")
+
     def test_detectron2_instances_cat(self):
         class Instances:
             def __init__(self, image_size: tuple[int, int], **kwargs: Any):
