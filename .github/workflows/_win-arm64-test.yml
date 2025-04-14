@@ -132,9 +132,9 @@ jobs:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
-        run: |         
-          call ./ci/pytorch/windows/arm64/bootstrap_tests.bat
+        run: |
+          call .ci/pytorch/windows/arm64/bootstrap_tests.bat
 
           set GIT_BASH=%DEPENDENCIES_DIR%\git\usr\bin\bash.exe
-
+          
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
