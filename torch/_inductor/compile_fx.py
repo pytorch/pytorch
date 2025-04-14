@@ -322,7 +322,10 @@ def _unlift_graph(
     return unlifted_gm
 
 
-def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
+def _get_subgraph_names(gm: GraphModule) -> OrderedSet[str]:
+    # Need dedup since the same graph may be invoked multiple times
+    subgraph_names: OrderedSet[str] = OrderedSet()
+
     for node in sorted(
         itertools.chain(
             gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
@@ -330,21 +333,29 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
             gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.invoke_subgraph
+            ),
         )
     ):
         if node.target == torch.ops.higher_order.cond:
             true_subgraph_name = node.args[1].name
             false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
+            subgraph_names.add(true_subgraph_name)
+            subgraph_names.add(false_subgraph_name)
         elif node.target == torch.ops.higher_order.while_loop:
             cond_subgraph_name = node.args[0].name
             body_subgraph_name = node.args[1].name
-            yield cond_subgraph_name
-            yield body_subgraph_name
+            subgraph_names.add(cond_subgraph_name)
+            subgraph_names.add(body_subgraph_name)
         elif node.target == torch.ops.higher_order.scan:
             combine_subgraph_name = node.args[0].name
-            yield combine_subgraph_name
+            subgraph_names.add(combine_subgraph_name)
+        elif node.target == torch.ops.higher_order.invoke_subgraph:
+            get_attr_node = node.args[0]
+            subgraph_names.add(get_attr_node.target)
+
+    return subgraph_names
 
 
 def _recursive_pre_grad_passes(
@@ -366,16 +377,29 @@ def _recursive_pre_grad_passes(
         return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
-def _recursive_joint_graph_passes(gm: GraphModule) -> None:
+def _recursive_joint_graph_passes(gm: GraphModule) -> GraphModule:
+    def _run_on_sub_graph_module(subgraph_name: str) -> None:
+        subgraph = getattr(gm, subgraph_name)
+        new_subgraph = _recursive_joint_graph_passes(subgraph)
+        setattr(gm, subgraph_name, new_subgraph)
+
     with dynamo_timed(
         "_recursive_joint_graph_passes",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_joint_graph_passes(subgraph)
-        joint_graph_passes(gm)
+        old_subgraph_names = _get_subgraph_names(gm)
+        for subgraph_name in old_subgraph_names:
+            _run_on_sub_graph_module(subgraph_name)
+
+        out_gm = joint_graph_passes(gm)
+
+        # Some joint graph passes may create new sub graph module. Run one round
+        # for the newly created graph modules.
+        for subgraph_name in _get_subgraph_names(out_gm):
+            if subgraph_name not in old_subgraph_names:
+                _run_on_sub_graph_module(subgraph_name)
+        return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -1626,7 +1650,7 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    _recursive_joint_graph_passes(aot_autograd_model)
+    aot_autograd_model = _recursive_joint_graph_passes(aot_autograd_model)
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1950,7 +1974,7 @@ def compile_fx(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
-                    _recursive_joint_graph_passes(gm)
+                    gm = _recursive_joint_graph_passes(gm)
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)
@@ -2050,7 +2074,7 @@ def compile_fx(
         ) -> tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
-                _recursive_joint_graph_passes(gm)
+                gm = _recursive_joint_graph_passes(gm)
 
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
