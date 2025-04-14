@@ -934,10 +934,10 @@ class Argument:
         self,
         name: str,
         type: JitType,
-        N: Optional[_int],
-        defualt_value: Optional[Any],
+        N: _int | None,
+        defualt_value: Any | None,
         kwarg_only: _bool,
-        alias_info: Optional[AliasInfo]
+        alias_info: AliasInfo | None
     ) -> None: ...
 
 class FunctionSchema:
@@ -950,8 +950,8 @@ class FunctionSchema:
         self,
         name: str,
         overload_name: str,
-        arguments: List[Argument],
-        returns: List[Argument],
+        arguments: list[Argument],
+        returns: list[Argument],
         is_vararg: _bool,
         is_varret: _bool
     ) -> None: ...
