@@ -203,10 +203,12 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
 }
 
 void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      hasWriterRegistered_.load() == false,
-      "debugInfoWriter already registered");
+  if (hasWriterRegistered_.load()) {
+    TORCH_WARN_ONCE(
+        "DebugInfoWriter has already been registered, and since we need the writer to stay "
+        "outside ProcessGroup, user needs to ensure that this extra registration is indeed needed. "
+        "And we will only use the last registered writer.");
+  }
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
 }

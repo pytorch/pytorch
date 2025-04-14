@@ -774,9 +774,6 @@ def _compile(
                     dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
                 )
             )
-            stack.enter_context(
-                _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -957,7 +954,9 @@ def _compile(
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
+        _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
+        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts

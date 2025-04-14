@@ -6,6 +6,10 @@ namespace c10d {
 PrefixStore::PrefixStore(std::string prefix, c10::intrusive_ptr<Store> store)
     : prefix_(std::move(prefix)), store_(std::move(store)) {}
 
+c10::intrusive_ptr<Store> PrefixStore::clone() {
+  return c10::make_intrusive<PrefixStore>(prefix_, store_->clone());
+}
+
 std::string PrefixStore::joinKey(const std::string& key) {
   return prefix_ + "/" + key;
 }

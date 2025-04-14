@@ -57,9 +57,9 @@ struct SgdMomentumArguments {
 };
 
 struct MetadataArguments {
-  uint32_t numels[kmaxTensors];
-  uint32_t threadgroup_to_tensor[kmaxThreadGroups];
-  uint32_t threadgroup_to_chunk[kmaxThreadGroups];
+  ulong numels[kmaxTensors];
+  ulong threadgroup_to_tensor[kmaxThreadGroups];
+  ulong threadgroup_to_chunk[kmaxThreadGroups];
 };
 
 enum ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };

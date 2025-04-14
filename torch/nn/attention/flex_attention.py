@@ -12,14 +12,14 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
-from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
+from torch._prims_common import DeviceLikeType
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
+from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -205,8 +205,8 @@ class BlockMask:
     BlockMask is our format for representing a block-sparse attention mask.
     It is somewhat of a cross in-between BCSR and a non-sparse format.
 
-    Basics
-    ------
+    **Basics**
+
     A block-sparse mask means that instead of representing the sparsity of
     individual elements in the mask, a KV_BLOCK_SIZE x Q_BLOCK_SIZE block is
     considered sparse only if every element within that block is sparse.
@@ -239,8 +239,8 @@ class BlockMask:
     Notably, this format makes it easier to implement a reduction along the
     *rows* of the mask.
 
-    Details
-    -------
+    **Details**
+
     The basics of our format require only kv_num_blocks and kv_indices. But, we
     have up to 8 tensors on this object. This represents 4 pairs:
 
@@ -560,7 +560,7 @@ class BlockMask:
     def to_string(self, grid_size=(20, 20), limit=4):
         """Returns a string representation of the block mask. Quite nifty.
 
-        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
+        If grid_size is -1, prints out an uncompressed version. Warning, it can be quite big!
         """
         dense_mask = self.to_dense()
         *batch_dims, num_rows, num_cols = dense_mask.shape
@@ -780,7 +780,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -805,6 +805,8 @@ def create_mask(
     n = torch.arange(0, KV_LEN, device=device)
     mod_type = _get_mod_type(mod_fn)
 
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
@@ -827,7 +829,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1115,16 +1117,6 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
             f"but got E={query.size(-1)} and E={key.size(-1)}."
-        )
-    return
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
-    if not (
-        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
-    ):
-        raise ValueError(
-            f"NYI: Currently non power of 2 embedding dimension are not supported. "
-            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
         )
 
 

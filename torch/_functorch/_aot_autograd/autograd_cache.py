@@ -18,7 +18,12 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
-from torch._dynamo.utils import CompileEventLogger, counters
+from torch._dynamo.utils import (
+    CHROMIUM_EVENT_LOG,
+    CompileEventLogger,
+    counters,
+    dynamo_timed,
+)
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -373,6 +378,8 @@ class FXGraphCacheLoadable:
         # so we can call it only after we're sure both forward and backward have
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
+        # Clear CompiledTritonKernels before loading from FXGraphCache
+        torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
         remote_cache = None
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
@@ -547,45 +554,45 @@ class AOTAutogradCacheEntry:
                 torch._logging.trace_structured(
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
                 )
+        with dynamo_timed("AOTAutogradCache.inductor_load"):
+            compiled_fw_func = self.compiled_fw.load(args)
+            compiled_bw_func = None
+            if self.compiled_bw is not None:
+                compiled_bw_func = self.compiled_bw.load(args)
+                needs_autograd = True
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile", dispatch_mode="autograd"
+                )
+                # Now that we've loaded forward and backward, call post compile on both
+                # This avoids setting things like BoxedBools in fx_config until
+                # after both forward and backward cache hit
+                fw_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": False,
+                }
+                bw_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": True,
+                }
+                compiled_fw_func = self.compiled_fw.post_compile(
+                    compiled_fw_func, fw_fx_config
+                )
+                compiled_bw_func = self.compiled_bw.post_compile(
+                    compiled_bw_func, bw_fx_config
+                )
+            else:
+                inference_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": False,
+                }
 
-        compiled_fw_func = self.compiled_fw.load(args)
-        compiled_bw_func = None
-        if self.compiled_bw is not None:
-            compiled_bw_func = self.compiled_bw.load(args)
-            needs_autograd = True
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="autograd"
-            )
-            # Now that we've loaded forward and backward, call post compile on both
-            # This avoids setting things like BoxedBools in fx_config until
-            # after both forward and backward cache hit
-            fw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": False,
-            }
-            bw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": True,
-            }
-            compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, fw_fx_config
-            )
-            compiled_bw_func = self.compiled_bw.post_compile(
-                compiled_bw_func, bw_fx_config
-            )
-        else:
-            inference_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": False,
-            }
-
-            needs_autograd = False
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="inference"
-            )
-            compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, inference_fx_config
-            )
+                needs_autograd = False
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile", dispatch_mode="inference"
+                )
+                compiled_fw_func = self.compiled_fw.post_compile(
+                    compiled_fw_func, inference_fx_config
+                )
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -598,7 +605,7 @@ class AOTAutogradCacheEntry:
         )
 
         req_subclass_dispatch = self.maybe_subclass_meta is not None
-        CompileEventLogger.pt2_compile(
+        CompileEventLogger.try_add_pt2_compile(
             "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
@@ -841,21 +848,22 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            CompileEventLogger.instant(
-                f"autograd_cache_{cache_state}",
-                metadata=cache_info,
-                time_ns=cache_event_time,
-            )
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile",
-                cache_state=cache_state,
-                cache_event_time=cache_event_time,
-                key=cache_info.get("key"),
-                components=cache_info.get("components"),
-                cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-                remote_cache_enabled=remote,
-                local_cache_enabled=local,
-            )
+            if CHROMIUM_EVENT_LOG:
+                CompileEventLogger.instant(
+                    f"autograd_cache_{cache_state}",
+                    metadata=cache_info,
+                    time_ns=cache_event_time,
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile",
+                    cache_state=cache_state,
+                    cache_event_time=cache_event_time,
+                    key=cache_info.get("key"),
+                    components=cache_info.get("components"),
+                    cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+                    remote_cache_enabled=remote,
+                    local_cache_enabled=local,
+                )
 
             torch._logging.trace_structured(
                 "artifact",

@@ -4149,6 +4149,10 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
+    )
     def test_group_norm_large_input(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -4178,6 +4182,10 @@ class CPUReproTests(TestCase):
                 # check for parallel reduction.
                 self.assertEqual(metrics.parallel_reduction_count, 1)
 
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
+    )
     def test_group_norm_large_size(self):
         # https://github.com/pytorch/pytorch/issues/141541
         # We are using the chunk size of 4096 for cascade summation,

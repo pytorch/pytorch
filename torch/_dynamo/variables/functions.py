@@ -75,6 +75,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._higher_order_ops.triton_kernel_wrap import (
         TritonGridType,
@@ -470,7 +471,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
@@ -520,6 +521,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
+            tracer.generator_exhausted = True
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -956,11 +958,15 @@ class WrappedUserMethodVariable(UserMethodVariable):
         self.context.exit(tx)
         return result
 
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
-        kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
@@ -975,6 +981,11 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
@@ -1078,6 +1089,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def has_closure(self):
         return self.closure is not None
 
+    def const_getattr(self, tx, name):
+        if name == "__name__":
+            return self.fn_name.as_python_constant()
+        return super().const_getattr(tx, name)
+
     def has_self(self):
         return False
 
@@ -1108,7 +1124,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -1167,6 +1183,46 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen.store_attr(name)
 
 
+class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("fn_name", None)
+        kwargs.pop("code", None)
+        kwargs.pop("f_globals", None)
+        kwargs.pop("defaults", None)
+        kwargs.pop("kwdefaults", None)
+        kwargs.pop("annotations", None)
+        kwargs.pop("closure", None)
+        kwargs.pop("wrapped_fn", None)
+        super().__init__(
+            wrapped.fn_name,
+            wrapped.code,
+            wrapped.f_globals,
+            wrapped.defaults,
+            wrapped.kwdefaults,
+            wrapped.annotations,
+            wrapped.closure,
+            wrapped.wrapped_fn,
+        )
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -1198,10 +1254,12 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented_v2(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
                 context=str(self.value),
-                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                explanation=f"Skip calling function `{self.value}` since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],
@@ -1312,6 +1370,31 @@ class SkipFunctionVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
 
         return fn_var_getattr(tx, self.value, self.source, name)
+
+
+class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("value", None)
+        kwargs.pop("reason", None)
+        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class WrapperUserFunctionVariable(VariableTracker):
@@ -1503,7 +1586,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def python_type(self):
         return functools.partial
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
@@ -1959,7 +2042,7 @@ class TMADescriptorVariable(VariableTracker):
             self.element_size.as_proxy(),
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "triton.tools.experimental_descriptor",

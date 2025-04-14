@@ -31,6 +31,7 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
+from torch.monitor import _WaitCounter
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -2223,7 +2224,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                    ):
+                        log_waitcounter=True,
+                        waitcounter_name_override="entire_backward_compile",
+                    ), _WaitCounter(
+                        "pytorch.wait_counter.dynamo_compile"
+                    ).guard():
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(

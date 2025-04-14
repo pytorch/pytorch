@@ -120,7 +120,11 @@ if(INTERN_BUILD_ATEN_OPS)
       "89;90a;100a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
-      "89;90a")
+      "90a")
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
+      "90a")
+
   endif()
 
   set(GEN_ROCM_FLAG)
@@ -417,11 +421,8 @@ if(INTERN_BUILD_ATEN_OPS)
       endif(MSVC)
 
       # Only parallelize the SortingKernel for now to avoid side effects
-      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OPENMP)
-        set(EXTRA_FLAGS "${EXTRA_FLAGS} -D_GLIBCXX_PARALLEL")
-        if(USE_PRECOMPILED_HEADERS)
-          set_source_files_properties(${NEW_IMPL} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-        endif()
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
       endif()
 
       # Disable certain warnings for GCC-9.X

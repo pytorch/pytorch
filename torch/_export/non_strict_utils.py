@@ -27,6 +27,7 @@ from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
     _DimHint,
+    _DimHintType,
     _process_dynamic_shapes,
     _RelaxedConstraint,
     _tree_map_with_path,
@@ -52,6 +53,7 @@ from torch.utils._pytree import (
     SequenceKey,
     tree_map_with_path,
 )
+from torch.utils._sympy.numbers import int_oo
 
 
 if TYPE_CHECKING:
@@ -362,17 +364,21 @@ def make_constraints(
         (used only to enumerate the user-input nodes)
     """
 
+    def is_int(x: object) -> bool:
+        return isinstance(x, int) or (
+            isinstance(x, torch.SymInt) and x.node.expr.is_number
+        )
+
     shape_env = fake_mode.shape_env
     assert shape_env is not None
     inline_constraints = gm.meta.get("inline_constraints", [])
-    range_constraints = {
-        symbol: inline_constraints[symbol] for symbol in inline_constraints
-    }
+    range_constraints = defaultdict(lambda: ValueRanges(0, int_oo)) | inline_constraints
     if not dynamic_shapes:
-        return range_constraints
+        return dict(range_constraints)
 
     # clean up dynamic markers from tensors
-    for arg in pytree.tree_flatten(combined_args)[0]:
+    flat_paths, flat_args = zip(*pytree.tree_flatten_with_path(combined_args)[0])
+    for arg in flat_args:
         if isinstance(arg, torch.Tensor):
             _clean_dynamic_markers(arg)
 
@@ -388,6 +394,7 @@ def make_constraints(
 
     input_dims = defaultdict(list)
     free_symbols = set()
+    range_violations = []
     for input_index, node in enumerate(gm.graph.nodes):
         if input_index < num_lifted_inputs or node.op != "placeholder":
             continue
@@ -397,23 +404,62 @@ def make_constraints(
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
-            if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
-                # Look up the range constraint for the symbol corresponding to this shape dimension
-                # and store it indexed by the symbolic expression corresponding to it.
-                # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
-                # we want the symbol, not its replacement, which could be an expression. Maybe
-                # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                dim = shape_spec[i] if shape_spec else None
+            dim = None
+            if isinstance(shape_spec, (list, tuple)):
+                dim = shape_spec[i]
+            elif isinstance(shape_spec, dict):
+                dim = shape_spec.get(i)
+            if not is_int(d):
+                # Compute the range constraint for the symbolic expression corresponding
+                # to this shape dimension and store it.
                 if dim is None or isinstance(dim, _DimHint):
-                    range_constraints[d.node.expr] = shape_env.var_to_range[
-                        d.node._expr
-                    ]
+                    range_constraints[d.node.expr] &= shape_env.bound_sympy(d.node.expr)
                 else:
-                    range_constraints[d.node.expr] = ValueRanges(
+                    range_constraints[d.node.expr] &= ValueRanges(
                         lower=dim.min, upper=dim.max
                     )
+
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
+
+            # check user-specified min/max range for DimHints;
+            # we might want to do this even if model tracing inferred a static dimension.
+            if isinstance(dim, _DimHint):
+                trace_vr = (
+                    range_constraints[d.node.expr]
+                    if not is_int(d)
+                    else ValueRanges(int(d), int(d))
+                )
+                try:
+                    user_vr = ValueRanges(
+                        lower=0 if dim.min is None else dim.min,
+                        upper=int_oo if dim.max is None else dim.max,
+                    )
+                    if is_int(d):
+                        out_vr = trace_vr & user_vr
+                    else:
+                        range_constraints[d.node.expr] &= user_vr
+                        shape_env.var_to_range[d.node._expr] &= user_vr
+                        out_vr = range_constraints[d.node.expr]
+                    # check for specializations
+                    if dim.type == _DimHintType.DYNAMIC and out_vr.is_singleton():
+                        msg = (
+                            f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                            f"but tracing inferred a static shape of {out_vr.lower} for dimension "
+                            f"inputs{pytree.keystr(flat_paths[input_index])}.shape[{i}]."
+                        )
+                        range_violations.append(msg)
+                except torch.utils._sympy.value_ranges.ValueRangeError:
+                    msg = (
+                        f"- Received user-specified min/max range of [{dim.min}, {dim.max}], "
+                        f"conflicting with the inferred min/max range of [{trace_vr.lower}, {trace_vr.upper}], "
+                        f"for inputs{pytree.keystr(flat_paths[input_index])}.shape[{i}]."
+                    )
+                    range_violations.append(msg)
+
+    if range_violations:
+        prefix = "Found the following conflicts between user-specified ranges and inferred ranges from model tracing:\n"
+        raise ValueError(prefix + "\n".join(range_violations))
 
     for symbol in free_symbols:
         if symbol not in range_constraints:
@@ -423,7 +469,7 @@ def make_constraints(
             # we want to record range constraints for their root symbols.
             range_constraints[symbol] = shape_env.var_to_range[symbol]
 
-    return range_constraints
+    return dict(range_constraints)
 
 
 def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
@@ -663,9 +709,38 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
-            # Redirect to torch.select for indexing with symint.
-            if isinstance(args[1], torch.SymInt):
-                return torch.select, [args[0], 0, args[1]], {}
+
+            def rewrite(dim, item):
+                # Redirect to torch.select for indexing.
+                if isinstance(item, (int, torch.SymInt)):
+                    return dim, (torch.select, [dim, item])
+                # Redirect to torch.ops.aten.slice for slicing.
+                if isinstance(item, slice):
+                    return dim + 1, (
+                        torch.ops.aten.slice,
+                        [dim, item.start, item.stop, item.step or 1],
+                    )
+                # Otherwise do nothing.
+
+            items = args[1] if isinstance(args[1], tuple) else (args[1],)
+            dim = 0
+            # Sequence rewrites.
+            sequence = []
+            for item in items:
+                if (r := rewrite(dim, item)) is None:
+                    return func, args, kwargs
+                dim, call_spec = r
+                sequence.append(call_spec)
+
+            def run():
+                # Run sequence.
+                t = args[0]
+                for _method, _args in sequence:
+                    t = _method(t, *_args)
+                return t
+
+            return run, [], {}
+
         return func, args, kwargs
 
     def __torch_function__(self, func, types, args=(), kwargs=None):

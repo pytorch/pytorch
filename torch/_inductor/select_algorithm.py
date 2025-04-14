@@ -61,6 +61,7 @@ from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
+from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
@@ -85,6 +86,7 @@ log = logging.getLogger(__name__)
 VERIFY: dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
+
 
 if TYPE_CHECKING:
     import concurrent
@@ -293,6 +295,8 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
+        num_consumer_groups=0,
+        num_buffers_warp_spec=0,
         use_jit=False,
         prefix_args=0,
         suffix_args=0,
@@ -316,6 +320,8 @@ class TritonTemplateKernel(TritonKernel):
         self.use_jit = use_jit
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.num_consumer_groups = num_consumer_groups
+        self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
         self.call_sizes = call_sizes
@@ -457,12 +463,23 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+
+        template_args = f"""
+            num_stages={self.num_stages},
+            num_warps={self.num_warps},
+            triton_meta={triton_meta!r},
+            inductor_meta={inductor_meta!r},
+        """
+
+        if HAS_WARP_SPEC:
+            template_args += f"""
+            num_consumer_groups={self.num_consumer_groups},
+            num_buffers_warp_spec={self.num_buffers_warp_spec},
+        """
+
         return f"""
             @triton_heuristics.template(
-                num_stages={self.num_stages},
-                num_warps={self.num_warps},
-                triton_meta={triton_meta!r},
-                inductor_meta={inductor_meta!r},
+                {template_args}
             )
             @triton.jit
         """
@@ -729,11 +746,10 @@ class TritonTemplateKernel(TritonKernel):
                 indices, self.range_trees[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
-            contiguous_index = sympy_dot(
-                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
-            )
-            contiguous_index = self.rename_indexing(contiguous_index)
-            self.body.writeline("xindex = " + texpr(contiguous_index))
+
+            strided_index = sympy_dot(input_node.get_stride(), index_symbols)
+            strided_index = self.rename_indexing(strided_index)
+            self.body.writeline("xindex = " + texpr(strided_index))
 
             xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -806,7 +822,7 @@ class TritonTemplateKernel(TritonKernel):
 
             output_index = self.rename_indexing(output_index)
 
-            if output_index == contiguous_index:
+            if output_index == strided_index:
                 output_index_str = "xindex"
             else:
                 out_indexing = self.indexing(
@@ -1070,6 +1086,8 @@ class TritonTemplate(KernelTemplate):
         layout,
         num_stages,
         num_warps,
+        num_consumer_groups=0,
+        num_buffers_warp_spec=0,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -1135,6 +1153,13 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
         }
+        if HAS_WARP_SPEC:
+            kernel_options.update(
+                {
+                    "num_consumer_groups": num_consumer_groups,
+                    "num_buffers_warp_spec": num_buffers_warp_spec,
+                }
+            )
 
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
@@ -1156,19 +1181,25 @@ class TritonTemplate(KernelTemplate):
                 return None
             if self.debug:
                 print("Generated Code:\n", code)
-            extra = (
-                "-".join(
+            extra_parts = [
+                f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
+            ]
+
+            extra_parts.extend(
+                [
+                    f"num_stages={num_stages}",
+                    f"num_warps={num_warps}",
+                ]
+            )
+            if HAS_WARP_SPEC:
+                extra_parts.extend(
                     [
-                        *[
-                            f"{kwarg}={repr(kwargs[kwarg])}"
-                            for kwarg in sorted(kwargs.keys())
-                        ],
-                        f"num_stages={num_stages}",
-                        f"num_warps={num_warps}",
+                        f"num_consumer_groups={num_consumer_groups}",
+                        f"num_buffers_warp_spec={num_buffers_warp_spec}",
                     ]
                 )
-                + "-"
-            )
+
+            extra = "-".join(extra_parts) + "-"
             mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
@@ -1224,6 +1255,8 @@ class TritonTemplate(KernelTemplate):
             extra_args=[*extra_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
+            num_consumer_groups=num_consumer_groups,
+            num_buffers_warp_spec=num_buffers_warp_spec,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
@@ -1249,6 +1282,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
@@ -1895,10 +1929,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_pool
-
-            # do the optional warmup
-            tuning_pool.initialize()
+            # Initialize the suprocess pool so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_process_pool()
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
@@ -2173,6 +2205,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+
+        strides = ", ".join([str(n.get_stride()) for n in input_nodes])
+        dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
         # when autotune_num_choices_displayed is None, [:None] means all
@@ -2220,6 +2255,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
+        sys.stderr.write(f"strides: {strides}\n")
+        sys.stderr.write(f"dtypes: {dtypes}\n")
+
         for choice in top_k:
             result = timings[choice]
             if result:
