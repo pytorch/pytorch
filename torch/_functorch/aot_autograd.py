@@ -671,15 +671,21 @@ def _create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx:
-                    fw_metadata = run_functionalized_fw_and_collect_metadata(
-                        flat_fn,
-                        static_input_indices=aot_config.static_input_indices,
-                        keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        is_train=needs_autograd,
-                        pre_dispatch=aot_config.pre_dispatch,
-                        is_export=aot_config.is_export,
-                    )(*_dup_fake_script_obj(fake_flat_args))
+                with dynamo_timed(
+                    "run_functionalized_fw_and_collect_metadata",
+                    phase_name="aot_collect_metadata",
+                    log_pt2_compile_event=True,
+                    dynamo_compile_column_us="aot_autograd_cumulative_collect_metadata_compile_time_us",
+                ):
+                    with ctx:
+                        fw_metadata = run_functionalized_fw_and_collect_metadata(
+                            flat_fn,
+                            static_input_indices=aot_config.static_input_indices,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations,
+                            is_train=needs_autograd,
+                            pre_dispatch=aot_config.pre_dispatch,
+                            is_export=aot_config.is_export,
+                        )(*_dup_fake_script_obj(fake_flat_args))
 
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
