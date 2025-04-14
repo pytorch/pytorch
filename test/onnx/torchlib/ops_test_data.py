@@ -46,7 +46,7 @@ import numpy as np
 import ops_test_common
 
 import torch
-from torch.onnx._internal.exporter._torchlib.ops import core as core_ops
+from torch.onnx._internal.exporter._torchlib.ops import core as core_ops, nn as nn_ops
 from torch.testing._internal import common_methods_invocations
 from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
@@ -78,6 +78,12 @@ class TorchLibOpInfo:
     compare_shape_only_for_output: tuple[int, ...] = ()
     # Whether the function is designed for complex inputs
     complex: bool = False
+    # The ONNX opset version in which the function was introduced.
+    # Its specifies the minimum ONNX opset version required to use the function.
+    # It ensures that the function is only used when the target ONNX opset version
+    # is compatible. For example, if `opset_introduced=20`, the function will only
+    # be used when exporting to ONNX models targeting opset version 20 or higher.
+    opset_introduced: int = 18
     # The acceptable tolerance of the inference result difference between PyTorch and ORT.
     # Format: {dtype: (rtol, atol)}.
     # For example: {torch.float16: (1e-3, 1e-3)}
@@ -447,7 +453,9 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("abs", core_ops.aten_abs_complex, complex=True),
     TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
     TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
+    TorchLibOpInfo("gelu_op20", nn_ops.aten_gelu_opset20, opset_introduced=20),
 )
+
 
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))
@@ -500,6 +508,7 @@ ops_test_common.duplicate_opinfo(
         "nn.functional.replication_pad3d",
     ),
 )
+ops_test_common.duplicate_opinfo(OPS_DB, "nn.functional.gelu", ("gelu_op20",))
 ops_test_common.duplicate_opinfo(
     OPS_DB,
     "nn.functional.scaled_dot_product_attention",
