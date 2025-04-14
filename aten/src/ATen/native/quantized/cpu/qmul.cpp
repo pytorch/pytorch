@@ -409,8 +409,8 @@ class QMulScalarTensorOut final {
 class QMulOnednn final {
   public:
   static Tensor run(
-    const Tensor& self, double self_scale, int64_t self_zero_point,
-    const Tensor& other, double other_scale, int64_t other_zero_point,
+    const Tensor self, double self_scale, int64_t self_zero_point,
+    const Tensor other, double other_scale, int64_t other_zero_point,
     double output_scale, int64_t output_zero_point, c10::ScalarType output_dtype
   ) {
 #if AT_MKLDNN_ENABLED()

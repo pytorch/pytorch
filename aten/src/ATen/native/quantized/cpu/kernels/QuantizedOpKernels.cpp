@@ -15,6 +15,7 @@
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <c10/util/Unroll.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -4259,91 +4260,109 @@ void _qmul_tensor_cpu_impl(
     double output_scale,
     int64_t output_zero_point) {
   float multiplier = x_scale * y_scale / output_scale;
+
+  auto compute_non_vectorized = [&](const uint8_t* x_ptr, const uint8_t* y_ptr,
+                                    T* out_addr) {
+      uint8_t x_data = *x_ptr;
+      uint8_t y_data = *y_ptr;
+      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
+      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
+      int32_t out_val = static_cast<int32_t>(x_val * y_val);
+      float out_val_f = (float)out_val * multiplier;
+      if constexpr (std::is_same<T, float>::value) {
+        *out_addr = out_val_f;
+      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+        *out_addr = at::BFloat16(out_val_f);
+      } else if constexpr (std::is_same<T, at::Half>::value) {
+        *out_addr = at::Half(out_val_f);
+      } else { //  T == uint8, requantization needed
+        out_val_f = std::round(out_val_f);
+        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
+        out_val_i32 = std::min(255, std::max(0, out_val_i32));
+        *out_addr = static_cast<uint8_t>(out_val_i32);
+      }
+  };
+
 #if defined(CPU_CAPABILITY_AVX512)
-  int64_t size_rem = size % 16;
-  int64_t size_com = size - size_rem;
-  int64_t steps = size_com / 16;
   __m512 vs = _mm512_set1_ps(multiplier);
   __m512i vza = _mm512_set1_epi32(x_zero_point);
   __m512i vzb = _mm512_set1_epi32(y_zero_point);
   __m512i vzc = _mm512_set1_epi32(output_zero_point);
   __m512i v255 = _mm512_set1_epi32(255);
-  __m512i v0 = _mm512_set1_epi32(0);
+  __m512i v0 = _mm512_setzero_epi32();
+  int64_t step_size = 64;
+  int64_t size_rem = size % step_size;
+  int64_t size_com = size - size_rem;
+  int64_t steps = size_com / step_size;
+
+  auto compute_one_lane = [&](__m128i va, __m128i vb, T* out_addr) {
+    __m512i va_i32 = _mm512_cvtepi8_epi32(va);
+    __m512i vb_i32 = _mm512_cvtepi8_epi32(vb);
+    va_i32 = _mm512_sub_epi32(va_i32, vza);
+    vb_i32 = _mm512_sub_epi32(vb_i32, vzb);
+    __m512i vc = _mm512_mullo_epi32(va_i32, vb_i32);
+    __m512 vc_f = _mm512_cvtepi32_ps(vc);
+    vc_f = _mm512_mul_ps(vc_f, vs);
+    if constexpr (std::is_same<T, float>::value) {
+      _mm512_storeu_ps(out_addr, vc_f);
+    } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+      __m256i vc_bf16 = cvtfp32_bf16(vc_f);
+      _mm256_storeu_si256((__m256i*)out_addr, vc_bf16);
+    } else if constexpr (std::is_same<T, at::Half>::value) {
+      __m256i vc_f16 = cvtfp32_fp16(vc_f);
+      _mm256_storeu_si256((__m256i*)out_addr, vc_f16);
+    } else { //  T == uint8, requantization needed
+      __m512i vc_i32 = _mm512_cvtps_epi32(vc_f);
+      vc_i32 = _mm512_add_epi32(vc_i32, vzc);
+      vc_i32 = _mm512_min_epi32(vc_i32, v255);
+      vc_i32 = _mm512_max_epi32(vc_i32, v0);
+      __m128i vc_i8 = _mm512_cvtepi32_epi8(vc_i32);
+      _mm_storeu_si128((__m128i*)out_addr, vc_i8);
+    }
+  };
+
+  auto compute = [&](int i, __m512i va_512, __m512i vb_512, T* out_addr) {
+    __m128i va = _mm512_extracti32x4_epi32(va_512, i);
+    __m128i vb = _mm512_extracti32x4_epi32(vb_512, i);
+    auto store_addr = out_addr + i * 16;
+    compute_one_lane(va, vb, store_addr);
+  };
+
   at::parallel_for(0, steps, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
-      auto x_data = x_ptr + d * 16;
-      auto y_data = y_ptr + d * 16;
-      auto out_data = out_ptr + d * 16;
+      auto x_data = x_ptr + d * step_size;
+      auto y_data = y_ptr + d * step_size;
+      auto out_data = out_ptr + d * step_size;
+      __m512i va_512 = _mm512_loadu_si512((__m512i*)x_data);
+      __m512i vb_512 = _mm512_loadu_si512((__m512i*)y_data);
+      c10::ForcedUnroll<4>{}(compute, va_512, vb_512, out_data);
+    }
+  });
+  auto base = size_com;
+  size = size_rem;
+  size_rem = size % 16;
+  size_com = size - size_rem;
+  steps = size_com / 16;
+  at::parallel_for(0, steps, 1, [&](int64_t start, int64_t end) {
+    for (const auto d : c10::irange(start, end)) {
+      auto x_data = x_ptr + base + d * 16;
+      auto y_data = y_ptr + base + d * 16;
+      auto out_data = out_ptr + base + d * 16;
       __m128i va = _mm_loadu_si128((__m128i*)x_data);
       __m128i vb = _mm_loadu_si128((__m128i*)y_data);
-      __m512i va_i32 = _mm512_cvtepi8_epi32(va);
-      __m512i vb_i32 = _mm512_cvtepi8_epi32(vb);
-      va_i32 = _mm512_sub_epi32(va_i32, vza);
-      vb_i32 = _mm512_sub_epi32(vb_i32, vzb);
-      __m512i vc = _mm512_mullo_epi32(va_i32, vb_i32);
-      __m512 vc_f = _mm512_cvtepi32_ps(vc);
-      vc_f = _mm512_mul_ps(vc_f, vs);
-      if constexpr (std::is_same<T, float>::value) {
-        _mm512_storeu_ps(out_data, vc_f);
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        __m256i vc_bf16 = cvtfp32_bf16(vc_f);
-        _mm256_storeu_si256((__m256i*)out_data, vc_bf16);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        __m256i vc_f16 = cvtfp32_fp16(vc_f);
-        _mm256_storeu_si256((__m256i*)out_data, vc_f16);
-      } else { //  T == uint8, requantization needed
-        __m512i vc_i32 = _mm512_cvtps_epi32(vc_f);
-        vc_i32 = _mm512_add_epi32(vc_i32, vzc);
-        vc_i32 = _mm512_min_epi32(vc_i32, v255);
-        vc_i32 = _mm512_max_epi32(vc_i32, v0);
-        __m128i vc_i8 = _mm512_cvtepi32_epi8(vc_i32);
-        _mm_storeu_si128((__m128i*)out_data, vc_i8);
-      }
+      compute_one_lane(va, vb, out_data);
     }
   });
   if (size_rem > 0) {
+    base += size_com;
     for (const auto d : c10::irange(size_rem)) {
-      uint8_t x_data = *(x_ptr + size_com + d);
-      uint8_t y_data = *(y_ptr + size_com + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      int32_t out_val = static_cast<int32_t>(x_val * y_val);
-      float out_val_f = (float)out_val * multiplier;
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + size_com + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + size_com + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + size_com + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + size_com + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_non_vectorized(x_ptr + base + d, y_ptr + base + d, out_ptr + base + d);
     }
   }
 #else
   at::parallel_for(0, size, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
-      uint8_t x_data = *(x_ptr + d);
-      uint8_t y_data = *(y_ptr + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      int32_t out_val = static_cast<int32_t>(x_val * y_val);
-      float out_val_f = (float)out_val * multiplier;
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_non_vectorized(x_ptr + d, y_ptr + d, out_ptr + d);
     }
   });
 #endif
