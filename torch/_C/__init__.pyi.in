@@ -937,7 +937,7 @@ class Argument:
         N: _int | None,
         defualt_value: Any | None,
         kwarg_only: _bool,
-        alias_info: AliasInfo | None
+        alias_info: AliasInfo | None,
     ) -> None: ...
 
 class FunctionSchema:
@@ -953,7 +953,7 @@ class FunctionSchema:
         arguments: list[Argument],
         returns: list[Argument],
         is_vararg: _bool,
-        is_varret: _bool
+        is_varret: _bool,
     ) -> None: ...
 
 class _UpgraderEntry:
