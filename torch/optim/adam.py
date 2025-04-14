@@ -832,9 +832,6 @@ def _fused_adam(
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
-        if device.type == "mps":  # type: ignore[union-attr]
-            assert found_inf is None and grad_scale is None
-
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(

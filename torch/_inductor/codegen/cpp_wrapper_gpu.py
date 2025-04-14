@@ -440,7 +440,7 @@ class CppWrapperGpu(CppWrapperCpu):
             is not None
         ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(global_scratch_def)
+            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
