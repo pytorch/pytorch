@@ -2055,13 +2055,20 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-            return min_cut_rematerialization_partition(
-                gm,
-                joint_inputs,
-                compiler="inductor",
-                static_lifetime_input_indices=static_lifetime_input_indices,
-                **kwargs,
-            )
+
+            with dynamo_utils.dynamo_timed(
+                "min_cut_rematerialization_partition",
+                phase_name="partitioner",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="partitioner_cumulative_compile_time_us",
+            ):
+                return min_cut_rematerialization_partition(
+                    gm,
+                    joint_inputs,
+                    compiler="inductor",
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    **kwargs,
+                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(

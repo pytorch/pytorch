@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -787,9 +787,15 @@ def aot_dispatch_autograd(
     )
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+    with dynamo_timed(
+        "aot_dispatch_autograd_graph",
+        phase_name="aot_trace_joint_graph",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="aot_cumulative_dispatch_autograd_graph_compile_time_us",
+    ):
+        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
