@@ -62,8 +62,9 @@ def munge_shape_guards(s: str) -> str:
 
     if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
         # Since we can have multiple guard accessors for one guard, the shape guard
-        # printing will have duplicates. We remove duplicates whie preserving order.
-        lines = list(dict.fromkeys(lines))
+        # printing will have just SYMBOLIC_SHAPE_GUARD in one line for the second
+        # guard accessor and onwards. We remove those lines
+        lines = [line for line in lines if "__SHAPE_GUARD__:" in line]
 
     return "\n".join(lines)
 

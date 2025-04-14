@@ -746,10 +746,11 @@ class TritonTemplateKernel(TritonKernel):
                 indices, self.range_trees[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
-
-            strided_index = sympy_dot(input_node.get_stride(), index_symbols)
-            strided_index = self.rename_indexing(strided_index)
-            self.body.writeline("xindex = " + texpr(strided_index))
+            contiguous_index = sympy_dot(
+                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+            )
+            contiguous_index = self.rename_indexing(contiguous_index)
+            self.body.writeline("xindex = " + texpr(contiguous_index))
 
             xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -822,7 +823,7 @@ class TritonTemplateKernel(TritonKernel):
 
             output_index = self.rename_indexing(output_index)
 
-            if output_index == strided_index:
+            if output_index == contiguous_index:
                 output_index_str = "xindex"
             else:
                 out_indexing = self.indexing(
@@ -1282,6 +1283,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },

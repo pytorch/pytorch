@@ -12,12 +12,8 @@ __all__ = ["all_reduce", "reduce", "broadcast", "all_gather", "reduce_scatter"]
 
 # ncclRedOp_t
 SUM = 0  # ncclSum
-PROD = 1  # ncclProd
-MIN = 2  # ncclMin
-MAX = 3  # ncclMax
-AVG = 4  # ncclAvg
 
-VALID_OPS = {SUM, PROD, MIN, MAX, AVG}
+VALID_OPS = {SUM}
 
 
 def is_available(tensors):

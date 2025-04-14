@@ -23,7 +23,7 @@ from torch._C._dynamo.eval_frame import (
     _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
 )
-from torch._guards import CompileId
+from torch._guards import CompileId, Guard
 
 
 # We use a dict to store additional data per frame.
@@ -35,6 +35,17 @@ class GuardFail(NamedTuple):
     reason: str
     # A code object where we failed a guard
     orig_code: types.CodeType
+
+
+@dataclasses.dataclass(frozen=True)
+class GuardFilterEntry:
+    name: str
+    has_value: bool
+    value: object
+    guard_type: str
+    derived_guard_types: tuple[str, ...]
+    is_global: bool
+    orig_guard: Guard
 
 
 class GuardFn(Protocol):

@@ -38,7 +38,13 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
-from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
+from ..source import (
+    AttrSource,
+    GenericAttrSource,
+    GetItemSource,
+    TypeSource,
+    WeakRefCallSource,
+)
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -269,12 +275,16 @@ class SuperVariable(VariableTracker):
                 return result
 
             try:
-                attr_value = self.objvar.value.__getattribute__(attr_name)
+                # NB - use object.__getattribute__ to prevent running any user code
+                attr_value = object.__getattribute__(self.objvar.value, attr_name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
-            source = self.source and AttrSource(self.source, attr_name)
-            return VariableTracker.build(tx, attr_value, source)
+            attr_source = None
+            if self.objvar.source is not None:
+                # setup a object.__getattribute__(self.objvar, name) source
+                attr_source = GenericAttrSource(self.objvar.source, attr_name)
+            return VariableTracker.build(tx, attr_value, attr_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
             # See `THPModule_disable_torch_function` for the C impl.
             # The signature of _disabled_torch_function_impl is similar to

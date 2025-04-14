@@ -1,5 +1,6 @@
+from collections import defaultdict
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, Optional
 
 import torch
 import torch.distributed.tensor._api as dtensor
@@ -15,6 +16,59 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+def _explicit_order_placements(
+    mesh_shape: ShapeType, placements: Sequence[Placement]
+) -> Sequence[tuple[int, Placement]]:
+    """
+    Replace Strided Shards with regular shards in an adjusted order.
+
+    Returns a list of (mesh_dim, placement) tuples where the list order is the sharding order.
+
+    ex.
+    [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] ->
+    [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
+
+    """
+    if not len(placements) == len(mesh_shape):
+        raise RuntimeError(
+            "Expected one placement per mesh dim, "
+            f"but found {len(placements)} placements and {len(mesh_shape)} mesh dims."
+        )
+    ordered = []
+    deferred_strided_placements = defaultdict(list)
+    strided_part_ended_for_dim = set()
+    for mesh_dim, p in enumerate(placements):
+        if isinstance(p, _StridedShard):
+            # validate the stride is the correct multiple of the meshdim and the earlier shard
+            deferred_strided_placements[p.dim].append((mesh_dim, p))
+
+        else:
+            ordered.append((mesh_dim, p))
+            if isinstance(p, Shard):
+                if p.dim in strided_part_ended_for_dim:
+                    raise NotImplementedError(
+                        f"Strided sharding does not allow Shard() to appear after "
+                        f"the strided part has ended. {p} at mesh dim {mesh_dim} in "
+                        f"{placements} violates this assumption."
+                    )
+
+                if p.dim in deferred_strided_placements:
+                    strided_part_ended_for_dim.add(p.dim)
+                    strided_placements = deferred_strided_placements.pop(p.dim)
+                    aggregate_size = mesh_shape[mesh_dim]
+                    while len(strided_placements) > 0:
+                        strided_mesh_dim, strided = strided_placements.pop()
+                        if not strided.split_factor == aggregate_size:
+                            raise RuntimeError(
+                                f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
+                                f" == aggregate mesh size ({aggregate_size})"
+                            )
+                        aggregate_size *= mesh_shape[strided_mesh_dim]
+                        ordered.append((strided_mesh_dim, Shard(p.dim)))
+
+    return ordered
+
+
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -22,40 +76,53 @@ def compute_local_shape_and_global_offset(
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
 
-    Example (2 host with 4GPUs each):
-    # Below is a DeviceMesh with mesh_shape of (2, 4)
-    mesh = DeviceMesh(device_type="cuda",
-                        mesh=[
-                        [0, 1, 2, 3],
-                        [4, 5, 6, 7]
-                        ],
+    Example:
+    global_tensor = [[0,  1,  2,  3,  4], sharded on mesh (DP=2, TP=2) with (Shard(1), Shard(1))
+                     [10, 11, 12, 13, 14]]
+
+    This table shows the return value of local_shape and global_offset for each rank.
+    (`local_tensor` is for illustration only).
+
+    Note how the first coordinate of global_offset is always 0, corresponding to tensor dim 0 being replicated.
+
+    Rank        local_tensor        local_shape     global_offset
+    -------------------------------------------------------------
+    0           [[0, 1],            (2, 2)          (0, 0)
+                 [10, 11]]
+
+    1           [[2],               (2, 1)          (0, 2)
+                 [12]]
+
+    2           [[3],               (2, 1)          (0, 3)
+                 [13]]
+
+    3           [[4],               (2, 1)          (0, 4)
+                 [14]]
+
+    Args:
+        global_shape (ShapeType): The global shape of the DTensor.
+        mesh (:class:`DeviceMesh`): The device mesh this DTensor is distributed on.
+        placements (Sequence[:class:`Placement`]]): The placements of the DTensor.
+
+    Return:
+        local_shape: the shape of the DTensor's _local_tensor on the current rank.
+        global_offset: a tuple of offsets for each dimension of the global tensor shape,
+        identifying how this shard fits into the global tensor in each dimension.
+
+    """
+    return _compute_local_shape_and_global_offset(
+        global_shape, mesh.shape, mesh.get_coordinate(), placements
     )
 
-    Let's say we distribute a global_tensor of shape (8,4) over the above DeviceMesh
-    with a placements of [Shard(0), Shard(0)].
-    The local shape and global offset will be as follows:
-    rank0 -- local_shape:[1, 4], global_offset:[0, 0]
-    rank1 -- local_shape:[1, 4], global_offset:[1, 0]
-    rank2 -- local_shape:[1, 4], global_offset:[2, 0]
-    rank5 -- local_shape:[1, 4], global_offset:[5, 0]
-    rank3 -- local_shape:[1, 4], global_offset:[3, 0]
-    rank4 -- local_shape:[1, 4], global_offset:[4, 0]
-    rank6 -- local_shape:[1, 4], global_offset:[6, 0]
-    rank7 -- local_shape:[1, 4], global_offset:[7, 0]
 
-    Let's say we distribute a global_tensor of shape (2) over the above DeviceMesh with
-    a placements of [Shard(0)]. We will not have non-empty local tensor for all the ranks.
-    The local shape and global offset will be as follows:
-    rank0 -- local_shape:[1,], global_offset:[0,]
-    rank1 -- local_shape:[1,], global_offset:[1,]
-    rank2 -- local_shape:[0,], global_offset:[2,]
-    rank5 -- local_shape:[0,], global_offset:[2,]
-    rank3 -- local_shape:[0,], global_offset:[2,]
-    rank4 -- local_shape:[0,], global_offset:[2,]
-    rank6 -- local_shape:[0,], global_offset:[2,]
-    rank7 -- local_shape:[0,], global_offset:[2,]
-    """
-    my_coordinate = mesh.get_coordinate()
+# accept 'plain data types' to enable simpler unit testing without creating device mesh
+def _compute_local_shape_and_global_offset(
+    global_shape: ShapeType,
+    mesh_shape: ShapeType,
+    my_coordinate: Optional[list[int]],
+    placements: Sequence[Placement],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
@@ -63,39 +130,36 @@ def compute_local_shape_and_global_offset(
     else:
         local_shape = list(global_shape)
         global_offset = [0] * len(global_shape)
-        shard_idx_stride_by_mesh_dim = [
-            [0] * mesh.ndim for _ in range(len(global_shape))
-        ]  # index by (shard_dim, mesh_dim)
-        num_shards_by_tensor_dim = [1] * len(global_shape)
-
-        for idx, placement in enumerate(placements):
-            mesh_dim_size = mesh.size(idx)
+        for mesh_dim, placement in ordered_placements:
+            mesh_dim_size = mesh_shape[mesh_dim]
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
                 assert shard_dim < len(local_shape), (
                     f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 )
-                shard_size, shard_offset = placement._local_shard_size_on_dim(
+                shard_size, shard_offset = placement._local_shard_size_and_offset(
                     local_shape[shard_dim],
                     mesh_dim_size,
-                    my_coordinate[idx],
-                    return_offset=True,
+                    my_coordinate[mesh_dim],
                 )
 
                 local_shape[shard_dim] = shard_size
                 local_offset[shard_dim] = shard_offset
-
-                # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
-                # it means that this dimension has been already sharded in previous placement.
-                # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
-                # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
-                if global_offset[shard_dim] <= local_offset[shard_dim]:
-                    global_offset[shard_dim] = local_offset[shard_dim]
+                if shard_size == 0:
+                    # Special case to fill in a standardized non-garbage value for the global_offset
+                    # of zero-sized shards.  This value is out of bounds of the tensor, so it won't conflict
+                    # with any real offsets.  DCP may rely on this value to de-duplicate shards.
+                    global_offset[shard_dim] = global_shape[shard_dim]
                 else:
-                    global_offset[shard_dim] += local_offset[shard_dim]
-
-                num_shards_by_tensor_dim[shard_dim] *= mesh_dim_size
+                    # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
+                    # it means that this dimension has been already sharded in previous placement.
+                    # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
+                    # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
+                    if global_offset[shard_dim] <= local_offset[shard_dim]:
+                        global_offset[shard_dim] = local_offset[shard_dim]
+                    else:
+                        global_offset[shard_dim] += local_offset[shard_dim]
 
         # NOTE: the offset compute relies on the local shard index and it has no
         # problem when strided sharding is not present. To correctly compute, we assume
@@ -120,46 +184,6 @@ def compute_local_shape_and_global_offset(
         # happen on mesh of 3 or more dimensions.
         # TODO: change this function to correctly address this.
         # TODO: this logic can be applied to contiguous sharding as well
-        strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
-        if strided_sharding:
-            strided_part_seen = [False] * len(global_shape)
-            strided_part_end = [False] * len(global_shape)
-            for idx, placement in enumerate(placements):
-                mesh_dim_size = mesh.size(idx)
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
-
-                    if strided_part_end[shard_dim]:
-                        raise NotImplementedError(
-                            f"Strided sharding does not allow Shard() to appear after "
-                            f"the strided part has ended. {placement} at idx {idx} in "
-                            f"{placements} violates this assumption."
-                        )
-
-                    if strided_part_seen[shard_dim]:
-                        strided_part_end[shard_dim] = True
-
-                    if isinstance(placement, _StridedShard):
-                        strided_part_seen[shard_dim] = True
-                        shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
-                            num_shards_by_tensor_dim[shard_dim]
-                            // (placement.split_factor * mesh_dim_size)
-                        )
-                    else:
-                        num_shards_by_tensor_dim[shard_dim] //= mesh_dim_size
-                        shard_idx_stride_by_mesh_dim[shard_dim][idx] = (
-                            num_shards_by_tensor_dim[shard_dim]
-                        )
-
-            shard_idx = [
-                sum([x * y for x, y in zip(shard_idx_stride, my_coordinate)])
-                for shard_dim, shard_idx_stride in enumerate(
-                    shard_idx_stride_by_mesh_dim
-                )
-            ]
-
-            global_offset = [x * y for x, y in zip(local_shape, shard_idx)]
-
         return tuple(local_shape), tuple(global_offset)
 
 
