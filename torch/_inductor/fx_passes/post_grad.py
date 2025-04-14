@@ -817,7 +817,10 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     slice_dim_size = self.shape[dim]
     if (
         statically_known_true(sym_eq(start, 0))
-        and statically_known_true(end >= slice_dim_size)
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_dim_size)
+        )
         and statically_known_true(sym_eq(step, 1))
     ):
         return True
@@ -834,7 +837,10 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     if (
         self.shape == src.shape
         and start == 0
-        and end >= slice_scatter_dim_size
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_scatter_dim_size)
+        )
         and step == 1
     ):
         return True
