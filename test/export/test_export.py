@@ -6990,6 +6990,29 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    def test_sym_or_sym_and(self):
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                torch._check(sym_or(u0 == 2, u0 == 4, u0 == 6))
+                torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
+                return u0 + u1 + u2
+
+        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
+        ep.module()(torch.tensor([2, 6, 5]))
+        ep.module()(torch.tensor([4, 7, 5]))
+        ep.module()(torch.tensor([6, 5, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
+        ):
+            ep.module()(torch.tensor([3, 6, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+        ):
+            ep.module()(torch.tensor([6, 6, 6]))
+
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
             def forward(self, x):
