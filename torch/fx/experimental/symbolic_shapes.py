@@ -105,7 +105,7 @@ DimList = list
 log = logging.getLogger(__name__)
 
 import sympy
-from sympy import Add, S
+from sympy import S
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
