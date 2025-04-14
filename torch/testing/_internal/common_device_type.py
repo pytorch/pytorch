@@ -952,10 +952,10 @@ def instantiate_device_type_tests(
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
-    # Delete the generic form of the test functions so they're not discoverable.
-    # At this point, device-specific tests have already been created based on these
-    # (e.g. TestFooCUDA.test_foo_cuda). This mutates the original class (TestFoo),
-    # which has already been removed from scope.
+    # Delete the generic form of the test functions (e.g. TestFoo.test_bar()) so they're
+    # not discoverable. This mutates the original class (TestFoo), which was removed from
+    # scope above. At this point, device-specific tests (e.g. TestFooCUDA.test_bar_cuda)
+    # have already been created and the generic forms are no longer needed.
     for name in generic_tests:
         delattr(generic_test_class, name)
 
