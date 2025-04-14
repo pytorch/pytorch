@@ -227,6 +227,7 @@ class _KinetoProfile:
                 cuda_version = None
                 if hasattr(torch, "version"):
                     from torch.torch_version import TorchVersion
+
                     cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
 
                 if inductor_config.triton.cudagraphs and (
