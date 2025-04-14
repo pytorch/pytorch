@@ -37,6 +37,13 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import (
+    Concatenate,
+    dataclass_transform,
+    ParamSpec,
+    Self,
+    TypeGuard,
+)
 from unittest import mock
 
 import sympy
@@ -45,13 +52,6 @@ import torch
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeGuard,
-)
 
 
 if TYPE_CHECKING:
@@ -301,9 +301,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(
-        denom, int
-    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(numer, int) and isinstance(denom, int), (
+        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    )
     return runtime_ceildiv(numer, denom)
 
 
@@ -1279,7 +1279,9 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
-            f"Not enough SMs to use max_autotune_gemm mode. min_sms: {min_sms}, avail_sms: {avail_sms}"
+            "Not enough SMs to use max_autotune_gemm mode: min_sms=%d, avail_sms=%d",
+            min_sms,
+            avail_sms,
         )
         return False
     return True
@@ -1439,9 +1441,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> (
-    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
-):
+def try_import_ck_lib() -> tuple[
+    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
+]:
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1713,9 +1715,9 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -1724,9 +1726,9 @@ def run_and_get_triton_code(
 ) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -1852,9 +1854,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(
-        val, sympy.Expr
-    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    assert isinstance(val, sympy.Expr), (
+        "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    )
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
