@@ -911,6 +911,8 @@ def instantiate_device_type_tests(
         # NB: This should be done before instantiate_test() is called as that invokes setup.
         @classmethod
         def _setUpClass(cls):
+            # This should always be called, whether or not the test class invokes
+            # super().setUpClass(), to set the primary device.
             base.setUpClass()
             # We want to call the @classmethod defined in the generic base, but pass
             # it the device-specific class object (cls), hence the __func__ call.
