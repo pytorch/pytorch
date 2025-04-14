@@ -1,6 +1,10 @@
 # mypy: allow-untyped-defs
 
+<<<<<<< HEAD
+from torch.utils._ordered_set import OrderedSet
+=======
 from torch._inductor.ir import ComputedBuffer, InputBuffer
+>>>>>>> 042c6e50349 ([Cutlass] Implement EVT example tensor creation)
 
 from ..cutlass_utils import try_import_cutlass
 
@@ -10,6 +14,12 @@ if try_import_cutlass():
     import ctypes
     import textwrap
 
+    from cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
+        EmptyByte,
+    )
+    from cutlass.backend.epilogue import (  # type: ignore[import-untyped, import-not-found]
+        dtype2ctype,
+    )
     from cutlass.backend.evt import (  # type: ignore[import-untyped, import-not-found]
         EpilogueFunctorVisitor,
     )
@@ -36,18 +46,19 @@ if try_import_cutlass():
     import torch
     from torch._inductor.utils import IndentedBuffer
 
+    _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
+
     TORCH_TO_CUTLASS_DTYPE = {
         torch.float32: DataType.f32,
         torch.float16: DataType.f16,
         torch.bfloat16: DataType.bf16,
     }
 
-    def create_example_tensors(
+def create_example_tensors(
         read_names: list[str],
         write_names: list[str],
         buffer_renames: dict[str, str],
-        name_to_buffer: dict[str, ComputedBuffer],
-        name_to_input: dict[str, InputBuffer],
+        name_to_buffer: dict[str, Union[ComputedBuffer, InputBuffer]],
     ):
         example_tensors = {}
 
@@ -80,18 +91,7 @@ if try_import_cutlass():
                 layout_tag=LayoutType.RowMajor
                 if is_row_major
                 else LayoutType.ColumnMajor,
-                element=TORCH_TO_CUTLASS_DTYPE[buffer.get_layout().dtype],
-            )
-
-        def get_buffer(name):
-            if name in name_to_buffer:
-                return name_to_buffer[name]
-
-            if name in name_to_input:
-                return name_to_input[name]
-
-            raise RuntimeError(
-                f"Buffer {name} not found in name_to_buffer or name_to_input"
+                element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
             )
 
         for name in read_names + write_names:
@@ -102,7 +102,7 @@ if try_import_cutlass():
                     name
                 ]  # Need to rewrite some special args (e.g. acc is a required arg name)
 
-            example_tensors[key] = cutlass_tensor_from_buffer(get_buffer(name))
+            example_tensors[key] = cutlass_tensor_from_buffer(name_to_buffer[name])
 
         return example_tensors
 
@@ -149,7 +149,7 @@ if try_import_cutlass():
         epilogue_functor.trace(example_tensors)
         return epilogue_functor
 
-    def _render_argument_type(epilogue_functor):
+    def _render_argument_type(epilogue_functor, name_to_buffer):
         epilogue_thread_type = epilogue_functor.epilogue_thread_type
 
         # Fragile, but this is the only way to guarantee t is expected type because t is a local class
@@ -162,13 +162,15 @@ if try_import_cutlass():
         buffer = IndentedBuffer()
 
         def render_argument_type(name, t):
-            fnames = []
             if issubclass(t, ctypes.c_byte):
                 buffer.writeline(f"{{}}, /* {name} */")
             else:
-                for fname, _ in t._fields_:
-                    fnames.append(fname)
-                buffer.writeline(f"{{{', '.join(fnames)}}}, /* {name} */")
+                fields = [
+                    (fname, _get_arg_from_node(ty, name_to_buffer[name]))
+                    for fname, ty in t._fields_
+                ]
+                field_strs = [f"/* {fname} */ {str(field)}" for fname, field in fields]
+                buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
 
         def render_thread_type(name, t):
             if is_nested_visitor_type(t):
@@ -187,3 +189,21 @@ if try_import_cutlass():
         buffer.writeline("}};")
 
         return buffer.getvalue()
+
+    def _get_arg_from_node(arg_ty, node):
+        from ..cuda_template import CUTLASSTemplate
+
+        # Today, arguments are either a pointer to the
+        # node's memory, a stride tuple, the datatype
+        if issubclass(arg_ty, tuple):
+            return f"{{{','.join([str(int(x)) for x in node.get_layout().stride])}}}"
+        elif issubclass(arg_ty, ctypes.c_void_p):
+            return f"{node.get_name()}.get()"
+        elif (
+            arg_ty in _CUTLASS_C_DTYPES
+        ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
+            return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+        elif issubclass(arg_ty, EmptyByte):
+            return "{}"
+
+        raise NotImplementedError(f"Unsupported arg type: {arg_ty}")
