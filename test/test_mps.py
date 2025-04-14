@@ -12937,15 +12937,9 @@ class TestCommon(TestCase):
     def test_numpy_ref_mps(self, device, dtype, op):
         # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
         # does not support float64 Tensors.
-        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-        # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        inputs = (
-            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
-            else op.sample_inputs(device, dtype, set_seed=False)
-        )
+        inputs = op.reference_inputs(device, dtype, set_seed=False)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
@@ -13077,6 +13071,29 @@ class TestMetalLibrary(TestCaseMPS):
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
                         f"results are {y}, but all elements should have been {x_sum.item()}")
+
+    def test_argument_buffers(self):
+        lib = torch.mps.compile_shader("""
+        constant constexpr auto nbuffers = 64;
+        struct Inputs {
+          metal::array<device float *, nbuffers> args;
+        };
+
+        kernel void sum_all(device float* output, constant Inputs& inputs, uint idx [[thread_position_in_grid]]) {
+          auto rc = inputs.args[0][idx];
+          for(auto i = 1; i < nbuffers; ++i) {
+            rc += inputs.args[i][idx];
+          }
+          output[idx] = rc;
+        }
+        """)
+        inputs = torch.rand(64, 32, device="mps").unbind(0)
+        output = torch.empty_like(inputs[0])
+        lib.sum_all(output, inputs)
+        correct = torch.zeros_like(inputs[0])
+        for inp in inputs:
+            correct += inp
+        self.assertEqual(correct, output)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):

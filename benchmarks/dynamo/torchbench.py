@@ -85,8 +85,9 @@ def process_hf_whisper_output(out):
     out_ret = []
     for i, elem in enumerate(out):
         if i == 0:
-            assert isinstance(elem, dict)
-            out_ret.append({k: v for k, v in elem.items() if k != "logits"})
+            if elem is not None:
+                assert isinstance(elem, dict)
+                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
         elif i != 1:
             out_ret.append(elem)
 
