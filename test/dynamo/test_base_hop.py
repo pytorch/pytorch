@@ -226,7 +226,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
         self.assertExpectedInline(
-            str(self._find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
+            str(find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
             """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor(a2!) operands1, *, str scheme="nf4") -> ((Tensor))""",
         )
 
@@ -283,7 +283,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
         self.assertExpectedInline(
-            str(self._find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
+            str(find_hop_schema(backend.graphs[0], invoke_quant_test)[0]),
             """invoke_quant_test(Any subgraph, Tensor(a1!) operands0, Tensor operands1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 

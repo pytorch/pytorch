@@ -220,7 +220,6 @@ class BaseHOPFunction(torch.autograd.Function):
             exclude_key_set=ctx._fw_exclude_key_set,
         )
 
-        breakpoint()
         return (
             None,
             None,

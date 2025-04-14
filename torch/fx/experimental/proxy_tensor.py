@@ -382,7 +382,7 @@ _ExtractValType = Optional[
         _AnyScriptObjectType,
         BackwardState,
         torch._C.FunctionSchema,
-        torch._higher_order_ops._invoke_quant.InvokeQuant,
+        "torch._higher_order_ops._invoke_quant.InvokeQuant",
         list["_ExtractValType"],
         tuple["_ExtractValType", ...],
         dict[str, "_ExtractValType"],
