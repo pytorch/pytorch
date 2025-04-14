@@ -21,6 +21,8 @@
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -86,7 +88,7 @@ struct WelfordHelper {
   std::vector<Welford<T>> welford_stk;
   uint64_t depth; // depth of welford_stk.
   uint64_t num_chunks; // number of chunks stored in welford_stk.
-  WelfordHelper() {}
+  WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;

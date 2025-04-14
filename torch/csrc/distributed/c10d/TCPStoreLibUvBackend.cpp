@@ -120,25 +120,24 @@ class UvTcpSocket : public UvHandle {
     if (nread > 0) {
       try {
         uv_socket->processBuf(buf, nread);
+        return; // We do free inside processBuf.
       } catch (std::exception& ex) {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
-    } else {
-      // Handle error and EOF cases
-      if (nread < 0) {
-        C10D_DEBUG(
-            "Read callback failed. code:{} name:{} desc:{}",
-            nread,
-            uv_err_name(nread),
-            uv_strerror(nread));
-      } else {
-        C10D_DEBUG("Remote peer closed the connection.");
-      }
+    } else if (nread == UV_EOF) { // Handle EOF cases
+      C10D_DEBUG("Remote peer closed the connection.");
       uv_socket->close();
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      free(buf->base);
+    } else if (nread < 0) { // Handle error and EOF cases
+      C10D_DEBUG(
+          "Read callback failed. code:{} name:{} desc:{}",
+          nread,
+          uv_err_name(nread),
+          uv_strerror(nread));
+      uv_socket->close();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    free(buf->base);
   }
 
  public:
@@ -667,6 +666,12 @@ class LibUVStoreDaemon : public BackgroundThread {
   int64_t deleteKey(const std::string& key);
   void append(const std::string& key, const std::vector<uint8_t>& value);
 
+  void queuePush(const std::string& queueName, const std::vector<uint8_t>& val);
+  void queuePop(
+      const std::string& queueName,
+      const c10::intrusive_ptr<UvHandle>& client);
+  int64_t queueLen(const std::string& queueName);
+
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
   void clearClientWaitState(const c10::intrusive_ptr<UvHandle>& client);
@@ -692,6 +697,10 @@ class LibUVStoreDaemon : public BackgroundThread {
   std::unordered_map<c10::intrusive_ptr<UvHandle>, size_t> keysAwaited_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> clients_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> miscellaneousClients_;
+
+  // Queues
+  std::unordered_map<std::string, std::deque<std::vector<uint8_t>>> queues_;
+
   int port_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
@@ -709,6 +718,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   void onConnect(int status);
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
+  void wakeupOneWaitingClient(const std::string& key);
   // bool tryListen(bool use_ipv6);
 
   static void print_active_handles(uv_handle_t* handle, void* arg);
@@ -786,6 +796,18 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::CANCEL_WAIT:
             if (!parse_cancel_wait_command())
+              return;
+            break;
+          case QueryType::QUEUE_PUSH:
+            if (!parse_queue_push_command())
+              return;
+            break;
+          case QueryType::QUEUE_POP:
+            if (!parse_queue_pop_command())
+              return;
+            break;
+          case QueryType::QUEUE_LEN:
+            if (!parse_queue_len_command())
               return;
             break;
           default:
@@ -917,7 +939,11 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("check key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "check key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     // Now we have received all the keys
     StreamWriter sw(iptr());
@@ -950,7 +976,11 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("wait key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "wait key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     if (store->waitKeys(keys, iptr())) {
       StreamWriter sw(iptr());
@@ -1070,12 +1100,55 @@ class UvClient : public UvTcpSocket {
   bool parse_cancel_wait_command() {
     store->clearClientWaitState(iptr());
 
-    C10D_TRACE("cancel_wait key_count:{} address:{}", this->address());
+    C10D_TRACE("cancel_wait address:{}", this->address());
 
     StreamWriter sw(iptr());
     sw.write1((uint8_t)WaitResponseType::WAIT_CANCELED);
     sw.send();
 
+    return true;
+  }
+
+  bool parse_queue_push_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    std::vector<uint8_t> data;
+    if (!stream.read_payload(data)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_push key:{} address:{}", key, this->address());
+
+    store->queuePush(key, data);
+    return true;
+  }
+
+  bool parse_queue_pop_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_pop key:{} address:{}", key, this->address());
+
+    store->queuePop(key, iptr());
+    return true;
+  }
+
+  bool parse_queue_len_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_len key:{} address:{}", key, this->address());
+
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(store->queueLen(key));
+    sw.send();
     return true;
   }
 
@@ -1348,7 +1421,13 @@ int64_t LibUVStoreDaemon::add(const std::string& key, int64_t addVal) {
 
 bool LibUVStoreDaemon::checkKeys(const std::vector<std::string>& keys) {
   return std::all_of(keys.begin(), keys.end(), [&](const std::string& s) {
-    return tcpStore_.count(s) > 0;
+    if (tcpStore_.count(s) > 0) {
+      return true;
+    }
+    if (auto it = queues_.find(s); it != queues_.end() && !it->second.empty()) {
+      return true;
+    }
+    return false;
   });
 }
 
@@ -1407,6 +1486,50 @@ void LibUVStoreDaemon::wakeupWaitingClients(const std::string& key) {
   }
 }
 
+void LibUVStoreDaemon::wakeupOneWaitingClient(const std::string& key) {
+  auto socketsToWait = waitingSockets_.find(key);
+  if (socketsToWait != waitingSockets_.end()) {
+    for (const auto& client : socketsToWait->second) {
+      if (--keysAwaited_[client] == 0) {
+        StreamWriter sw(client->iptr());
+        sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
+        sw.send();
+        return;
+      }
+    }
+  }
+}
+
+void LibUVStoreDaemon::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  queues_[key].push_back(value);
+  wakeupOneWaitingClient(key);
+}
+
+void LibUVStoreDaemon::queuePop(
+    const std::string& key,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  auto& queue = queues_[key];
+
+  StreamWriter sw(client->iptr());
+  sw.write_value<int64_t>(queue.size());
+
+  if (queue.size() > 0) {
+    auto value = queue.front();
+    queue.pop_front();
+    sw.write_vector(value);
+  }
+
+  sw.send();
+}
+int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
+  auto it = queues_.find(key);
+  if (it == queues_.end()) {
+    return 0;
+  }
+  return static_cast<int64_t>(it->second.size());
+}
 #endif
 
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(

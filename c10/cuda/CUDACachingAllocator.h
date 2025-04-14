@@ -115,6 +115,7 @@ struct TraceEntry {
       size_t addr,
       size_t size,
       cudaStream_t stream,
+      MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
@@ -122,7 +123,8 @@ struct TraceEntry {
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {
+        size_(size),
+        mempool_(std::move(mempool)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -131,6 +133,7 @@ struct TraceEntry {
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
   size_t size_;
+  MempoolId_t mempool_;
   trace_time_ time_{};
 };
 
