@@ -613,8 +613,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
         if subMatrix:
             warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
+                "Offline tuning is not supported on submatrices. Use online tuning instead. "
+                + f"Skipped tuning for: {untuned_gemm[1]}"
             )
             return
 
