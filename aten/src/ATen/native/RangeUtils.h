@@ -28,12 +28,20 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // we dont want.
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
   double size_d;
+  double start_d = start.to<double>();
+  double end_d = end.to<double>();
+  double step_d = step.to<double>();
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
     int64_t sgn = (xstep > 0) - (xstep < 0);
     size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+
+    // workaround for corner case where start or end loses precision when cast to int64_t,
+    // leading to size_d == 0 even though one value should be included
+    if ((step_d > 0 && end_d > start_d) || (step_d < 0 && end_d < start_d)) {
+      size_d = std::max<double>(size_d, 1);
+    }
   } else {
-    size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
-                        / step.to<double>());
+    size_d = std::ceil(static_cast<double>(end_d - start_d) / step_d);
   }
 
   TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),

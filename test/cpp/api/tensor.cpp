@@ -915,6 +915,12 @@ TEST(TensorTest, Arange) {
     auto x = torch::arange(0, 5);
     ASSERT_EQ(x.dtype(), torch::kLong);
   }
+  {
+    auto x = torch::arange(0, 0.5, 1, torch::kLong);
+    ASSERT_EQ(x.dtype(), torch::kLong);
+    ASSERT_EQ(x.sizes(), std::vector<int64_t>({1}));
+    ASSERT_EQ(x.numel(), 1);
+  }
   test_Arange_expected_dtype(torch::kFloat);
   test_Arange_expected_dtype(torch::kDouble);
 }
