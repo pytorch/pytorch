@@ -171,18 +171,21 @@ html_theme_options = {
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 # For these links to appear in the right nav, there is an override in
 # the theme:
-# https://github.com/pytorch/pytorch_sphinx_theme/blob/pytorch_sphinx_theme2/pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
+# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
 community_links = [
     {"url": "/community/index.html", "name": "PyTorch Governance"},
     {"url": "/community/design.html", "name": "PyTorch Design Philosophy"},
-    {"url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions", "name": "The Ultimate Guide to PyTorch Contributions"}
+    {
+        "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
+        "name": "The Ultimate Guide to PyTorch Contributions",
+    },
 ]
 # For these links to appear in the right nav, there is an override in
-# https://github.com/pytorch/pytorch_sphinx_theme/blob/pytorch_sphinx_theme2/pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L27
+# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
 language_bindings_links = [
     {"url": "/cpp_index.html", "name": "C++"},
     {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
-    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"}
+    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
 ]
 
 html_context = {
@@ -195,7 +198,8 @@ html_context = {
     "pytorch_project": "docs",
     "doc_path": "docs/source",
     "theme_variables": theme_variables,  # noqa: F601
-    # library links are defined in https://github.com/pytorch/pytorch_sphinx_theme/blob/pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
+    # library links are defined in
+    # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
     "community_links": community_links,
     "language_bindings_links": language_bindings_links,
