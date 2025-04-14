@@ -1872,6 +1872,9 @@ def _get_1f1b_rank_ops(
         BACKWARD_INPUT if enable_zero_bubble else FULL_BACKWARD
     )
 
+    # During cooldown phase, we need backward steps to align with 1f1b happening in other ranks
+    cooldown_noop_count = 2 * pp_group_size - 2 * (1 + rank)
+
     for op in range(total_ops):
         # Warmup phase
         if op < warmup_ops:
@@ -1922,9 +1925,9 @@ def _get_1f1b_rank_ops(
         # Cooldown phase
         else:
             # During cooldown phase, we need steps to align with 1f1b happening in other ranks
-            # TODO: we don't need to always append, after all 1f1b are finished we can stop appending None
-            if not enable_zero_bubble:
+            if not enable_zero_bubble and cooldown_noop_count > 0:
                 rank_ops.append(None)
+                cooldown_noop_count -= 1
 
             bwd_stage_index = backward_stage_index(op)
             bwd_stage_mb_index[bwd_stage_index] = (
