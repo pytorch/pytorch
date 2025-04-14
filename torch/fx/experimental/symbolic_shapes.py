@@ -73,6 +73,7 @@ from torch.utils._sympy.functions import (
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
 )
@@ -5913,22 +5914,26 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if size_oblivious and expr.has(Max):
-            max_replacements = {}
+        if size_oblivious and (expr.has(Max) or expr.has(Min)):
+            min_max_replacements = {}
             for atom in expr.atoms(Max):
                 a, b = atom.args
-                if b == 1 or b == 0:
+                if isinstance(b, (int, sympy.Integer)):
                     a, b = b, a
-                if a == 1 or a == 0:
-                    if (
-                        isinstance(b, Add)
-                        and len(b.free_symbols) == 2  # TODO: expand to N?
-                        and b.free_symbols == set(b.atoms())
-                        and all(x in self.size_like for x in b.free_symbols)
-                    ):
-                        max_replacements[atom] = b
-            if max_replacements:
-                expr = expr.xreplace(max_replacements)
+                if isinstance(a, (int, sympy.Integer)):
+                    vr = self.bound_sympy(b, size_oblivious=True)
+                    if vr.lower >= a:
+                        min_max_replacements[atom] = b
+            for atom in expr.atoms(Min):
+                a, b = atom.args
+                if isinstance(b, (int, sympy.Integer)):
+                    a, b = b, a
+                if isinstance(a, (int, sympy.Integer)):
+                    vr = self.bound_sympy(b, size_oblivious=True)
+                    if vr.upper <= a:
+                        min_max_replacements[atom] = b
+            if min_max_replacements:
+                expr = expr.xreplace(min_max_replacements)
                 expr = safe_expand(expr)
 
         # TODO it would seem that this pass is not necessary given the
