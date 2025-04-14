@@ -175,6 +175,7 @@ for test_name in [
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
+    "test_batch_norm_2d_2",
     "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
@@ -208,6 +209,7 @@ for test_name in [
     "test_max_min",
     "test_max_pool2d2",
     "test_multilayer_prime_size",
+    "test_multilayer_var_lowp",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_neg_max_uint8",
@@ -221,6 +223,7 @@ for test_name in [
     "test_rsqrt",
     "test_scalar_cpu_tensor_arg",
     "test_scalar_output",
+    "test_scheduler_vertical_fusion1",
     "test_setitem_with_int_parameter",
     "test_signbit",
     "test_silu",
@@ -231,6 +234,7 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
+    "test_unroll_small_reduction",
     "test_vectorized_ops_masked",
     "test_var_mean_tile_reduction_True",
     "test_view_as_complex",
@@ -239,6 +243,7 @@ for test_name in [
     "test_views6",
     "test_views7",
     "test_zero_dim_reductions",
+    "test_zero_element_mutation",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 

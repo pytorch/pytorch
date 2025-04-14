@@ -5206,6 +5206,7 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @tf32_on_and_off(0.006)
     @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -10015,6 +10016,11 @@ class CommonTemplate:
         ):
             # https://github.com/halide/Halide/issues/8318
             raise unittest.SkipTest("halide not supported")
+
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(
+                f"dtype {dtype} not supported for device {self.device}"
+            )
 
         def fn(x, y):
             return x + y, x * y, x / y
