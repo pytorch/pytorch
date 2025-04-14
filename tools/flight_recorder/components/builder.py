@@ -6,6 +6,7 @@
 
 import argparse
 import ast
+import copy
 import os
 import sys
 from typing import Any  # type: ignore[attr-defined]
@@ -209,12 +210,17 @@ def build_collectives(
             errors=set(),
         )
 
-        if find_coalesced_group(pg_name, entries, _pg_guids, first_rank):
-            expected_ranks.add(first_rank)
+        maybe_coalesced_group = find_coalesced_group(
+            pg_name, entries, _pg_guids, first_rank
+        )
+        if len(maybe_coalesced_group) > 1:
+            num_coalesced_entries = len(maybe_coalesced_group)
+            # We need a copy of the original expected ranks to avoid modifying it.
+            candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
             all_coalesced_entries = {}
-            while expected_ranks:
-                curr = expected_ranks.pop()
+            while candidate_ranks:
+                curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
                     find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
@@ -226,31 +232,45 @@ def build_collectives(
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
-                        assert op._src_g == curr, (op._src_g, curr)
+                        assert op._src_g == curr, (
+                            f"Send src error: {curr} expected but {op._src_g} is set"
+                        )
                         peer = op._dst_g
                     elif op.type == "recv":
-                        assert op._dst_g == curr, (op._dst_g, curr)
+                        assert op._dst_g == curr, (
+                            f"Recv dst error: {curr} expected but {op._dst_g} is set"
+                        )
                         peer = op._src_g
                     if peer and peer not in done_ranks:
-                        expected_ranks.add(peer)
+                        candidate_ranks.add(peer)
 
             match = match_coalesced_groups(
-                all_coalesced_entries,
-                group_size=_groups[pg_name].size,
-                groups=_groups,
+                copy.deepcopy(
+                    all_coalesced_entries
+                ),  # We want to keep a copy for cleanup.
+                pg_info=(pg_name, desc),
                 memberships=_memberships,
                 _pg_guids=_pg_guids,
+                mismatch=mismatch,
+                dumps_ranks=dumps_ranks,
+                version=version,
+                collectives=collectives,
+                match_record=match_record,
             )
 
             if match and mismatch[pg_name] == 0:
-                collectives.append(entry_state.to_collective(len(collectives)))
+                # We treat coalesced collectives as a single collective.
+                # TODO: we need to surface a merged collective info like input/output sizes to users.
+                collectives.append(
+                    match_record.entry_state.to_collective(len(collectives))
+                )
             else:
                 mismatch[pg_name] += 1
             for r in all_coalesced_entries:
                 idx_map = {r: i for i, _ in reversed(all_coalesced_entries[r])}  # noqa: B035
                 nccl_calls.extend(
                     reversed(
-                        entry_state.to_nccl_call(
+                        match_record.entry_state.to_nccl_call(
                             all_entries,
                             idx_map,
                             len(nccl_calls),
@@ -258,6 +278,10 @@ def build_collectives(
                         )
                     )
                 )
+                # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
+                for i, k in idx_map.items():
+                    for _ in range(1, num_coalesced_entries):
+                        all_entries[i].pop(k)
         else:
             # Iterate through all the ranks and check if there is a mis-match for the current entry.
             check_current_entry_match(
