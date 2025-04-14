@@ -2,6 +2,11 @@
 
 """
 This visualizer requires matplotlib to be installed.
+
+Example usage:
+
+ops = get_schedule_ops("InterleavedZeroBubble", 4, 8)
+visualize_schedule(ops, "test.png")
 """
 
 from typing import Optional, Union
@@ -24,6 +29,13 @@ def get_schedule_ops(
     num_microbatches: int,
     num_stages_per_rank: Optional[int] = None,
 ) -> list[list[Optional[_Action]]]:
+    """
+    Get all actions for a given schedule, pp_degree, and num_microbatches. The actions are returned in a list of lists
+    where each inner list represents a rank and each element in the inner list represents an action.
+
+    The schedule can be specified as a string which is passed into get_schedule_class() or a _PipelineSchedule instance.
+    """
+
     if isinstance(schedule, str):
         schedule_class = get_schedule_class(schedule)
     elif type(schedule) == _PipelineSchedule:
@@ -92,6 +104,13 @@ action_type_to_color_mapping = {
 def visualize_schedule(
     schedule: list[list[Optional[_Action]]], filename: Optional[str] = None
 ) -> None:
+    """
+    Visualize the schedule using matplotlib.
+    The schedule is a list of lists where each inner list represents a rank and each element in the inner list represents an action.
+    The actions are represented as rectangles with different colors based on their computation type.
+    The filename is optional and if provided, the plot will be saved to that file.
+    """
+
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
 
@@ -168,9 +187,3 @@ def visualize_schedule(
         plt.savefig(filename, bbox_inches="tight")
     else:
         plt.show()
-
-
-if __name__ == "__main__":
-    # Example usage:
-    ops = get_schedule_ops("InterleavedZeroBubble", 4, 8)
-    visualize_schedule(ops, "test.png")
