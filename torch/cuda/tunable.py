@@ -694,25 +694,12 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # y = x*A^T + b
         assert transA != transB
 
-        if subMatrix:
-            warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
-            )
-            return
-
-        X = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
-        )
-        matA = (
-            torch.rand(n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
-        )
         bias = torch.rand(n, dtype=dtype, device=deviceid)
 
+        X, matA = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
+        )
+        matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
