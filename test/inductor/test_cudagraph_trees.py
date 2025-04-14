@@ -3390,6 +3390,10 @@ if HAS_CUDA:
         def test_cudagraphs_aot_eager_compat_equal_device_one(self):
             self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:1"))
 
+        @config.patch(graph_partition=True)
+        def test_graph_partition_cudagraphs_aot_eager_compat_equal(self):
+            self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:0"))
+
         @requires_multigpu()
         def test_multi_device(self):
             def gn(x, y):
