@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
@@ -375,7 +374,7 @@ Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& res
 
 Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
   auto out_dtype = self.scalar_type();
-  if (c10::isIntegralType(out_dtype, /*includeBool*/true)) {
+  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
     out_dtype = kFloat;
   }
   Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
