@@ -6741,6 +6741,7 @@ torch.cuda.synchronize()
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
         check_cudnn = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED", "0") == "1"
+        print(check_cudnn)
         if (
             "cuda" in str(device)
             and check_cudnn
