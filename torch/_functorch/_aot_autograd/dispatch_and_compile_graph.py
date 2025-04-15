@@ -85,21 +85,20 @@ def _remove_args_argument(wrapper: Callable[..., Any]) -> Callable[..., Any]:
 class WrapResult(NamedTuple):
     fn: Callable[..., Any]
     args: Sequence[Tensor]
-    maybe_subclass_meta: Optional[SubclassMeta]
+    maybe_subclass_meta: Optional[SubclassMeta] = None
 
 
-class Wrappers:
-    def __init__(self, *wrappers: Callable[..., Any]) -> None:
-        self.wrappers = wrappers
-
-    def run(self, fn: Callable[..., Any], args: Sequence[Tensor]) -> WrapResult:
-        res = WrapResult(fn, args, None)
-        for wrapper in self.wrappers:
-            r = wrapper(res.fn, res.args)
-            if not isinstance(r, Sequence):
-                r = [r]
-            res = WrapResult(*r, *res[len(r) :])
-        return res
+def run_wrappers(
+    fn: Callable[..., Any],
+    args: Sequence[Tensor],
+    wrappers: Sequence[Callable[..., Any]]
+) -> "WrapResult":
+    res = WrapResult(fn, args)
+    for wrapper in wrappers:
+        r = wrapper(res.fn, res.args)
+        r = r if isinstance(r, Sequence) else [r]
+        res = WrapResult(*r, *res[len(r) :])
+    return res
 
 
 def aot_dispatch_base_graph(
@@ -116,7 +115,7 @@ def aot_dispatch_base_graph(
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    wrappers = Wrappers(
+    wrappers = (
         functools.partial(
             _remove_args_argument(fn_input_mutations_to_outputs),
             keep_data_input_mutations=aot_config.keep_inference_input_mutations,
@@ -145,7 +144,7 @@ def aot_dispatch_base_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
         maybe_subclass_meta,
-    ) = wrappers.run(flat_fn, flat_args)
+    ) = apply_wrappers(flat_fn, flat_args, wrappers)
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
@@ -288,7 +287,7 @@ def aot_dispatch_autograd_graph(
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
 
-    wrappers = Wrappers(
+    wrappers = (
         functools.partial(
             _remove_args_argument(fn_prepped_for_autograd),
             meta=fw_metadata,
@@ -316,8 +315,9 @@ def aot_dispatch_autograd_graph(
             trace_joint=True,
         ),
     )
-    joint_fn_to_trace, updated_joint_inputs, maybe_subclass_meta = wrappers.run(
-        flat_fn, flat_args
+
+    (joint_fn_to_trace, updated_joint_inputs, maybe_subclass_meta) = apply_wrappers(
+        flat_fn, flat_args, wrappers
     )
 
     # When we call _create_graph, this may mutate the metadata of joint
