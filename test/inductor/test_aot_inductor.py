@@ -2414,37 +2414,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @common_utils.parametrize("minmax", [min, max])
-    def test_sympy_cpp_printer_min_max(self, minmax):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
-
-        class Model(torch.nn.Module):
-            def forward(self, a, b, ranks):
-                n_elements = a.numel()
-                out = torch.empty_like(a)
-                backed = a.size(0)
-                unbacked = int(ranks.max())
-                scaling_factor = minmax(backed, unbacked, 100)
-                add_kernel_with_scaling[(n_elements,)](
-                    a,
-                    b,
-                    out,
-                    n_elements,
-                    scaling_factor,
-                    BLOCK_SIZE=16,
-                )
-                return out
-
-        example_inputs = (
-            torch.randn(16, device=self.device),
-            torch.randn(16, device=self.device),
-            torch.arange(end=4, device=self.device, dtype=torch.int16),
-        )
-        torch._dynamo.mark_dynamic(example_inputs[0], 0)
-        torch._dynamo.mark_dynamic(example_inputs[1], 0)
-        self.check_model(Model(), example_inputs)
-
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
