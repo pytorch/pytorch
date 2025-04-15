@@ -351,6 +351,13 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
 }
 
 void AllocatorConfig::parseArgs(const char* env) {
+  // The following option will be reset to its default value if not explicitly
+  // set each time.
+  max_split_size_ = std::numeric_limits<size_t>::max();
+  roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
+  garbage_collection_threshold_ = 0;
+  use_async_allocator_ = false;
+
   bool used_native_specific_option = false;
 
   if (env == nullptr) {

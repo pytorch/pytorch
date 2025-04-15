@@ -50,6 +50,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(config.max_non_split_rounding_size(), 40 * kMB);
   EXPECT_EQ(config.garbage_collection_threshold(), 0.8);
 
+  // roundup_power2_divisions knob array syntax
   env = "roundup_power2_divisions:[128:8,256:16,512:1,2048:8,>:2]";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(config.last_allocator_settings(), env);
@@ -57,9 +58,17 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(config.roundup_power2_divisions(128 * kMB), 8);
   EXPECT_EQ(config.roundup_power2_divisions(256 * kMB), 16);
   EXPECT_EQ(config.roundup_power2_divisions(512 * kMB), 1);
-  EXPECT_EQ(config.roundup_power2_divisions(1024 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(1024 * kMB), 0);
   EXPECT_EQ(config.roundup_power2_divisions(2048 * kMB), 8);
   EXPECT_EQ(config.roundup_power2_divisions(4096 * kMB), 2);
+
+  // roundup_power2_divisions single value syntax for backward compatibility
+  env = "roundup_power2_divisions:4";
+  c10::CachingAllocator::setAllocatorSettings(env);
+  EXPECT_EQ(config.last_allocator_settings(), env);
+  EXPECT_EQ(config.roundup_power2_divisions(64 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(256 * kMB), 4);
+  EXPECT_EQ(config.roundup_power2_divisions(2048 * kMB), 4);
 
   env =
       "backend:native,"
