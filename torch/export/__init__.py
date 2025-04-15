@@ -260,6 +260,7 @@ def export(
       ``OrderedDict`` containing all above types.
 
     """
+    from ._draft_export import draft_export
     from ._trace import _export
 
     if not isinstance(mod, torch.nn.Module):
@@ -272,6 +273,18 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
+
+    if os.environ.get("DRAFT_EXPORT"):
+        ep = draft_export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes=dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
+        raise RuntimeError(str(ep._report))
 
     try:
         return _export(
@@ -288,7 +301,8 @@ def export(
             "The error above occurred when calling torch.export.export. If you would "
             "like to view some more information about this error, and get a list "
             "of all other errors that may occur in your export call, you can "
-            "replace your `export()` call with `draft_export()`."
+            "replace your `export()` call with `draft_export()` or run with the "
+            "envvar DRAFT_EXPORT=1."
         )
 
         # For errors that we know can be caught by draft-export, add the message
@@ -308,6 +322,18 @@ def export(
             new_msg = str(e) + "\n\n" + draft_export_msg
             e.args = (new_msg,)
         raise e
+=======
+
+    return _export(
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes,
+        strict=strict,
+        preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=True,
+    )
+>>>>>>> f2a0860470c ([export] Add DRAFT_EXPORT envvar)
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
