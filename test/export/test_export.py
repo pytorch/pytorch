@@ -695,6 +695,25 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailureCppSerDes # Cpp serder seems to fail parsing complicated guards 
+    def test_export_statically_known_true(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                shape = y.shape[0]**2 - 3*y.shape[0]
+                end = shape
+                return x[:, :end]
+
+        dynamic_shapes = ((torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC), (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC))
+
+        ep = export(Foo(), (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=dynamic_shapes, strict=False)
+        print(ep.graph)
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 2, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("operator.sub", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
     def test_colon_parameter(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
