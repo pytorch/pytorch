@@ -3,13 +3,43 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
 namespace openreg {
 namespace {
+
 // Python factory function where real implementations can be found
 PyObject* py_factory;
+
+struct HostAllocator final : at::Allocator {
+  HostAllocator() = default;
+
+  at::DataPtr allocate(size_t nbytes) override {
+    py::gil_scoped_acquire acquire;
+    void* data = nullptr;
+    if (nbytes > 0) {
+      data = reinterpret_cast<void*>(
+          get_method("hostMalloc")(nbytes).cast<openreg_ptr_t>());
+      TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
+    }
+    return {data, data, &ReportAndDelete<kHostFreeMethod>, at::Device(at::kCPU)};
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &ReportAndDelete<kHostFreeMethod>;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    py::gil_scoped_acquire acquire;
+    get_method("hostCopyData")(
+        reinterpret_cast<openreg_ptr_t>(dest),
+        reinterpret_cast<openreg_ptr_t>(src),
+        count);
+  }
+};
 
 static HostAllocator global_host_alloc;
 
@@ -84,7 +114,7 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 };
 
-static bool register_hook_flag = []() {
+static bool register_hook_flag [[maybe_unused]] = []() {
   at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
 
   return true;
@@ -316,4 +346,5 @@ py::function get_method(const char* name) {
   auto factory = py::cast<py::function>(py_factory);
   return factory(name);
 }
+
 } // namespace openreg
