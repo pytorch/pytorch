@@ -924,7 +924,9 @@ def infer_size(a, b):
     return tuple(expandedSizes)
 
 
-def make_fast_binary_impl(slow_ref):
+def make_fast_binary_impl(
+    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def fast_binary_impl(mode, *args, **kwargs):
         def slow(msg):
             count_label(f"slow {msg}")
@@ -991,7 +993,7 @@ def make_fast_binary_impl(slow_ref):
             # compute promotion
             # TODO: we don't need the compute type
             _, common_dtype = elementwise_dtypes(
-                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                *operands, type_promotion_kind=type_promotion_kind
             )
 
         # check all tensors on same device
@@ -1061,7 +1063,7 @@ def make_fast_binary_impl(slow_ref):
 def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
@@ -1076,7 +1078,10 @@ def get_fast_op_impls():
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
-        make_fast_binary_impl(torch._refs.div)
+        make_fast_binary_impl(
+            torch._refs.div,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

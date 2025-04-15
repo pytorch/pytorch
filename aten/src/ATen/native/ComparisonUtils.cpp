@@ -13,7 +13,7 @@ class Tensor;
 namespace native {
 
 template<typename O, typename C>
-void _assert_match(const O& original, const C& compared, const std::string& name) {
+static void _assert_match(const O& original, const C& compared, const std::string& name) {
   if (compared) {
     bool equal = (original == compared.value());
     if (!equal) {
