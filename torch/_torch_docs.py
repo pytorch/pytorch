@@ -6983,7 +6983,7 @@ Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
     dim (int, optional): the dimension to reduce.
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not.
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
@@ -7024,7 +7024,7 @@ Example::
     tensor(2.)
     >>> torch.quantile(a, 0.4, interpolation='nearest')
     tensor(1.)
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
