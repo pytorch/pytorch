@@ -44,14 +44,15 @@ class FileBaton:
         passed to the constructor.
         """
         has_warned = False
+        should_warn = isinstance(self.warn_after_seconds, (int, float))
 
         start_time = time.time()
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
-            if isinstance(self.warn_after_seconds, (int, float)):
+            if should_warn and not has_warned:
                 waited_too_long = time.time() - start_time > self.warn_after_seconds
-                if waited_too_long and not has_warned:
+                if waited_too_long:
                     warnings.warn(f'Waited on lock file "{self.lock_file_path}" for '
                                   f'{self.warn_after_seconds} seconds.')
                     has_warned = True
