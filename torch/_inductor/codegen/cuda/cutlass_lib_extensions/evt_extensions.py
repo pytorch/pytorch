@@ -1,10 +1,7 @@
 # mypy: allow-untyped-defs
 
-<<<<<<< HEAD
-from torch.utils._ordered_set import OrderedSet
-=======
 from torch._inductor.ir import ComputedBuffer, InputBuffer
->>>>>>> 042c6e50349 ([Cutlass] Implement EVT example tensor creation)
+from torch.utils._ordered_set import OrderedSet
 
 from ..cutlass_utils import try_import_cutlass
 
@@ -42,8 +39,8 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    from torch._inductor.codegen.cuda import cuda_env
     import torch
+    from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
@@ -54,7 +51,7 @@ if try_import_cutlass():
         torch.bfloat16: DataType.bf16,
     }
 
-def create_example_tensors(
+    def create_example_tensors(
         read_names: list[str],
         write_names: list[str],
         buffer_renames: dict[str, str],
