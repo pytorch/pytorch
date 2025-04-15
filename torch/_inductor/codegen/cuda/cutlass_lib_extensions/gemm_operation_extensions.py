@@ -2,11 +2,12 @@
 from ..cutlass_utils import try_import_cutlass
 
 
+# copied / modified from original at
+# https://github.com/NVIDIA/cutlass/blob/8783c41851cd3582490e04e69e0cd756a8c1db7f/tools/library/scripts/gemm_operation.py#L658
+
 if try_import_cutlass():
     import enum
 
-    # import cutlass
-    # import cutlass_library
     from cutlass_library.gemm_operation import *  # noqa: F401, F403
     from cutlass_library.library import *  # noqa: F401, F403
 
@@ -131,6 +132,7 @@ ${compile_guard_end}
             )
 
         def emit(self, operation):
+            """Given a gem operation, emits a template definition of the operation"""
             _LOGGER.debug("*** EmitGemmConfigurationLibrary::emit(operation)")
             _LOGGER.debug(
                 "***   operation.procedural_name(): %s", operation.procedural_name()
