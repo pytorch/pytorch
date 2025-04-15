@@ -89,7 +89,19 @@ DEFINE_DISPATCH(bf16_gemv_trans_stub);
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
-#if !defined(__aarch64__) && !defined(C10_MOBILE)
+#if !defined(C10_MOBILE)
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
+
 void fp16_gemv_trans(
     const int m,
     const int n,
@@ -102,6 +114,32 @@ void fp16_gemv_trans(
     Half* y,
     const int incy) {
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+
+void bf16_gemv_trans(
+  const int m,
+  const int n,
+  const at::BFloat16 alpha,
+  const at::BFloat16* a,
+  const int lda,
+  const at::BFloat16* x,
+  const int incx,
+  const at::BFloat16 beta,
+  at::BFloat16* y,
+  const int incy);
+
+void bf16_gemv_trans(
+  const int m,
+  const int n,
+  const at::BFloat16 alpha,
+  const at::BFloat16* a,
+  const int lda,
+  const at::BFloat16* x,
+  const int incx,
+  const at::BFloat16 beta,
+  at::BFloat16* y,
+  const int incy) {
+  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 #endif // !defined(C10_MOBILE)
 
@@ -152,6 +190,18 @@ static void fp16_gemv_notrans_fp32_arith(
     vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
   }
 }
+
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
 
 void fp16_gemv_notrans(
     const int m,
@@ -337,20 +387,6 @@ bool gemv_use_fast_path<at::BFloat16>(
     [[maybe_unused]] int64_t incy) {
   return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 &&
       beta == 0.0;
-}
-
-void bf16_gemv_trans(
-  const int m,
-  const int n,
-  const at::BFloat16 alpha,
-  const at::BFloat16* a,
-  const int lda,
-  const at::BFloat16* x,
-  const int incx,
-  const at::BFloat16 beta,
-  at::BFloat16* y,
-  const int incy) {
-  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 template <>
