@@ -2910,6 +2910,8 @@ class CommonTemplate:
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
     def test_logaddexp(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Complex needs MacOS-14+")
         self.common(
             torch.logaddexp,
             (
@@ -11734,7 +11736,11 @@ class CommonTemplate:
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
-                self.assertNotEqual(bar_strides[0], expected_stride)
+                if self.device == "mps" and MACOS_VERSION < 15.0:
+                    # Before MacOS15 contigous output were returned regardless of input
+                    self.assertEqual(bar_strides[0], expected_stride)
+                else:
+                    self.assertNotEqual(bar_strides[0], expected_stride)
 
     @config.patch(implicit_fallbacks=True)
     @skip_if_cpp_wrapper(
