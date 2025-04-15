@@ -218,6 +218,47 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+Tensor aminmax_backward(
+    const at::Tensor& self,
+    c10::optional<int64_t> dim,
+    bool keepdim,
+    const at::Tensor& grad_min,
+    const at::Tensor& grad_max,
+    const at::Tensor& min,
+    const at::Tensor& max) {
+  auto dims_ = dim.has_value() ? at::IntArrayRef{*dim} : at::IntArrayRef{};
+  auto min_reduced = restore_reduced_dims(min, dims_, keepdim);
+  auto max_reduced = restore_reduced_dims(max, dims_, keepdim);
+
+  auto self_isnan = self.isnan();
+  auto min_isnan = min.isnan();
+  auto max_isnan = max.isnan();
+
+  at::Tensor mask_min;
+  if (self_isnan.all().item<bool>() && min_isnan.all().item<bool>()) {
+    mask_min = at::ones_like(self, at::kBool);
+  } else {
+    mask_min = (min_reduced == self);
+  }
+
+  at::Tensor mask_max;
+  if (self_isnan.all().item<bool>() && max_isnan.all().item<bool>()) {
+    mask_max = at::ones_like(self, at::kBool);
+  } else {
+    mask_max = (max_reduced == self);
+  }
+
+  auto grad_min_scaled = grad_min.defined()
+      ? scale_grad_by_count(
+            restore_reduced_dims(grad_min, dims_, keepdim), mask_min, dims_)
+      : at::zeros_symint(self.sym_sizes(), self.options());
+  auto grad_max_scaled = grad_max.defined()
+      ? scale_grad_by_count(
+            restore_reduced_dims(grad_max, dims_, keepdim), mask_max, dims_)
+      : at::zeros_symint(self.sym_sizes(), self.options());
+  return grad_min_scaled + grad_max_scaled;
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,

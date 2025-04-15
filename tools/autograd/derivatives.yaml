@@ -1202,13 +1202,7 @@
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
-  self:  |
-    scale_grad_by_count(restore_reduced_dims(grad_min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim),
-      restore_reduced_dims(min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim) == self,
-      dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}) +
-    scale_grad_by_count(restore_reduced_dims(grad_max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim),
-      restore_reduced_dims(max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim) == self,
-      dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}) 
+  self: aminmax_backward(self, dim, keepdim, grad_min, grad_max, min, max)
   min: 'amaxamin_jvp(self_p, self_t, min, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim)'
   max: 'amaxamin_jvp(self_p, self_t, max, dim.has_value() ? IntArrayRef{dim.value()} : IntArrayRef{}, keepdim)'
 
