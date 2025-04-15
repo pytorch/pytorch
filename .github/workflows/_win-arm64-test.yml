@@ -38,6 +38,7 @@ env:
   PYTORCH_ROOT: ${{ github.workspace }}/pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
+  PYTORCH_FINAL_PACKAGE_DIR: c:\${{ github.run_id }}\build-results
   
 jobs:
   test:
@@ -101,13 +102,13 @@ jobs:
         env:
           JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
         run: |
-          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
-
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"       
+      
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4.1.7  
         with:
-            name: ${{ inputs.build-environment }}
-            path: C:\${{ github.run_id }}\build-results
+          name: ${{ inputs.build-environment }}
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
 
       - name: Test
         id: test
@@ -129,10 +130,9 @@ jobs:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
         run: |
           call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
           set GIT_BASH=%DEPENDENCIES_DIR%\git\usr\bin\bash.exe          
-          "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
+          "%GIT_BASH%" -c "bash --noprofile --norc pytorch/.ci/pytorch/win-arm64-test.sh"
