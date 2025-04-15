@@ -58,7 +58,7 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
-from torch._dynamo.trace_rules import is_fbcode
+from torch._environment import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
