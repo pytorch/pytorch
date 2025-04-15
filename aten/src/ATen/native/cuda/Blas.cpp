@@ -276,9 +276,6 @@ static bool isSupportedHipLtROCmArch(int index) {
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
-#if ROCM_VERSION >= 60500
-        "gfx950"
-#endif
     };
     return at::detail::getCUDAHooks().isGPUArch(archs, index);
 }
