@@ -1456,6 +1456,11 @@ void run_cudnn_SDP_bprop_nestedtensor(
     return;
   }
 
+  const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
+  if (innermost_dO_stride != 1) {
+    permute_to_matching_layout(o, dO_);
+  }
+
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
   auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
