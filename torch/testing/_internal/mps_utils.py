@@ -389,9 +389,6 @@ XFAILLIST_GRAD = {
     "polygamma": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], variant="polygamma_n_0"
     ),
-    "nn.functional.binary_cross_entropy": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
-    ),
     # Unimplemented ops
     "_upsample_bilinear2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "_upsample_bicubic2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
@@ -591,6 +588,7 @@ COMPLEX_XFAILLIST = {
     "linalg.matrix_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.matrix_power": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.slogdet": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.solve": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.solve_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.solve_triangular": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -875,8 +873,6 @@ OTHER_XFAILLIST = {
     "nn.functional.scaled_dot_product_attention": MPSSkipInfo(
         dtypes=[torch.float32, torch.float16, torch.bfloat16]
     ),
-    # float output for float16 input on MPS
-    "logit": MPSSkipInfo(dtypes=[torch.float16, torch.bfloat16]),
     # Fill tensors with uninitialized data, causing mismatch with CPU.
     # They occasionally match, thus skipping them.
     # See https://github.com/pytorch/pytorch/issues/100175
