@@ -55,23 +55,50 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half,
-      iter.dtype(), "logaddexp2_cuda",
-      [&]() {
-        using opmath_t = at::opmath_type<scalar_t>;
-        const auto inv_log_2 = static_cast<opmath_t>(1.0 / c10::ln_2<double>);
-        gpu_kernel(iter, [inv_log_2] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
-          const auto a = static_cast<opmath_t>(a_);
-          const auto b = static_cast<opmath_t>(b_);
-          if (::isinf(a) && a == b) {
-            return a;
-          } else {
-            const auto m = ::max(a, b);
-            return m + ::log1p(::exp2(-::abs(a - b))) * inv_log_2;
-          }
+  auto dtype = iter.dtype();
+  if (isComplexType(dtype)) {
+    // There is no std::exp2 overload for complex, so instead
+    // use the identity 2^x = e^(ln(2) * x)
+    AT_DISPATCH_COMPLEX_TYPES_AND(
+        ScalarType::ComplexHalf,
+        dtype, "logaddexp2_cuda",
+        [&]() {
+          using opmath_t = at::opmath_type<scalar_t>;
+          const auto inv_log_2 = static_cast<opmath_t>(1.0 / c10::ln_2<double>);
+          const auto log_2 = static_cast<opmath_t>(c10::ln_2<double>);
+          gpu_kernel(iter, [log_2, inv_log_2] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+            const auto a = static_cast<opmath_t>(a_);
+            const auto b = static_cast<opmath_t>(b_);
+            if (::isinf(a.real()) && a == b) {
+              return a;
+            } else {
+              if (a.real() > b.real()) {
+                return a + ::log1p(::exp(log_2 * (b - a))) * inv_log_2;
+              } else {
+                return b + ::log1p(::exp(log_2 * (a - b))) * inv_log_2;
+              }
+            }
+          });
         });
-      });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::BFloat16, ScalarType::Half,
+        dtype, "logaddexp2_cuda",
+        [&]() {
+          using opmath_t = at::opmath_type<scalar_t>;
+          const auto inv_log_2 = static_cast<opmath_t>(1.0 / c10::ln_2<double>);
+          gpu_kernel(iter, [inv_log_2] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+            const auto a = static_cast<opmath_t>(a_);
+            const auto b = static_cast<opmath_t>(b_);
+            if (::isinf(a) && a == b) {
+              return a;
+            } else {
+              const auto m = ::max(a, b);
+              return m + ::log1p(::exp2(-::abs(a - b))) * inv_log_2;
+            }
+          });
+        });
+  }
 }
 
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda)

@@ -1060,8 +1060,9 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
 }
 
 void logaddexp2_kernel(TensorIteratorBase& iter) {
-  if (at::isReducedFloatingType(iter.dtype())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+  auto dtype = iter.dtype();
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "logaddexp2_cpu", [&]() {
       using Vec = Vectorized<scalar_t>;
       constexpr auto inv_log_2 = static_cast<float>(1.0 / c10::ln_2<double>);
       cpu_kernel_vec(
@@ -1094,8 +1095,34 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
             return convert_from_float<scalar_t>(a0, a1);
           });
     });
+  } else if (at::isComplexType(dtype)) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(ScalarType::ComplexHalf, dtype, "logaddexp2_cpu", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      const auto inv_log_2 = static_cast<opmath_t>(1.0 / c10::ln_2<double>);
+      const auto log_2 = static_cast<opmath_t>(c10::ln_2<double>);
+      cpu_kernel(
+          iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t {
+            auto a0 = static_cast<opmath_t>(a);
+            auto b0 = static_cast<opmath_t>(b);
+            auto [min, max] = _logcumsumexp_minmax(a0, b0);
+            auto min_real = std::real(min);
+            auto max_real = std::real(max);
+            if (at::_isnan(min)) {
+              return scalar_t(std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN());
+            } else if (!std::isfinite(min_real) && (min_real == max_real)) {
+              if (min_real < 0) {
+                return min;
+              } else {
+                return std::log(std::exp(log_2 * min) + std::exp(log_2 * max)) * inv_log_2;
+              }
+            } else {
+              return max + std::log1p(std::exp(log_2 * (min - max))) * inv_log_2;
+            }
+          });
+    });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(dtype, "logaddexp2_cpu", [&]() {
       constexpr auto inv_log_2 = static_cast<scalar_t>(1.0 / c10::ln_2<double>);
       cpu_kernel_vec(
           iter,
