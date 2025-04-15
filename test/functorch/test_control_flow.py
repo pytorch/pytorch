@@ -113,7 +113,7 @@ ALIAS_FN = [
 ]
 
 
-def get_scan_combine_fn(name, associative=True):
+def get_scan_combine_fn(name, associative=True, parameters=None):
     def add(x: torch.Tensor, y: torch.Tensor):
         return x + y
 
@@ -156,6 +156,18 @@ def get_scan_combine_fn(name, associative=True):
         W = torch.diag(torch.ones(2, device=x.device))
         return x @ W + y @ W
 
+    def RNN(x: torch.Tensor, y: torch.Tensor):
+        c_new = y @ parameters[0] + parameters[1]
+        h_new = torch.tanh(c_new + x @ parameters[2] + parameters[3])
+        return h_new, h_new
+
+    def fct_c1_no_grad(x: torch.Tensor, y: torch.Tensor):
+        h_new = torch.tanh(x[0] + x[1] + y)
+        c2 = x[1] + y
+        with torch.no_grad():
+            c1 = x[0] + y
+        return (c1, c2), h_new
+
     if name == "add":
         fct = add
     elif name == "adds":
@@ -174,6 +186,10 @@ def get_scan_combine_fn(name, associative=True):
         fct = complex_pointwise
     elif name == "non_pointwise":
         fct = non_pointwise
+    elif name == "RNN":
+        fct = RNN
+    elif name == "fct_c1_no_grad":
+        fct = fct_c1_no_grad
     else:
         raise ValueError("Combine_fn name unknown!")
 
@@ -441,6 +457,18 @@ class TestControlFlow(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+
+    def check_autograd(self, result, result_exp, params):
+        params_flatten = pytree.tree_leaves(params)
+        result_flatten = pytree.tree_leaves(result)
+        result_exp_flatten = pytree.tree_leaves(result_exp)
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, params_flatten, grad_exp_init
+        )
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(result_flatten, params_flatten, grad_init)
+        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -1529,11 +1557,12 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_compile(self, reverse, compile_mode, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_compile(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
-        x = torch.randn(3, 10, 2, device=device)
+        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -1541,12 +1570,12 @@ def forward(self, pred_1, x_1):
             (
                 get_scan_combine_fn("add", False),
                 torch.cumsum,
-                torch.zeros(10, 2, device=device),
+                torch.zeros(10, 2, device=device, requires_grad=autograd),
             ),
             (
                 get_scan_combine_fn("mul", False),
                 torch.cumprod,
-                torch.ones(10, 2, device=device),
+                torch.ones(10, 2, device=device, requires_grad=autograd),
             ),
         ]:
             result = scan_fct(op, init, x, dim=0, reverse=reverse)
@@ -1555,6 +1584,9 @@ def forward(self, pred_1, x_1):
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result[1], result_exp_PT)
+
+            if autograd:
+                self.check_autograd(result, result_exp, (init, x))
 
         # Jax Examples
         x = torch.arange(0, 4, device=device, dtype=torch.int64)
@@ -1607,8 +1639,10 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, result_exp)
 
         # Non associative operation
-        x = torch.arange(0, 5, device=device, dtype=torch.float32)
-        init = torch.ones(1, device=device, dtype=torch.float32)
+        x = torch.arange(
+            0, 5, device=device, dtype=torch.float32, requires_grad=autograd
+        )
+        init = torch.ones(1, device=device, dtype=torch.float32, requires_grad=autograd)
         result = scan_fct(
             get_scan_combine_fn("div", False),
             init,
@@ -1624,6 +1658,9 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (init, x))
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
@@ -1698,32 +1735,37 @@ def forward(self, pred_1, x_1):
             ],
         )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_dim(self, reverse, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_dim(self, reverse, compile_mode, device, autograd):
         import random
 
-        num_dims = [random.randint(2, 5) for _ in range(10)]
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        num_dims = [random.randint(2, 5) for _ in range(5)]
         for num_dim in num_dims:
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
-            x = torch.randn(*shapes, device=device)
+            x = torch.randn(*shapes, device=device, requires_grad=autograd)
             init_shapes = shapes[:rnd_scan_dim] + shapes[rnd_scan_dim + 1 :]
 
             for op, op_pt, init in [
                 (
                     get_scan_combine_fn("add", False),
                     torch.cumsum,
-                    torch.zeros(*init_shapes, device=device),
+                    torch.zeros(*init_shapes, device=device, requires_grad=autograd),
                 ),
                 (
                     get_scan_combine_fn("mul", False),
                     torch.cumprod,
-                    torch.ones(*init_shapes, device=device),
+                    torch.ones(*init_shapes, device=device, requires_grad=autograd),
                 ),
             ]:
-                result = scan(op, init, x, dim=rnd_scan_dim, reverse=reverse)
+                result = scan_fct(op, init, x, dim=rnd_scan_dim, reverse=reverse)
                 result_exp = _fake_scan(
                     op, init=init, xs=x, dim=rnd_scan_dim, reverse=reverse
                 )
@@ -1734,33 +1776,41 @@ def forward(self, pred_1, x_1):
                     res_list[1] = res_list[1].movedim(0, rnd_scan_dim)
                     self.assertEqual(res_list[1], result_exp_PT)
 
+                if autograd:
+                    self.check_autograd(result, result_exp, (init, x))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_binary_operator(self, reverse, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_binary_operator(self, reverse, compile_mode, device, autograd):
         state_dim = 20
         timesteps = 10
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
         projected_inputs = torch.randn(
-            timesteps, state_dim, requires_grad=True, device=device
+            timesteps, state_dim, requires_grad=autograd, device=device
         )
-        A = torch.randn(state_dim, requires_grad=True, device=device)
+        A = torch.randn(state_dim, requires_grad=autograd, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
         init = tuple(
             [
                 torch.ones_like(
                     torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
-                    requires_grad=True,
+                    requires_grad=autograd,
                 )
             ]
             + [
                 torch.zeros_like(
                     torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
-                    requires_grad=True,
+                    requires_grad=autograd,
                 )
             ]
         )
 
-        result = scan(
+        result = scan_fct(
             get_scan_combine_fn("s5_operator", False),
             init,
             elements,
@@ -1776,17 +1826,37 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
+        if autograd:
+            init_flatten, _ = pytree.tree_flatten(init)
+            elements_flatten, _ = pytree.tree_flatten(elements)
+
+            result_flatten, _ = pytree.tree_flatten(result)
+            result_exp_flatten, _ = pytree.tree_flatten(expected_result)
+            grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+            expected_grads = torch.autograd.grad(
+                result_exp_flatten, (*init_flatten, *elements_flatten), grad_out
+            )
+            grads = torch.autograd.grad(
+                result_flatten, (*init_flatten, *elements_flatten), grad_out
+            )
+            self.assertEqual(grads, expected_grads)
+
     @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_tuple(self, reverse, device):
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
+    @parametrize("autograd", [False, True])
+    def test_scan_tuple(self, reverse, compile_mode, device, autograd):
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = (x, y)
         init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp)
 
-        result_same = scan(
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        result_same = scan_fct(
             get_scan_combine_fn("tuple_fct", False),
             init,
             inp,
@@ -1802,6 +1872,9 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_same, expected_result)
 
+        if autograd:
+            self.check_autograd(result_same, expected_result, (init, inp))
+
         def fct_different_output_tuple(x, y):
             return ((x[0] + y[0], x[1] * y[1]), (x[1] * y[1]))
 
@@ -1816,6 +1889,9 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_diff, expected_result)
         self.assertEqual(result_diff[1], result_same[1][1])
+
+        if autograd:
+            self.check_autograd(result_diff, expected_result, (init, inp))
 
     def test_scan_wrong_pytree(self):
         # Init and input have same pytree
@@ -1869,19 +1945,23 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_complex_pytree(self, reverse, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_complex_pytree(self, reverse, compile_mode, device, autograd):
         # Init and input have same pytree
 
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = {"i": x, "j": ([y], [{"o": z}])}
         inp_flat, inp_spec = pytree.tree_flatten(inp)
         init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
         init = pytree.tree_unflatten(init_flat, inp_spec)
 
-        result = scan(
+        result = scan_fct(
             get_scan_combine_fn("complex_pointwise", False),
             init,
             inp,
@@ -1896,6 +1976,9 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result, expected_result)
+
+        if autograd:
+            self.check_autograd(result, expected_result, (init, inp))
 
     # TODO: Does not work because of the usage of vmap witin associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
@@ -1946,9 +2029,10 @@ def forward(self, pred_1, x_1):
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
-        init = torch.randn(3, 2, device=device)
+    @parametrize("autograd", [False, True])
+    def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device, autograd):
+        inp = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        init = torch.randn(3, 2, device=device, requires_grad=autograd)
 
         for ind in range(2):
             # Chain with matmul
@@ -1975,18 +2059,24 @@ def forward(self, pred_1, x_1):
             result = fct_cmp(inp)
             self.assertEqual(result, expected_result)
 
+            if autograd:
+                self.check_autograd(result, expected_result, (init, inp))
+
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
-        init = torch.randn(3, 2, device=device)
+    @parametrize("autograd", [False, True])
+    def test_scan_downstream_scan_scan_dim(
+        self, compile_mode, reverse, device, autograd
+    ):
+        inp = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        init = torch.randn(3, 2, device=device, requires_grad=autograd)
 
         # Chain with scan on different dim
-        init2 = torch.randn(1, 10, 2, device=device)
+        init2 = torch.randn(1, 10, 2, device=device, requires_grad=autograd)
 
         def chain_fct_different_dim(inp):
             o1 = scan(
@@ -2026,13 +2116,21 @@ def forward(self, pred_1, x_1):
         result = fct_cmp(inp)
         self.assertEqual(result, expected_result)
 
+        if autograd:
+            self.check_autograd(result, expected_result, (init, init2, inp))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_non_pointwise(self, reverse, device):
-        x = torch.randn(3, 10, 2, device=device)
-        init = torch.randn(10, 2, device=device)
-        result_expected = _fake_scan(
+    @parametrize("autograd", [False, True])
+    def test_scan_non_pointwise(self, reverse, compile_mode, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        init = torch.randn(10, 2, device=device, requires_grad=autograd)
+        expected_result = _fake_scan(
             get_scan_combine_fn("non_pointwise", False),
             init=init,
             xs=x,
@@ -2040,14 +2138,17 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
 
-        out = scan(
+        result = scan_fct(
             get_scan_combine_fn("non_pointwise", False),
             init,
             x,
             dim=0,
             reverse=reverse,
         )
-        self.assertEqual(out, result_expected)
+        self.assertEqual(result, expected_result)
+
+        if autograd:
+            self.check_autograd(result, expected_result, (init, x))
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2181,26 +2282,20 @@ def forward(self, pred_1, x_1):
             self.assertEqual(cnt.frame_count, 6)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_scanned_0(self, compile_mode):
-        scan_fct = compile_mode_helper(scan, compile_mode)
-
+    def test_scan_init_scanned_0(self):
         # Only init and no input
-        x = torch.randn(3, 1, 2)
-        init = torch.randn(3, 2)
+        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
+        init = torch.randn(3, 2, device=torch.device("cpu"))
         dim = 1
 
         # Scan dimension is 0
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
         inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
         with self.assertRaisesRegex(
-            # RuntimeError,
-            # "scan\(\) operator doesn't support.*",
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
+            RuntimeError,
+            "All xs leaves must at least have.*",
         ):
-            scan_fct(
+            scan(
                 get_scan_combine_fn("add", False),
                 init,
                 inp,
@@ -2208,29 +2303,14 @@ def forward(self, pred_1, x_1):
             )
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_non_tensor(self, compile_mode):
-        scan_fct = compile_mode_helper(scan, compile_mode)
-
-        x = torch.randn(3, 1, 2)
+    def test_scan_init_non_tensor(self):
+        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
         dim = 1
 
         # Init is a float and not a tensor
         init = 1.0
-        if compile_mode == "none":
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "All init leaves must be a Tensor",
-            ):
-                scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
-        else:
-            with self.assertRaisesRegex(
-                # Should be: RuntimeError, "Init leaves must be a Tensor"
-                torch._dynamo.exc.Unsupported,
-                "Observed exception.*",
-            ):
-                scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
+        with self.assertRaisesRegex(RuntimeError, "All init leaves must be a Tensor.*"):
+            scan(get_scan_combine_fn("add", False), init, x, dim=dim, reverse=False)
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_wrong_shape(self):
@@ -2347,12 +2427,12 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init(self, reverse, compile_mode, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_init(self, reverse, compile_mode, device, autograd):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
-        init = torch.randn(3, 1, 2, device=device)
+        x = torch.randn(3, 1, 2, device=device, requires_grad=autograd)
         dim = 1
         op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
 
@@ -2365,15 +2445,17 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0], init)
 
-        x = torch.randn(3, 5, 2, device=device)
-        init = torch.randn(3, 5, 2, device=device)
+        if autograd:
+            self.check_autograd(result, result_exp, (init,))
+
+        x = torch.randn(3, 5, 2, device=device, requires_grad=autograd)
         dim = 0
 
         op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
         inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
 
         # Init tensor scalar
-        init = torch.ones(1, device=device)
+        init = torch.ones(1, device=device, requires_grad=autograd)
 
         def add_scalar_carry(x: torch.Tensor, y: torch.Tensor):
             return x + 1.0, x + y
@@ -2385,8 +2467,11 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0], torch.tensor([3.0], device=device))
 
+        if autograd:
+            self.check_autograd(result_init, result_exp, (init, inp))
+
         # Init tensor entirely different shape than inp
-        init = torch.randn(7, 8, device=device)
+        init = torch.randn(7, 8, device=device, requires_grad=autograd)
 
         def add_scalar_carry2(x: torch.Tensor, y: torch.Tensor):
             return x + 1.0, x[: y.shape[0], : y.shape[1]] + y
@@ -2408,6 +2493,9 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0].shape, torch.Size([2, 5, 2]))
 
+        if autograd:
+            self.check_autograd(result_init, result_exp, (init, inp))
+
         init = torch.tile(init, (1, 2, 1))
 
         def add_scalar_carry_sliced_out(x: torch.Tensor, y: torch.Tensor):
@@ -2423,17 +2511,14 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result_init[0].shape, torch.Size([2, 10, 2]))
         self.assertEqual(result_init[1].shape, torch.Size([2, 2, 5, 2]))
 
+        if autograd:
+            self.check_autograd(result_init, result_exp, (init, inp))
+
         # Correct case
         op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
-        x = torch.randn(3, 2, 2, device=device)
-        dim = 1
-
-        if reverse:
-            init = torch.zeros_like(torch.select_copy(x, -1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 0, -1, 1)
-        else:
-            init = torch.zeros_like(torch.select_copy(x, 1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        init = torch.zeros(3, 2, device=device, requires_grad=autograd)
+        dim = 2
 
         result = scan_fct(op, init, x, dim=dim, reverse=reverse)
         result_exp = _fake_scan(op, init=init, xs=x, dim=dim, reverse=reverse)
@@ -2442,8 +2527,11 @@ def forward(self, pred_1, x_1):
         if not reverse:
             result_exp_PT = op_pt(x, dim)
             result = list(result)
-            result[1] = pytree.tree_map(lambda t: t.movedim(0, dim), result[1])
+            result[1] = pytree.tree_map(lambda t: torch.movedim(t, 0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (init, x))
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2481,10 +2569,13 @@ def forward(self, pred_1, x_1):
                 reverse=reverse,
             )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_pytree_complex(self, reverse, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_init_pytree_complex(self, reverse, compile_mode, device, autograd):
         def fct_pointwise_different_output(x, y):
             return (
                 {
@@ -2495,7 +2586,7 @@ def forward(self, pred_1, x_1):
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"] * 2,
                     {
                         "o": x["i"] * y["i"],
                         "j": (
@@ -2511,13 +2602,13 @@ def forward(self, pred_1, x_1):
                 {
                     "i": x["i"] * y["i"],
                     "j": (
-                        x["i"],
+                        x["i"] * 2,
                         [x["j"][1][0] * y["j"][0][0]],
                         [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"] * 2,
                     {
                         "o": x["i"] * y["i"] + x["j"][0][0],
                         "j": (
@@ -2528,9 +2619,11 @@ def forward(self, pred_1, x_1):
                 ),
             )
 
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
 
         if reverse:
             init_start, init_end = -1, None
@@ -2554,7 +2647,7 @@ def forward(self, pred_1, x_1):
                 [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
             ),
         }
-        result = scan(
+        result = scan_fct(
             get_scan_combine_fn("complex_pointwise", False),
             init,
             inp,
@@ -2570,8 +2663,15 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
+        if autograd:
+            init_flat = pytree.tree_leaves(init)
+            inp_flat = pytree.tree_leaves(inp)
+            self.check_autograd(result, expected_result, (*init_flat, *inp_flat))
+
         # Pytree of output is different
-        result = scan(fct_pointwise_different_output, init, inp, dim=0, reverse=reverse)
+        result = scan_fct(
+            fct_pointwise_different_output, init, inp, dim=0, reverse=reverse
+        )
         expected_result = _fake_scan(
             fct_pointwise_different_output, init=init, xs=inp, dim=0, reverse=reverse
         )
@@ -2593,11 +2693,18 @@ def forward(self, pred_1, x_1):
                 [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
             ),
         }
-        result = scan(fct_pointwise_different_carry, init, inp, dim=0, reverse=reverse)
+        result = scan_fct(
+            fct_pointwise_different_carry, init, inp, dim=0, reverse=reverse
+        )
         expected_result = _fake_scan(
             fct_pointwise_different_carry, init=init, xs=inp, dim=0, reverse=reverse
         )
         self.assertEqual(result, expected_result)
+
+        if autograd:
+            init_flat = pytree.tree_leaves(init)
+            inp_flat = pytree.tree_leaves(inp)
+            self.check_autograd(result, expected_result, (*init_flat, *inp_flat))
 
     @skipIfTorchDynamo("don't test compile on compile")
     @skipIfNoDynamoSupport
@@ -2652,42 +2759,484 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_scan_RNN(self):
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_RNN(self, compile_mode, autograd):
         dim = 1
         device = torch.device("cpu")
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         rnn = torch.nn.RNN(
             input_size=5,
             hidden_size=7,
+            batch_first=True,
         )
         rnn = rnn.to(device=device)
-        x = torch.randn(1, 2, 5, device=device)
-        h = torch.randn(1, 2, 7, device=device)
+        x = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
 
-        new_state_dict = {
-            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
-            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
-            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
-            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
-        }
-        rnn.load_state_dict(new_state_dict)
+        W_ih = rnn.weight_ih_l0.T.clone()
+        b_ih = rnn.bias_ih_l0.clone()
+        W_hh = rnn.weight_hh_l0.T.clone()
+        b_hh = rnn.bias_hh_l0.clone()
 
-        def RNN(x: torch.Tensor, y: torch.Tensor):
-            W_ih = torch.ones((5, 7), device=device)
-            b_ih = torch.ones((7), device=device)
-            W_hh = torch.ones((7, 7), device=device)
-            b_hh = torch.ones((7), device=device)
-            c_new = y @ W_ih + b_ih
-            h_new = torch.tanh(c_new + x @ W_hh + b_hh)
-            return h_new, h_new
+        if not autograd:
+            W_ih = W_ih.detach()
+            b_ih = b_ih.detach()
+            W_hh = W_hh.detach()
+            b_hh = b_hh.detach()
 
-        expected_result = rnn(
-            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
+        expected_result = rnn(x, torch.unsqueeze(h, 0))
+        expected_result_out = expected_result[0]
+        expected_result_state = expected_result[1][0, :]
+
+        result = scan_fct(
+            get_scan_combine_fn("RNN", True, parameters=[W_ih, b_ih, W_hh, b_hh]),
+            h,
+            x,
+            dim=dim,
+            reverse=False,
         )
-        expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
-        result = scan(RNN, init=torch.select_copy(h, dim, 0), xs=x, dim=dim)
-        self.assertEqual(result[0].unsqueeze(0), expected_result_state)
-        self.assertEqual(result[1], expected_result[0])
+        result_cmp = [result[0], torch.movedim(result[1], 0, dim)]
+        self.assertEqual(result_cmp[0], expected_result_state)
+        self.assertEqual(result_cmp[1], expected_result_out)
+
+        if autograd:
+            result_flat = pytree.tree_leaves(result)
+            result_exp_flat = [expected_result_state, expected_result_out]
+
+            grad_out_expected = [torch.ones_like(r) for r in result_exp_flat]
+            expected_grads = torch.autograd.grad(
+                result_exp_flat,
+                (
+                    h,
+                    x,
+                    rnn.weight_ih_l0,
+                    rnn.bias_ih_l0,
+                    rnn.weight_hh_l0,
+                    rnn.bias_hh_l0,
+                ),
+                grad_out_expected,
+            )
+            expected_add_input_grads = list(expected_grads[2:])
+            expected_grads = expected_grads[:2]
+
+            grad_out = [torch.ones_like(r) for r in result]
+            grads = torch.autograd.grad(
+                result_flat, (h, x, W_ih, b_ih, W_hh, b_hh), grad_out
+            )
+            add_input_grads = list(grads[2:])
+            add_input_grads[0] = add_input_grads[0].T
+            add_input_grads[2] = add_input_grads[2].T
+            grads = grads[:2]
+            self.assertEqual(grads, expected_grads)
+            self.assertEqual(add_input_grads, expected_add_input_grads)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize(
+        "partial_grad", ["xs", "init", "additional_inputs", "complex", "random"]
+    )
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_closure_RNN_partial_autograd(
+        self, reverse, compile_mode, partial_grad, device
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # The first two booleans are the xs
+        # The second two are the inits
+        # The last four are the additional_inputs
+        autograds = []
+
+        if partial_grad == "xs":
+            # xs tests
+            autograds.append([True, False, True, True, True, True, True, True])
+            autograds.append([False, False, True, True, True, True, True, True])
+        elif partial_grad == "init":
+            # init tests
+            autograds.append([True, True, False, True, True, True, True, True])
+            autograds.append([True, True, False, False, True, True, True, True])
+        elif partial_grad == "additional_inputs":
+            # additional input tests
+            autograds.append([True, True, True, True, False, True, False, True])
+            autograds.append([True, True, True, True, False, False, False, False])
+        elif partial_grad == "complex":
+            # complex cases
+            autograds.append([True, False, False, False, False, False, False, True])
+            autograds.append([False, False, True, True, False, False, False, True])
+        elif partial_grad == "random":
+            # random tests
+            import random
+
+            for _ in range(5):
+                autograds.append([bool(random.randint(0, 1)) for _ in range(8)])
+
+        for autograd in autograds:
+            x = torch.randn(3, 10, 5, device=device, requires_grad=autograd[0])
+            x1 = torch.randn(3, 10, 5, device=device, requires_grad=autograd[1])
+            h = torch.randn(3, 7, device=device, requires_grad=autograd[2])
+            h_1 = torch.randn(3, 7, device=device, requires_grad=autograd[3])
+            W_ih = torch.randn(5, 7, device=device, requires_grad=autograd[4])
+            b_ih = torch.randn(7, device=device, requires_grad=autograd[5])
+            W_hh = torch.randn(7, 7, device=device, requires_grad=autograd[6])
+            b_hh = torch.randn(7, device=device, requires_grad=autograd[7])
+
+            params = [
+                p
+                for p, a in zip([x, x1, h, h_1, W_ih, b_ih, W_hh, b_hh], autograd)
+                if a
+            ]
+
+            def RNN(x: torch.Tensor, y: torch.Tensor):
+                c_new_0 = x[0] + 1
+                c_new_1 = x[1] + 1
+                h_new = (
+                    torch.tanh(c_new_1 + x[0] @ W_hh + b_hh)
+                    + y[0] @ W_ih
+                    + y[1] @ W_ih
+                    + b_ih
+                    + x[1]
+                )
+                return (c_new_0, c_new_1), h_new
+
+            inits = (h, h_1)
+            result = scan_fct(RNN, inits, (x, x1), dim=dim, reverse=reverse)
+            result_exp = _fake_scan(RNN, (h, h_1), (x, x1), dim=dim, reverse=reverse)
+            self.assertEqual(result, result_exp)
+
+            if autograd:
+                result_flat = pytree.tree_leaves(result)
+                result_exp_flat = pytree.tree_leaves(result_exp)
+                exp_grad_mask = [
+                    True if r.requires_grad else False for r in result_exp_flat
+                ]
+                self.check_autograd(
+                    [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                    [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
+                    params,
+                )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad_init_carries_unequal_grad(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 7, device=device, requires_grad=autograd)
+        h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
+
+        result = scan_fct(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
+        result_exp = _fake_scan(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            # TODO: Ideally we should be able to select the results that require gradients like this
+            # [leaf for leaf in pytree.tree_leaves(result) if leaf.requires_grad == True]
+            # However, for the scan operator this does not work, as all outputs always have
+            # grad_fn=<ScanAutogradOpBackward>
+            res_req_grad_flat = pytree.tree_leaves(result)[1:]
+            res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
+            self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad_init_carries_equal_grad(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 7, device=device, requires_grad=False)
+        h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
+
+        result = scan_fct(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
+        result_exp = _fake_scan(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            # TODO: Ideally we should be able to select the results that require gradients like this
+            # [leaf for leaf in pytree.tree_leaves(result) if leaf.requires_grad == True]
+            # However, for the scan operator this does not work, as all outputs always have
+            # grad_fn=<ScanAutogradOpBackward>
+            res_req_grad_flat = pytree.tree_leaves(result)[1:]
+            res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
+            self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad_for_out(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 7, device=device, requires_grad=autograd)
+        h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
+
+        def fct_ys_no_grad(x: torch.Tensor, y: torch.Tensor):
+            c1 = x[0] + y
+            c2 = x[1] + y
+            with torch.no_grad():
+                h_new = torch.tanh(x[0] + x[1] + y)
+            return (c1, c2), h_new
+
+        result = scan_fct(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result[0], result_exp[0], (x, h1, h2))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W_ih = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_ih = torch.randn(7, device=device, requires_grad=autograd)
+        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+
+        def fct_no_grad_bhh_Whh(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_ih + b_ih + x
+
+            h_new = c_new + 1
+            with torch.no_grad():
+                h_new_no_grad = torch.tanh(x @ W_hh + b_hh)
+            h_new2 = h_new + h_new_no_grad
+
+            return c_new, h_new2
+
+        result = scan_fct(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result[1], result_exp[1], (h, x, W_ih, b_ih))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad_additional_inputs_all(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W_ih = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_ih = torch.randn(7, device=device, requires_grad=autograd)
+        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+
+        def fct_no_grad_bih_Wih_bhh_Whh(x: torch.Tensor, y: torch.Tensor):
+            c_new = x + y
+            h_new = c_new + x
+            with torch.no_grad():
+                c_new_no_grad = y @ W_ih + b_ih
+                h_new_no_grad = torch.tanh(x @ W_hh + b_hh)
+            c_new2 = c_new + c_new_no_grad
+            h_new2 = h_new + h_new_no_grad
+            return c_new2, h_new2
+
+        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(
+            fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
+        )
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result[1], result_exp[1], (h, x))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_carries_ys_same_grad(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 7, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W_ih = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_ih = torch.randn(7, device=device, requires_grad=autograd)
+        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+
+        def fct_no_grad_bih_Wih_bhh_Whh(x: torch.Tensor, y: torch.Tensor):
+            c_new = x + y
+            h_new = c_new + 1
+            with torch.no_grad():
+                c_new_no_grad = y @ W_ih + b_ih
+                h_new_no_grad = torch.tanh(x @ W_hh + b_hh)
+            c_new2 = c_new + c_new_no_grad
+            h_new2 = h_new + h_new_no_grad
+            return c_new2, h_new2
+
+        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(
+            fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
+        )
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result[1], result_exp[1], (h, x))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Simple non-nested case
+        x = torch.randn(3, 20, 5, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b = torch.randn(7, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W + b
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result = scan_fct(f1, h, x, dim=1, reverse=reverse)
+        result_exp = _fake_scan(f1, h, x, dim=1, reverse=reverse)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (h, x, W, b))
+
+        # Nested case
+        def chain_fct(fct, f_1, f_2, xs, h_1, h_2):
+            o1 = fct(
+                f_1,
+                h_1,
+                xs,
+                dim=1,
+                reverse=reverse,
+            )
+            o2 = fct(
+                f_2,
+                h_2,
+                o1[1],
+                dim=0,
+                reverse=reverse,
+            )
+            return o2
+
+        x1 = torch.ones(3, 20, 5, device=device, requires_grad=autograd)
+        h1 = torch.zeros(3, 7, device=device, requires_grad=autograd)
+        h2 = torch.zeros(3, 3, device=device, requires_grad=autograd)
+        W_1 = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b_1 = torch.randn(7, device=device, requires_grad=autograd)
+        W_2 = torch.randn(7, 3, device=device, requires_grad=autograd)
+        b_2 = torch.randn(3, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_1 + b_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        def f2(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_2 + b_2
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
+        self.assertEqual(result1, expected_result)
+
+        if autograd:
+            self.check_autograd(result1, expected_result, (h1, h2, x1, W_1, b_1))
+
+        # Complex case
+        x1 = torch.randn(3, 20, 3, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        h2 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        W_1 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        b_1 = torch.randn(3, device=device, requires_grad=autograd)
+        W_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        b_2 = torch.randn(3, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_1 + b_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        def f2(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_2 + b_2 * b_1 + y @ W_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
+        self.assertEqual(result1, expected_result)
+
+        if autograd:
+            self.check_autograd(
+                result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
+            )
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_wrong_dtype(self):
@@ -2728,12 +3277,12 @@ class GraphModule(torch.nn.Module):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
-    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -6715,7 +7264,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     out = scan[1];  scan = None
     return (carry, out)""",  # noqa: B950
             )
-
         else:
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),

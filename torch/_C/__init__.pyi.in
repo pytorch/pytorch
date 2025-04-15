@@ -913,6 +913,12 @@ class AliasInfo:
     is_write: _bool
     before_set: Set[str]
     after_set: Set[str]
+    def __init__(
+        self,
+        is_write: _bool,
+        before_set: Set[str],
+        after_set: Set[str]
+    ) -> None: ...
 
 # Defined in torch/aten/src/ATen/core/function_schema.h
 class Argument:
@@ -925,6 +931,15 @@ class Argument:
     alias_info: Optional[AliasInfo]
     is_write: _bool
     real_type: JitType
+    def __init__(
+        self,
+        name: str,
+        type: JitType,
+        N: Optional[_int],
+        defualt_value: Optional[Any],
+        kwarg_only: _bool,
+        alias_info: Optional[AliasInfo]
+    ) -> None: ...
 
 class FunctionSchema:
     arguments: List[Argument]
@@ -932,6 +947,15 @@ class FunctionSchema:
     name: str
     overload_name: str
     is_mutable: _bool
+    def __init__(
+        self,
+        name: str,
+        overload_name: str,
+        arguments: List[Argument],
+        returns: List[Argument],
+        is_vararg: _bool,
+        is_varret: _bool
+    ) -> None: ...
 
 class _UpgraderEntry:
     bumped_at_version: _int
@@ -2260,7 +2284,6 @@ def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails
 
 # Defined in torch/csrc/DeviceAccelerator.cpp
 def _accelerator_getAccelerator() -> _device: ...
-def _accelerator_deviceCount() -> _int: ...
 def _accelerator_setDeviceIndex(device_index: _int) -> None: ...
 def _accelerator_getDeviceIndex() -> _int: ...
 def _accelerator_setStream(Stream) -> None: ...
