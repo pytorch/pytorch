@@ -94,7 +94,14 @@ from torch.utils.hooks import RemovableHandle
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Iterator, KeysView, ValuesView
+    from collections.abc import (
+        Generator,
+        ItemsView,
+        Iterable,
+        Iterator,
+        KeysView,
+        ValuesView,
+    )
 
 
 try:
@@ -579,11 +586,26 @@ class CompileEventLogger:
     @staticmethod
     def try_add_pt2_compile(event_name: str, **metadata: object):
         """
-        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
+        or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
+        if CHROMIUM_EVENT_LOG is None:
+            return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def try_(method_fn, *args, **kwargs):
+        """
+        Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
+        """
+        if CHROMIUM_EVENT_LOG is None:
+            return
+        metrics_context = get_metrics_context()
+        if not metrics_context.in_progress():
+            return
+        method_fn(*args, **kwargs)
 
 
 @contextmanager
@@ -1245,6 +1267,8 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1408,6 +1432,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "reorderable_logging_functions",
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
+            "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
         }
 
@@ -2400,6 +2425,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
+dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
@@ -4371,7 +4397,9 @@ def does_not_override_dict_iter_methods(user_cls):
 # compiled bytecode
 # They will be skipped which is the desired result
 def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.size(i)
 
@@ -4379,7 +4407,9 @@ def call_size(x, i):
 
 
 def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.stride(i)
 
@@ -4387,7 +4417,9 @@ def call_stride(x, i):
 
 
 def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x):
         return x.storage_offset()
 

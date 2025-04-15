@@ -18,6 +18,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
+#include <ATen/native/cuda/GroupMM.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -265,24 +266,16 @@ static bool getDisableAddmmCudaLt() {
 
 #ifdef USE_ROCM
 static bool isSupportedHipLtROCmArch(int index) {
-    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
-    std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs, index);
 }
 #endif
 
@@ -326,7 +319,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   }
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -352,6 +345,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
+  // if lt path fails, we recurse back into this function here and force the lt path to off
+  disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -446,6 +441,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   if (useLtInterface) {
 #if defined(USE_ROCM)
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -461,7 +457,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation));
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -480,6 +476,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_to_gemm_and_blas_arg(activation)
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -491,6 +491,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       activation_epilogue = cuda::blas::GEMMAndBiasActivationEpilogue::None;
 #endif
 
+    bool okay = true;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -506,7 +507,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue);
         }
         else {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
               args.m,
@@ -523,6 +524,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               activation_epilogue
           );
         }});
+    if (!okay) {
+      // lt path failed; recurse but disable lt path
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+    }
 #endif
   } else
   {
@@ -938,43 +943,31 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
-static bool _scaled_mm_allowed_device() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
+static bool _scaled_mm_allowed_device(bool sm90_only=false) {
 #ifdef USE_ROCM
-    std::string device_arch = dprops->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1200", "gfx1201"
+        "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
-    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (sm90_only) {
+      return dprops->major == 9;
+    } else {
+      return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    }
 #endif
 }
 
 #ifdef USE_ROCM
 static bool _scaled_mm_is_fnuz() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx942"};
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
 
@@ -1413,16 +1406,20 @@ namespace {
     }
   }
 
-  bool transposed(const Tensor& mat) {
+  bool check_valid_strides_and_return_transposed(const Tensor& mat) {
     IntArrayRef tensor_strides = mat.strides();
     IntArrayRef tensor_sizes = mat.sizes();
     int end_dim = mat.dim() - 1;
+    int alignment = 16 / mat.element_size();
+    TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
     if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
+      TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
       return true;
     } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
+      TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
       return false;
     } else {
-      TORCH_CHECK(false, "Tensor should not be self-overlapping");
+      TORCH_CHECK(false, "Tensor should have a contiguous dimension and not be self-overlapping, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
     }
   }
 
@@ -1488,13 +1485,13 @@ const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
-  TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
-  TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
+  TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
+  TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
   TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
@@ -1512,7 +1509,7 @@ bool use_fast_accum) {
     ").");
 
 
-
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
@@ -1554,6 +1551,43 @@ bool use_fast_accum) {
 #endif
 
 }
+
+Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+#ifndef USE_ROCM
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+
+  TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  // check that the strides are valid, the fn will throw an error if not
+  check_valid_strides_and_return_transposed(mat_a);
+  check_valid_strides_and_return_transposed(mat_b);
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d");
+
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high output type is supported for grouped gemm");
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+
+  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
+  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
+  at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+  return out;
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#endif
+}
+
 
 
 } // namespace at::native

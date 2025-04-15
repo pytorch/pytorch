@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -87,6 +88,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 if TYPE_CHECKING:
     # Cyclic dependency...
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 log = logging.getLogger(__name__)
@@ -730,7 +732,7 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen"):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
@@ -1037,6 +1039,15 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
+            if (
+                fn is operator.eq
+                and len(args) == 2
+                and isinstance(args[0], variables.TensorVariable)
+            ):
+                # Dynamo expects `__eq__` str while operator.eq gives just `eq`
+                # TODO - supporting all comparison operators could also work but
+                # it fails lots of tests because graph str changes.
+                return args[0].call_method(tx, "__eq__", args[1:], kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
@@ -1267,6 +1278,12 @@ class BuiltinVariable(VariableTracker):
 
                 # Inline the user function
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
+        elif isinstance(arg, (variables.ExceptionVariable,)):
+            if len(arg.args) == 0:
+                value = f"{arg.exc_type}"
+            else:
+                value = ", ".join(a.as_python_constant() for a in arg.args)
+            return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -1650,7 +1667,10 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
-        return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        try:
+            return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        except AttributeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
@@ -1798,10 +1818,10 @@ class BuiltinVariable(VariableTracker):
         name_var: VariableTracker,
         default=None,
     ):
-        name = name_var.as_python_constant()
-
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
+
+        name = name_var.as_python_constant()
 
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
@@ -1864,6 +1884,30 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and issubclass(obj.value.__class__, unittest.TestCase)
+                and config.enable_trace_unittest
+                and name
+                in (
+                    "assertRaisesRegex",
+                    "assertNotWarns",
+                    "assertWarnsRegex",
+                    "assertDictEqual",
+                    "assertSequenceEqual",
+                    "assertWarns",
+                )
+            ):
+                unimplemented_v2(
+                    gb_type="Failed to trace builtin operator",
+                    context=f"function: unittest.TestCase.{name}",
+                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    hints=[
+                        f"Avoid calling builtin `{name}`. "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
@@ -1933,6 +1977,20 @@ class BuiltinVariable(VariableTracker):
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
                     )
                 elif name == "data":
+                    # See comments on `test_set_data_on_scoped_tensor` for plans
+                    # to support this.
+                    if obj.source is None:
+                        unimplemented_v2(
+                            gb_type="Failed to mutate tensor data attribute",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dyanmo only supports mutating `.data`"
+                            " of tensor created outside `torch.compile` region",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
@@ -2223,6 +2281,9 @@ class BuiltinVariable(VariableTracker):
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
             return SetVariable(list(a.set_items | b.set_items))
+        # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
+        if isinstance(a, ConstDictVariable):
+            return a.call_method(tx, "__or__", args=[b], kwargs={})
         # None no-ops this handler and lets the driving function proceed
         return None
 

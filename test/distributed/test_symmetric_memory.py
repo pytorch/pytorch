@@ -771,7 +771,7 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-@skipIfRocm
+# @skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcessTestCase):
@@ -912,7 +912,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
             shift = align_bytes // t.element_size()
             numel = size_bytes // t.element_size()
             res = t[shift : shift + numel]
-            res.normal_().fill_(1)
+            res.normal_()
             inp = res.clone()
             if not inplace:
                 out = torch.empty_like(inp)
@@ -939,6 +939,78 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        for dtype, size_bytes, align_bytes, split_last_dim in itertools.product(
+            [torch.float, torch.bfloat16],
+            [128, 8192, 36 * 1024 * 16],
+            [4, 8, 16],
+            [True, False],
+        ):
+            t = symm_mem.empty(36 * 1024 * 16, dtype=dtype, device=self.device).fill_(0)
+            symm_mem.rendezvous(t, group=group_name)
+
+            self.assertTrue(t.data_ptr() % 16 == 0)
+            self.assertTrue(align_bytes % t.element_size() == 0)
+            self.assertTrue(size_bytes % t.element_size() == 0)
+
+            shift = align_bytes // t.element_size()
+            numel = size_bytes // t.element_size()
+            res = t[shift : shift + numel].normal_()
+            if split_last_dim:
+                res = res.view(-1, 128 // t.element_size())
+            inp = res.clone()
+            out_size = list(inp.shape)
+            out_size[-1] = inp.shape[-1] // self.world_size
+            out = torch.empty(out_size, dtype=dtype, device=self.device)
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, split_last_dim, out)
+
+            # Head and tail should not be written
+            self.assertTrue(t[:shift].eq(0).all().item())
+            self.assertTrue(t[shift + numel :].eq(0).all().item())
+            self._verify_reduce_scatter_result(inp, out)
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_corner_cases(self) -> None:
+        dtype = torch.bfloat16
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(t, group=group_name)
+        res = t[:0]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[:48]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[: 2 * 48].view(2, 48)
+        out = torch.empty(2, 48 // self.world_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
+
+    def _verify_reduce_scatter_result(self, inp, res):
+        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
+        sum_inps = gathered_inps.sum(0)
+        slice_width = sum_inps.shape[-1] // self.world_size
+        for i in range(self.world_size):
+            torch.testing.assert_close(
+                gathered_res[i],
+                sum_inps[..., i * slice_width : (i + 1) * slice_width],
+                rtol=1e-01,
+                atol=1e-01,
+            )
 
     @skip_if_lt_x_gpu(4)
     @parametrize("align_bytes", [4, 8, 16])
