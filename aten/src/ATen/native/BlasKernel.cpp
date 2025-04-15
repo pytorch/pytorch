@@ -152,6 +152,7 @@ static void fp16_gemv_notrans_fp32_arith(
     vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
   }
 }
+
 void fp16_gemv_notrans(
     const int m,
     const int n,
@@ -162,8 +163,45 @@ void fp16_gemv_notrans(
     const int incx,
     const float beta,
     Half* y,
-    const int incy);
-
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    if (at::globalContext().allowFP16ReductionCPU()) {
+      return fp16_gemv_notrans_fp16_arith(
+          m,
+          n,
+          reinterpret_cast<const float16_t*>(a),
+          lda,
+          reinterpret_cast<const float16_t*>(x),
+          reinterpret_cast<float16_t*>(y));
+    }
+#endif
+    return fp16_gemv_notrans_fp32_arith(
+        m,
+        n,
+        reinterpret_cast<const float16_t*>(a),
+        lda,
+        reinterpret_cast<const float16_t*>(x),
+        reinterpret_cast<float16_t*>(y));
+  }
+  std::vector<float> sum(m);
+  for (const auto j : c10::irange(n)) {
+    const auto* column_ = a + lda * j;
+    auto z = alpha * x[j * incx];
+    for (const auto i : c10::irange(m)) {
+      sum[i] += z * column_[i];
+    }
+  }
+  if (beta == 0.0) {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
+    }
+  } else {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] += sum[i];
+    }
+  }
+}
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
