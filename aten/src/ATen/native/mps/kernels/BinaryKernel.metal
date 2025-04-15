@@ -25,6 +25,13 @@ struct lerp_functor {
   }
 };
 
+struct mul_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(a * b);
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -218,6 +225,14 @@ REGISTER_BINARY_OP(lerp, short, short);
 REGISTER_BINARY_OP(lerp, uchar, uchar);
 REGISTER_BINARY_OP(lerp, char, char);
 REGISTER_BINARY_OP(lerp, bool, bool);
+REGISTER_BINARY_OP(mul, long, long);
+REGISTER_BINARY_OP(mul, int, int);
+REGISTER_BINARY_OP(mul, float, float);
+REGISTER_BINARY_OP(mul, half, half);
+REGISTER_BINARY_OP(mul, short, short);
+REGISTER_BINARY_OP(mul, uchar, uchar);
+REGISTER_BINARY_OP(mul, char, char);
+REGISTER_BINARY_OP(mul, bool, bool);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
@@ -234,6 +249,7 @@ REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
 REGISTER_BINARY_OP(lerp, bfloat, bfloat);
+REGISTER_BINARY_OP(mul, bfloat, bfloat);
 #endif
 
 // Complex binary functions
