@@ -4622,7 +4622,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @xfail_if_mps  # Shape mismatch
+    @xfail_if_mps  # AssertionError: expected size
     def test_conv2d_backward_channels_last(self):
         def fn(grad_output, inp, weight):
             convolution_backward_8 = torch.ops.aten.convolution_backward.default(
@@ -7080,6 +7080,7 @@ class CommonTemplate:
             ),
         )
 
+    @xfail_if_mps
     def test_reflection_pad2d_backward(self):
         def template(size, padding):
             def fn(grad_output, x):
@@ -9545,6 +9546,7 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
+    @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
@@ -10567,6 +10569,7 @@ class CommonTemplate:
         eager_out = eager_mod(*eager_args)
         self.assertEqual(inductor_out, eager_out)
 
+    @xfail_if_mps  # AssertionError: expected size
     def test_require_stride_expanded(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
