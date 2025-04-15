@@ -87,6 +87,7 @@ __all__ = [
 ]
 
 
+# In-tree installation may have VCS-based versioning. Update the previous static version.
 python_pytree._optree_version = _TorchVersion(optree.__version__)  # type: ignore[attr-defined]
 
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
