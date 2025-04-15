@@ -268,6 +268,9 @@ static void add_sub_lerp_template(const Tensor& self,
   if (alpha_has_value) {
     auto commonDtype = at::result_type(self, other);
     at::native::alpha_check(commonDtype, alpha);
+  } else {
+    mps::binary_op_kernel(op_name, self, other, output);
+    return;
   }
 
   if (!alpha_has_value && op_name == "lerp") {
@@ -413,8 +416,6 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  if (mps::binary_alpha_kernel("add", self, other, alpha, output))
-    return;
   if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
       !mps::supportsComplex()) {
     // Complex add with non-complex alpha is just add over views
