@@ -7248,7 +7248,7 @@ def forward(self, b_a_buffer, x):
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
         from torch.utils._pytree import tree_structure, tree_unflatten
-        
+
         for device in [torch.device("cpu"), torch.device("cuda")]:
             # for combine_mode in ["pointwise"], "generic"]:
             # TODO: I had to comment out the "generic" case because it would raise
@@ -7274,14 +7274,13 @@ def forward(self, b_a_buffer, x):
 
                 ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
                 module_out = Foo()(xs)
-                module_treespec = tree_structure(module_out)
-                self.assertTrue(torch.allclose(tree_unflatten(ep.module()(xs), module_treespec), module_out))
+                self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
         from torch.utils._pytree import tree_structure, tree_unflatten
-        
+
         for device in [torch.device("cpu"), torch.device("cuda")]:
             # for combine_mode in ["pointwise"], "generic"]:
             # TODO: I had to comment out the "generic" case because it would raise
@@ -7308,13 +7307,17 @@ def forward(self, b_a_buffer, x):
                 ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
                 module_out = Foo()(xs)
                 module_treespec = tree_structure(module_out)
-                self.assertTrue(torch.allclose(tree_unflatten(ep.module()(xs), module_treespec), module_out))
+                self.assertTrue(
+                    torch.allclose(
+                        tree_unflatten(ep.module()(xs), module_treespec), module_out
+                    )
+                )
 
     @requires_cuda
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_lifted_buffers(self):
-        from torch.utils._pytree import tree_structure, tree_unflatten, tree_leaves
-        
+        from torch.utils._pytree import tree_leaves, tree_structure, tree_unflatten
+
         for device in [torch.device("cpu"), torch.device("cuda")]:
             # for combine_mode in ["pointwise"], "generic"]:
             # TODO: Using combine_mode="generic" raises
@@ -7327,10 +7330,12 @@ def forward(self, b_a_buffer, x):
                 class M(torch.nn.Module):
                     def __init__(self) -> None:
                         super().__init__()
-                        self.register_buffer("buf", torch.ones(3, 2, device=device), persistent=False)
+                        self.register_buffer(
+                            "buf", torch.ones(3, 2, device=device), persistent=False
+                        )
 
                     def combine_fn(self, x, y):
-                        return x + y# * self.buf
+                        return x + y  # * self.buf
 
                     def forward(self, x):
                         return associative_scan(
