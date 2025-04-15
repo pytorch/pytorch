@@ -13,7 +13,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.guards import CheckFunctionManager, CompileId
-from torch._dynamo.symbolic_convert import InstructionTranslator
+from torch._dynamo.symbolic_convert import InstructionTranslator, SpeculationLog
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 
@@ -44,6 +44,8 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         self._frame_state = None
         sys.settrace(self._tracefunc)
+        if isinstance(fn, torch.nn.Module):
+            fn = fn.forward
         try:
             fn(*args, **kwargs)
         finally:
@@ -52,7 +54,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         assert self._frame_state is not None
 
         def guard_filter_fn(guards):
-            return [g.guard_type == guard_type for g in guards]
+            ret = [g.guard_type == guard_type for g in guards]
+            self.assertTrue(any(ret))
+            return ret
 
         ref_gm = None
         loaded_gm = None
@@ -73,7 +77,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 self._frame_state.f_locals,
                 self._frame_state.f_globals,
                 self._frame_state.f_builtins,
-                (),  # TODO closure
+                fn.__closure__ or (),
                 [],  # TODO tf_mode_stack,
                 code_options,
                 lambda gm, *args, **kwargs: gm.forward,
@@ -81,7 +85,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 export=False,
                 export_constraints=None,
                 frame_state=None,
-                speculation_log=None,
+                speculation_log=SpeculationLog(),
                 exn_vt_stack=None,
                 distributed_state=None,
             )
@@ -139,3 +143,21 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_not_present_in_generic_dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = Module()
+
+        def fn(x):
+            return m(x)
+
+        ref, loaded = self._test_serialization(
+            "NOT_PRESENT_IN_GENERIC_DICT", fn, torch.ones(2, dtype=torch.float32)
+        )
+        self._test_check_fn(ref, loaded, {"m": m}, True)
+
+        m.forward = types.MethodType(lambda x: x + 2, m)
+        self._test_check_fn(ref, loaded, {"m": m}, False)
