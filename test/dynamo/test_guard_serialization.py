@@ -161,3 +161,26 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         m.forward = types.MethodType(lambda x: x + 2, m)
         self._test_check_fn(ref, loaded, {"m": m}, False)
+
+    def test_hasattr_serialization(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 1
+
+            def forward(self, x: torch.Tensor):
+                if hasattr(self, "a"):
+                    return x + self.a
+                else:
+                    return x + 2
+
+        m = Module()
+        def fn(x):
+            return m(x)
+
+        ref, loaded = self._test_serialization(
+            "HASATTR", fn, torch.randn(3)
+        )
+        self._test_check_fn(ref, loaded, {"m": m}, True)
+        delattr(m, "a")
+        self._test_check_fn(ref, loaded, {"m": m}, False)
