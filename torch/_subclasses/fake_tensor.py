@@ -871,10 +871,11 @@ class FakeTensor(Tensor):
             aten.masked_fill.Scalar,
             # where's data source might have different device types.
             aten.where.self,
-            # a zero dim cpu tensor is often used to time another tensor like a scalar.
+            # a zero dim cpu tensor is often used as a scalar in these arithmetic operation
             aten.mul.Tensor,
-            # a zero dim cpu tensor is often used as a denominator like a scalar.
             aten.div.Tensor,
+            aten.add.Tensor,
+            aten.sub.Tensor,
             # zero dim cpu tensor is passed as some parameter in these backward methods.
             aten._scaled_dot_product_efficient_attention_backward.default,
             aten._efficient_attention_backward.default,
