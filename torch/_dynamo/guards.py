@@ -27,8 +27,10 @@ import enum
 import functools
 import importlib
 import inspect
+import io
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import types
@@ -57,9 +59,9 @@ from torch._C._dynamo.guards import (
     RootGuardManager,
 )
 from torch._dynamo.source import (
+    get_global_source_name,
     IndexedSource,
     is_from_flatten_script_object_source,
-    is_from_global_source,
     is_from_local_source,
     is_from_optimizer_source,
     TensorProperty,
@@ -165,6 +167,8 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from sympy import Symbol
+
+    from torch._dynamo.output_graph import OutputGraphGuardsState
 
 
 log = logging.getLogger(__name__)
@@ -494,10 +498,9 @@ def convert_to_concrete_values(size_or_stride):
     return converted
 
 
-def get_tensor_guard_code_part(value, name, sizes, strides):
-    pytype = type(value)
+def get_tensor_guard_code_part(value, name, sizes, strides, pytype, dispatch_keys):
     dispatch_key = (
-        torch._C._dispatch_keys(value) | torch._C._dispatch_tls_local_include_set()
+        dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
     device_index = value.device.index
@@ -2142,6 +2145,15 @@ class GuardBuilder(GuardBuilderBase):
                 value = value()
 
             value = value if value is not None else self.get(guard.name)
+
+            pytype = type(value)
+            dispatch_keys = torch._C._dispatch_keys(value)
+            if isinstance(value, torch._subclasses.FakeTensor):
+                if value.pytype is not None:
+                    pytype = value.pytype
+                if value.dispatch_keys is not None:
+                    dispatch_keys = value.dispatch_keys
+
             assert isinstance(value, torch.Tensor)
 
             tensor_name = self.arg_ref(guard)
@@ -2212,7 +2224,9 @@ class GuardBuilder(GuardBuilderBase):
                 stride = convert_to_concrete_values(metadata["stride"])
 
                 verbose_code_parts = get_verbose_code_parts(
-                    get_tensor_guard_code_part(value, tensor_name, size, stride),
+                    get_tensor_guard_code_part(
+                        value, tensor_name, size, stride, pytype, dispatch_keys
+                    ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
@@ -2221,6 +2235,8 @@ class GuardBuilder(GuardBuilderBase):
                     stride,
                     tensor_name,
                     verbose_code_parts,
+                    pytype,
+                    dispatch_keys,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
@@ -2453,6 +2469,66 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
         self.diff_guard_root = None
 
 
+@dataclasses.dataclass
+class GuardsState:
+    output_graph: OutputGraphGuardsState
+    # TODO SHAPE_ENV states here
+
+
+class GuardsStatePickler(pickle.Pickler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fake_mode = torch._subclasses.FakeTensorMode()
+        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+
+    @classmethod
+    def _unpickle_module(cls, state):
+        mod = torch.nn.Module()
+        mod.__setstate__(state)
+        return mod
+
+    @classmethod
+    def _unpickle_tensor(cls, meta_tensor, device, pytype, dispatch_keys_raw):
+        fake_mode = torch._subclasses.FakeTensorMode()
+        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+        return tensor_converter.from_meta_and_device(
+            fake_mode,
+            meta_tensor,
+            device,
+            pytype,
+            torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
+        )
+
+    def reducer_override(self, obj):
+        if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            return type(self)._unpickle_tensor, (
+                torch.empty_like(obj, device="meta"),
+                obj.device,
+                type(obj),
+                torch._C._dispatch_keys(obj).raw_repr(),
+            )
+
+        elif isinstance(obj, torch.nn.Module):
+            if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
+                return type(self)._unpickle_module, (obj.__getstate__(),)
+
+        if type(obj).__qualname__ != type(obj).__name__:
+            raise RuntimeError(
+                f"Type {type(obj)} for object {obj} cannot be saved "
+                + "into torch.compile() package since it's defined in local scope. "
+                + "Please define the class at global scope (top level of a module)."
+            )
+
+        return NotImplemented
+
+
+def pickle_guards_state(state: GuardsState) -> bytes:
+    buf = io.BytesIO()
+    pickler = GuardsStatePickler(buf)
+    pickler.dump(state)
+    return buf.getvalue()
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2468,6 +2544,7 @@ class CheckFunctionManager:
         guard_filter_fn: Optional[
             Callable[[list[GuardFilterEntry]], list[bool]]
         ] = None,
+        guards_serialization_mode: Optional[str] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2482,6 +2559,7 @@ class CheckFunctionManager:
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
+        self.guards_serialization_mode = guards_serialization_mode
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
@@ -2502,7 +2580,7 @@ class CheckFunctionManager:
                 else:
                     has_value = True
                     value = builder.get(guard.name)
-                is_global = is_from_global_source(guard.originating_source)
+                is_global = get_global_source_name(guard.originating_source) is not None
                 guard_fn = guard.create_fn
                 if isinstance(guard_fn, functools.partial):
                     guard_fn = guard.create_fn.func
@@ -2552,7 +2630,7 @@ class CheckFunctionManager:
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
-        if not output_graph.export:
+        if not output_graph.export and self.guards_serialization_mode != "load":
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,  # type: ignore[arg-type]
@@ -2584,6 +2662,39 @@ class CheckFunctionManager:
             # since these situations are rare and typically impractical to
             # account for, we simply increment at the toplevel instead.
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
+
+        self.guards_state: Optional[bytes] = None
+        if self.guards_serialization_mode == "save":
+            output_graph_guards_state = self.output_graph.dump_guards_state()
+            # Only serialize the global variables that are actually used in guards.
+            used_global_vars = set()
+            for guard in sorted_guards:
+                if name := get_global_source_name(guard.originating_source):
+                    used_global_vars.add(name)
+
+            output_graph_guards_state = dataclasses.replace(
+                output_graph_guards_state,
+                global_scope={
+                    k: v
+                    for k, v in output_graph_guards_state.global_scope.items()
+                    if k in used_global_vars
+                },
+                _guards=torch._guards.GuardsSet(
+                    {
+                        dataclasses.replace(
+                            guard,
+                            obj_weakref=None,
+                            guarded_class_weakref=None,
+                            create_fn=guard.inner_create_fn(),
+                        )
+                        for guard in sorted_guards
+                    }
+                ),
+            )
+            guards_state = GuardsState(
+                output_graph=output_graph_guards_state,
+            )
+            self.guards_state = pickle_guards_state(guards_state)
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -2751,9 +2862,7 @@ class CheckFunctionManager:
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (
-            self.output_graph.tracing_context.guards_context.aotautograd_guards
-            if self.output_graph
-            else []
+            self.output_graph.aotautograd_guards if self.output_graph else []
         )
 
         # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
