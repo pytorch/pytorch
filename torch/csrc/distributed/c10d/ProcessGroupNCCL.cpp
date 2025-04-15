@@ -275,6 +275,28 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   }
 }
 
+// When TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK is set, all tensors (no
+// matter how they have been allocated) are registered with all NCCL comms.
+bool shouldAllCommunicatorsRegisterAllTensors() {
+#ifdef NCCL_HAS_COMM_REGISTER
+  static const bool flag = [] {
+    const bool flag =
+        getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
+    if (flag &&
+        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            expandable_segments()) {
+      LOG(INFO)
+          << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+      return false;
+    }
+    return flag;
+  }();
+  return flag;
+#else
+  return false;
+#endif // NCCL_HAS_COMM_REGISTER
+}
+
 } // namespace
 
 // Map from each communicator to its device index.
@@ -289,7 +311,6 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 //   communicators in all PGs.
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
 static std::mutex ncclCommDevIdxMapMutex;
-static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
@@ -302,12 +323,12 @@ static void cacheAllocatorRegisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& it : ncclCommDevIdxMap) {
-    auto& ncclComm = it.first;
-    auto& devIdx = it.second;
-    if (te.device_ == devIdx) {
-      // NOLINTNEXTLINE(performance-no-int-to-ptr)
-      ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    if (te.device_ == ncclComm->getDeviceIndex()) {
+      if (shouldAllCommunicatorsRegisterAllTensors()) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+      }
     }
   }
 }
@@ -321,14 +342,28 @@ static void cacheAllocatorDeregisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
-  for (auto& it : ncclCommDevIdxMap) {
-    auto& ncclComm = it.first;
-    auto& devIdx = it.second;
-    if (te.device_ == devIdx) {
-      // NOLINTNEXTLINE(performance-no-int-to-ptr)
-      ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    if (te.device_ == ncclComm->getDeviceIndex()) {
+      if (shouldAllCommunicatorsRegisterAllTensors()) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+      }
     }
   }
+}
+
+static void attachAllocatorHooks() {
+  static c10::once_flag flag;
+  c10::call_once(flag, [] {
+    // Attaching hooks fails if CUDACachingAllocator is not initialized, so
+    // Init for CUDA is called (and is a no-op if CUDA is already
+    // initialized).
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorRegisterHook);
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorDeregisterHook);
+  });
 }
 
 static std::
@@ -345,11 +380,12 @@ static std::
   std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
   // within the critical section, we don't want to dump while holding the lock
   // as dump might hang
-  ncclCommDevIdxMapMutex.lock();
-  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
-    allNCCLComms.push_back(ncclComm);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+      allNCCLComms.push_back(ncclComm);
+    }
   }
-  ncclCommDevIdxMapMutex.unlock();
   for (auto& ncclComm : allNCCLComms) {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
@@ -824,9 +860,10 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   // Abort all communicators of this work
   ncclComm_->abort();
 
-  ncclCommDevIdxMapMutex.lock();
-  ncclCommDevIdxMap.erase(ncclComm_);
-  ncclCommDevIdxMapMutex.unlock();
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    ncclCommDevIdxMap.erase(ncclComm_);
+  }
 }
 
 ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
@@ -959,17 +996,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
   }
-#ifdef NCCL_HAS_COMM_REGISTER
-  useTensorRegisterAllocatorHook_ =
-      getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
-  if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-          expandable_segments()) {
-    useTensorRegisterAllocatorHook_ = false;
-    LOG(INFO)
-        << logPrefix()
-        << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
-  }
-#endif // NCCL_HAS_COMM_REGISTER
 
   if (blockingWait_) {
     LOG(INFO)
@@ -1022,7 +1048,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-            << useTensorRegisterAllocatorHook_
+            << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_ENABLE_MONITORING: "
             << monitorThreadEnabled_.load()
@@ -1043,17 +1069,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // action is called. In the following hooks, we register a newly allocated
   // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
   // SEGMENT_FREE action occurs.
-  // We attach hooks only once at the first PG creation.
-  // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // Init for CUDA is called (and is a no-op if CUDA is already
-  // initialized).
-  if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
-        &cacheAllocatorRegisterHook);
-    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
-        &cacheAllocatorDeregisterHook);
-    allocatorHooksAttached = true;
+  if (shouldAllCommunicatorsRegisterAllTensors()) {
+    // This call is idempotent.
+    attachAllocatorHooks();
   }
 
   // Enable Desync Debugger per user setting
@@ -1386,12 +1404,12 @@ bool ProcessGroupNCCL::abortComms(
   // communicators. Note that ncclCommDevIdxMap is a global container which may
   // contain other PG's communicators, thus we need to only erase communicators
   // for the current PG.
-  ncclCommDevIdxMapMutex.lock();
-  for (auto& it : devNCCLCommMap_) {
-    auto& ncclComm = it.second;
-    ncclCommDevIdxMap.erase(ncclComm);
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    for (auto& [_, ncclComm] : devNCCLCommMap_) {
+      ncclCommDevIdxMap.erase(ncclComm);
+    }
   }
-  ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
@@ -1815,8 +1833,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     if (logger) {
       logger->log(debugLog);
     }
-    // Indicate to watchdog thread that we have finished dumping.
-    promiseFlightRecorderDump_.set_value();
   }
 
   // GIL deadlock check.
@@ -2141,27 +2157,10 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
-  if (shouldDump_.load()) {
-    // already signaled dump, skipping signal again and wait for the dump
-    // future.
-    return;
-  }
-  LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
-  // signal the monitor thread on PG0 to start dumping
-  shouldDump_.store(true);
-  // Give time for dumping before throwing exception
-  auto start = std::chrono::steady_clock::now();
-  auto status = promiseFlightRecorderDump_.get_future().wait_for(
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-  if (status == std::future_status::timeout) {
-    LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                 << waitTimeoutDumpInMilSec_ << "ms"
-                 << " flight recorder dumps to finish.";
-  } else if (status == std::future_status::ready) {
-    auto end = std::chrono::steady_clock::now();
-    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms"
-              << " giving time for flight recorder dumps to finish.";
+  if (!shouldDump_.load()) {
+    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+    // signal the monitor thread on PG0 to start dumping
+    shouldDump_.store(true);
   }
 }
 
@@ -2336,6 +2335,13 @@ void ProcessGroupNCCL::watchdogHandler() {
         // recorder behavior is independent of desync Debug.
         if (dumpOnTimeoutOrEx_) {
           broadcastDumpSignal();
+          // Give time for dumping before throwing exception for all ranks.
+          // It is hard to presume or control what the pattern of watchdog might
+          // look like, so it is better to let all ranks universally sleep for a
+          // short period of time, in this case, 60 seconds, which is also the
+          // maximum time we leave for FR dump.
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
@@ -2713,9 +2719,10 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   // Clear used device indices.
   usedDeviceIdxs_.clear();
 
-  ncclCommDevIdxMapMutex.lock();
-  ncclCommDevIdxMap.erase(ncclComm);
-  ncclCommDevIdxMapMutex.unlock();
+  {
+    std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+    ncclCommDevIdxMap.erase(ncclComm);
+  }
 }
 
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
@@ -2882,8 +2889,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
 #if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
-      ncclComm =
-          NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
+      ncclComm = NCCLComm::create_scalable(
+          numRanks, rank, ncclIDs, deviceIndex, options_->config);
 #else
       C10_THROW_ERROR(
           DistBackendError,
@@ -2975,7 +2982,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // Now ncclComms are fully initialized.
     // Register all active CUDA memory segments in cache allocator to
     // the new NCCL communicators
-    if (useTensorRegisterAllocatorHook_) {
+    if (shouldAllCommunicatorsRegisterAllTensors()) {
       auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
       // Register the segment to a new NCCL communicator if on the same device
       for (const auto& segmentInfo : snapshot.segments) {
@@ -2993,9 +3000,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // on the same device.
     // NOTE: we need remove the communicator from this map when it is
     // destroyed, otherwise may register onto an invalid communicator.
-    ncclCommDevIdxMapMutex.lock();
-    ncclCommDevIdxMap.emplace(ncclComm, device.index());
-    ncclCommDevIdxMapMutex.unlock();
+    {
+      std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+      ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    }
   }
 
   it = devNCCLCommMap_.find(deviceKey);
@@ -3273,6 +3281,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
   auto ncclStream = ncclStreams_.at(key);
+  auto opProfilerTitle = optype != OpType::COALESCED
+      ? "nccl:" + opTypeToString(optype) + "_coalesced"
+      : "nccl:coalesced";
 
   // Create Work object
   c10::cuda::CaptureStatus capture_status =
@@ -3284,7 +3295,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
       rank_,
       optype,
       coalescing_state_ & CoalP2P,
-      "nccl:coalesced",
+      opProfilerTitle.c_str(),
       {},
       {},
       enqueue);
@@ -3440,7 +3451,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (work->timingEnabled_) {
+  if (work->timingEnabled_ && !coalescing_state_) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
