@@ -10,6 +10,8 @@ namespace c10d {
 
 class TORCH_API HashStore : public Store {
  public:
+  c10::intrusive_ptr<Store> clone() override;
+
   ~HashStore() override = default;
 
   void set(const std::string& key, const std::vector<uint8_t>& data) override;
