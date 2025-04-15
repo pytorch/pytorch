@@ -386,22 +386,22 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_nestedten
           max_q,
           max_k);
 
-  auto [dq, dk, dv] = at::_cudnn_attention_backward(grad_out,
-                                                   query,
-                                                   key,
-                                                   value,
-                                                   out,
-                                                   logsumexp,
-                                                   philox_seed,
-                                                   philox_offset,
-                                                   attn_bias,
-                                                   cum_seq_q,
-                                                   cum_seq_k,
-                                                   max_q,
-                                                   max_k,
-                                                   dropout_p,
-                                                   is_causal,
-                                                   scale);
+  auto [dq, dk, dv] = at::_cudnn_attention_backward(grad_out_buffer_reshaped,
+                                                    query_buffer_reshaped,
+                                                    key_buffer_reshaped,
+                                                    value_buffer_reshaped,
+                                                    output_buffer_reshaped,
+                                                    logsumexp,
+                                                    philox_seed,
+                                                    philox_offset,
+                                                    attn_bias,
+                                                    cum_seq_q,
+                                                    cum_seq_k,
+                                                    max_q,
+                                                    max_k,
+                                                    dropout_p,
+                                                    is_causal,
+                                                    scale);
   return std::make_tuple(dq, dk, dv);
 }
 
