@@ -987,6 +987,11 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        def alloc_fn(size: int, align: int, stream: Optional[int]):
+            return torch.empty(size, dtype=torch.int8, device=self.device_props.type)
+
+        triton.set_allocator(alloc_fn)
+
         if self.triton_interpret:
             args, grid = self._interpret_args_grid(args, self.configs[0])
             return self.fn[grid](

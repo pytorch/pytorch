@@ -252,27 +252,19 @@ persistent_tma_mm_template = TritonTemplate(
     rk_for_mask = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
-    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
-    a_desc_ptr = workspace_base
-    b_desc_ptr = workspace_base + TMA_SIZE
-
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=a_desc_ptr,
-        global_address=A,
-        load_size=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-        global_size=[M, K] if A_ROW_MAJOR else [K, M],
-        element_ty=A.dtype.element_ty,
-    )
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=b_desc_ptr,
-        global_address=B,
-        load_size=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-        global_size=[K, N] if B_ROW_MAJOR else [N, K],
-        element_ty=B.dtype.element_ty,
+    a_desc = tl.make_tensor_descriptor(
+        A,
+        shape = [M, K] if A_ROW_MAJOR else [K, M],
+        strides = [K, 1] if A_ROW_MAJOR else [M, 1],
+        block_shape= [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
 
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+    b_desc = tl.make_tensor_descriptor(
+        B,
+        shape = [K, N] if B_ROW_MAJOR else [N, K],
+        strides = [N, 1] if B_ROW_MAJOR else [K, 1],
+        block_shape= [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+    )
 
     pid_m = 0
     pid_n = 0
@@ -294,17 +286,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         rk = ki * BLOCK_K
 
-        a = tl._experimental_descriptor_load(
-            a_desc_ptr,
+        a = tl.load_tensor_descriptor(
+            a_desc,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
-            [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-            A.dtype.element_ty,
         )
-        b = tl._experimental_descriptor_load(
-            b_desc_ptr,
+        b = tl.load_tensor_descriptor(
+            b_desc,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
-            [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-            B.dtype.element_ty,
         )
         acc += tl.dot(
             a if A_ROW_MAJOR else a.T,
@@ -637,10 +625,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
@@ -858,10 +842,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                     prefix_args=1,
