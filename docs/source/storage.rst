@@ -31,7 +31,7 @@ can be faster than deserializing multiple independent tensors.
 
 A tensor storage can be accessed through the :meth:`~torch.Tensor.untyped_storage` method. This will return an object of
 type :class:`torch.UntypedStorage`.
-Fortunately, storages have a unique identifier called accessed through the :meth:`torch.UntypedStorage.data_ptr` method.
+Fortunately, storages have a unique identifier accessed through the :meth:`torch.UntypedStorage.data_ptr` method.
 In regular settings, two tensors with the same data storage will have the same storage ``data_ptr``.
 However, tensors themselves can point to two separate storages, one for its data attribute and another for its grad
 attribute. Each will require a ``data_ptr()`` of its own. In general, there is no guarantee that a
