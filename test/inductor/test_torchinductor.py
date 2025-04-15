@@ -3737,7 +3737,8 @@ class CommonTemplate:
                 torch.randn(256, 256),
                 torch.randint(-128, 127, (256, 256), dtype=torch.int8),
             ),
-            check_lowp=True,
+            # MacOS-13 MM ops have precision issues
+            check_lowp=self.device != "mps" or MACOS_VERSION > 14.0,
             rtol=0.01,
             atol=0.1,
         )
@@ -11261,7 +11262,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
-    @xfail_if_mps  # Missing lowering
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
