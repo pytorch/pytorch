@@ -818,7 +818,7 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1494,11 +1494,21 @@ bool gemm_and_bias(
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
   #endif
 
-  if (at::globalContext().allowBF16ReductionCuBLAS() && std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
+  if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
+    #ifdef USE_ROCM
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+    #endif
+    
     // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
-  } else if (at::globalContext().allowFP16ReductionCuBLAS() && std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+    if (at::globalContext().allowBF16ReductionCuBLAS())
+      TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
+  } else if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
+    #ifdef USE_ROCM
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+    #endif
+
+    if (at::globalContext().allowFP16ReductionCuBLAS())
+      TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
   }
 
   using opmath_t = at::opmath_type<Dtype>;
