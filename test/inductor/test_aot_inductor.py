@@ -3372,8 +3372,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     def test_aoti_runtime_asserts(self):
-        from torch._dispatch.python import enable_python_dispatcher
-        from torch.export._draft_export import draft_export
+        from torch.export._draft_export import draft_export, FailureType
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -3403,23 +3402,23 @@ class AOTInductorTestsTemplate:
 
             example_inputs = (torch.randn(100), torch.tensor(10))
             ep = draft_export(M(), example_inputs)
+            report = ep._report
+            need_config_patch = any(
+                not f.xfail and f.failure_type == FailureType.MISMATCHED_FAKE_KERNEL
+                for f in report.failures
+            )
             m = ep.module()
-            from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
-            example_inputs = [
-                node.meta["val"] for node in m.graph.nodes if node.op == "placeholder"
-            ]
-            fake_mode = example_inputs[0].fake_mode
-            with enable_python_dispatcher(), fake_mode:
-                FakeTensorProp(m, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
-                )
+            # This should no longer be needed after #150093
+            from torch._functorch import config as functorch_config
 
-            # TODO: change to the tests below after  MetadataMismatchError is fixed
-            # pt2_file = torch._inductor.aoti_compile_and_package(ep)
-            # optimized = torch._inductor.aoti_load_package(pt2_file)
+            with functorch_config.patch(
+                {"generate_fake_kernels_from_real_mismatches": need_config_patch}
+            ):
+                pt2_file = torch._inductor.aoti_compile_and_package(ep)
+            optimized = torch._inductor.aoti_load_package(pt2_file)
 
-            # self.assertTrue(same(optimized(example_inputs), m(example_inputs)))
+            self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
@@ -3990,6 +3989,47 @@ class AOTInductorTestsTemplate:
             for kernel_name, _ in kernel_calls_not_to_print:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
+
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler(self, enable_kernel_profile):
+        # basic addmm model
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        if sys.platform not in ["linux", "win32"]:
+            raise unittest.SkipTest(
+                "enable_kernel_profile only supported on linux and win32"
+            )
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K, self.device)
+        batch = 2
+        a = torch.randn(batch, M, K, device=self.device)
+        example_inputs = (a,)
+        kernel_calls = (
+            f"aoti_torch_{GPU_TYPE}_addmm_out"
+            if self.device == GPU_TYPE
+            else "aoti_torch_cpu_addmm_out"
+        )
+        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            shim_fn_codes = (
+                f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
+            )
+            if enable_kernel_profile:
+                FileCheck().check(shim_fn_codes).run(code)
+            else:
+                FileCheck().check_not(shim_fn_codes).run(code)
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
