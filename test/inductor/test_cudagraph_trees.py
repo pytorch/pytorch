@@ -1450,7 +1450,8 @@ if HAS_CUDA:
                     if not IS_ARM64:
                         self.assertTrue(
                             "at::cuda::blas::gemm<float, float>" in str(e)
-                            or "at::cuda::blas::gemm_internal_cublas<float, float>" in str(e)
+                            or "at::cuda::blas::gemm_internal_cublas<float, float>"
+                            in str(e)
                         )
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
