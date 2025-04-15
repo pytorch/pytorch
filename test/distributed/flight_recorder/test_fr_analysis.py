@@ -207,7 +207,7 @@ class FlightRecorderE2ETest(TestCase):
     def testBuildDB(self):
         config = JobConfig()
         args = config.parse_args([])
-        version = "2.6"  # Same as the version in FlightRecorder.hpp
+        version = "2.7"  # Same as the version in FlightRecorder.hpp
         LOADED_FR_DETAIL_TEMPLATE["dump_file_rank_0"]["version"] = version
         LOADED_FR_DETAIL_TEMPLATE["dump_file_rank_1"]["version"] = version
         # Test case 1: matched all_reduce case.
