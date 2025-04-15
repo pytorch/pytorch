@@ -78,7 +78,7 @@ def export_for_training(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    strict: bool = True,
+    strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -275,7 +275,7 @@ def export(
         )
 
     if os.environ.get("DRAFT_EXPORT"):
-        return draft_export(
+        ep = draft_export(
             mod,
             args,
             kwargs,
@@ -284,6 +284,45 @@ def export(
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
         )
+        raise RuntimeError(str(ep._report))
+
+    try:
+        return _export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
+    except Exception as e:
+        draft_export_msg = (
+            "The error above occurred when calling torch.export.export. If you would "
+            "like to view some more information about this error, and get a list "
+            "of all other errors that may occur in your export call, you can "
+            "replace your `export()` call with `draft_export()` or run with the "
+            "envvar DRAFT_EXPORT=1."
+        )
+
+        # For errors that we know can be caught by draft-export, add the message
+        # to ask users to try out draft-export
+        if isinstance(
+            e,
+            (
+                torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                torch._dynamo.exc.UserError,
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+            ),
+        ):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        elif isinstance(e, RuntimeError) and "no fake impl registered" in str(e):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        raise e
+=======
 
     return _export(
         mod,
@@ -294,6 +333,7 @@ def export(
         preserve_module_call_signature=preserve_module_call_signature,
         pre_dispatch=True,
     )
+>>>>>>> f2a0860470c ([export] Add DRAFT_EXPORT envvar)
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
