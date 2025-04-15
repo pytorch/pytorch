@@ -3514,7 +3514,6 @@ class GraphModule(torch.nn.Module):
             [[], [], [], []],
         )
 
-    @unittest.expectedFailure  # with installing parameters on for export, this is now "fixed"
     def test_invalid_input_global(self) -> None:
         global bulbous_bouffant
         bulbous_bouffant = torch.randn(3)
@@ -3532,7 +3531,6 @@ G['bulbous_bouffant'], accessed at:
 """,
         )
 
-    @unittest.expectedFailure  # with installing parameters on for export, this is now "fixed"
     def test_invalid_input_global_multiple_access(self) -> None:
         global macademia
         macademia = torch.randn(3)
