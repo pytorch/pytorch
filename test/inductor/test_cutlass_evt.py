@@ -7,82 +7,78 @@ from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
-try_import_cutlass()
-import cutlass_library as cutlass_lib
-from cutlass_library import EpilogueScheduleType
+if try_import_cutlass():
+    import cutlass_library as cutlass_lib
+    from cutlass_library import EpilogueScheduleType
 
+    LayoutType = cutlass_lib.LayoutType
+    DataType = cutlass_lib.DataType
+    from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
+        _render_argument_type,
+        _trace,
+        CutlassTensor,
+        trace,
+    )
 
-LayoutType = cutlass_lib.LayoutType
-DataType = cutlass_lib.DataType
-from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
-    _render_argument_type,
-    _trace,
-    CutlassTensor,
-    trace,
-)
+    BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
+        F = accum + C + aux
+        E = relu(F) + bias
+        D = E + F
+        return D, F"""
 
+    TYPE_C = DataType.f32
+    M = 4224
+    N = 2048
+    BIAS = CutlassTensor(shape=(M, 1), element=TYPE_C, layout_tag=LayoutType.RowMajor)
 
-BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
-    F = accum + C + aux
-    E = relu(F) + bias
-    D = E + F
-    return D, F"""
+    EXAMPLE_TENSORS = {
+        "accum": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "bias": BIAS,
+        # "beta": 0.5, TODO: mlazos support scalars
+        # "alpha": 0.5, TODO: mlazos support scalars
+        "D": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "C": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "F": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "aux": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+    }
 
-TYPE_C = DataType.f32
-M = 4224
-N = 2048
-BIAS = CutlassTensor(shape=(M, 1), element=TYPE_C, layout_tag=LayoutType.RowMajor)
+    class MockTileDescription:
+        threadblock_shape = (128, 128, 8)
 
-EXAMPLE_TENSORS = {
-    "accum": CutlassTensor(
-        element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
-    ),
-    "bias": BIAS,
-    # "beta": 0.5, TODO: mlazos support scalars
-    # "alpha": 0.5, TODO: mlazos support scalars
-    "D": CutlassTensor(
-        element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
-    ),
-    "C": CutlassTensor(
-        element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
-    ),
-    "F": CutlassTensor(
-        element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
-    ),
-    "aux": CutlassTensor(
-        element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
-    ),
-}
+    def _create_mock_buffer_name_map(example_tensors):
+        class MockNode:
+            def __init__(self, name, stride, dtype):
+                self.name = name
+                self.dtype = dtype
+                self.stride = stride
 
+            def get_layout(self):
+                class MockLayout:
+                    def __init__(self, stride, dtype):
+                        self.dtype = dtype
+                        self.stride = stride
 
-class MockTileDescription:
-    threadblock_shape = (128, 128, 8)
+                return MockLayout(self.stride, self.dtype)
 
+            def get_name(self):
+                return self.name
 
-def _create_mock_buffer_name_map(example_tensors):
-    class MockNode:
-        def __init__(self, name, stride, dtype):
-            self.name = name
-            self.dtype = dtype
-            self.stride = stride
+        name_to_buffer = {}
+        for name, tensor in example_tensors.items():
+            if isinstance(tensor, CutlassTensor):
+                name_to_buffer[name] = MockNode(name, tensor.stride, torch.float32)
 
-        def get_layout(self):
-            class MockLayout:
-                def __init__(self, stride, dtype):
-                    self.dtype = dtype
-                    self.stride = stride
-
-            return MockLayout(self.stride, self.dtype)
-
-        def get_name(self):
-            return self.name
-
-    name_to_buffer = {}
-    for name, tensor in example_tensors.items():
-        if isinstance(tensor, CutlassTensor):
-            name_to_buffer[name] = MockNode(name, tensor.stride, torch.float32)
-
-    return name_to_buffer
+        return name_to_buffer
 
 
 class TestCutlassEVT(TestCase):
