@@ -13205,7 +13205,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
             ignore_empty_lines=True,
         )
 
-    def test_remove_noop_view_device(self):
+    def test_remove_noop_view_dtype(self):
         def f(x):
             x = x.transpose(1, 2)  # (batch_size, 2, 3)
             x = x.view(torch.uint8)  # noop
