@@ -5042,6 +5042,31 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_super_classmethod(self):
+        class Parent:
+            @classmethod
+            def greet(cls):
+                if cls == Parent:
+                    return 4
+                if cls == Child:
+                    return 3
+                return 2
+
+        class Child(Parent):
+            def greet(self, x):
+                return x * super().greet()
+
+        child = Child()
+
+        def fn(x):
+            return child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_super_diamond(self):
         class A:
             def __init__(self):
