@@ -1143,6 +1143,14 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+        """
+        Performs the forward pass.
+
+        Attributes:
+            input (Tensor): The input tensor.
+            output_size (list[int], optional): A list of integers representing
+                the size of the output tensor. Default is None.
+        """
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
