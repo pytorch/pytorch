@@ -440,6 +440,13 @@ class TestMatmulCuda(TestCase):
         dtype = input_dtype
         torch.backends.cuda.preferred_blas_library(backend)
 
+        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+
+        # Low precision accumulation is not supported for fp32 output
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
         def create_inputs(B=None):
             if B is None:
                 a = torch.randn(M, K, device=device, dtype=dtype)
@@ -470,6 +477,9 @@ class TestMatmulCuda(TestCase):
 
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
+
     @onlyCUDA
     @skipIfRocm
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -482,6 +492,13 @@ class TestMatmulCuda(TestCase):
         device = "cuda"
         dtype = input_dtype
         torch.backends.cuda.preferred_blas_library(backend)
+
+        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+
+        # Low precision accumulation is not supported for fp32 output
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
         def create_inputs(B=None):
             if B is None:
@@ -515,6 +532,9 @@ class TestMatmulCuda(TestCase):
             self.assertEqual(out.dtype, output_dtype)
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
+
     @onlyCUDA
     @skipIfRocm
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
@@ -526,6 +546,8 @@ class TestMatmulCuda(TestCase):
         dtype = input_dtype
         torch.backends.cuda.preferred_blas_library(backend)
 
+        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         # Low precision accumulation is not supported for fp32 output
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
@@ -543,15 +565,18 @@ class TestMatmulCuda(TestCase):
 
         with self.assertRaises(Exception):
             torch.baddbmm(expand(c), expand(a), expand(b), out_dtype=torch.float32)
-        
+
         with self.assertRaises(Exception):
             torch.addmm(c, a, b, out_dtype=torch.float32)
-        
+
         with self.assertRaises(Exception):
             torch.bmm(expand(a,), expand(b), out_dtype=torch.float32)
-        
+
         with self.assertRaises(Exception):
             torch.mm(a, b, out_dtype=torch.float32)
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
