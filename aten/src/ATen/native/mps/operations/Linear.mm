@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
@@ -19,6 +20,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
+  TORCH_CHECK((input.scalar_type() != kComplexFloat && input.scalar_type() != kComplexHalf),
+              "mps linear does not support complex types");
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
@@ -54,67 +57,55 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  MPSStream* stream = getCurrentMPSStream();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* weightTensor_ = nil;
-    MPSGraphTensor* biasTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
-  @autoreleasepool {
-    std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
+      MPSDataType mpsDataType = getMPSDataType(weight.scalar_type());
 
-      MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
-                                                              dimension:-1
-                                                          withDimension:-2
-                                                                   name:nil];
-      // matrixMultiplicationWithPrimary crashes for 5D tensors, see https://github.com/pytorch/pytorch/issues/114942
-      bool doReshape = input.dim() > 4;
-      if (!doReshape && is_bias_defined) {
-        // workaround to improve the performance with 3D+ inputs
-        doReshape =
-            input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
-      }
-      auto inputFlattened = doReshape ? [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil] : inputTensor;
-      auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputFlattened
-                                                          secondaryTensor:weightTransposeTensor
-                                                                     name:nil];
+      auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
+      auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
+
+      id<MTLBuffer> weightBuf = getMTLBufferStorage(weight);
+      MPSNDArrayDescriptor* weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType
+                                                                                shape:getMPSShape(weight.sizes())];
+      weightDesc.preferPackedRows = YES;
+      [weightDesc transposeDimension:0 withDimension:1];
+      MPSNDArray* weightNDArray = [[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                              offset:weight.storage_offset() * weight.element_size()
+                                                          descriptor:weightDesc];
 
       if (is_bias_defined) {
-        newCachedGraph->biasTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, bias);
-        outputTensor = [mpsGraph additionWithPrimaryTensor:outputTensor
-                                           secondaryTensor:newCachedGraph->biasTensor_
-                                                      name:nil];
+        auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
+            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3]; });
+        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray ]
+                      destinationArray:outNDArray];
+        getMPSProfiler().endProfileKernel(kernel);
+      } else {
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
+            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2]; });
+        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ inputNDArray, weightNDArray ]
+                      destinationArray:outNDArray];
+        getMPSProfiler().endProfileKernel(kernel);
       }
-      if (doReshape) {
-        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output_size) name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
-    Placeholder biasPlaceholder = Placeholder();
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [NSMutableDictionary dictionary];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-    if (is_bias_defined) {
-      biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
-      feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
     }
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  });
 
   // Shave off '1' present at the end of the shape
   if (weight_arg.dim() == 1) {
