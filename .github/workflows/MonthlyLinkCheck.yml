@@ -1,0 +1,43 @@
+#Runs once a month and checks links in the repo to ensure they are valid 
+#If action fails, it creates an issue with the failing links and an "incorrect link" label
+#If link is valid but failing, it can be added to the .lycheeignore file
+#Action can also be run manually as needed.
+
+
+name: Monthly Link Check
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Runs at midnight on the first day of every month
+  workflow_dispatch:  # Allows manual triggering of the workflow
+jobs:
+  linkChecker:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Check Links
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --accept=200,403,429 --base . --verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'
+          token: ${{ secrets.CUSTOM_TOKEN }}
+          fail: true
+
+      - name: Create Issue From File
+        if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: Broken links detected in docs 🔗
+          content-filepath: ./lychee/out.md
+          labels: 'incorrect link'
+          
+    
+      - name: Suggestions
+        if: failure()
+        run: |
+          echo -e "\nPlease review the links reported in the Check links step above."
+          echo -e "If a link is valid but fails due to a CAPTCHA challenge, IP blocking, login requirements, etc., consider adding such links to .lycheeignore file to bypass future checks.\n"
+          exit 1
