@@ -117,6 +117,9 @@ bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_de
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
+# Unsafe way to skip dynamic shape guards to get faster cache load
+unsafe_skip_cache_dynamic_shape_guards: bool = False
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
@@ -156,6 +159,7 @@ static_weight_shapes = True
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
+alignment_asserts = os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -171,6 +175,9 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
+# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
+bfloat16_atomic_adds_enabled = True
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -500,6 +507,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -1129,7 +1139,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required

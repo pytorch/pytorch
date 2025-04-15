@@ -1997,6 +1997,8 @@ class CommonTemplate:
             return torch.max(a), torch.sum(a)
 
         # Requires masked loading for the intermediate reduction
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
         sample = torch.full((3999971,), 0, dtype=torch.int64)
         sample[-1] = 1
         self.common(fn, (sample,))
@@ -2493,6 +2495,8 @@ class CommonTemplate:
 
         dtypes = torch.bool, torch.uint8, torch.int
         inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
@@ -2638,6 +2642,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
+
+    @skip_if_halide  # different pow accuracies
+    @xfail_if_triton_cpu
+    def test_norm_constant_overflow(self):
+        def fn(a):
+            return (
+                torch.norm(a, p=-41.0, dim=1),
+                torch.norm(a, p=-41.0, dim=0),
+            )
+
+        self.common(fn, (torch.randn(4, 1, 4),))
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
@@ -4281,34 +4296,35 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    def test_low_memory_max_pool(self, dilation: int):
+    @parametrize("dim", (2, 3))
+    def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
         def fn(x):
-            kernel_size = [3, 3]
-            stride = [2, 2]
-            padding = [1, 1]
+            kernel_size = [3, 3] if dim == 2 else [3, 3, 2]
+            stride = [2] * dim
+            padding = [1] * dim
             ceil_mode = False
 
-            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+            vals, offsets = prims._low_memory_max_pool_with_offsets(
                 x,
                 kernel_size,
                 stride,
                 padding,
-                [dilation] * 2,
+                [dilation] * dim,
                 ceil_mode,
             )
-            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+            indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
-                kernel_size[1],
-                x.size(-1),
+                kernel_size,
+                x.shape[-dim:],
                 stride,
                 padding,
-                dilation=[dilation] * 2,
+                dilation=[dilation] * dim,
             )
             return vals, indices, offsets
 
-        self.common(fn, (torch.randn(1, 3, 10, 10),))
+        self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     @xfail_if_mps
     def test_to_dtype(self):
@@ -5195,6 +5211,7 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @tf32_on_and_off(0.006)
     @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -5362,6 +5379,19 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randint(10, [2, 8]),),
+        )
+
+    def test_embedding_sparse(self):
+        # Fix https://github.com/pytorch/pytorch/issues/150656
+        def fn(weight, indices):
+            return F.embedding(indices, weight, sparse=True)
+
+        indices = torch.randint(10, (2, 3))
+        weight = torch.randn(10, 3, requires_grad=True)
+
+        self.common(
+            fn,
+            (weight, indices),
         )
 
     def test_mean(self):
@@ -6574,6 +6604,7 @@ class CommonTemplate:
             ),
         )
 
+    @skip_if_halide  # log2 not implemented for halide
     def test_log2(self):
         def fn(x):
             return torch.log2(x), torch.log2(x + 1) - 2
@@ -6592,6 +6623,7 @@ class CommonTemplate:
             (torch.randn([8, 8]) + 10,),
         )
 
+    @skip_if_halide  # log2 not implemented for halide
     def test_log_fp64(self):
         def fn(x):
             return torch.log(x), torch.log2(x)
@@ -9990,6 +10022,11 @@ class CommonTemplate:
             # https://github.com/halide/Halide/issues/8318
             raise unittest.SkipTest("halide not supported")
 
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(
+                f"dtype {dtype} not supported for device {self.device}"
+            )
+
         def fn(x, y):
             return x + y, x * y, x / y
 
@@ -10109,9 +10146,6 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
-    @skip_if_cpp_wrapper(
-        "cannot currently handle fallback ops with return types containing list[Tensor]"
-    )
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
@@ -10344,6 +10378,16 @@ class CommonTemplate:
             fn,
             [x],
         )
+
+    @skip_if_halide  # log2 not yet implemented
+    @skip_if_triton_cpu  # log2 implemented only in Dec 2024
+    @expectedFailureXPU  # Remmove this after the known issue of Intel Triton #3871 resolved.
+    def test_pow_by_natural_log2_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        self.common(fn, [torch.randn(5)])
 
     def test_setitem_with_int_parameter(self):
         x = torch.zeros(7, device=self.device)
@@ -12025,6 +12069,8 @@ class CommonTemplate:
             x_view = x.view(dtype=torch.int16)
             return x_view.mul(2) + x_view.bitwise_and(2)
 
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest("bfloat16 is not supported on {self.device}")
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         ref = fn(a, b)
@@ -12862,6 +12908,93 @@ class CommonTemplate:
         self.common(fn, (0, x))
         self.common(fn, (1, x))
         self.common(fn, (2, x))
+
+    def test_unaligned_input(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024 + 16, device=self.device)[1:-15]
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_unaligned_input_2d(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)[:, 1:-15]
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_alignment_without_custom_op(self):
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = (3 * a)[1:-15]
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op(self):
+        def slice1d(x):
+            return (3 * x)[1:-15]
+
+        def slice1d_meta(x):
+            return torch.empty_like(x)[1:-15]
+
+        define_custom_op_for_test("slice1d", slice1d, slice1d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice1d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 1:-15]
+
+        define_custom_op_for_test("slice2d", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    @skip_if_cpp_wrapper(
+        "Inductor does not generate alignment assertion for cpp_wrapper right now"
+    )
+    def test_incorrect_meta_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        define_custom_op_for_test("slice2d_incorrect_meta", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d_incorrect_meta(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+
+        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
+        with self.assertRaisesRegex(AssertionError, expected_error):
+            self.common(fn, (x,), check_lowp=False)
 
 
 @dataclasses.dataclass
@@ -14223,7 +14356,7 @@ if RUN_GPU:
         def test_graph_partition_unbacked_symint_multi_output_layout(self):
             def f(p, size_tensor):
                 size_val = size_tensor.item()
-                b = torch.ones([size_val, 3], device="cuda")
+                b = torch.ones([size_val, 3], device=GPU_TYPE)
 
                 def true_fn(x):
                     return torch.cos(x), torch.cos(x) + 1
@@ -14235,8 +14368,8 @@ if RUN_GPU:
                 return cond_out[0] + cond_out[1]
 
             compiled_f = torch.compile(f)
-            p = torch.tensor([True], device="cuda")
-            size_tensor = torch.tensor(2, device="cuda")
+            p = torch.tensor([True], device=GPU_TYPE)
+            size_tensor = torch.tensor(2, device=GPU_TYPE)
             eager_out = f(p, size_tensor)
             compiled_out = compiled_f(p, size_tensor)
             self.assertEqual(eager_out, compiled_out)
@@ -14286,7 +14419,7 @@ if RUN_GPU:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_symint_from_mutation_index(self):
-            x = torch.zeros(7, device="cuda")
+            x = torch.zeros(7, device=GPU_TYPE)
 
             def fn(n, a):
                 a[n] = -1
@@ -14357,8 +14490,8 @@ if RUN_GPU:
                 return x + y + scalar
 
             compiled_f = torch.compile(f)
-            compiled_out = f(torch.tensor(1, device="cuda"))
-            self.assertEqual(compiled_out, f(torch.tensor(1, device="cuda")))
+            compiled_out = f(torch.tensor(1, device=GPU_TYPE))
+            self.assertEqual(compiled_out, f(torch.tensor(1, device=GPU_TYPE)))
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_buffer_reuse(self):

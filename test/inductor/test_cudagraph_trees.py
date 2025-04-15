@@ -3048,6 +3048,23 @@ if HAS_CUDA:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
+        def test_meta_tensor(self):
+            def foobar(x, y):
+                return x * 2, y * 3
+
+            foo_c = torch.compile(mode="reduce-overhead")(foobar)
+            t = torch.empty((1, 16, 128, 128), device="meta")
+            y = torch.rand([64], device="cuda")
+
+            eager_out = foobar(t, y)
+
+            for _ in range(3):
+                compiled_out = foo_c(t, y)
+
+            compiled_out = foo_c(t, y)
+            self.assertEqual(eager_out, compiled_out)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -3372,6 +3389,10 @@ if HAS_CUDA:
         @requires_multigpu()
         def test_cudagraphs_aot_eager_compat_equal_device_one(self):
             self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:1"))
+
+        @config.patch(graph_partition=True)
+        def test_graph_partition_cudagraphs_aot_eager_compat_equal(self):
+            self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:0"))
 
         @requires_multigpu()
         def test_multi_device(self):
