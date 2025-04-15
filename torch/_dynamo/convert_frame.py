@@ -812,7 +812,10 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                out_code = transform_code_object(code, transform)
+                with dynamo_timed(
+                    f"bytecode_transform_attempt{attempt}", log_pt2_compile_event=True
+                ):
+                    out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
