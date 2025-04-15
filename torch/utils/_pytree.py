@@ -91,6 +91,9 @@ __all__ = [
 ]
 
 
+__name__ = "torch.utils.pytree.python"  # sets the __module__ attribute of all functions in this module
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
