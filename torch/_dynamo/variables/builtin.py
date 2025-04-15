@@ -264,9 +264,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> dict[
-        Callable[..., object], tuple[list[str], Callable[..., object]]
-    ]:
+    def _binops() -> (
+        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
+    ):
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -874,7 +874,7 @@ class BuiltinVariable(VariableTracker):
                                 gb_type="invalid call to builtin op handler",
                                 context=f"invalid args to {self_handler}: {args} {kwargs}",
                                 explanation=f"Encountered TypeError when trying to handle op {fn.__name__}",
-                                hints=[],
+                                hints=[*graph_break_hints.DIFFICULT],
                             )
                     else:
                         raise
@@ -1058,6 +1058,15 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
+            if (
+                fn is operator.eq
+                and len(args) == 2
+                and isinstance(args[0], variables.TensorVariable)
+            ):
+                # Dynamo expects `__eq__` str while operator.eq gives just `eq`
+                # TODO - supporting all comparison operators could also work but
+                # it fails lots of tests because graph str changes.
+                return args[0].call_method(tx, "__eq__", args[1:], kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
@@ -1599,8 +1608,8 @@ class BuiltinVariable(VariableTracker):
         unimplemented_v2(
             gb_type="bad args to builtin cast()",
             context=f"got args {args} {kwargs}",
-            explanation="Dynamo expects exactly 2 args to builtin cast()",
-            hints=[],
+            explanation="Dynamo expects exactly 2 args to builtin cast().",
+            hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):

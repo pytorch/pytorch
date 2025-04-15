@@ -85,7 +85,6 @@ def mps_ops_grad_modifier(ops):
         # precision issues
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
-        'nn.functional.binary_cross_entropy': [torch.float16],
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
@@ -833,9 +832,6 @@ def mps_ops_modifier(ops):
         # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
         'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16, torch.bfloat16],
-
-        # float output for float16 input on MPS
-        'logit': [torch.float16, torch.bfloat16],
     }
 
     ON_MPS_XFAILLIST = {
@@ -12937,15 +12933,9 @@ class TestCommon(TestCase):
     def test_numpy_ref_mps(self, device, dtype, op):
         # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
         # does not support float64 Tensors.
-        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-        # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        inputs = (
-            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
-            else op.sample_inputs(device, dtype, set_seed=False)
-        )
+        inputs = op.reference_inputs(device, dtype, set_seed=False)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
