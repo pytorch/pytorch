@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import cache
 from pathlib import Path
 
@@ -34,17 +35,25 @@ ROOT_DIR = Path(__file__).parent.parent
 
 STABLE_CUDA_VERSION = "12.6"
 
+class StrEnum(str, Enum):
+    def __str__(self) -> str:
+        return self.value
 
-class CpuArch:
-    X86_64: str = "x86_64"
-    AARCH64: str = "aarch64"
-    S390X: str = "s390x"
+class CpuArch(StrEnum):
+    X86_64 = "x86_64"
+    AARCH64 = "aarch64"
+    S390X = "s390x"
 
+class AcceleratorType(StrEnum):
+    CPU = "cpu"
+    CUDA = "cuda"
+    ROCM = "rocm"
+    XPU = "xpu"
 
-class OperatingSystem:
-    LINUX: str = "linux"
-    WINDOWS: str = "windows"
-    MACOS: str = "macos"
+class OperatingSystem(StrEnum):
+    LINUX = "linux"
+    WINDOWS = "windows"
+    MACOS = "macos"
 
 
 @cache
@@ -175,7 +184,7 @@ class BinaryBuild:
         tag = _generate_docker_tag()
         return f"pytorch/wheel-build:{str(self.cpu_arch)}-{self.accelerator_type}{self.accelerator_version}-{tag}"
 
-    def get_extra_install_requirements(self) -> list[str]:
+    def get_extra_install_requirements(self) -> str:
         """Returns the extra install requirements for this build configuration
 
         We need to keep the install requirements for packages 'mostly' consistent across
@@ -192,7 +201,7 @@ class BinaryBuild:
         """
         key = (self.accelerator_type, self.accelerator_version)
         requirements = EXTRA_INSTALL_REQUIREMENTS.get(key, [])
-        return requirements
+        return " | ".join(requirements)
 
 
 @dataclass
@@ -221,7 +230,7 @@ class XpuBuild(BinaryBuild):
     tests_on: str = "linux.xpu.gpu"
 
 
-MANYWHEEL_CPU_BUILDS: list[CpuBuild] = [
+WHEEL_CPU_BUILDS: list[CpuBuild] = [
     # CPU x86_64 - Linux
     CpuBuild(
         operating_system=OperatingSystem.LINUX,
@@ -266,7 +275,7 @@ MANYWHEEL_CPU_BUILDS: list[CpuBuild] = [
     ),
 ]
 
-MANYWHEEL_CUDA_BUILDS: list[CudaBuild] = [
+WHEEL_CUDA_BUILDS: list[CudaBuild] = [
     # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
     # CUDA 11.8 x86_64 - Linux
     CudaBuild(
@@ -321,7 +330,7 @@ MANYWHEEL_CUDA_BUILDS: list[CudaBuild] = [
     ),
 ]
 
-MANYWHEEL_ROCM_BUILDS: list[RocmBuild] = [
+WHEEL_ROCM_BUILDS: list[RocmBuild] = [
     # ROCm 6.2.4 x86_64
     RocmBuild(
         accelerator_version="6.2.4",
@@ -336,7 +345,7 @@ MANYWHEEL_ROCM_BUILDS: list[RocmBuild] = [
     ),
 ]
 
-MANYWHEEL_XPU_BUILDS: list[XpuBuild] = [
+WHEEL_XPU_BUILDS: list[XpuBuild] = [
     # XPU x86_64
     XpuBuild(
         cpu_arch=CpuArch.X86_64,
@@ -344,11 +353,11 @@ MANYWHEEL_XPU_BUILDS: list[XpuBuild] = [
     ),
 ]
 
-MANYWHEEL_BUILDS: list[BinaryBuild] = [
-    *MANYWHEEL_CPU_BUILDS,
-    *MANYWHEEL_CUDA_BUILDS,
-    *MANYWHEEL_ROCM_BUILDS,
-    *MANYWHEEL_XPU_BUILDS,
+WHEEL_BUILDS: list[BinaryBuild] = [
+    *WHEEL_CPU_BUILDS,
+    *WHEEL_CUDA_BUILDS,
+    *WHEEL_ROCM_BUILDS,
+    *WHEEL_XPU_BUILDS,
 ]
 
 
@@ -365,7 +374,7 @@ def read_nccl_pin(arch_version: str) -> str:
 
 
 def validate_nccl_dep_consistency() -> None:
-    for build in MANYWHEEL_BUILDS:
+    for build in WHEEL_BUILDS:
         if isinstance(build, CudaBuild):
             nccl_release_tag = read_nccl_pin(build.accelerator_version)
             key = (build.accelerator_type, build.accelerator_version)
@@ -392,13 +401,13 @@ def generate_wheels_matrix(
     os: OperatingSystem,
     accelerator_type: str,
     python_versions: list[str] | None = None,
-) -> list[dict[str, str]]:
+) -> dict[str, list[dict[str, str]]]:
     if python_versions is None:
         python_versions = FULL_PYTHON_VERSIONS
     validate_nccl_dep_consistency()
 
     ret: list[dict[str, str]] = []
-    for build in MANYWHEEL_BUILDS:
+    for build in WHEEL_BUILDS:
         if build.accelerator_type != accelerator_type:
             continue
         for python_version in python_versions:
@@ -410,6 +419,7 @@ def generate_wheels_matrix(
                 "python_version": python_version,
                 "accelerator_type": build.accelerator_type,
                 "accelerator_version": build.accelerator_version,
+                "cpu_arch": build.cpu_arch,
                 "container_image": build.container_image(),
                 "package_type": "wheel",
                 "pytorch_extra_install_requirements": build.get_extra_install_requirements(),
@@ -440,7 +450,10 @@ def generate_wheels_matrix(
                 )
 
                 ret.append(matrix)
-    return {"include": ret}
+    if not ret:
+        return {}
+    else:
+        return {"include": ret}
 
 
 if __name__ == "__main__":
@@ -454,27 +467,9 @@ if __name__ == "__main__":
         help="Type of binary package to build (wheel libtorch)",
     )
     parser.add_argument(
-        "--os",
-        choices=["linux", "windows", "macos"],
-        required=True,
-        help="Operating system for the build (linux, windows, or macos)",
-    )
-    parser.add_argument(
-        "--accelerator-type",
-        choices=["cpu", "cuda", "rocm", "xpu"],
-        required=True,
-        help="Accelerator type (cpu, cuda, rocm, or xpu)",
-    )
-    parser.add_argument(
         "--python-versions",
         nargs="+",
         help="Python versions to build for (e.g., 3.9 3.10 3.11). If not specified, all supported versions will be used.",
-    )
-    parser.add_argument(
-        "--output",
-        choices=["json", "github_output"],
-        required=False,
-        help="Output format (json, github_output)",
     )
     parser.add_argument(
         "--to-github-output",
@@ -484,31 +479,23 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Map string OS argument to OperatingSystem enum
-    os_map = {
-        "linux": OperatingSystem.LINUX,
-        "windows": OperatingSystem.WINDOWS,
-        "macos": OperatingSystem.MACOS,
-    }
-
-    if args.package_type == "wheel":
-        # Generate the matrix
-        matrix = generate_wheels_matrix(
-            os=os_map[args.os],
-            accelerator_type=args.accelerator_type,
-            python_versions=args.python_versions,
-        )
-    elif args.package_type == "libtorch":
-        # TODO: Implement libtorch matrix generation
-        pass
-    else:
-        raise ValueError(f"Invalid --package-type: {args.package_type}")
-
-    # Pretty printed JSON for human readability
-    print(json.dumps(matrix, indent=2))
-
-    # Output the matrix
-    if args.to_github_output:
-        # Print the matrix in the format expected by GitHub Actions
-        with open(os.environ["GITHUB_OUTPUT"], "w") as f:
-            print(f"matrix={json.dumps(matrix)}", file=f)
+    for operating_system in OperatingSystem:
+        for accelerator_type in AcceleratorType:
+            if args.package_type == "wheel":
+                # Generate the matrix
+                matrix = generate_wheels_matrix(
+                    os=operating_system,
+                    accelerator_type=accelerator_type,
+                    python_versions=args.python_versions,
+                )
+                if args.to_github_output:
+                    # Print the matrix in the format expected by GitHub Actions
+                    with open(operating_system.environ["GITHUB_OUTPUT"], "a") as f:
+                        print(f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix)}", file=f)
+                # TODO: Pretty print the matrix for human readability
+                print(f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix, indent=2)}")
+            elif args.package_type == "libtorch":
+                # TODO: Implement libtorch matrix generation
+                pass
+            else:
+                raise ValueError(f"Invalid --package-type: {args.package_type}")

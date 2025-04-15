@@ -16,24 +16,48 @@ on:
         required: true
         type: string
         description: Type of binary package to build (wheel libtorch)
-      os:
-        required: true
-        type: string
-        description: Operating system to build for
-      accelerator-type:
-        required: true
-        type: string
-        description: Accelerator type to build for
     outputs:
-      matrix:
-        description: The generated matrix
-        value: ${{ jobs.generate-matrix.outputs.matrix }}
+      # NOTE: These need to correspond to the output from .cd/generate_build_matrix.py
+      linux-cpu-matrix:
+        description: The generated matrix for linux cpu builds
+        value: ${{ jobs.generate-matrix.outputs.linux-cpu-matrix }}
+      linux-cuda-matrix:
+        description: The generated matrix for linux cuda builds
+        value: ${{ jobs.generate-matrix.outputs.linux-cuda-matrix }}
+      linux-rocm-matrix:
+        description: The generated matrix for linux rocm builds
+        value: ${{ jobs.generate-matrix.outputs.linux-rocm-matrix }}
+      linux-xpu-matrix:
+        description: The generated matrix for linux xpu builds
+        value: ${{ jobs.generate-matrix.outputs.linux-xpu-matrix }}
+      windows-cpu-matrix:
+        description: The generated matrix for windows cpu builds
+        value: ${{ jobs.generate-matrix.outputs.windows-cpu-matrix }}
+      windows-cuda-matrix:
+        description: The generated matrix for windows cuda builds
+        value: ${{ jobs.generate-matrix.outputs.windows-cuda-matrix }}
+      windows-xpu-matrix:
+        description: The generated matrix for windows xpu builds
+        value: ${{ jobs.generate-matrix.outputs.windows-xpu-matrix }}
+      macos-cpu-matrix:
+        description: The generated matrix for macos cpu builds
+        value: ${{ jobs.generate-matrix.outputs.macos-cpu-matrix }}
 
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      # Linux
+      linux-cpu-matrix: ${{ steps.set-matrix.outputs.linux-cpu-matrix }}
+      linux-cuda-matrix: ${{ steps.set-matrix.outputs.linux-cuda-matrix }}
+      linux-rocm-matrix: ${{ steps.set-matrix.outputs.linux-rocm-matrix }}
+      linux-xpu-matrix: ${{ steps.set-matrix.outputs.linux-xpu-matrix }}
+      # Windows
+      windows-cpu-matrix: ${{ steps.set-matrix.outputs.windows-cpu-matrix }}
+      windows-cuda-matrix: ${{ steps.set-matrix.outputs.windows-cuda-matrix }}
+      windows-xpu-matrix: ${{ steps.set-matrix.outputs.windows-xpu-matrix }}
+      # MacOS
+      macos-cpu-matrix: ${{ steps.set-matrix.outputs.macos-cpu-matrix }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,15 +70,8 @@ jobs:
       - name: Generate matrix
         id: set-matrix
         run: |
-          # Set default values
-          PACKAGE_TYPE="${{ inputs.package-type }}"
-          OS="${{ inputs.os }}"
-          ACCELERATOR_TYPE="${{ inputs.accelerator-type }}"
-
           set +x
 
           python3 .cd/generate_build_matrix.py \
             --package-type "${PACKAGE_TYPE}" \
-            --os "${OS}" \
-            --accelerator-type "${ACCELERATOR_TYPE}" \
             --to-github-output

@@ -3,51 +3,62 @@ name: linux-binary
 on:
   workflow_call:
     inputs:
+      accelerator_type:
+        required: true
+        type: string
+        description: GPU Arch type
+      accelerator_version:
+        required: true
+        type: string
+        description: GPU Arch version
+      build_name:
+        required: true
+        type: string
+        description: Build name
+      builds_on:
+        required: true
+        type: string
+        description: Builds on
+      package_type:
+        required: true
+        type: string
+        description: Package type
+      pytorch_extra_install_requirements:
+        required: true
+        type: string
+        description: PyTorch extra install requirements
       runner_prefix: # aka label-type
         required: false
         default: ""
         type: string
         description: prefix for runner label
-      package_type:
+      test_on:
         required: true
         type: string
-        description: Package type
-      accelerator_type:
-        required: true
-        type: string
-        description: GPU Arch type
+        description: Test on
     secrets:
       github-token:
         required: true
         description: Github Token
 
 jobs:
-  generate-matrix:
-    uses: ./.github/workflows/_generate-binary-matrix.yml
-    with:
-      os: linux 
-      package-type: ${{ inputs.package_type }}
-      accelerator-type: ${{ inputs.accelerator_type }}
   build:
     strategy:
       fail-fast: true 
-      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
-    needs: 
-      - generate-matrix
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
-      DESIRED_CUDA: ${{ matrix.accelerator_type }}
+      DESIRED_CUDA: ${{ inputs.accelerator_type }}
       DESIRED_PYTHON: ${{ matrix.python_version }}
       DOCKER_IMAGE: ${{ matrix.container_image }}
-      GPU_ARCH_TYPE: ${{ matrix.accelerator_type }}
-      GPU_ARCH_VERSION: ${{ matrix.accelerator_version }}
+      GPU_ARCH_TYPE: ${{ inputs.accelerator_type }}
+      GPU_ARCH_VERSION: ${{ inputs.accelerator_version }}
       PACKAGE_TYPE: ${{ inputs.package_type }}
       PYTORCH_ROOT: /pytorch
-      build_environment: ${{ matrix.accelerator_type }}
-      build_name: build-${{ matrix.build_name }}
-      pytorch_extra_install_requirements: ${{ matrix.pytorch_extra_install_requirements }}
+      build_environment: ${{ inputs.accelerator_type }}
+      build_name: build-${{ inputs.build_name }}
+      pytorch_extra_install_requirements: ${{ inputs.pytorch_extra_install_requirements }}
       runner_prefix: ${{ inputs.runner_prefix }}
-      runs_on: ${{ matrix.builds_on }}
+      runs_on: ${{ inputs.builds_on }}
       timeout-minutes: 240
       use_split_build: False
     secrets:
@@ -55,20 +66,16 @@ jobs:
   test:
     needs: 
       - build
-      - generate-matrix
-    strategy:
-      fail-fast: true 
-      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      build_name: test-${{ matrix.build_name }}
-      build_environment: ${{ matrix.accelerator_type }}
+      build_name: test-${{ inputs.build_name }}
+      build_environment: ${{ inputs.accelerator_type }}
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: ${{ inputs.package_type }}
-      DESIRED_CUDA: ${{ matrix.accelerator_type }}
-      GPU_ARCH_TYPE: ${{ matrix.accelerator_type }}
-      GPU_ARCH_VERSION: ${{ matrix.accelerator_version }}
+      DESIRED_CUDA: ${{ inputs.accelerator_type }}
+      GPU_ARCH_TYPE: ${{ inputs.accelerator_type }}
+      GPU_ARCH_VERSION: ${{ inputs.accelerator_version }}
       DOCKER_IMAGE: ${{ matrix.container_image }}
-      runs_on: ${{ matrix.test_on }}
+      runs_on: ${{ inputs.test_on }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
