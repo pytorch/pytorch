@@ -921,6 +921,15 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
+  float falpha = alpha;
+  float fbeta = beta;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+  auto compute_type = CUDA_R_32F;
+#endif
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
@@ -935,14 +944,14 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       m,
       n,
       k,
-      &alpha,
+      alpha_ptr,
       a,
       rocblas_datatype_f16_r,
       lda,
       b,
       rocblas_datatype_f16_r,
       ldb,
-      &beta,
+      beta_ptr,
       c,
       rocblas_datatype_f16_r,
       ldc,
@@ -956,6 +965,19 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    compute_type = CUDA_R_16F;
+    halpha = alpha;
+    hbeta = beta;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
+  if (prop->major >= 5) {
+    cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    }
+    // Disallow fp16 reductions that could lead to unexpected overflow issues.
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
         opa,
@@ -963,19 +985,20 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         m,
         n,
         k,
-        &alpha,
+        alpha_ptr,
         a,
         CUDA_R_16F,
         lda,
         b,
         CUDA_R_16F,
         ldb,
-        &beta,
+        beta_ptr,
         c,
         CUDA_R_16F,
         ldc,
-        CUDA_R_32F,
+        compute_type,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
@@ -984,14 +1007,14 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         m,
         n,
         k,
-        &alpha,
+        &falpha,
         a,
         CUDA_R_16F,
         lda,
         b,
         CUDA_R_16F,
         ldb,
-        &beta,
+        &fbeta,
         c,
         CUDA_R_16F,
         ldc));
@@ -1005,6 +1028,8 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
+  float falpha = alpha;
+  float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
 #ifndef USE_ROCM
@@ -1026,14 +1051,14 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       m,
       n,
       k,
-      &alpha,
+      &falpha,
       a,
       CUDA_R_16BF,
       lda,
       b,
       CUDA_R_16BF,
       ldb,
-      &beta,
+      &fbeta,
       c,
       CUDA_R_16BF,
       ldc,
