@@ -1149,12 +1149,14 @@ def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> 
                 if instructions[i].target is inst:
                     instructions[i].target = next_inst
                 if instructions[i].exn_tab_entry:
-                    if instructions[i].exn_tab_entry.start is inst:
-                        instructions[i].exn_tab_entry.start = next_inst
-                    if instructions[i].exn_tab_entry.end is inst:
-                        instructions[i].exn_tab_entry.end = next_inst
-                    if instructions[i].exn_tab_entry.target is inst:
-                        instructions[i].exn_tab_entry.target = next_inst
+                    # linter is mistakenly complaining that None has no attribute "..."
+                    # but this codepath only runs if instructions[i] is not None
+                    if instructions[i].exn_tab_entry.start is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.start = next_inst  # type: ignore[union-attr]
+                    if instructions[i].exn_tab_entry.end is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.end = next_inst  # type: ignore[union-attr]
+                    if instructions[i].exn_tab_entry.target is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.target = next_inst  # type: ignore[union-attr]
         else:
             new_insts.append(inst)
     new_insts.append(instructions[-1])
