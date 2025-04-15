@@ -106,7 +106,7 @@ inline int64_t getDistAutogradContextId() {
 }
 } // namespace
 
-thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
+static thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state)
       : prev_state_(tls_int_state_ptr_) {
