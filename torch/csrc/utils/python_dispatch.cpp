@@ -771,7 +771,8 @@ void initDispatchBindings(PyObject* module) {
             return self.add(k);
           })
       .def("has", &c10::DispatchKeySet::has)
-      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); })
+      .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
