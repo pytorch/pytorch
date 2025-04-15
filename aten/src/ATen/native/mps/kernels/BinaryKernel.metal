@@ -25,7 +25,6 @@ struct lerp_functor {
   }
 };
 
-
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
