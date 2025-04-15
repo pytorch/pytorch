@@ -173,8 +173,8 @@ theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 # the theme:
 # pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
 community_links = [
-    {"url": "/community/index.html", "name": "PyTorch Governance"},
-    {"url": "/community/design.html", "name": "PyTorch Design Philosophy"},
+    {"url": "/community/index", "name": "PyTorch Governance"},
+    {"url": "/community/design", "name": "PyTorch Design Philosophy"},
     {
         "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
         "name": "The Ultimate Guide to PyTorch Contributions",
@@ -183,7 +183,7 @@ community_links = [
 # For these links to appear in the right nav, there is an override in
 # /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
 language_bindings_links = [
-    {"url": "/cpp_index.html", "name": "C++"},
+    {"url": "/cpp_index", "name": "C++"},
     {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
     {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
 ]
