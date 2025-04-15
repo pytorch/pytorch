@@ -672,12 +672,19 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_identifiers: dict[str, str] = {}
+        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
@@ -696,6 +703,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
+        self.lazy_bwd_cache[identifier] = gmod
+
+    def get_lazy_bwd_entry(self, identifier: str):
+        return self.lazy_bwd_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
