@@ -436,7 +436,9 @@ def innermost_fn(fn):
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
-        assert callable(unaltered_fn), f"A callable function is expected, but {type(unaltered_fn)} is provided."
+        assert callable(unaltered_fn), (
+            f"A callable function is expected, but {type(unaltered_fn)} is provided."
+        )
     return unaltered_fn
 
 
@@ -591,7 +593,9 @@ class _TorchDynamoContext:
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), f"A callable function is expected, but {type(fn)} is provided."
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         try:
             filename = inspect.getsourcefile(fn)
@@ -836,7 +840,9 @@ class DisableContext(_TorchDynamoContext):
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), f"A callable function is expected, but {type(fn)} is provided."
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -902,7 +908,9 @@ def get_compiler_fn(compiler_fn):
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
-        assert callable(fn), f"A callable function is expected, but {type(fn)} is provided."
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
         return fn
 
 
