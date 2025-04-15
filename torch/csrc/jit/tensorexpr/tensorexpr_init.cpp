@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
+#include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <utility>
 
@@ -25,7 +26,7 @@ struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
 namespace torch::jit {
 using namespace torch::jit::tensorexpr;
 
-ArgValue convertPyToArgValue(py::handle inp) {
+static ArgValue convertPyToArgValue(py::handle inp) {
   if (py::isinstance<BufHandle>(inp)) {
     return py::cast<BufHandle>(inp);
   } else if (py::isinstance<VarHandle>(inp)) {
@@ -54,7 +55,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
   }
 }
 
-Dtype parsePythonDtype(py::handle obj) {
+static Dtype parsePythonDtype(py::handle obj) {
   if (THPDtype_Check(obj.ptr())) {
     return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
   } else {
