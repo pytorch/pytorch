@@ -663,12 +663,37 @@ def build_code_hash(
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-@functools.lru_cache(None)
+def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
+    """
+    This function is a reimplementation of functools.lru_cache with a
+    set function that allows prepopulating the cache.
+    """
+    # Use list for reference semantics
+    _cache: list[bytes] = []
+
+    def wrapper() -> bytes:
+        if len(_cache) == 0:
+            _cache.append(func())
+        return _cache[0]
+
+    def set_val(val: bytes) -> None:
+        assert len(_cache) == 0
+        _cache.append(val)
+
+    def clear() -> None:
+        _cache.clear()
+
+    wrapper.set = set_val  # type: ignore[attr-defined]
+    wrapper.clear = clear  # type: ignore[attr-defined]
+    return wrapper
+
+
+@torch_key_cache
 def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
+    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=False):
         if not config.is_fbcode():
 
             def get_code_hash(root: str) -> bytes:
@@ -1021,16 +1046,20 @@ class FxGraphCache:
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(
-                shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
-            )
-            log.debug(
-                "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
-                key,
-                candidate.guards_expr,
-                hints,
-                hit,
-            )
+            if config.unsafe_skip_cache_dynamic_shape_guards:
+                hit = True
+            else:
+                hit = bool(
+                    shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
+                )
+                log.debug(
+                    "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
+                    key,
+                    candidate.guards_expr,
+                    hints,
+                    hit,
+                )
+
             if hit:
                 graph = candidate
                 break
@@ -1078,7 +1107,7 @@ class FxGraphCache:
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
-        if graph.guards_expr:
+        if not config.unsafe_skip_cache_dynamic_shape_guards and graph.guards_expr:
             check = bool(
                 shape_env.evaluate_guards_expression(graph.guards_expr, symints)
             )
