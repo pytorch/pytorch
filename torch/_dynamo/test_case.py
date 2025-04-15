@@ -12,7 +12,7 @@ import contextlib
 import importlib
 import logging
 import os
-from typing import Union
+from typing import Any, Union
 
 import torch
 import torch.testing
@@ -57,11 +57,6 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     run_tests()
 
 
-class CompileCounterInt(int):
-    def __add__(self, other):
-        return CompileCounterInt(super().__add__(other))
-
-
 class TestCase(TorchTestCase):
     _exit_stack: contextlib.ExitStack
 
@@ -101,11 +96,11 @@ class TestCase(TorchTestCase):
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
 
-    def assertEqual(self, x, y, *args, **kwargs):
+    def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if (
             config.debug_disable_compile_counter
-            and isinstance(x, CompileCounterInt)
-            or isinstance(y, CompileCounterInt)
+            and isinstance(x, utils.CompileCounterInt)
+            or isinstance(y, utils.CompileCounterInt)
         ):
             return
         return super().assertEqual(x, y, *args, **kwargs)

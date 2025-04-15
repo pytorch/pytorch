@@ -41,9 +41,8 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
-from .test_case import CompileCounterInt
 from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
-from .utils import same
+from .utils import CompileCounterInt, same
 
 
 np: Optional[types.ModuleType] = None
@@ -227,6 +226,7 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.clear()
 
     def __call__(
@@ -248,13 +248,10 @@ class CompileCounter:
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        if config.debug_disable_compile_counter:
-            self.frame_count = CompileCounterInt(0)
-        else:
-            self.frame_count = 0
-        self.op_count = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
+        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -269,7 +266,10 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
     def clear(self) -> None:
-        self.frame_count = 0
+        if config.debug_disable_compile_counter:
+            self.frame_count = CompileCounterInt(0)
+        else:
+            self.frame_count = 0
         self.op_count = 0
         self.graphs = []
 
@@ -471,31 +471,31 @@ def make_test_cls_with_patches(
 
 
 # test Python 3.11+ specific features
-def skipIfNotPy311(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
 
 
-def skipIfNotPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
 
 
-def xfailIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
     return fn
 
 
-def skipIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
 
 
-def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
+def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 10):
         return fn
     else:
@@ -504,19 +504,19 @@ def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
-def expectedFailureDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
-def expectedFailureCodegenDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_codegen_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls test generated in test/inductor/test_cpp_wrapper.py
-def expectedFailureDynamicWrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
 
