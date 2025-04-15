@@ -486,7 +486,7 @@ def run_joint_graph_passes_on_hops(
 
         new_graph.lint()
 
-        out = torch.fx.GraphModule(joint_gm, new_graph)
+        out = torch.fx.GraphModule(mod, new_graph)
         return out
 
     new_hop_graphs: dict[str, InvokeSubgraphHopGraphs] = defaultdict(

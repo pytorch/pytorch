@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
@@ -1423,7 +1424,7 @@ if HAS_CUDA:
             self.assertEqual(all_live_block_count(), 0)
 
         @skipIfRocm
-        @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
@@ -3046,6 +3047,23 @@ if HAS_CUDA:
             run(shape_x=(3, 4), shape_y=(10, 11))
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        def test_meta_tensor(self):
+            def foobar(x, y):
+                return x * 2, y * 3
+
+            foo_c = torch.compile(mode="reduce-overhead")(foobar)
+            t = torch.empty((1, 16, 128, 128), device="meta")
+            y = torch.rand([64], device="cuda")
+
+            eager_out = foobar(t, y)
+
+            for _ in range(3):
+                compiled_out = foo_c(t, y)
+
+            compiled_out = foo_c(t, y)
+            self.assertEqual(eager_out, compiled_out)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

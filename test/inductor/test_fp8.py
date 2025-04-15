@@ -12,7 +12,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._triton import has_triton_tma_device
@@ -118,7 +117,6 @@ def _fix_fp8_dtype_for_rocm(
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     def test_xblock_for_small_numel(self, float8_dtype: torch.dtype):
         """
@@ -129,6 +127,7 @@ class TestFP8Types(TestCase):
 
         We should not pick a XBLOCK larger than xnumel
         """
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
 
         def f(x):
             return x.to(dtype=float8_dtype)
@@ -139,7 +138,6 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(expected.half(), actual.half(), rtol=1e-2, atol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_eager_fallback(self, dtype: torch.dtype):
         weight_shape = (32, 16)
@@ -247,7 +245,6 @@ class TestFP8Types(TestCase):
 
         torch.testing.assert_close(y_compiled.half(), y.half(), rtol=5e-1, atol=5e-1)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
@@ -303,7 +300,6 @@ class TestFP8Types(TestCase):
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("amax_keep_dim", (True, False))
@@ -413,7 +409,6 @@ class TestFP8Types(TestCase):
 
 @instantiate_parametrized_tests
 class TestFP8Lowering(TestCase):
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
@@ -435,6 +430,7 @@ class TestFP8Lowering(TestCase):
 
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         shape = [int(dim) for dim in shape.split(",")]
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
@@ -491,7 +487,6 @@ class TestFP8Lowering(TestCase):
             # setting a small absolute tolerance in these tests
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
@@ -506,6 +501,7 @@ class TestFP8Lowering(TestCase):
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         shape = [int(dim) for dim in shape.split(",")]
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
@@ -557,7 +553,6 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 32, 1024))
@@ -573,6 +568,7 @@ class TestFP8Lowering(TestCase):
         use_fast_accum = True
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         x = torch.randn(M, K, dtype=dtype, device=device)
         w = torch.randn(N, K, dtype=dtype, device=device)
@@ -615,7 +611,6 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 32, 1024))
@@ -630,6 +625,7 @@ class TestFP8Lowering(TestCase):
         use_fast_accum = True
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         x = torch.randn(M, K, dtype=dtype, device=device)
         w = torch.randn(N, K, dtype=dtype, device=device)
@@ -674,13 +670,14 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_input_dims(self):
         # for compiled ops, type checking is in torch/_meta_registrations.py
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
+
         M, K, N = 64, 15, 2048  # K needs to be a multiple of 16
         x = torch.randn(M, K, dtype=dtype, device=device)
         w = torch.randn(N, K, dtype=dtype, device=device)
@@ -714,12 +711,13 @@ class TestFP8Lowering(TestCase):
             in str(cm.exception)
         )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_scale_dims_rowwise_scaling(self):
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
+
         M, K, N = 233, 32, 128
         x = torch.randn(M, K, dtype=dtype, device=device)
         w = torch.randn(N, K, dtype=dtype, device=device)

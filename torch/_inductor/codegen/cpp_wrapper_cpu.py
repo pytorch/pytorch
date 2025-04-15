@@ -403,6 +403,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     """
                 )
 
+        # Create a separate function for each input check to avoid "too big to optimize" error
+        for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+            self.prefix.splice(
+                f"""
+                AOTI_NOINLINE static void check_input_{idx}(
+                    AtenTensorHandle* input_handles
+                ) {{
+                """
+            )
+            with self.prefix.indent():
+                gen_check("input_handles", idx, name, tensor)
+            self.prefix.writeline("}")
+
         # force noinline to avoid any potential compilation slowdown due to aggressive
         # inline done by the host compiler
         self.prefix.splice(
@@ -422,8 +435,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
         with self.prefix.indent():
-            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
-                gen_check("input_handles", idx, name, tensor)
+            for idx in range(len(V.graph.graph_inputs)):
+                self.prefix.writeline(f"check_input_{idx}(input_handles);")
         self.prefix.writeline("}")
 
     def write_wrapper_decl(self):
@@ -475,13 +488,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
+                        __check_inputs_outputs(input_handles, output_handles);
                     """
 
                 self.generate_input_output_runtime_checks()
-                run_impl_proto += """
-                    __check_inputs_outputs(input_handles, output_handles);
-                """
-
                 self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper

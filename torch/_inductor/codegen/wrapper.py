@@ -620,6 +620,7 @@ class PythonWrapperCodegen(CodeGen):
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
+        self.kernel_autotune_tmp_arg_idx: int = 0
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -1991,7 +1992,7 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -2004,8 +2005,9 @@ class PythonWrapperCodegen(CodeGen):
                 assert raw_arg is not None, (
                     "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                 )
-                buf_name = f"tmp_arg_{index}"
+                buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
                 buf = raw_arg
+                self.kernel_autotune_tmp_arg_idx += 1
 
             size = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
@@ -2182,13 +2184,13 @@ class PythonWrapperCodegen(CodeGen):
                         arg_str = arg
                     elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg, i
+                            arg, arg_type, raw_arg
                         )
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             self.kernel_autotune_calls.writeline(

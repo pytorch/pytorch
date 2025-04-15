@@ -50,6 +50,7 @@ from ..exc import (
     IncorrectUsage,
     UncapturedHigherOrderOpError,
     unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
@@ -506,6 +507,9 @@ def speculate_subgraph(
     restore_side_effects=True,
     should_flatten_outputs=False,
     under_activation_checkpoint=False,
+    # TODO - supports input_mutation and aliasing should be False by default for strictness
+    supports_input_mutation=True,
+    supports_aliasing=True,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -693,6 +697,34 @@ def speculate_subgraph(
 
                 if len(lifted_freevars) > 0:
                     move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+
+                if not supports_input_mutation:
+                    mutation_info = subtracer.has_input_mutation()
+                    if mutation_info.has_mutation:
+                        context = f"{mutation_info.msg} in\n {graph}"
+                        unimplemented_v2(
+                            gb_type=f"Encountered input mutation during higher order op tracing for HOP - {source_target.name()}",
+                            context=context,
+                            explanation="Higher order ops do not support input mutation",
+                            hints=[
+                                "Consider using the debug context to change user code to avoid mutation.",
+                                "Please open an issue.",
+                            ],
+                        )
+
+                if not supports_aliasing:
+                    aliasing_info = subtracer.has_aliasing()
+                    if aliasing_info.has_aliasing:
+                        context = f"{aliasing_info.msg} in\n {graph}"
+                        unimplemented_v2(
+                            gb_type=f"Encountered aliasing during higher order op tracing for HOP - {source_target.name()}",
+                            context=context,
+                            explanation="Higher order ops do not support aliasing",
+                            hints=[
+                                "Consider using the debug context to change user code to avoid aliasing.",
+                                "Please open an issue.",
+                            ],
+                        )
 
                 return (
                     (output, treespec),
@@ -1794,6 +1826,11 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supports_input_mutation = True
+        self.supports_aliasing = True
+
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
@@ -1828,6 +1865,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
+            supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -3039,6 +3078,11 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supports_input_mutation = False
+        self.supports_aliasing = False
+
     def python_type(self):
         return type(self.value)
 
@@ -3061,20 +3105,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-
-        fake_inputs = [
-            node.meta["example_value"]
-            for node in body_gmod.graph.nodes
-            if node.op == "placeholder"
-        ]
-
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
-            raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated or the "
-                f"outputs are aliases of the inputs. Please ensure that this doesn't happen."
-            )
-
         flat_example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
@@ -3087,6 +3117,11 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supports_input_mutation = False
+        self.supports_aliasing = False
+
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
     ):
@@ -3094,18 +3129,12 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-
-        # TODO(anijain2305) - This might be too big of a limitation. Consider
-        # supporting mutation/aliasing in HOP itself to remove this restriction.
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
-            unimplemented("NYI: invoke_subgraph with aliasing/mutation")
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 

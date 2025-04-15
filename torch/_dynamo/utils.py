@@ -94,7 +94,14 @@ from torch.utils.hooks import RemovableHandle
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Iterator, KeysView, ValuesView
+    from collections.abc import (
+        Generator,
+        ItemsView,
+        Iterable,
+        Iterator,
+        KeysView,
+        ValuesView,
+    )
 
 
 try:
@@ -579,11 +586,26 @@ class CompileEventLogger:
     @staticmethod
     def try_add_pt2_compile(event_name: str, **metadata: object):
         """
-        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
+        or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
+        if CHROMIUM_EVENT_LOG is None:
+            return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def try_(method_fn, *args, **kwargs):
+        """
+        Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
+        """
+        if CHROMIUM_EVENT_LOG is None:
+            return
+        metrics_context = get_metrics_context()
+        if not metrics_context.in_progress():
+            return
+        method_fn(*args, **kwargs)
 
 
 @contextmanager
@@ -598,6 +620,7 @@ def dynamo_timed(
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -674,13 +697,23 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    cx_managers: list[typing.Any] = [
+        torch.profiler.record_function(f"{key} (dynamo_timed)")
+    ]
+    wait_counter_name = key
+    if waitcounter_name_override:
+        wait_counter_name = waitcounter_name_override
+
+    if log_waitcounter:
+        cx_managers.append(
+            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
+        )
+
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            if log_waitcounter:
-                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
-                    yield
-            else:
-                yield
+        with contextlib.ExitStack() as stack:
+            for cx in cx_managers:
+                stack.enter_context(cx)
+            yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
@@ -1397,6 +1430,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "reorderable_logging_functions",
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
+            "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
         }
 
@@ -2389,6 +2423,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
+dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
@@ -3751,10 +3786,11 @@ def build_checkpoint_variable(**options):
 def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4359,7 +4395,9 @@ def does_not_override_dict_iter_methods(user_cls):
 # compiled bytecode
 # They will be skipped which is the desired result
 def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.size(i)
 
@@ -4367,7 +4405,9 @@ def call_size(x, i):
 
 
 def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.stride(i)
 
@@ -4375,7 +4415,9 @@ def call_stride(x, i):
 
 
 def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x):
         return x.storage_offset()
 

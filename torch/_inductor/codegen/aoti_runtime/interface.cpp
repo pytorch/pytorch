@@ -205,6 +205,22 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     { *dtype = container->constant_dtype(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto constants_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { const auto ret = container->extract_constants_map(use_inactive);
+      for (const auto& pair: ret) {
+        constants_map->emplace(pair.first, pair.second);
+      }
+    })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
