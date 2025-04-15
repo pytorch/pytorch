@@ -242,7 +242,7 @@ class TestBasics(TestCase):
             mask = sample.kwargs["mask"]
             mt = masked_tensor(data, mask, requires_grad=True)
 
-            new_device = torch.device("cpu") if device != "cpu" else torch.device("cuda")
+            new_device = torch.device("cuda") if device != "cuda" and torch.cuda.is_available() else torch.device("cpu")
             mt_device = mt.to(new_device)
 
             self.assertEqual(mt_device.device.type, new_device.type)

@@ -6,6 +6,7 @@ from typing import Any
 from typing_extensions import TypeIs
 
 import torch
+from torch._prims_common import canonicalize_device, DeviceLikeType
 from torch.overrides import get_default_nowrap_functions
 
 
@@ -363,8 +364,8 @@ class MaskedTensor(torch.Tensor):
         device_to = current_device
         if len(args) == 1:
             arg = args[0]
-            if isinstance(arg, (torch.device, str, int)):
-                device_to = torch.device(arg)
+            if isinstance(arg, DeviceLikeType):
+                device_to = canonicalize_device(arg)
             elif isinstance(arg, torch.Tensor):
                 device_to = arg.device
         else:
