@@ -881,6 +881,8 @@ class FakeTensor(Tensor):
             # scalar tensor could be used as inputs
             aten.fmax.default,
             aten.fmin.default,
+            aten.lt.Tensor,
+            aten.gt.Tensor,
             # zero dim cpu tensor is passed as some parameter in these backward methods.
             aten._scaled_dot_product_efficient_attention_backward.default,
             aten._efficient_attention_backward.default,
