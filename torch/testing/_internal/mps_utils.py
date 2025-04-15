@@ -136,6 +136,7 @@ UNIMPLEMENTED_XFAILIST = {
     "linalg.svdvals": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.vecdot": MPSSkipInfo(UNIMPLEMENTED),
     "logcumsumexp": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.slogdet": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
     "lu_solve": MPSSkipInfo(UNIMPLEMENTED),
     "masked.median": MPSSkipInfo(UNIMPLEMENTED),
     "matrix_exp": MPSSkipInfo(UNIMPLEMENTED),
@@ -207,8 +208,27 @@ UNIMPLEMENTED_XFAILIST = {
     "sparse.mm": MPSSkipInfo(UNIMPLEMENTED),
     "sparse.mmreduce": MPSSkipInfo(UNIMPLEMENTED),
     "special.airy_ai": MPSSkipInfo(UNIMPLEMENTED),
-    "special.entr": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bool]),
+    "special.chebyshev_polynomial_t": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.bool, torch.int32, torch.int64, torch.uint8],
+    ),
+    "special.chebyshev_polynomial_u": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int64, torch.bool, torch.int16, torch.int32, torch.uint8],
+    ),
+    "special.entr": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bool, torch.int8]),
     "special.erfcx": MPSSkipInfo(UNIMPLEMENTED),
+    "special.hermite_polynomial_h": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[
+            torch.bool,
+            torch.int32,
+            torch.uint8,
+            torch.int16,
+            torch.int64,
+            torch.int8,
+        ],
+    ),
     "special.hermite_polynomial_he": MPSSkipInfo(UNIMPLEMENTED),
     "special.laguerre_polynomial_l": MPSSkipInfo(UNIMPLEMENTED),
     "special.log_ndtr": MPSSkipInfo(UNIMPLEMENTED),
@@ -241,6 +261,7 @@ UNIMPLEMENTED_XFAILIST = {
     "to": MPSSkipInfo(UNIMPLEMENTED),
     "to_sparse": MPSSkipInfo(UNIMPLEMENTED),
     "unique": MPSSkipInfo(UNIMPLEMENTED),
+    "_upsample_bicubic2d_aa": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.uint8]),
     "vdot": MPSSkipInfo(UNIMPLEMENTED),
     "segment_reduce_": MPSSkipInfo(UNIMPLEMENTED),
     "geometric": MPSSkipInfo(UNIMPLEMENTED),
@@ -360,11 +381,14 @@ XFAILLIST_GRAD = {
     ),
     # Unimplemented ops
     "_upsample_bilinear2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
+    "_upsample_bicubic2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.det": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve_ex": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.tensorsolve": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
+    "logdet": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "special.zeta": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
+    "special.i1e": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     "__getitem__": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     "_segment_reduce": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
@@ -729,6 +753,8 @@ MACOS_13_XFAILLIST = {
 
 """Other uncategorized xfails"""
 OTHER_XFAILLIST = {
+    # atan2 cpu match test regressed in pytorch
+    "atan2": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64]),
     # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
     "argsort": MPSSkipInfo(
         dtypes=[torch.float16, torch.int8, torch.uint8, torch.bool, torch.bfloat16]
