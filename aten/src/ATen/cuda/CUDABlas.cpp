@@ -783,6 +783,11 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
 template<>
 void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
 {
+  if (at::globalContext().allowFP16ReductionCuBLAS()) {
+    // Do not allow fp16 reductions with fp32 output
+    TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+  }
+
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
@@ -790,7 +795,7 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::bgemm_internal_ck<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -801,6 +806,11 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
 template<>
 void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
+  if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    // Do not allow fp16 reductions with fp32 output
+    TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
+  }
+
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
       bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
@@ -808,7 +818,7 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1302,12 +1312,17 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
 template<>
 void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
 {
+  if (at::globalContext().allowFP16ReductionCuBLAS()) {
+    // Do not allow fp16 reductions with fp32 output
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+  }
+
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1318,12 +1333,17 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
 template<>
 void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
+  if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    // Do not allow fp16 reductions with fp32 output
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
+  }
+
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1441,22 +1461,15 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 template <>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
   // TODO: Support Tuning for fp16-fp32 gemm
-  gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
 }
 
 
 template <>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
   // TODO: Support Tuning for bf16-fp32 gemm
-  gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
-
-template<>
-void gemm<c10::complex<float>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<float>, float)) {}
-template<>
-void gemm<c10::complex<double>, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(c10::complex<double>, float)) {}
-template<>
-void gemm<double, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(double, float)) {}
 
 
 template <typename Dtype, typename C_Dtype>
@@ -1475,6 +1488,19 @@ bool gemm_and_bias(
     C_Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
+
+  #ifdef USE_ROCM
+  if (std::is_same_v<C_Dtype, float>)
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #endif
+
+  if (at::globalContext().allowBF16ReductionCuBLAS() && std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
+    // Do not allow fp16 reductions with fp32 output
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
+  } else if (at::globalContext().allowFP16ReductionCuBLAS() && std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+  }
+
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 

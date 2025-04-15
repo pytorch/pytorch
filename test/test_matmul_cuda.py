@@ -515,6 +515,44 @@ class TestMatmulCuda(TestCase):
             self.assertEqual(out.dtype, output_dtype)
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @parametrize("batch_size", [1, 32])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_fp16_or_bf16_accum_and_fp32_out_failure(self, input_dtype, batch_size, backend):
+        M, N, K = 32, 32, 32
+        device = "cuda"
+        dtype = input_dtype
+        torch.backends.cuda.preferred_blas_library(backend)
+
+        # Low precision accumulation is not supported for fp32 output
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+
+        def create_inputs():
+            a = torch.randn(M, K, device=device, dtype=dtype)
+            b = torch.randn(K, N, device=device, dtype=dtype)
+            c = torch.randn(M, N, device=device, dtype=dtype)
+            return a, b, c
+
+        def expand(tensor):
+            return tensor.unsqueeze(0).expand(batch_size, *tensor.shape)
+
+        a, b, c = create_inputs()
+
+        with self.assertRaises(Exception):
+            torch.baddbmm(expand(c), expand(a), expand(b), out_dtype=torch.float32)
+        
+        with self.assertRaises(Exception):
+            torch.addmm(c, a, b, out_dtype=torch.float32)
+        
+        with self.assertRaises(Exception):
+            torch.bmm(expand(a,), expand(b), out_dtype=torch.float32)
+        
+        with self.assertRaises(Exception):
+            torch.mm(a, b, out_dtype=torch.float32)
+
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
