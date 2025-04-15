@@ -283,6 +283,11 @@ def lru_cache(
     return inner
 
 
+@lru_cache
+def _bound_sympy_helper(expr, var_to_ranges):
+    return bound_sympy(expr, var_to_range)
+
+
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
@@ -5703,7 +5708,6 @@ class ShapeEnv:
             for guard in self.guards
         )
 
-    @_lru_cache
     def bound_sympy(
         self, expr: sympy.Expr, size_oblivious: bool = False
     ) -> ValueRanges:
@@ -5720,7 +5724,7 @@ class ShapeEnv:
                     # to determine if we can do size-like replacement, the
                     # upper bound is irrelevant here
                     var_to_range[x] = ValueRanges(2, int_oo)
-        return bound_sympy(expr, var_to_range)  # type: ignore[arg-type]
+        return _bound_sympy_helper(expr, var_to_range)  # type: ignore[arg-type]
 
     @_lru_cache
     def get_axioms(
