@@ -5205,6 +5205,7 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @tf32_on_and_off(0.006)
     @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -10012,6 +10013,11 @@ class CommonTemplate:
             # https://github.com/halide/Halide/issues/8318
             raise unittest.SkipTest("halide not supported")
 
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(
+                f"dtype {dtype} not supported for device {self.device}"
+            )
+
         def fn(x, y):
             return x + y, x * y, x / y
 
@@ -10366,6 +10372,7 @@ class CommonTemplate:
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
+    @expectedFailureXPU  # Remmove this after the known issue of Intel Triton #3871 resolved.
     def test_pow_by_natural_log2_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x):
@@ -12053,6 +12060,8 @@ class CommonTemplate:
             x_view = x.view(dtype=torch.int16)
             return x_view.mul(2) + x_view.bitwise_and(2)
 
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest("bfloat16 is not supported on {self.device}")
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         ref = fn(a, b)
@@ -12952,6 +12961,31 @@ class CommonTemplate:
 
         x = torch.randn(1024, 1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    @skip_if_cpp_wrapper(
+        "Inductor does not generate alignment assertion for cpp_wrapper right now"
+    )
+    def test_incorrect_meta_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        define_custom_op_for_test("slice2d_incorrect_meta", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d_incorrect_meta(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+
+        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
+        with self.assertRaisesRegex(AssertionError, expected_error):
+            self.common(fn, (x,), check_lowp=False)
 
 
 @dataclasses.dataclass
@@ -14313,7 +14347,7 @@ if RUN_GPU:
         def test_graph_partition_unbacked_symint_multi_output_layout(self):
             def f(p, size_tensor):
                 size_val = size_tensor.item()
-                b = torch.ones([size_val, 3], device="cuda")
+                b = torch.ones([size_val, 3], device=GPU_TYPE)
 
                 def true_fn(x):
                     return torch.cos(x), torch.cos(x) + 1
@@ -14325,8 +14359,8 @@ if RUN_GPU:
                 return cond_out[0] + cond_out[1]
 
             compiled_f = torch.compile(f)
-            p = torch.tensor([True], device="cuda")
-            size_tensor = torch.tensor(2, device="cuda")
+            p = torch.tensor([True], device=GPU_TYPE)
+            size_tensor = torch.tensor(2, device=GPU_TYPE)
             eager_out = f(p, size_tensor)
             compiled_out = compiled_f(p, size_tensor)
             self.assertEqual(eager_out, compiled_out)
@@ -14376,7 +14410,7 @@ if RUN_GPU:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_symint_from_mutation_index(self):
-            x = torch.zeros(7, device="cuda")
+            x = torch.zeros(7, device=GPU_TYPE)
 
             def fn(n, a):
                 a[n] = -1
@@ -14447,8 +14481,8 @@ if RUN_GPU:
                 return x + y + scalar
 
             compiled_f = torch.compile(f)
-            compiled_out = f(torch.tensor(1, device="cuda"))
-            self.assertEqual(compiled_out, f(torch.tensor(1, device="cuda")))
+            compiled_out = f(torch.tensor(1, device=GPU_TYPE))
+            self.assertEqual(compiled_out, f(torch.tensor(1, device=GPU_TYPE)))
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_buffer_reuse(self):
