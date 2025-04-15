@@ -332,7 +332,7 @@ lxml==5.3.0
 
 PyGithub==2.3.0
 
-sympy==1.13.3
+sympy==1.14.0rc1
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
 #Pinned versions:
 #test that import:
