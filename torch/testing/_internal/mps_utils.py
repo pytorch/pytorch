@@ -136,7 +136,6 @@ UNIMPLEMENTED_XFAILIST = {
     "linalg.svdvals": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.vecdot": MPSSkipInfo(UNIMPLEMENTED),
     "logcumsumexp": MPSSkipInfo(UNIMPLEMENTED),
-    "linalg.slogdet": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
     "lu_solve": MPSSkipInfo(UNIMPLEMENTED),
     "masked.median": MPSSkipInfo(UNIMPLEMENTED),
     "matrix_exp": MPSSkipInfo(UNIMPLEMENTED),
@@ -210,13 +209,27 @@ UNIMPLEMENTED_XFAILIST = {
     "special.airy_ai": MPSSkipInfo(UNIMPLEMENTED),
     "special.chebyshev_polynomial_t": MPSSkipInfo(
         UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.bool, torch.int32, torch.int64, torch.uint8],
+        dtypes=[
+            torch.int16,
+            torch.bool,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+            torch.int8,
+        ],
     ),
     "special.chebyshev_polynomial_u": MPSSkipInfo(
         UNIMPLEMENTED,
-        dtypes=[torch.int64, torch.bool, torch.int16, torch.int32, torch.uint8],
+        dtypes=[
+            torch.int64,
+            torch.bool,
+            torch.int16,
+            torch.int32,
+            torch.uint8,
+            torch.int8,
+        ],
     ),
-    "special.entr": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bool, torch.int8]),
+    "special.entr": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bool]),
     "special.erfcx": MPSSkipInfo(UNIMPLEMENTED),
     "special.hermite_polynomial_h": MPSSkipInfo(
         UNIMPLEMENTED,
@@ -585,6 +598,8 @@ COMPLEX_XFAILLIST = {
     "linalg.vander": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.vector_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "logaddexp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "logdet": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "slogdet": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "lu": MPSSkipInfo(dtypes=[torch.complex64]),
     "lu_unpack": MPSSkipInfo(dtypes=[torch.complex64]),
     "masked.cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -753,8 +768,6 @@ MACOS_13_XFAILLIST = {
 
 """Other uncategorized xfails"""
 OTHER_XFAILLIST = {
-    # atan2 cpu match test regressed in pytorch
-    "atan2": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64]),
     # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
     "argsort": MPSSkipInfo(
         dtypes=[torch.float16, torch.int8, torch.uint8, torch.bool, torch.bfloat16]
