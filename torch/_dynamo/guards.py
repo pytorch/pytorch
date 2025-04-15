@@ -103,6 +103,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
@@ -1036,6 +1037,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GenericAttrSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.generic_getattr_manager(
+                attr=source.member,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -2485,10 +2494,13 @@ class CheckFunctionManager:
         if guard_filter_fn:
 
             def make_guard_filter_entry(guard):
+                MISSING = object()
                 name = strip_local_scope(guard.name)
                 if name == "":
-                    value = None
+                    has_value = False
+                    value = MISSING
                 else:
+                    has_value = True
                     value = builder.get(guard.name)
                 is_global = is_from_global_source(guard.originating_source)
                 guard_fn = guard.create_fn
@@ -2496,6 +2508,7 @@ class CheckFunctionManager:
                     guard_fn = guard.create_fn.func
                 return GuardFilterEntry(
                     name=name,
+                    has_value=has_value,
                     value=value,
                     guard_type=guard_fn.__name__,
                     derived_guard_types=tuple(guard.guard_types)
