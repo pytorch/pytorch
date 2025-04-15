@@ -424,7 +424,7 @@ static __global__ void chunk_cat_cuda_kernel(
 bool all_contiguous(TensorList tensors) {
   bool contiguous = true;
   for (const auto& t : tensors) {
-    contiguous &= t.is_non_overlapping_and_dense();
+    contiguous &= t.is_contiguous();
   }
   return contiguous;
 }
