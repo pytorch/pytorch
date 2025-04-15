@@ -1171,15 +1171,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (use_fast_accum) {
     TORCH_CHECK(mat1.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat2.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat1` or `mat2` tensors have the `Float4_e2m1fn_x2` dtype.");
   }
+#ifdef USE_ROCM
+  if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float4_e2m1fn_x2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+  }
+#endif
   if (bias) {
     TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
   }
   {
     auto bias_ = bias.value_or(Tensor());
