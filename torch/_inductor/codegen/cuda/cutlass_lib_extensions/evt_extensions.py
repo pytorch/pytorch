@@ -127,8 +127,27 @@ if try_import_cutlass():
 
         # Today, arguments are either a pointer to the
         # node's memory, a stride tuple, the datatype
-        if issubclass(arg_ty, tuple):
-            return f"{{{','.join([str(int(x)) for x in node.get_layout().stride])}}}"
+        # Once again, need to check for local class type for stride tuple
+        if (
+            str(arg_ty)
+            == "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>"
+        ):
+            DEFAULT_STRIDE_LEN = 3
+            stride = [int(x) for x in node.get_layout().stride]
+            for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
+                stride.append(0)
+
+            def render_stride(x: int):
+                # Handle EBO for 0 and 1
+                if x == 0:
+                    return "_0{}"
+                elif x == 1:
+                    return "_1{}"
+                else:
+                    return str(x)
+
+            return f"{{{', '.join([render_stride(x) for x in stride])}}}"
+
         elif issubclass(arg_ty, ctypes.c_void_p):
             return f"{node.get_name()}.get()"
         elif (
@@ -138,4 +157,5 @@ if try_import_cutlass():
         elif issubclass(arg_ty, EmptyByte):
             return "{}"
 
+        breakpoint()
         raise NotImplementedError(f"Unsupported arg type: {arg_ty}")
