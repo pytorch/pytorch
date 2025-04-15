@@ -1,1 +1,4 @@
 # Add links to this file that you want ignored by the link checker
+
+#Linkchecker assumes this is a link so ignoring it.Original file is RELEASE.md
+pypi/warehouse#726
