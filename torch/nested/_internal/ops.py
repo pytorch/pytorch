@@ -179,6 +179,18 @@ def raggedness_matches(nt, size):
     )
 
 
+def has_different_symint_size(nt, size):
+    end = nt._ragged_idx + 1
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        any(
+            isinstance(ns, torch.SymInt) and isinstance(s, torch.SymInt) and ns != s
+            for ns, s in zip(nt_ragged, size_ragged)
+        )
+    )
+
+
 def squeeze_leading_ones(t):
     # Note: [ Squeezing leading ones ]
     #
@@ -304,6 +316,14 @@ def jagged_binary_pointwise(func, *args, **kwargs):
             return NestedTensor(
                 func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
             )
+
+        # ex: (B, j1, D) + (B, j2, D)
+        if has_different_symint_size(a, b._size):
+            raise ValueError(
+                f"cannot call binary pointwise function {func.__name__} "
+                f"with two jagged tensors with different symint sizes"
+            )
+
         raise RuntimeError(mismatch_error_msg.format(func.__name__, a._size, b._size))
     # either a is NT or b is NT at this point
     a_is_nt = isinstance(a, NestedTensor)
