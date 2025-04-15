@@ -101,6 +101,7 @@ from ..source import (
     GradSource,
     is_constant_source,
     is_from_optimizer_source,
+    is_from_unspecialized_param_buffer_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -1764,15 +1765,21 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
+        should_install_graph_params = (
+            config.install_params_as_graph_attr
+            and is_from_unspecialized_param_buffer_source(source)
+        )
+
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules
             or is_parameter_freezing()
             or torch._dynamo.config.prepare_freezing
         )
 
-        if (
-            source.guard_source().is_specialized_nn_module() or make_graph_attribute
-        ) and not source.guard_source().is_fsdp_module():
+        if should_install_graph_params or (
+            (source.guard_source().is_specialized_nn_module() or make_graph_attribute)
+            and not source.guard_source().is_fsdp_module()
+        ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
