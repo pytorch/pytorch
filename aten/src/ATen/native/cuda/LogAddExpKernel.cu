@@ -26,7 +26,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
             if (::isinf(a.real()) && a == b) {
               return a;
             } else {
-              if (a.real() > b.real()) {
+              if (a.real() >= b.real()) {
                 return a + ::log1p(::exp(b - a));
               } else {
                 return b + ::log1p(::exp(a - b));
