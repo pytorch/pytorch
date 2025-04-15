@@ -403,7 +403,7 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
   void* mem_ptr = PyLong_AsVoidPtr(obj);
   {
     pybind11::gil_scoped_release no_gil;
-    c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+    c10::cuda::CUDACachingAllocator::raw_deallocate(mem_ptr);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1310,7 +1310,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK(succeeded, "Expected standard deleter");
-    c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
+    c10::cuda::CUDACachingAllocator::raw_deallocate(data_ptr);
   });
 
   m.def(

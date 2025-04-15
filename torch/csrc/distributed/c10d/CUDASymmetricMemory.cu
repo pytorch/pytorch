@@ -298,9 +298,9 @@ CUDASymmetricMemory::CUDASymmetricMemory(
       world_size_(world_size) {
   const size_t arr_size = sizeof(void*) * world_size_;
   buffers_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+      c10::cuda::CUDACachingAllocator::raw_allocate(arr_size));
   signal_pads_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+      c10::cuda::CUDACachingAllocator::raw_allocate(arr_size));
 
   c10::cuda::CUDAGuard guard(local_device_idx);
   AT_CUDA_CHECK(cudaMemcpy(

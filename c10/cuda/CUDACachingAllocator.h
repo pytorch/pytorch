@@ -201,9 +201,7 @@ struct ShareableHandle {
 
 class CUDAAllocator : public Allocator {
  public:
-  virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
-  virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
@@ -325,16 +323,8 @@ inline CUDAAllocator* get() {
 }
 
 // Called directly by clients.
-inline void* raw_alloc(size_t nbytes) {
-  return get()->raw_alloc(nbytes);
-}
-
 inline void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   return get()->raw_alloc_with_stream(nbytes, stream);
-}
-
-inline void raw_delete(void* ptr) {
-  return get()->raw_delete(ptr);
 }
 
 inline void init(int device_count) {
@@ -541,7 +531,7 @@ struct C10_CUDA_API MemPoolContext {
   //
   //  auto active_pool = MemPoolContext::getActiveMemPool();
   //  if (active_pool && active_pool->allocator()) {
-  //    ptr = active_pool->allocator()->raw_alloc(size);
+  //    ptr = active_pool->allocator()->raw_allocate(size);
   //  }
   //
   static MemPool* getActiveMemPool();

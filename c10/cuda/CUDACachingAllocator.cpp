@@ -898,7 +898,7 @@ struct MempoolIdHash {
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   auto active_pool = MemPoolContext::getActiveMemPool();
   if (active_pool && active_pool->allocator() && p.pool->owner_PrivatePool) {
-    *ptr = active_pool->allocator()->raw_alloc(size);
+    *ptr = active_pool->allocator()->raw_allocate(size);
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
   } else {
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, size));
@@ -2957,7 +2957,7 @@ class DeviceCachingAllocator {
 
       // If there is an active mempool with a given allocator,
       // we use the given allocator's delete function.
-      active_pool->allocator()->raw_delete((void*)block->ptr);
+      active_pool->allocator()->raw_deallocate((void*)block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
@@ -3741,21 +3741,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  void* raw_alloc(size_t nbytes) override {
-    if (nbytes == 0) {
-      return nullptr;
-    }
-    void* r = nullptr;
-    if (forceUncachedAllocator() || !isEnabled()) {
-      r = uncached_allocate(nbytes);
-    } else {
-      c10::DeviceIndex device = 0;
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
-    }
-    return r;
-  }
-
   void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override {
     if (nbytes == 0) {
       return nullptr;
@@ -3809,14 +3794,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     // when p2p is not enabled, only cudaMemcpyPeerAsync correctly handles
     // memory not allocated via cudaMalloc
     return cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
-  }
-
-  void raw_delete(void* ptr) override {
-    if (forceUncachedAllocator() || !isEnabled()) {
-      uncached_delete(ptr);
-    } else {
-      this->free(ptr);
-    }
   }
 
   // In CUDA IPC, sender sends a tensor to receiver via shareIPCHandle,

@@ -853,17 +853,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     //    but stale ptrs will not permanently leak into ptr_info.
   }
 
-  void* raw_alloc(size_t nbytes) override {
-    if (nbytes == 0) {
-      return nullptr;
-    }
-    c10::DeviceIndex device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    void* r = nullptr;
-    mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
-    return r;
-  }
-
   void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override {
     if (nbytes == 0) {
       return nullptr;
@@ -874,9 +863,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     mallocAsync(&r, device, nbytes, stream);
     return r;
   }
-  void raw_delete(void* ptr) override {
-    freeAsync(ptr);
-  }
+
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
       override {
     // Double-checks allocator backend hasn't changed, which would definitely be
