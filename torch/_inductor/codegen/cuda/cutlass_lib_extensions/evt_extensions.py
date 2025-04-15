@@ -3,13 +3,14 @@
 from torch._inductor.ir import ComputedBuffer, InputBuffer
 from torch.utils._ordered_set import OrderedSet
 
-from ..cutlass_utils import try_import_cutlass
+from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 
 if try_import_cutlass():
     import ast
     import ctypes
     import textwrap
+    from typing import Union
 
     from cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,
@@ -51,6 +52,20 @@ if try_import_cutlass():
         torch.bfloat16: DataType.bf16,
     }
 
+    def _check_contiguous(shape: tuple[int, ...], stride: tuple[int, ...]) -> bool:
+        if len(shape) != len(stride):
+            return False
+
+        running_product = 1
+        for shape_i, stride_i in zip(shape, stride):
+            if shape_i == 1:
+                continue
+            if stride_i != running_product:
+                return False
+            running_product *= shape_i
+
+        return True
+
     def create_example_tensors(
         read_names: list[str],
         write_names: list[str],
@@ -59,28 +74,17 @@ if try_import_cutlass():
     ):
         example_tensors = {}
 
-        def cutlass_tensor_from_buffer(buffer: ComputedBuffer):
+        def cutlass_tensor_from_buffer(buffer: Union[ComputedBuffer, InputBuffer]):
             shape = tuple(int(x) for x in buffer.get_layout().size)
             stride = tuple(int(x) for x in buffer.get_layout().stride)
 
-            is_column_major = True
-            for i in range(1, len(shape)):
-                if shape[i] == 1:
-                    continue
-                if stride[i] != stride[i - 1] * shape[i - 1]:
-                    is_column_major = False
-
-            is_row_major = True
-            for i in range(len(shape) - 1):
-                if shape[i] == 1:
-                    continue
-
-                if stride[i] != stride[i + 1] * shape[i + 1]:
-                    is_row_major = False
+            is_column_major = _check_contiguous(shape, stride)
+            is_row_major = _check_contiguous(shape[::-1], stride[::-1])
 
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
-                    f"Cannot create example tensor for {buffer.get_name()} with non-contiguous layout, recieved stride: {stride} and shape: {shape}"
+                    f"Cannot create example tensor for {buffer.get_name()} with \
+non-contiguous layout, recieved stride: {stride} and shape: {shape}"
                 )
 
             return CutlassTensor(
