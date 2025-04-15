@@ -2099,7 +2099,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Stores require an explicit broadcast.
+        # Stores require an explicit broadcast. We do this in two phases:
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
+        #  2. In case the block pointer has higher dimensionality, broadcast/reshape the
+        #     result to the block shape of the pointer.
+        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
