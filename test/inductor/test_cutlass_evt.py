@@ -3,7 +3,10 @@ import unittest
 
 import torch
 from torch._dynamo.test_case import TestCase
-from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+from torch._inductor.codegen.cuda.cutlass_utils import (
+    torch_dtype_to_cutlass_type,
+    try_import_cutlass,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -55,33 +58,64 @@ if try_import_cutlass():
     class MockTileDescription:
         threadblock_shape = (128, 128, 8)
 
+    class MockNode:
+        def __init__(self, name, shape, stride, dtype):
+            self.name = name
+            self.dtype = dtype
+            self.shape = shape
+            self.stride = stride
+
+        def get_layout(self):
+            class MockLayout:
+                def __init__(self, shape, stride, dtype):
+                    self.size = shape
+                    self.stride = stride
+                    self.dtype = dtype
+
+            return MockLayout(self.shape, self.stride, self.dtype)
+
+        def get_name(self):
+            return self.name
+
     def _create_mock_buffer_name_map(example_tensors):
-        class MockNode:
-            def __init__(self, name, stride, dtype):
-                self.name = name
-                self.dtype = dtype
-                self.stride = stride
-
-            def get_layout(self):
-                class MockLayout:
-                    def __init__(self, stride, dtype):
-                        self.dtype = dtype
-                        self.stride = stride
-
-                return MockLayout(self.stride, self.dtype)
-
-            def get_name(self):
-                return self.name
-
         name_to_buffer = {}
         for name, tensor in example_tensors.items():
             if isinstance(tensor, CutlassTensor):
-                name_to_buffer[name] = MockNode(name, tensor.stride, torch.float32)
+                name_to_buffer[name] = MockNode(
+                    name, tensor.shape, tensor.stride, torch.float32
+                )
 
         return name_to_buffer
 
 
 class TestCutlassEVT(TestCase):
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_example_tensor_creation(self):
+        from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
+            create_example_tensors,
+        )
+
+        row_major_buf0 = MockNode("buf0", (3, 2, 1), (2, 1, 0), torch.float32)
+        col_major_buf1 = MockNode("buf1", (3, 2, 1), (1, 3, 0), torch.float32)
+        read_names = ["buf0"]
+        write_names = ["buf1"]
+        buffer_renames = {"buf0": "acc"}
+        name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
+        result = create_example_tensors(
+            read_names, write_names, buffer_renames, name_to_buffer
+        )
+        self.assertEqual(result["acc"].shape, (3, 2, 1))
+        self.assertEqual(result["acc"].stride, (2, 1, 0))
+        self.assertEqual(
+            result["acc"].element, torch_dtype_to_cutlass_type(torch.float32)
+        )
+
+        self.assertEqual(result["buf1"].shape, (3, 2, 1))
+        self.assertEqual(result["buf1"].stride, (1, 3, 0))
+        self.assertEqual(
+            result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
+        )
+
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
         epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
