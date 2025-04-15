@@ -4622,7 +4622,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @xfail_if_mps  # AssertionError: expected size
     def test_conv2d_backward_channels_last(self):
         def fn(grad_output, inp, weight):
             convolution_backward_8 = torch.ops.aten.convolution_backward.default(
