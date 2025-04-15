@@ -870,8 +870,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 ]
                 for preset_num in preset_nums:
                     preset = PRESETS.get(preset_num, {}).get(
-                        inductor_cuda_config.cutlass_instantiation_level, []
-                    )
+                        inductor_cuda_config.cutlass_instantiation_level
+                    ) or []
 
                     patterns.extend(preset)
 
