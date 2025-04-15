@@ -11312,11 +11312,17 @@ class CommonTemplate:
         def fn(x):
             return torch.fft.fftn(x)
 
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("FFT needs MacOS-14+")
+
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
     def test_fft_real_input_real_output(self):
         def fn(x):
             return torch.fft.fftn(x).real
+
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("FFT needs MacOS-14+")
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
@@ -13173,6 +13179,8 @@ if RUN_GPU or HAS_MPS:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
+if RUN_GPU:
+
     @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
@@ -13608,7 +13616,6 @@ if RUN_GPU or HAS_MPS:
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
-        @xfail_if_mps
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device=GPU_TYPE)
@@ -13638,7 +13645,6 @@ if RUN_GPU or HAS_MPS:
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
-        @xfail_if_mps
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device=GPU_TYPE)
