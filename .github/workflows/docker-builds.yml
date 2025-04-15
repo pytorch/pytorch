@@ -106,7 +106,7 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true

@@ -56,7 +56,7 @@ jobs:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
         with:
             docker-image-name: libtorch-cxx11-builder-cuda${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/libtorch
@@ -98,7 +98,7 @@ jobs:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
         with:
             docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
             docker-build-dir:  .ci/docker/libtorch
@@ -134,7 +134,7 @@ jobs:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
         with:
             docker-image-name: libtorch-cxx11-builder-cpu
             docker-build-dir:  .ci/docker/libtorch

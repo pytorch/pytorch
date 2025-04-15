@@ -46,7 +46,7 @@ jobs:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
         with:
             docker-image-name: almalinux-builder${{ matrix.cuda_version == 'cpu' && '-' || '-cuda' }}${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/almalinux
