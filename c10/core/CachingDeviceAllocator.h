@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Stream.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -56,6 +57,24 @@ struct DeviceStats {
 
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
+};
+
+class C10_API CachingDeviceAllocator : public c10::Allocator {
+ public:
+  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void* raw_alloc_with_stream(size_t nbytes, c10::Stream stream) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+  virtual void init(int device_count) = 0;
+  virtual bool initialized() = 0;
+  virtual void emptyCache() = 0;
+  virtual void enable(bool value) = 0;
+  virtual bool isEnabled() const = 0;
+  virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
+  virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+  virtual DeviceStats getDeviceStats(c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+  virtual std::string name() = 0;
 };
 
 } // namespace c10::CachingDeviceAllocator
