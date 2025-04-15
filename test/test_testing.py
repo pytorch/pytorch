@@ -441,6 +441,7 @@ if __name__ == '__main__':
         )
 
     def test_setup_and_teardown_run_for_device_specific_tests(self, device):
+        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
         stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
 #!/usr/bin/env python3
 
