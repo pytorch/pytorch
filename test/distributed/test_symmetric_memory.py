@@ -875,6 +875,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_one_shot_all_reduce(self) -> None:
         self._init_process()
@@ -905,6 +906,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_two_shot_all_reduce(self) -> None:
         self._init_process()
@@ -954,7 +956,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()
@@ -991,7 +993,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter_corner_cases(self) -> None:
         dtype = torch.bfloat16
@@ -1144,6 +1146,7 @@ class SymmMemSingleProcTest(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
     )
+    @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):
         tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
         expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
@@ -1159,6 +1162,7 @@ class SymmMemSingleProcTest(TestCase):
             _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
 
     @requires_cuda
+    @runOnRocmArch(MI300_ARCH)
     def test_memset32(self):
         t = _SymmetricMemory.empty_strided_p2p(
             (64,),
