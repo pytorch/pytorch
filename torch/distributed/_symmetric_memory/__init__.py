@@ -1099,6 +1099,7 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials,
         group_name,
     )
+
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     return reduce_fn(
@@ -1252,7 +1253,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
 
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
-    A_with_scatter_dim_0 = A.flatten(0, -2)
+    A_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
     # Parition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_with_scatter_dim_0.chunk(group.size())
@@ -1313,7 +1314,12 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     stacked_partials_3D_leading_dims = [group.size()] + list(
         A_with_scatter_dim_0.shape[:-1]
     )
-    stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
+
+    # A [group_size] leading dim has been prepended to `stacked_partials_3D_leading_dims`,
+    # to capture the partial output from each rank. If the original scatter dim was 0, then
+    # it is now dim 1 in this tensor, since this new `[group_size]` dim was prepended.
+    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
+    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
@@ -1325,10 +1331,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         dim=orig_scatter_dim,  # Reduce along the origal scatter dim (`group_size`)
     )
 
-    # Final 3D+ output shape must be scattered along original scatter dim as well.
-    final_out_shape = [*output_shape[:-1], B.shape[-1]]
-    final_out_shape[orig_scatter_dim] //= group.size()
-    out = reduced_out.view(*final_out_shape)
+    # Output shape must be scattered along original scatter dim as well.
+    output_shape[orig_scatter_dim] //= group.size()
+    out = reduced_out.view(*output_shape)
     return out
 
 
