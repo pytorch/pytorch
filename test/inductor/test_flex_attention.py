@@ -5335,6 +5335,9 @@ class TestLearnableBiases(InductorTestCase):
         query = torch.randn(2, 16, 512, 64, device="cuda")
         key = torch.randn(2, 16, 512, 64, device="cuda")
         value = torch.randn(2, 16, 512, 64, device="cuda")
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
 
         shape = (2, 16, 512, 16, 512, 64)
         B, Hq, M, Hkv, N, D = shape
@@ -5360,10 +5363,24 @@ class TestLearnableBiases(InductorTestCase):
             enable_gqa=True,
             kernel_options=None,
         )
+        out.sum().backward()
 
         self.assertEqual(
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
+
+    def test_inspect_bug(self):
+        # https://github.com/pytorch/pytorch/issues/139374
+        def sliding_window(b, h, q_idx, kv_idx, val):
+            return (q_idx - kv_idx).abs() < val
+
+        sliding_window2 = functools.partial(
+            sliding_window, val=torch.randn((), device="cuda")
+        )
+        opt_fn = torch.compile(create_block_mask, fullgraph=True)
+        create_block_mask(sliding_window2, None, None, 1024, 1024)
+        # checks that the compile is working
+        opt_fn(sliding_window2, None, None, 1024, 1024)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
