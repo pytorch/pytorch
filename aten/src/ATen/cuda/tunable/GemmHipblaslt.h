@@ -526,7 +526,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         if (GetUseRowwiseFromParams<CT>(params)) {
           // For MX-FP8 on gfx950
 #if ROCM_VERSION >= 60500
-          if (IsGfx950Device()) {
+          if (_is_gfx950_supported()) {
             // Validate matrix dimensions for MX format
             TORCH_CHECK(ValidateMXFormatRequirements(params->m, params->n, params->k),
                        "Matrix dimensions must be multiples of 32 for MX format. ",

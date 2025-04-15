@@ -1256,7 +1256,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 "Block-wise scaling requires both matrices to be Float8_e8m0fnu type");
     
 #if ROCM_VERSION >= 60500
-    TORCH_CHECK(at::cuda::tunable::IsGfx950Device(),
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
     
     TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
@@ -1414,7 +1414,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Add MX format validation for gfx950
   if (scaling_choice == ScalingType::RowWise) {
 #ifdef USE_ROCM
-    if (at::cuda::tunable::IsGfx950Device()) {
+    if (_is_gfx950_supported()) {
       // Validate matrix dimensions for MX format
       TORCH_CHECK(at::cuda::tunable::ValidateMXFormatRequirements(mat1.size(0), mat2.size(1), mat1.size(1)),
                  "For MX format on gfx950, matrix dimensions must be multiples of 32. ",
@@ -1646,3 +1646,15 @@ std::optional<c10::ScalarType> out_dtype) {
 
 
 } // namespace at::native
+
+#ifdef USE_ROCM
+namespace at::cuda::tunable {
+bool _is_gfx950_supported() {
+#if ROCM_VERSION >= 60500
+    return at::detail::getCUDAHooks().isGPUArch({"gfx950"});
+#else
+    return false;
+#endif
+}
+} // namespace at::cuda::tunable
+#endif
