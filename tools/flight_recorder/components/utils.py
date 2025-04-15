@@ -58,6 +58,129 @@ def match_one_event(
 
 def match_coalesced_groups(
     all_rank_events: dict[Any, Any],
+    group_size: int,
+    groups: dict[str, Group],
+    memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
+) -> bool:
+    """
+    all_rank_events: {
+        rank: [
+            (idx, event_dict)
+        ]
+    }
+
+    Note: it is possible for event dicts in a coalesced group to be asymmetric.
+        e.g. the following events lists form a valid coalescing group
+             events0 [send:1]
+             events1 [recv:0, send:2]
+             events2 [recv:1]
+
+    Rule 1: all ops should find a match
+    Rule 2: relative ordering of sends and recvs in one event list can be arbitrary
+        e.g.
+        events1 [recv:0, send:2]  —> okay
+        events1 [send:2, recv:0] —> also okay
+    Rule 3: sends to the same dest or recvs from the src should be in a consistent order
+        e.g.
+        rank0 [send:1 (100B), send:1 (1000B)]
+        rank1 [recv:0 (1000B), recv:0 (100B)]   —> not okay
+    """
+    all_ops = {
+        rank: [
+            Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+            for i, e in all_rank_events[rank]
+        ]
+        for rank in all_rank_events
+    }
+
+    def visualize_ops(
+        match: bool,
+        _pg_guids: dict[tuple[str, int], str],
+    ) -> None:
+        all_ops = {
+            rank: [
+                Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+                for i, e in all_rank_events[rank]
+            ]
+            for rank in all_rank_events
+        }
+
+        i = 0
+        row = []
+        progress = True
+        table = []
+        while progress:
+            progress = False
+            for r in all_ops:
+                if len(all_ops[r]) > i:
+                    rank, event = all_rank_events[r][i]
+                    row.append(
+                        Op(
+                            event,
+                            memberships,
+                            _pg_guids[(event["process_group"][0], rank)],
+                        )
+                    )
+                    progress = True
+                else:
+                    row.append(None)  # type: ignore[arg-type]
+            table.append(row)
+            row = []
+            i += 1
+        title = "Match" if match else "MISMATCH"
+        logger.info("%s \n", title)
+        logger.info("%s", tabulate(table))  # type: ignore[operator]
+
+    # TODO can't verify seq_id bc there might have been valid seq deltas between ranks even within a pg.
+    for op_list in all_ops.values():
+        if not op_list:
+            # print("TODO- not sure if its valid for only some ranks in a PG to participate in a coalesced op?")
+            return False
+        assert op_list[-1].type == "coalesced"
+        op_list.pop(-1)
+
+    while all_ops:
+        first_rank = next(iter(all_ops))
+        my_ops = all_ops[first_rank]
+
+        if len(all_ops[first_rank]) == 0:
+            all_ops.pop(first_rank)
+            continue
+
+        # lets match the first collective! we need to know which ranks are involved, and ensure that this same
+        # collective is also the first one on those ranks within that group
+        op = my_ops[0]
+        match_idx = -1
+        if op.type in P2P:
+            dst_global_rank = sorted(memberships[op.pg_name])[op.dst]
+            peer_ops = all_ops[dst_global_rank]
+            for i, other in enumerate(peer_ops):
+                if op.match(other).state == MatchState.FULLY_MATCHED:
+                    match_idx = i
+                    break
+                elif op.dst == other.src:
+                    # Rule 3
+                    break
+                else:
+                    # Rule 1
+                    continue
+        else:
+            raise NotImplementedError("coalesced collective ops")
+        if match_idx >= 0:
+            my_ops.pop(0)
+            peer_ops.pop(match_idx)
+        else:
+            visualize_ops(False, _pg_guids)
+            return False
+
+    visualize_ops(True, _pg_guids)
+    return True
+
+
+# We enabled the creating FR entry for non-P2P slow path collective ops in v2.7.
+def match_coalesced_groups_with_non_p2p(
+    all_rank_events: dict[Any, Any],
     pg_info: tuple[str, str],
     memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -419,6 +542,39 @@ def error_analysis(
 
 
 def find_coalesced_group(
+    pg_name: str,
+    entries: list[dict[str, Any]],
+    _pg_guids: dict[tuple[str, int], str],
+    rank: int,
+) -> list[tuple[int, dict[str, Any]]]:
+    """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
+    build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
+    """
+    found = []
+    collective_seq_id = None
+    for i, e in enumerate(entries):
+        if _pg_guids[(e["process_group"][0], rank)] != pg_name:
+            continue
+        elif collective_seq_id is None:
+            collective_seq_id = (
+                e["p2p_seq_id"] if e["is_p2p"] else e["collective_seq_id"]
+            )
+            found.append((i, e))
+        elif not e["is_p2p"] and e["collective_seq_id"] == collective_seq_id:
+            found.append((i, e))
+        elif e["is_p2p"] and e["p2p_seq_id"] == collective_seq_id:
+            found.append((i, e))
+        else:
+            break
+
+    if len(found) > 1:
+        assert found[-1][1]["profiling_name"] == "nccl:coalesced"
+        return found
+    return []
+
+
+# We enabled the creating FR entry for non-P2P slow path collective ops in v2.7.
+def find_coalesced_group_with_non_p2p(
     pg_name: str,
     entries: list[dict[str, Any]],
     _pg_guids: dict[tuple[str, int], str],
