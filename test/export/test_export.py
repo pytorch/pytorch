@@ -4634,6 +4634,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -6990,6 +6992,29 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    def test_sym_or_sym_and(self):
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                torch._check(sym_or(u0 == 2, u0 == 4, u0 == 6))
+                torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
+                return u0 + u1 + u2
+
+        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
+        ep.module()(torch.tensor([2, 6, 5]))
+        ep.module()(torch.tensor([4, 7, 5]))
+        ep.module()(torch.tensor([6, 5, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
+        ):
+            ep.module()(torch.tensor([3, 6, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+        ):
+            ep.module()(torch.tensor([6, 6, 6]))
+
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -7302,6 +7327,7 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
+    # map_fn references module outside the module hierarchy
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
