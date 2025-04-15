@@ -3821,6 +3821,26 @@ class GraphModule(torch.nn.Module):
         x, y = map(lambda x: x + 1, [a, b])
         return x + y
 
+    @make_test
+    def test_map_list_extend(a):
+        y = [1]
+
+        def inner(z):
+            return z + y[-1]
+
+        y.extend(map(inner, range(3)))
+        return a + 1, y
+
+    @make_test
+    def test_map_deque_extendleft(a):
+        y = collections.deque([1])
+
+        def inner(z):
+            return z + y[0]
+
+        y.extendleft(map(inner, range(3)))
+        return a + 1, y
+
     def test_unsqueeze_inplace(self):
         def fn(x):
             return torch.Tensor.unsqueeze_(x, dim=1) + 1
