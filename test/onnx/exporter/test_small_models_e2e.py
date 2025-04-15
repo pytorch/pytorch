@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 import transformers
+from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -220,6 +221,29 @@ class DynamoExporterTest(common_utils.TestCase):
                 return input
 
         _ = self.export(Float8Module(), (torch.randn(1, 2),))
+
+    def test_bfloat16_support(self):
+        class BfloatModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Test parameters
+                self.param = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.bfloat16))
+
+            def forward(self, x):
+                # Test constant tensors are stored as bfloat16
+                const = torch.tensor(1.0, dtype=torch.bfloat16)
+                return x * const * self.param
+
+        input = torch.tensor([1.0, 2.0], dtype=torch.bfloat16)
+        onnx_program = self.export(BfloatModel(), (input,), optimize=False)
+        initializers = onnx_program.model.graph.initializers.values()
+        self.assertEqual(len(initializers), 2)
+        for initializer in initializers:
+            self.assertEqual(initializer.dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(onnx_program.model.graph.inputs[0].dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(
+            onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+        )
 
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)
