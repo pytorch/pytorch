@@ -5,19 +5,9 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-prepare_test_env() {
-    # Create virtual environment
-    python -m venv .venv
-    echo "*" > .venv/.gitignore
+run_tests() {
     source .venv/Scripts/activate
 
-    # Install dependencies
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
-    pip install pytest numpy protobuf expecttest hypothesis
-}
-
-run_tests() {
     echo Running smoke_test.py...
     python ./.ci/pytorch/smoke_test/smoke_test.py --package torchonly
 
@@ -34,6 +24,5 @@ run_tests() {
     done
 }
 
-prepare_test_env
 run_tests
 echo "TEST PASSED"
