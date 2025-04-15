@@ -37,7 +37,7 @@ using namespace torch;
     auto _w =                                                              \
         write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char)); \
     (void)_w;                                                              \
-    struct sigaction sa {};                                                \
+    struct sigaction sa{};                                                 \
     sa.sa_handler = SIG_DFL;                                               \
     sa.sa_flags = 0;                                                       \
     if (sigemptyset(&sa.sa_mask) != 0 ||                                   \
@@ -54,7 +54,7 @@ static void setSignalHandler(
     int signal,
     void (*handler)(int, siginfo_t*, void*),
     struct sigaction* old_sa_ptr) {
-  struct sigaction sa {};
+  struct sigaction sa{};
   sa.sa_sigaction = handler;
   sa.sa_flags = SA_RESTART | SA_SIGINFO | SA_NOCLDSTOP | SA_NODEFER;
   if (sigemptyset(&sa.sa_mask) != 0 ||
@@ -92,7 +92,7 @@ static void handler_SIGTERM(int sig, siginfo_t* info, void* ctx) {
   if (info->si_pid == getppid()) {
     _exit(EXIT_SUCCESS);
   }
-  struct sigaction sa {};
+  struct sigaction sa{};
   sa.sa_handler = SIG_DFL;
   sa.sa_flags = 0;
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
