@@ -672,10 +672,7 @@ def _create_aot_dispatcher_function(
                 else:
                     ctx = nullcontext()
                 with dynamo_timed(
-                    "run_functionalized_fw_and_collect_metadata",
-                    phase_name="aot_collect_metadata",
-                    log_pt2_compile_event=True,
-                    dynamo_compile_column_us="aot_autograd_cumulative_collect_metadata_compile_time_us",
+                    "aot_collect_metadata", log_pt2_compile_event=True
                 ), ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,

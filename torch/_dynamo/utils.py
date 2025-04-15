@@ -1227,9 +1227,6 @@ class CompilationMetrics:
     duration_us: Optional[int] = None
     dynamo_cumulative_compile_time_us: Optional[int] = None
     aot_autograd_cumulative_compile_time_us: Optional[int] = None
-    aot_cumulative_dispatch_autograd_graph_compile_time_us: Optional[int] = None
-    aot_autograd_cumulative_collect_metadata_compile_time_us: Optional[int] = None
-    partitioner_cumulative_compile_time_us: Optional[int] = None
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None

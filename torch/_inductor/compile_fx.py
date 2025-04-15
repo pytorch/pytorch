@@ -2057,10 +2057,7 @@ def compile_fx(
             )
 
             with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition",
-                phase_name="partitioner",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="partitioner_cumulative_compile_time_us",
+                "min_cut_rematerialization_partition", log_pt2_compile_event=True
             ):
                 return min_cut_rematerialization_partition(
                     gm,
