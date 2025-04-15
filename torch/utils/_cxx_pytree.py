@@ -32,6 +32,7 @@ from torch.utils._pytree import (
 )
 
 
+# Do not try to import `optree` package if the static version check already fails.
 if not python_pytree._cxx_pytree_dynamo_traceable:
     raise ImportError(
         f"{__name__} depends on `optree>={python_pytree._optree_minimum_version}`, "
