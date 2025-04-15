@@ -275,8 +275,7 @@ class TestTorchbind(TestCase):
                                 "is_hop_single_tensor_return": None,
                             },
                         },
-                    ],
-                    "protocol": "json",
+                    ]
                 },
             )
 
