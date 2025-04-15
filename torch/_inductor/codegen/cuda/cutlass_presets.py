@@ -3,11 +3,12 @@ from collections import defaultdict
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 
 
-PRESETS: dict[int, defaultdict[list]] = {}
+PRESETS: dict[int, dict[str, list[str]]] = {}
 
-PRESETS[0] = preset = defaultdict(list)
+PRESETS[0] = defaultdict(list)
 arch = get_cuda_arch()
 if arch == "90":
+    preset = PRESETS[0]
     preset["0"] = [
         r"cutlass3x_sm90_tensorop_s64x128x16gemm_.*_128x128x64_2x1x1_0_.*_align.*_stream_k_warpspecialized_cooperative_epi_tma",
         r"cutlass3x_sm90_tensorop_s64x256x16gemm_.*_128x256x64_1x2x1_0_.*_align.*_warpspecialized_cooperative_epi_tma",
