@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -756,6 +757,55 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("variant", ("v1", "v2"))
+    def test_auto_functionalized_caching(self, variant):
+        if variant == "v1":
+            patch = torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+        else:
+            assert variant == "v2"
+            patch = torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+
+        @torch.library.custom_op("mylib::sin_inplace", mutates_args=["x"])
+        def sin_inplace(x: torch.Tensor) -> None:
+            x.sin_()
+
+        @torch.library.custom_op("mylib::cos_inplace", mutates_args=["x"])
+        def cos_inplace(x: torch.Tensor) -> None:
+            x.cos_()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, op):
+            y = torch.empty_like(x)
+            op(y)
+            return y
+
+        x = torch.randn(3)
+
+        with patch:
+            # A first call should miss in the cache.
+            fn(x, sin_inplace)
+            self.reset()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+            fn(x, sin_inplace)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+            # A third call with different operator should have a cache miss
+            self.reset()
+            fn(x, cos_inplace)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1407,6 +1457,7 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @unittest.skipIf(IS_FBCODE, "torch import error")
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})

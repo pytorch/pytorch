@@ -247,7 +247,7 @@ def aot_dispatch_base(
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
-    if not hasattr(compiled_fw, "_boxed_call"):
+    if not getattr(compiled_fw, "_boxed_call", False):
         compiled_fw = make_boxed_func(compiled_fw)
 
     # Create a wrapper to set up the rng functionalize and fakified out bits
@@ -304,7 +304,7 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
-    if not hasattr(compiled_fw, "_boxed_call"):
+    if not getattr(compiled_fw, "_boxed_call", False):
         compiled_fw = make_boxed_func(compiled_fw)
 
     compiled_fn = RuntimeWrapper(
@@ -1129,7 +1129,7 @@ def aot_dispatch_autograd(
             with TracingContext.report_output_strides() as fwd_output_strides:
                 compiled_fw_func = aot_config.fw_compiler(fw_module, adjusted_flat_args)
 
-            if not hasattr(compiled_fw_func, "_boxed_call"):
+            if not getattr(compiled_fw_func, "_boxed_call", False):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
             if fakified_out_wrapper.needs_post_compile:

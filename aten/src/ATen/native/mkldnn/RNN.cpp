@@ -169,7 +169,7 @@ struct RNNParams {
 };
 
 template<bool is_single_direction>
-std::vector<int64_t> _output_size(const RNNParams& rnn) {
+static std::vector<int64_t> _output_size(const RNNParams& rnn) {
   auto output_channels = is_single_direction ? rnn.hidden_size
                                              : rnn.hidden_size * rnn.num_directions;
   return {rnn.seq_length, rnn.mini_batch, output_channels};
