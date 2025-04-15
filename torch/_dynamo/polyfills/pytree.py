@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing_extensions import Self, TypeIs
 
-    from torch.utils._cxx_pytree import PyTree
-
 
 __all__: list[str] = []
 
@@ -32,6 +30,9 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import optree._C
 
     import torch.utils._cxx_pytree as cxx_pytree
+
+    if TYPE_CHECKING:
+        from torch.utils._cxx_pytree import PyTree
 
     @substitute_in_graph(
         optree._C.is_dict_insertion_ordered,

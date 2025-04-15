@@ -45,6 +45,8 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self, TypeAlias
 
+from torch.torch_version import TorchVersion as _TorchVersion
+
 
 __all__ = [
     "PyTree",
@@ -177,17 +179,24 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+_optree_minimum_version = _TorchVersion("0.13.0")
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    # optree can not be imported
-    _cxx_pytree_exists = False
-    _optree_version = "0.0.0a0"
+    # No optree package found
+    _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    _optree_version = _TorchVersion("0.0.0a0")
 else:
-    # optree can be imported
-    _cxx_pytree_exists = True
+    _optree_version = _TorchVersion(_optree_version)
+    if _optree_version < _optree_minimum_version:
+        # optree package less than our required minimum version.
+        # Pretend the optree package doesn't exist.
+        # NB: We will raise ImportError if the user directly tries to
+        # `import torch.utils._cxx_pytree` (look in that file for the check).
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    else:
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
 
-_cxx_pytree_dynamo_traceable = _cxx_pytree_exists
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
 

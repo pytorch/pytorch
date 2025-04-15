@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import torch.utils._pytree as python_pytree
-from torch.torch_version import TorchVersion
+from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
     Context as Context,
     DumpableContext as DumpableContext,
@@ -42,11 +42,9 @@ from torch.utils._pytree import (
 )
 
 
-OPTREE_VERSION = TorchVersion(python_pytree._optree_version)
-OPTREE_REQUIRED_VERSION = "0.13.0"
-if OPTREE_VERSION < OPTREE_REQUIRED_VERSION:
+if python_pytree._cxx_pytree_dynamo_traceable:
     raise ImportError(
-        f"{__name__} depends on `optree>={OPTREE_REQUIRED_VERSION}`, "
+        f"{__name__} depends on `optree>={python_pytree._optree_minimum_version}`, "
         "which is an optional dependency of PyTorch. "
         "To use it, please upgrade your optree package via "
         "`python3 -m pip install --upgrade optree`"
@@ -103,9 +101,7 @@ __all__ = [
 ]
 
 
-OPTREE_VERSION = TorchVersion(optree.__version__)  # type: ignore[attr-defined]
-del TorchVersion
-
+python_pytree._optree_version = _TorchVersion(optree.__version__)  # type: ignore[attr-defined]
 
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
 __TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
