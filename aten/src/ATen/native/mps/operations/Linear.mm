@@ -4,12 +4,101 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
+#include <ATen/mps/MPSProfiler.h>
 
 namespace at::native {
 
 using namespace mps;
 
+static Tensor _mps_linear_new(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
+    using namespace mps;
+
+    if (input.scalar_type() == kComplexFloat || input.scalar_type() == kComplexHalf) {
+      TORCH_CHECK(false, "mps linear does not support complex types");
+    }
+
+    TORCH_CHECK(supportedFloatingOrComplexType(input), "MPS device does not support linear for non-float inputs");
+    TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
+    TORCH_CHECK(supportedFloatingOrComplexType(weight), "MPS device does not support linear for non-float weights");
+    TORCH_CHECK(weight.is_mps(), "Tensor for argument weight is on ", weight.device(), " but expected on mps");
+
+    Tensor bias;
+    bool has_bias = bias_opt.has_value();
+    if(has_bias){
+        bias = bias_opt.value();
+        TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
+        TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
+    }
+
+    if (input.numel() == 0 || weight.numel() == 0) {
+        auto input_size = input.sizes();
+        std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+        output_size.push_back(weight.size(0));
+      Tensor output = at::empty(output_size, input.scalar_type(), std::nullopt, kMPS, std::nullopt, input.suggest_memory_format());
+      return output;
+    }
+
+    auto input_size = input.sizes();
+    std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+    output_size.push_back(weight.size(0));
+    Tensor output = at::empty(output_size, input.scalar_type(), std::nullopt, kMPS, std::nullopt, input.suggest_memory_format());
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    id<MTLDevice> device = MPSDevice::getInstance()->device();
+    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+
+    const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true);
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+      @autoreleasepool {
+        mpsStream->endKernelCoalescing();
+        MPSDataType mpsDataType = getMPSDataType(weight.scalar_type());
+
+        auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
+        auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
+
+        id<MTLBuffer> weightBuf = getMTLBufferStorage(weight);
+        MPSNDArrayDescriptor* weightTensorDesc = 
+            [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:getMPSShape(weight.sizes())];
+        weightTensorDesc.preferPackedRows = YES;
+        [weightTensorDesc transposeDimension:0 withDimension:1];
+        MPSNDArray* weightNDArray = [[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                            offset:weight.storage_offset() * weight.element_size()
+                                                        descriptor:weightTensorDesc];
+
+        id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+        if(has_bias){
+            auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
+            auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+                return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3];
+            });
+            auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+
+            getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+            [kernel encodeToCommandEncoder:computeEncoder
+                                             commandBuffer:commandBuffer
+                                              sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray]
+                                          destinationArray:outNDArray];
+            getMPSProfiler().endProfileKernel(kernel);
+        } else {
+            auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+                return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2];
+            });
+            auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+            getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+            [kernel encodeToCommandEncoder:computeEncoder
+                                             commandBuffer:commandBuffer
+                                              sourceArrays:@[ inputNDArray, weightNDArray]
+                                          destinationArray:outNDArray];
+            getMPSProfiler().endProfileKernel(kernel);
+        }
+      }
+    });
+    return output;
+}
+
 Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
+  return _mps_linear_new(input, weight_arg, bias_opt);
   // wT = transpose(weight);
   // y=x*wT+b
 
@@ -67,6 +156,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   @autoreleasepool {
     string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
+    
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
 
