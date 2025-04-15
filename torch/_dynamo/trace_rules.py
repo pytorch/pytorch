@@ -1577,6 +1577,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
+        "torch._scaled_grouped_mm",
         "torch._shape_as_tensor",
         "torch._sobol_engine_draw",
         "torch._sobol_engine_ff_",
@@ -1624,6 +1625,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._values_copy",
         "torch._weight_int4pack_mm",
         "torch._weight_int4pack_mm_for_cpu",
+        "torch._weight_int4pack_mm_with_scales_and_zeros",
         "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
@@ -3173,7 +3175,6 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
-    unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3579,6 +3580,12 @@ def check_file(filename, is_inlined_call=False):
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
     ):
         return SkipResult(True, "FBCODE_SKIP_TORCHREC_DIRS")
+
+    if (
+        filename.startswith(_module_dir(unittest))
+        and not torch._dynamo.config.enable_trace_unittest
+    ):
+        return SkipResult(True, "unittest")
 
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")
