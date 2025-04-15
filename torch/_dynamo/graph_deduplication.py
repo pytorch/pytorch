@@ -252,7 +252,7 @@ def _stable_topological_sort(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]],
 ) -> None:
-    # Nodes are in exactly one of these three collections:
+    # Nodes are in exactly one of these four collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
     pending = list(reversed(graph.nodes))
@@ -265,11 +265,20 @@ def _stable_topological_sort(
     #   dependency.
     waiting = defaultdict(list)
 
+    # - `outputs` are always at the end of the graph
+    outputs = OrderedSet[torch.fx.Node]()
+
     # The cursor indicates the last processed node so we can add new nodes
     # after it.
     cursor = None
     while pending:
         node = pending.pop()
+
+        if node.target == "output":
+            outputs.add(node)
+            assert not node.users, "output nodes should have no users"
+            continue
+
         waiting_for = [
             x for x in _args(node, node_to_additional_deps) if x not in ready
         ]
@@ -286,6 +295,7 @@ def _stable_topological_sort(
             # ready to check again.
             pending.extend(reversed(waiting.pop(node, ())))
 
+    ready.update(outputs)
     assert not waiting and len(ready) == len(graph.nodes)
 
 
