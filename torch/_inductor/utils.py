@@ -50,6 +50,7 @@ import sympy
 
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -60,7 +61,6 @@ if TYPE_CHECKING:
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -1275,13 +1275,12 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 58  # L4 Ada
+    min_sms = 16 if device.type == "xpu" else 60  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
-            "Not enough SMs to use max_autotune_gemm mode: min_sms=%d, avail_sms=%d",
-            min_sms,
-            avail_sms,
+            "Not enough SMs to use max_autotune_gemm mode",
+            extra={"min_sms": min_sms, "avail_sms": avail_sms},
         )
         return False
     return True
@@ -2413,7 +2412,9 @@ def run_and_get_cpp_code(
     return result, s
 
 
-def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
+def shape_env_from_inputs(
+    inputs: Sequence[InputType], default: bool = False
+) -> Optional[ShapeEnv]:
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
@@ -2428,6 +2429,9 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
     for input in inputs:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
+
+    if default:
+        return ShapeEnv()
 
     # TODO(voz): Should we always have one anyway?
     return None
