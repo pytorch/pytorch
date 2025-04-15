@@ -1455,6 +1455,8 @@ class CommonTemplate:
             return inp.scatter_add(0, index, src)
 
         for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            if not self.is_dtype_supported(dtype):
+                continue
             self.common(
                 fn,
                 [
@@ -1590,6 +1592,9 @@ class CommonTemplate:
         def copy(x):
             i = torch.arange(x.size(0), device=x.device)
             return x[i]
+
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Inaccurate on MacOS-13")
 
         x = torch.randn(8, device=self.device)
         copy_opt = torch.compile(copy, backend="inductor")
@@ -2121,6 +2126,9 @@ class CommonTemplate:
             offsets = torch.cumsum(lengths, 0)
             return data[offsets]
 
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
+
         lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
         lengths[-2] = 3
         lengths[-1] = 3
@@ -2156,6 +2164,8 @@ class CommonTemplate:
             return torch.cumprod(a.view(-1), 0)
 
         for dtype in [torch.float16, torch.bfloat16]:
+            if not self.is_dtype_supported(dtype):
+                continue
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
             )
@@ -2502,10 +2512,13 @@ class CommonTemplate:
         def fn(x):
             return 2 * x.sum(-1) + x.sum()
 
-        dtypes = torch.bool, torch.uint8, torch.int
-        inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+        # Requires masked loading for the intermediate reduction
         if self.device == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
+
+        dtypes = torch.bool, torch.uint8, torch.int
+        inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
@@ -2672,6 +2685,10 @@ class CommonTemplate:
         def fn(a, b):
             return torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16))
 
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     def test_arange1(self):
@@ -3108,6 +3125,9 @@ class CommonTemplate:
                 a / b,
                 a // b,
             )
+
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Inaccurate for MPS no MacOS-13")
 
         self.common(
             fn,
@@ -5285,6 +5305,10 @@ class CommonTemplate:
         def fn(x):
             return aten.tan(x) + 2, aten.tan(x + 1)
 
+        # tan is broken in MPSGraph for MacOS before version 13.3
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("tan is inaccurate for MPS no MacOS-13")
+
         self.common(
             fn,
             (torch.randn([16, 16]),),
@@ -5886,6 +5910,10 @@ class CommonTemplate:
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
 
+        # pow is broken in MPSGraph for MacOS before version 13.3
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
+
         self.common(
             fn,
             (torch.randn([16, 16]),),
@@ -6213,18 +6241,24 @@ class CommonTemplate:
             # use default
             atol = None
             rtol = None
-        self.common(
-            fn,
-            (
-                torch.randn(256, 256),
-                torch.randn(256, 1024),
-                torch.randn(1024, 1600),
-                torch.randn(100, 256),
-            ),
-            atol=atol,
-            rtol=rtol,
-            check_lowp=False,  # accuracy issues with relatively large matmuls
-        )
+        # MPS has correctness problem before MacOS15
+        with (
+            contextlib.nullcontext()
+            if self.device != "mps" or MACOS_VERSION >= 15.0
+            else self.assertRaises(AssertionError)
+        ):
+            self.common(
+                fn,
+                (
+                    torch.randn(256, 256),
+                    torch.randn(256, 1024),
+                    torch.randn(1024, 1600),
+                    torch.randn(100, 256),
+                ),
+                atol=atol,
+                rtol=rtol,
+                check_lowp=False,  # accuracy issues with relatively large matmuls
+            )
 
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
@@ -7206,9 +7240,16 @@ class CommonTemplate:
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
+        # MPS has correctness problem for transposed sort before MacOS15
+        ctx = (
+            contextlib.nullcontext()
+            if self.device != "mps" or MACOS_VERSION >= 15.0
+            else self.assertRaises(AssertionError)
+        )
         inp = torch.randn(128, 10).transpose(0, 1)
-        self.common(fn, (inp, False))
-        self.common(fn, (inp, True))
+        with ctx:
+            self.common(fn, (inp, False))
+            self.common(fn, (inp, True))
 
     def test_topk(self):
         def fn(a):
@@ -8003,6 +8044,10 @@ class CommonTemplate:
             )
             return torch.ops.aten.index.Tensor(y, [iota, sub])
 
+        # Requires masked loading for the intermediate reduction
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
+
         self.common(fn, [torch.randn(1, 1024), torch.randn(1, 1024, 2)])
 
     @config.patch(fallback_random=True)
@@ -8318,6 +8363,9 @@ class CommonTemplate:
             a1.scatter_(dim, index, b, reduce=reduce)
             return (a, a1)
 
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Crashes on MacOS-13")
+
         check_lowp = True
         if self.device == "xpu":
             check_lowp = False
@@ -8471,6 +8519,9 @@ class CommonTemplate:
             a1 = a + 1.0
             a1.scatter_reduce_(dim, index, b, reduce=reduce)
             return (a, a1)
+
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Crashes on MacOS-13")
 
         check_lowp = True
         if self.device == "xpu":
@@ -11106,6 +11157,9 @@ class CommonTemplate:
             attention_mask = attention_mask.long()
             return torch.cumsum(attention_mask, dim=1)
 
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
+
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
@@ -13032,7 +13086,13 @@ class CommonTemplate:
             return torch.nn.functional.relu(x)
 
         x = torch.randn(1024 + 16, device=self.device)[1:-15]
-        self.common(fn, (x,), check_lowp=False)
+        # TODO (malfet): Investigate failures on MacOS-14
+        with (
+            contextlib.nullcontext()
+            if self.device != "mps" or MACOS_VERSION >= 15.0
+            else self.assertRaises(AssertionError)
+        ):
+            self.common(fn, (x,), check_lowp=False)
 
     def test_unaligned_input_2d(self):
         def fn(x):
