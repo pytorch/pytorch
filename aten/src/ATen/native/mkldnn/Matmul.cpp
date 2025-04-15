@@ -109,7 +109,7 @@ static bool use_mkldnn_bf32_matmul() {
 
 
 template<typename scalar_t>
-inline typename std::enable_if_t<
+static inline typename std::enable_if_t<
     std::is_same_v<scalar_t, float> ||
     std::is_same_v<scalar_t, c10::Half> ||
     std::is_same_v<scalar_t, c10::BFloat16>,
@@ -322,7 +322,7 @@ void mkldnn_matmul(
 
 }
 
-inline bool checksize(const Tensor& mat1, const Tensor& mat2){
+static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)

@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -8,7 +8,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._inductor.index_propagation import SymPyOps, TypedExpr
-from torch._prims_common import type_to_dtype
 
 from .ops_handler import DefaultHandler
 from .virtualized import StoreMode, V
@@ -110,32 +109,11 @@ class RecordLowPrecisionOps(DefaultHandler):
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
 
-    def masked(
-        self,
-        mask: DTypeContainer,
-        body: Callable[[], DTypeContainer],
-        other: DTypeContainer,
-    ) -> DTypeContainer:
-        return self.where(mask, other, body())
-
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        def to_constant(c: Union[int, float]) -> DTypeContainer:
-            return DTypeContainer(type_to_dtype(type(c)), is_scalar=True)
-
-        args = tuple(
-            a if not isinstance(a, (int, float)) else to_constant(a) for a in args
-        )
-        kwargs = {
-            k: v if not isinstance(v, (int, float)) else to_constant(v)
-            for k, v in kwargs.items()
-        }
-
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-        is_scalar = all(
-            not isinstance(v, DTypeContainer) or v.is_scalar
-            for v in itertools.chain(args, kwargs.values())
-        )
-        out = DTypeContainer(out_dtype, is_scalar=is_scalar)
+        out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
+        if name == "constant":
+            return DTypeContainer(torch.float, is_scalar=True)
 
         uses_low_prec = any(
             isinstance(dtype_cont, DTypeContainer)
