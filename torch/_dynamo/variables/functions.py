@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -47,7 +47,6 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
-    unimplemented,
     unimplemented_v2,
     Unsupported,
 )
@@ -369,16 +368,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
                 typ = fn_var.python_type()
-                unimplemented(
-                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                msg = f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                unimplemented_v2(
+                    gb_type="TypeError from user code",
+                    context=f"call_function({self.value}, {args}, {kwargs})",
+                    explanation=msg,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                unimplemented(
-                    f"""
-Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                unimplemented_v2(
+                    gb_type="Limitation of `nonstrict_trace",
+                    context=f"{self}",
+                    explanation=msg,
+                    hints=[
+                        f"make sure definition of {fn_name} is outside ",
+                        "`torch.compile` region",
+                    ],
                 )
 
             fn = fn_var.fn
@@ -1280,13 +1290,14 @@ class SkipFunctionVariable(VariableTracker):
                 ],
             )
         elif isinstance(self.value, types.WrapperDescriptorType):
-            msg = (
-                f"Graph break due to unsupported wrapper descriptor {self.value}. "
-                f"Please file an issue on GitHub "
-                f"so the PyTorch team can add support for it. "
+            unimplemented_v2(
+                gb_type="Calling unsupported type of SkipFunctionVariable",
+                context=f"{self.value}",
+                explanation="`torch.compile` cannot arbitrary C functions",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
-            torch._dynamo.utils.warn_once(msg)
-            unimplemented(msg)
         else:
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
@@ -1510,8 +1521,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         args = ()
 
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
-            unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+            unimplemented_v2(
+                gb_type="async_op=True for distributed collectives",
+                context=f"{self.fn}",
+                explanation="`torch.compile` currently can't trace these",
+                hints=[
+                    *graph_break_hints.DIFFICULT,
+                ],
             )
 
         if self.fn in (
@@ -1545,7 +1561,14 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
                     return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
+                unimplemented_v2(
+                    gb_type="functools.wraps",
+                    context=f"{fn}",
+                    explanation="`torch.compile` currently can't trace these",
+                    hints=[
+                        *graph_break_hints.DIFFICULT,
+                    ],
+                )
 
             return variables.LambdaVariable(wraps)
 
@@ -1571,7 +1594,14 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
-        unimplemented("namedtuple with non constant args")
+        unimplemented_v2(
+            gb_type="namedtuple construction",
+            context=f"{args=}, {kwargs=}",
+            explanation="`torch.compile` only support certain input types for namedtuple",
+            hints=[
+                *graph_break_hints.DIFFICULT,
+            ],
+        )
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -1816,10 +1846,8 @@ class SysFunctionVariable(VariableTracker):
     def call_function(self, tx, args, kwargs):
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        elif self.value is sys.exception:
-            return self.exception(tx)
-        else:
-            unimplemented(f"sys.{self.value.__name__}")
+        assert self.value is sys.exception
+        return self.exception(tx)
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -1846,7 +1874,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
         if isinstance(grid, BaseListVariable):
             return grid.as_proxy()
         else:
-            unimplemented(f"grid for the triton kernel is {type(grid)}")
+            unimplemented_v2(
+                gb_type="unsupported grid type for triton hop check_grid",
+                context=f"grid type = {type(grid)}",
+                explanation="`torch.compile` currently can't trace this",
+                hints=[
+                    *graph_break_hints.DIFFICULT,
+                ],
+            )
 
     def call_grid(self, grid, meta, tx):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
