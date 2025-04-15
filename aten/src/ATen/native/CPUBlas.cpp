@@ -554,7 +554,7 @@ using is_blas_library_type = std::integral_constant<bool,
     std::is_same_v<scalar_t, c10::complex<float>>>;
 
 template <typename scalar_t>
-void gemm_batched_generic(
+static void gemm_batched_generic(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -568,7 +568,7 @@ void gemm_batched_generic(
 }
 
 template <typename scalar_t>
-void gemm_batched(
+static void gemm_batched(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -596,7 +596,7 @@ void gemm_batched(
 }
 
 template <typename scalar_t>
-void gemm_batched_with_stride_generic(
+static void gemm_batched_with_stride_generic(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -945,7 +945,7 @@ struct PackKey {
   }
 };
 
-inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
+static inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
   if (dtype == ScalarType::Float) {
     return dnnl::memory::data_type::f32;
   } else if (dtype == ScalarType::BFloat16) {
