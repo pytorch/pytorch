@@ -85,7 +85,6 @@ def mps_ops_grad_modifier(ops):
         # precision issues
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
-        'nn.functional.binary_cross_entropy': [torch.float16],
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
