@@ -1,3 +1,5 @@
+# Owner(s): ["module: pytree"]
+
 """
 Contains utility functions for working with nested python data structures.
 
@@ -41,7 +43,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple, Self
+from typing_extensions import deprecated, NamedTuple, Self, TypeAlias
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
@@ -52,8 +54,9 @@ __all__ = [
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
-    "ToDumpableContextFn",
-    "FromDumpableContextFn",
+    "ToDumpableContextFunc",
+    "FromDumpableContextFunc",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -119,17 +122,21 @@ class EnumEncoder(json.JSONEncoder):
         return super().default(obj)  # type: ignore[no-any-return]
 
 
-Context = Any
-PyTree = Any
-FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
-UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
-DumpableContext = Any  # Any json dumpable text
-ToDumpableContextFn = Callable[[Context], DumpableContext]
-FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", list[str]], str]
-MaybeFromStrFunc = Callable[[str], Optional[tuple[Any, Context, str]]]
-KeyPath = tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
+Context: TypeAlias = Any
+PyTree: TypeAlias = Any
+FlattenFunc: TypeAlias = Callable[[PyTree], tuple[list[Any], Context]]
+UnflattenFunc: TypeAlias = Callable[[Iterable[Any], Context], PyTree]
+DumpableContext: TypeAlias = Any  # Any json dumpable text
+ToDumpableContextFunc: TypeAlias = Callable[[Context], DumpableContext]
+FromDumpableContextFunc: TypeAlias = Callable[[DumpableContext], Context]
+ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
+FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
+ToStrFunc: TypeAlias = Callable[["TreeSpec", list[str]], str]
+MaybeFromStrFunc: TypeAlias = Callable[[str], Optional[tuple[Any, Context, str]]]
+KeyPath: TypeAlias = tuple[KeyEntry, ...]
+FlattenWithKeysFunc: TypeAlias = Callable[
+    [PyTree], tuple[list[tuple[KeyEntry, Any]], Any]
+]
 
 
 # A NodeDef holds two callables:
@@ -162,8 +169,8 @@ SUPPORTED_NODES: dict[type[Any], NodeDef] = {}
 class _SerializeNodeDef(NamedTuple):
     typ: type[Any]
     serialized_type_name: str
-    to_dumpable_context: Optional[ToDumpableContextFn]
-    from_dumpable_context: Optional[FromDumpableContextFn]
+    to_dumpable_context: Optional[ToDumpableContextFunc]
+    from_dumpable_context: Optional[FromDumpableContextFunc]
 
 
 SUPPORTED_SERIALIZED_TYPES: dict[type[Any], _SerializeNodeDef] = {}
@@ -200,8 +207,8 @@ def register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
@@ -523,8 +530,8 @@ def _register_pytree_node(
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node for the Python pytree only.
@@ -590,8 +597,8 @@ def _private_register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """This is an internal function that is used to register a pytree node type
@@ -1056,7 +1063,9 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
 @dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
-class TreeSpec:
+class PyTreeSpec:
+    """Representing the structure of the pytree."""
+
     type: Any
     context: Context
     children_specs: list["TreeSpec"]
@@ -1103,9 +1112,12 @@ class TreeSpec:
         return NotImplemented
 
     def is_leaf(self) -> bool:
+        """Test whether the treespec represents a leaf."""
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+    def flatten_up_to(self, full_tree: PyTree) -> list[PyTree]:
+        """Flatten the subtrees in ``full_tree`` up to the structure of this treespec and return a list of subtrees."""
+
         def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(tree)
@@ -1185,10 +1197,11 @@ class TreeSpec:
                 helper(subspec, subtree, subtrees)
 
         subtrees: list[PyTree] = []
-        helper(self, tree, subtrees)
+        helper(self, full_tree, subtrees)
         return subtrees
 
     def unflatten(self, leaves: Iterable[Any]) -> PyTree:
+        """Reconstruct a pytree from the leaves."""
         if not isinstance(leaves, (list, tuple)):
             leaves = list(leaves)
         if len(leaves) != self.num_leaves:
@@ -1212,6 +1225,9 @@ class TreeSpec:
             start = end
 
         return unflatten_fn(child_pytrees, self.context)
+
+
+TreeSpec: TypeAlias = PyTreeSpec
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
@@ -1888,16 +1904,22 @@ def treespec_loads(serialized: str) -> TreeSpec:
     )
 
 
-class _DummyLeaf:
+class _Asterisk(str):
+    __slots__ = ()
+
+    def __new__(cls) -> Self:
+        return super().__new__(cls, "*")
+
     def __repr__(self) -> str:
-        return "*"
+        return "*"  # no quotes
+
+
+_asterisk = _Asterisk()
+del _Asterisk
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten(
-        [_DummyLeaf() for _ in range(treespec.num_leaves)],
-        treespec,
-    )
+    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
     return repr(dummy_tree)
 
 
