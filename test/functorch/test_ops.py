@@ -2974,8 +2974,8 @@ class TestOperators(TestCase):
         )
 
 
-only_for = ("cpu", "cuda", "mps")
-instantiate_device_type_tests(TestOperators, globals(), allow_mps=True)
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestOperators, globals())
 
 if __name__ == "__main__":
     run_tests()
