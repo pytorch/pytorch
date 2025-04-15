@@ -616,7 +616,7 @@ class SymInt:
 
 class SymFloat:
     """
-    Like an float (including magic methods), but redirects all operations on the
+    Like a float (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
     """
@@ -735,7 +735,7 @@ class SymFloat:
 
 class SymBool:
     """
-    Like an bool (including magic methods), but redirects all operations on the
+    Like a bool (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
 
@@ -2099,7 +2099,7 @@ for __name in dir(_C._VariableFunctions):
     __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
-        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        # TODO: Once the undocumented FC window is passed, remove the line below
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj
@@ -2416,7 +2416,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2429,7 +2431,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2441,7 +2445,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2577,6 +2583,10 @@ def compile(
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
+    guard_filter_fn = None
+    if options and isinstance(options, dict):
+        guard_filter_fn = options.pop("guard_filter_fn", None)
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2587,6 +2597,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        guard_filter_fn=guard_filter_fn,
     )(model)  # type: ignore[return-value]
 
 
