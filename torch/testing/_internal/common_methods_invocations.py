@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR
+    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -1341,10 +1341,19 @@ def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kw
     supported_dtypes = op_info.supported_dtypes(device)
     make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
 
-    types = (
-        (torch.float64, torch.complex128),
-        (torch.bfloat16, torch.float32),
-    )
+    if torch.device(device).type == 'mps':
+        types = (
+            (torch.float16, torch.float32),
+        )
+
+        if MACOS_VERSION >= 14:
+            types += (torch.bfloat16, torch.float32),
+
+    else:
+        types = (
+            (torch.float64, torch.complex128),
+            (torch.bfloat16, torch.float32),
+        )
 
     values = (
         None,
@@ -8227,6 +8236,7 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(_make_tensor(shape),
                           args=(_make_tensor(shape, requires_grad=rhs_requires_grad),),
                           kwargs=kwargs)
+
 
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     # We get better tests if we change the range of the values to something like [-2,2]

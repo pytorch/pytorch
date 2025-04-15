@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    skipIfMPS,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -4567,6 +4568,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+
+                xfail("SortGenVmapAutogradFunction", device_type="mps"),
             }
         ),
     )
@@ -4609,6 +4612,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             device, dtype, op, check_has_batch_rule=True, skip_inplace=inplace_failures
         )
 
+    @skipIfMPS  # Not implemented
     def test_linalg_svd(self, device):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
@@ -4635,6 +4639,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 postprocess_fn=compute_A,
             )
 
+    @skipIfMPS  # Not implemented
     def test_linalg_eigh(self, device):
         # linalg_svd returns two tensors, (Q, L).
         # Given the same input, it may return different tensors,
@@ -6415,8 +6420,10 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "mps")
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfo, globals(), only_for=only_for, allow_mps=True
+)
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,

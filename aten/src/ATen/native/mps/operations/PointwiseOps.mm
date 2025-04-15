@@ -41,7 +41,7 @@ static void addc_mul_div_out_mps(const Tensor& self,
     bool contiguousOutput = !needsGather(output);
     Tensor output_ = output;
     if (!contiguousOutput) {
-      output_ = at::empty_like(self, MemoryFormat::Contiguous);
+      output_ = output.contiguous();
     }
 
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
@@ -105,12 +105,12 @@ static void addc_mul_div_out_mps(const Tensor& self,
 // APIs exposed to at::native scope
 TORCH_IMPL_FUNC(addcmul_out_mps)
 (const Tensor& self, const Tensor& tensor1, const Tensor& tensor2, const Scalar& value, const Tensor& output) {
-  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, false, "addcmul_out_mps");
+  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, false /*is_div*/, "addcmul_out_mps");
 }
 
 TORCH_IMPL_FUNC(addcdiv_out_mps)
 (const Tensor& self, const Tensor& tensor1, const Tensor& tensor2, const Scalar& value, const Tensor& output) {
-  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, true, "addcdiv_out_mps");
+  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, true /*is_div*/, "addcdiv_out_mps");
 }
 
 } // namespace at::native

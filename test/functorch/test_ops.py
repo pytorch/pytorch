@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     runOnRocm,
+    skipIfMPS,
     skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -1658,6 +1659,7 @@ class TestOperators(TestCase):
             }
         ),
     )
+    @skipIfMPS
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
         # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
@@ -2439,6 +2441,9 @@ class TestOperators(TestCase):
 
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
+            return
+        elif dtype == torch.float64 and torch.device(device).type == "mps":
+            self.skipTest("MPS does not support float64.")
             return
 
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
