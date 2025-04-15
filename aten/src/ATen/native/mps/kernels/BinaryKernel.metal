@@ -210,6 +210,14 @@ REGISTER_BINARY_OP(sub, short, short);
 REGISTER_BINARY_OP(sub, uchar, uchar);
 REGISTER_BINARY_OP(sub, char, char);
 REGISTER_BINARY_OP(sub, bool, bool);
+REGISTER_BINARY_OP(lerp, long, long);
+REGISTER_BINARY_OP(lerp, int, int);
+REGISTER_BINARY_OP(lerp, float, float);
+REGISTER_BINARY_OP(lerp, half, half);
+REGISTER_BINARY_OP(lerp, short, short);
+REGISTER_BINARY_OP(lerp, uchar, uchar);
+REGISTER_BINARY_OP(lerp, char, char);
+REGISTER_BINARY_OP(lerp, bool, bool);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
@@ -225,6 +233,7 @@ REGISTER_BINARY_OP(chebyshev_polynomial_w, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
+REGISTER_BINARY_OP(lerp, bfloat, bfloat);
 #endif
 
 // Complex binary functions
