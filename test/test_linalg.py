@@ -5747,6 +5747,26 @@ class TestLinalg(TestCase):
         with torch.no_grad():
             torch.matmul(a, b, out=c)
 
+    @dtypes(torch.float, torch.complex64)
+    def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
+        a = torch.empty((4, 2), device=device, dtype=dtype, requires_grad=True)
+        b = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
+        c = torch.empty((2, 2), device=device, dtype=dtype, requires_grad=True)
+        d = torch.empty((4, 4), device=device, dtype=dtype, requires_grad=False)
+        err_msg = "the 'out' tensor was specified and requires gradients"
+
+        with torch.set_grad_enabled(True), self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+
+        with torch.set_grad_enabled(True):
+            torch.tensordot(a, b, dims=([1], [0]), out=d)
+
+        with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
+            # Hack to avoid resize error for CUDA tensors as resize_cuda_ is different to resize_.
+            c.requires_grad = False
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+            self.assertEqual(len(w), 1)
+
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
@@ -9480,6 +9500,17 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
         ref = alpha * A @ B + beta * C
         self.assertEqual(rc, ref)
+
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @largeTensorTest('16GB')
+    def test_matmul_mv(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150637
+        # Such matrix will take more than 4Gb in memory
+        n = 50_000
+        A = torch.ones(n, n, dtype=dtype, device=device)
+        B = torch.rand(n, dtype=dtype, device=device)
+        C = torch.matmul(A, B)
+        self.assertEqual(C, B.sum().expand(B.shape))
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
