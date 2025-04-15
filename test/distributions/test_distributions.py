@@ -2592,7 +2592,9 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(
-            MixtureSameFamily(Categorical(probs=probs), Binomial(max_count, binom_probs)),
+            MixtureSameFamily(
+                Categorical(probs=probs), Binomial(max_count, binom_probs)
+            ),
             ref_log_prob,
         )
 
