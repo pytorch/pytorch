@@ -88,7 +88,7 @@ class WrapResult(NamedTuple):
     maybe_subclass_meta: Optional[SubclassMeta] = None
 
 
-def run_wrappers(
+def apply_wrappers(
     fn: Callable[..., Any],
     args: Sequence[Tensor],
     wrappers: Sequence[Callable[..., Any]]
