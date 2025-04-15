@@ -4879,6 +4879,9 @@ class CommonTemplate:
 
         mod = Model().to(self.device)
         for dtype in [torch.half, torch.bfloat16]:
+            # Skip bfloat16 on MacOS-13 for MPS tests
+            if not self.is_dtype_supported(dtype):
+                continue
             x = torch.randn(4, 3, 7, 7, device=self.device).to(dtype=dtype)
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
