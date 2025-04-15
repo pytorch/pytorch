@@ -101,7 +101,6 @@ from ..source import (
     GradSource,
     is_constant_source,
     is_from_optimizer_source,
-    is_from_unspecialized_param_buffer_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -1765,9 +1764,16 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
-        should_install_graph_params = (
-            config.install_params_as_graph_attr
-            and is_from_unspecialized_param_buffer_source(source)
+        # Install any tensors which are not:
+        should_install_graph_params = config.install_params_as_graph_attr and not (
+            # Either explicit input
+            (isinstance(source, LocalSource) and source.is_input)
+            # One level nested such as list or dict should not be installed
+            or (
+                isinstance(source, GetItemSource)
+                and isinstance(source.base, LocalSource)
+                and source.base.is_input
+            )
         )
 
         make_graph_attribute = is_static_input and (
