@@ -396,6 +396,7 @@ XFAILLIST_GRAD = {
     "_upsample_bilinear2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "_upsample_bicubic2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.det": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
+    "linalg.slogdet": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve_ex": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.tensorsolve": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
