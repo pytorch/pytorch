@@ -9,6 +9,10 @@
 
 namespace c10d {
 
+c10::intrusive_ptr<Store> HashStore::clone() {
+  return c10::intrusive_ptr<Store>::unsafe_reclaim_from_nonowning(this);
+}
+
 void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   std::unique_lock<std::mutex> lock(m_);
   map_[key] = data;
@@ -57,19 +61,17 @@ std::vector<uint8_t> HashStore::get(const std::string& key) {
 void HashStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
-  const auto end = std::chrono::steady_clock::now() + timeout;
-  auto pred = [&]() {
-    auto done = true;
-    for (const auto& key : keys) {
-      if (map_.find(key) == map_.end()) {
-        done = false;
-        break;
-      }
-    }
-    return done;
-  };
-
   std::unique_lock<std::mutex> lock(m_);
+  waitLocked(lock, keys, timeout);
+}
+
+void HashStore::waitLocked(
+    std::unique_lock<std::mutex>& lock,
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
+  const auto end = std::chrono::steady_clock::now() + timeout;
+  auto pred = [&]() { return checkLocked(lock, keys); };
+
   if (timeout == kNoTimeout) {
     cv_.wait(lock, pred);
   } else {
@@ -108,8 +110,18 @@ bool HashStore::deleteKey(const std::string& key) {
 
 bool HashStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> lock(m_);
+
+  return checkLocked(lock, keys);
+}
+
+bool HashStore::checkLocked(
+    const std::unique_lock<std::mutex>& lock,
+    const std::vector<std::string>& keys) {
   for (const auto& key : keys) {
-    if (map_.find(key) == map_.end()) {
+    auto foundKV = map_.find(key) != map_.end();
+    auto foundQueue =
+        queues_.find(key) != queues_.end() && !queues_[key].empty();
+    if (!foundKV && !foundQueue) {
       return false;
     }
   }
@@ -168,6 +180,37 @@ void HashStore::multiSet(
 
 bool HashStore::hasExtendedApi() const {
   return true;
+}
+
+void HashStore::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  queues_[key].push_back(value);
+
+  cv_.notify_one();
+}
+
+std::vector<uint8_t> HashStore::queuePop(const std::string& key) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  waitLocked(lock, {key}, timeout_);
+
+  auto& queue = queues_[key];
+  auto val = queue.front();
+  queue.pop_front();
+  return val;
+}
+
+int64_t HashStore::queueLen(const std::string& key) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  auto it = queues_.find(key);
+  if (it == queues_.end()) {
+    return 0;
+  }
+  return static_cast<int64_t>(it->second.size());
 }
 
 } // namespace c10d
