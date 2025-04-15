@@ -148,6 +148,7 @@ if try_import_cutlass():
             == "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>"
         ):
             DEFAULT_STRIDE_LEN = 3
+            assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN
             stride = [int(x) for x in node.get_layout().stride]
             for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
                 stride.append(0)
