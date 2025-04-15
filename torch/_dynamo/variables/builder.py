@@ -251,7 +251,6 @@ from .torch import (
     TorchInGraphFunctionVariable,
 )
 from .torch_function import (
-    build_torch_function_fn,
     TensorWithTFOverrideVariable,
     torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
@@ -1846,9 +1845,6 @@ class VariableBuilder:
             subclass_type = None
         else:
             subclass_type = type(value)
-            options["torch_function_fn"] = build_torch_function_fn(
-                self.tx, value, self.source
-            )
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
@@ -2614,7 +2610,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         # For newly constructed objects that have mutable attributes, we usually
         # construct their VariableTracker via `track_object_new`, but since
         # tensor variable construction is a bit different, we handle them
-        # speically here. This ensures that codegen will actually generate the
+        # specially here. This ensures that codegen will actually generate the
         # attribute mutations on this tensor.
         #
         # NOTE we pass a dummy object as the `item` argument to avoid

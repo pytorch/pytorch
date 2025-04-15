@@ -203,7 +203,7 @@ def get_overridable_functions():
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more = {
+    more: set[Callable[..., Any]] = {
         torch.ones,
         torch.ones_like,
         torch.zeros,
