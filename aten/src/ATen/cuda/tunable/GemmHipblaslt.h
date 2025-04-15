@@ -572,7 +572,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       void* workspace_buffer = nullptr;
       if (workspace_size > 0) {
-        workspace_buffer = c10::cuda::CUDACachingAllocator::raw_allocate(workspace_size);
+        workspace_buffer = c10::cuda::CUDACachingAllocator::raw_alloc(workspace_size);
       }
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
@@ -597,7 +597,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
       if (workspace_size > 0) {
-        c10::cuda::CUDACachingAllocator::raw_deallocate(workspace_buffer);
+        c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
       }
       return OK;
     }

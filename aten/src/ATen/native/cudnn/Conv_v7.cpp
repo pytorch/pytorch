@@ -148,14 +148,14 @@ struct Workspace {
     // OOM error. In such case, we manually fail with OOM.
     TORCH_CHECK_WITH(
         OutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
-    data = c10::cuda::CUDACachingAllocator::raw_allocate(size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      c10::cuda::CUDACachingAllocator::raw_deallocate(data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 

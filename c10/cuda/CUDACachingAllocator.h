@@ -323,8 +323,16 @@ inline CUDAAllocator* get() {
 }
 
 // Called directly by clients.
+inline void* raw_alloc(size_t nbytes) {
+  return get()->raw_allocate(nbytes);
+}
+
 inline void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   return get()->raw_alloc_with_stream(nbytes, stream);
+}
+
+inline void raw_delete(void* ptr) {
+  return get()->raw_deallocate(ptr);
 }
 
 inline void init(int device_count) {
