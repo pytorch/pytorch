@@ -10,4 +10,4 @@ void complex_mul_out(
     const Tensor& input,
     const Tensor& other,
     const Tensor& output);
-}
+} // namespace at::native::mps
