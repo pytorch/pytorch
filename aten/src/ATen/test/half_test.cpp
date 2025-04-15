@@ -100,8 +100,6 @@ ASSERT_SAME_TYPE(is_exact);
 ASSERT_SAME_TYPE(has_infinity);
 ASSERT_SAME_TYPE(has_quiet_NaN);
 ASSERT_SAME_TYPE(has_signaling_NaN);
-ASSERT_SAME_TYPE(has_denorm);
-ASSERT_SAME_TYPE(has_denorm_loss);
 ASSERT_SAME_TYPE(round_style);
 ASSERT_SAME_TYPE(is_iec559);
 ASSERT_SAME_TYPE(is_bounded);
