@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -290,6 +291,14 @@ def get_divisible_by_16(cfg):
         for key, value in cfg.items()
         if len(key) == 1 and value[0] == ["tt.divisibility", 16]
     ]
+
+
+def get_post_grad_graph(f, inputs):
+    log_stream, ctx = logs_to_string("torch._inductor.compile_fx", "post_grad_graphs")
+    with ctx():
+        f(*inputs)
+    post_grad_graph = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+    return post_grad_graph
 
 
 class TestCase(InductorTestCase):
@@ -6348,6 +6357,87 @@ class CommonTemplate:
             return y + x
 
         self.common(fn, (torch.randn(2, 4),))
+
+    def test_remove_noop_slice(self):
+        def f(x):
+            x = x + 1
+            size = x.shape[-1]
+            y = torch.ops.aten.slice(x, -1, 0, size)  # noop
+            return y + 1
+
+        f = torch.compile(f)
+
+        x = torch.ones((2, 3, 2), device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
+        add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
+        add_9: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_9,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    def test_remove_noop_slice1(self):
+        def f(x):
+            x = x + 1
+            y = torch.ops.aten.slice(x, -1, 0, -1)  # not a noop
+            return y + 1
+
+        f = torch.compile(f)
+        x = torch.ones((2, 3, 2), device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}"):
+        add: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
+        slice_1: "f32[s77, s27, 1][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.slice.Tensor(add, -1, 0, -1);  add = None
+        add_9: "f32[s77, s27, 1][s27, 1, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(slice_1, 1);  slice_1 = None
+        return (add_9,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    def test_remove_noop_slice_scatter(self):
+        def f(x):
+            x = x + 1
+            y = torch.empty_like(x)
+            size = x.shape[-1]
+            out = torch.ops.aten.slice_scatter(y, x, -1, 0, size)  # noop
+            return out + 1
+
+        f = torch.compile(f)
+
+        x = torch.ones((2, 3, 2), device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph = f"""\
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
+        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = None
+        permute: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.permute.default(empty, [0, 1, 2]);  empty = permute = None
+        add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
+        add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_13,)"""  # noqa: B950
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
