@@ -315,9 +315,8 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         def test_linear(x: torch.Tensor) -> torch.Tensor:
             return param * x + buf
 
-        # In this fn, param and buf are not part of net so shouldn't be installed
         self.check_num_inputs_and_equality_no_install(test_linear, 3, (x,))
-        self.check_num_inputs_and_equality_install(test_linear, 3, (x,))
+        self.check_num_inputs_and_equality_install(test_linear, 1, (x,))
 
         def test_linear_explicit(
             x: torch.Tensor, a: torch.Tensor, b: torch.Tensor
@@ -335,6 +334,7 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
 
 class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    @torch._dynamo.config.patch(install_params_as_graph_attr=True)
     def check_export_matches_expectation(
         self,
         fn_to_export: Callable,
@@ -467,11 +467,6 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         inp = torch.randn(5, 5)
         self.check_export_matches_expectation(fn, 1, (inp,))
 
-    # NOTE; the `should_install_graph_params` does not include
-    # nonlocal, only globals and params/bufs so as of now this
-    # should fail; we may want to support other sources in the
-    # near future though so let's leave this testcase for now
-    @unittest.expectedFailure
     def test_nonlocal_closure(self) -> None:
         x = torch.randn((5, 5))
 
@@ -481,7 +476,26 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         inp = torch.randn((5, 5))
         self.check_export_matches_expectation(fn, 1, (inp,))
 
+    # TODO[lucaskabela]: register the flatten/unflatten function so we can evaluate this test
+    @unittest.expectedFailure
+    def test_user_defined_object(self) -> None:
+        class UserDefinedTestClass:
+            def __init__(self, x, y) -> None:
+                self.x = x
+                self.y = y
+
+        x = torch.randn((3, 3))
+        y = torch.randn((3, 3))
+
+        def fn(obj: UserDefinedTestClass, inp: torch.Tensor) -> torch.Tensor:
+            return obj.x + obj.y + inp
+
+        z = torch.randn((3, 1))
+
+        self.check_export_matches_expectation(fn, 2, (UserDefinedTestClass(x, y), z))
+
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    @torch._dynamo.config.patch(install_params_as_graph_attr=True)
     def test_modify_net_state(self) -> None:
         class Mod(torch.nn.Module):
             def __init__(self):
