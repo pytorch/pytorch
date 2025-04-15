@@ -488,9 +488,6 @@ class AOTAutogradCacheEntry:
     forward_time_taken_ns: int
     backward_time_taken_ns: int
 
-    # Used by standalone_compile
-    sanitized_aot_config: AOTConfig
-
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
