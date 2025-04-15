@@ -755,11 +755,6 @@ class MultiOutputLine(WrapperLine):
         )
 
 
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
