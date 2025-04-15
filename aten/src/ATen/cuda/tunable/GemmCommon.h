@@ -442,7 +442,7 @@ struct GemmAndBiasParams : OpParams {
       // NOLINTNEXTLINE(*const-cast)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
       // NOLINTNEXTLINE(*const-cast)
-      c10::cuda::CUDACachingAllocator::raw_deletest_cast<T*>(b));
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
     }
   }
 
