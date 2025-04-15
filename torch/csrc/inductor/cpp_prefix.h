@@ -9,10 +9,11 @@
 #include <memory>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
-// Because AOTInductor generated code will include this for the CPU backend, we
-// have to make sure the used headers are implemented in a header-only way; i.e.
-// all the function and class definitions are in .h files instead of .cpp files,
-// to avoid ABI backward-compatibility breakage.
+// Because AOTInductor generated code will copy-paste this cpp_prefix.h for
+// the CPU backend, we have to make sure the used headers are implemented
+// in a header-only way, i.e. all the function and class definitions are
+// in .h files instead of .cpp files, to avoid ABI backward-compatiblity
+// breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
@@ -20,7 +21,9 @@
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/generic_math.h>
@@ -45,6 +48,12 @@
 // For calc_erfinv
 #include <ATen/native/Math.h>
 #endif
+
+typedef at::Half half;
+typedef at::BFloat16 bfloat16;
+
+typedef at::Float8_e4m3fn float8_e4m3fn;
+typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
@@ -240,8 +249,7 @@ T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
 #endif
 
 // Refer to
-// https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
-// aten/src/ATen/native/SharedReduceOps.h#L419-L445
+// https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/aten/src/ATen/native/SharedReduceOps.h#L419-L445
 template <typename scalar_t>
 inline bool greater_or_nan(
     scalar_t a,
@@ -565,9 +573,10 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
+    default:
+      throw std::runtime_error(
+          "Unhandled vec_shuffle_down value " + std::to_string(n));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -590,9 +599,10 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 8:
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+    default:
+      throw std::runtime_error(
+          "Unhandled vec_shuffle_down value " + std::to_string(n));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -711,7 +721,7 @@ struct AsIntegerType<double> {
   typedef uint64_t type;
 };
 template <>
-struct AsIntegerType<at::BFloat16> {
+struct AsIntegerType<bfloat16> {
   typedef uint16_t type;
 };
 
