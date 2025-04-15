@@ -258,7 +258,7 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    if not hasattr(compiled_fn, "_boxed_call"):
+    if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
     # Note [Inputs needed in runtime epilogue after list clearing]
