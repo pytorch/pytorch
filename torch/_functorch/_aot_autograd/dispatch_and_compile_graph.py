@@ -72,7 +72,7 @@ def _detach_and_copy_item_memo(t):
     return detached_t
 
 
-def _remove_args_argument(wrapper: Callable[..., Any]) -> Callable[..., Any]:
+def _add_args_argument(wrapper: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(wrapper)
     def wrapped_wrapper(
         fn: Callable[..., Any], args: Sequence[Tensor], /, *a: Any, **ka: Any
@@ -117,7 +117,7 @@ def aot_dispatch_base_graph(
     # - input metadata mutations
     wrappers = (
         functools.partial(
-            _remove_args_argument(fn_input_mutations_to_outputs),
+            _add_args_argument(fn_input_mutations_to_outputs),
             keep_data_input_mutations=aot_config.keep_inference_input_mutations,
             meta=fw_metadata,
         ),
@@ -289,15 +289,15 @@ def aot_dispatch_autograd_graph(
 
     wrappers = (
         functools.partial(
-            _remove_args_argument(fn_prepped_for_autograd),
+            _add_args_argument(fn_prepped_for_autograd),
             meta=fw_metadata,
         ),
         functools.partial(
-            _remove_args_argument(create_joint),
+            _add_args_argument(create_joint),
             aot_config=aot_config,
         ),
         functools.partial(
-            _remove_args_argument(create_functionalized_fn),
+            _add_args_argument(create_functionalized_fn),
             args=[flat_args, fw_metadata.traced_tangents],
             aot_config=aot_config,
             meta=fw_metadata,
