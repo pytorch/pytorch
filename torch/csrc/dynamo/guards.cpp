@@ -3631,6 +3631,85 @@ class GetAttrGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents object.__getattribute__(obj, attr_name) acccessor.
+ */
+class GenericGetAttrGuardAccessor : public GuardAccessor {
+ public:
+  GenericGetAttrGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            name,
+            std::move(source),
+            example_value,
+            guard_manager_enum),
+        _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* x = PyObject_GenericGetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GenericGetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, "getattr failed on source " + get_source(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    // Helpful when priting GuardManager tree structure.
+    return "GenericGetAttrGuardAccessor(" +
+        py::str(_attr_name).cast<std::string>() + ")";
+  }
+
+ public: // cloning functions
+  GenericGetAttrGuardAccessor(
+      GuardManager* guard_manager,
+      GenericGetAttrGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GenericGetAttrGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(GenericGetAttrGuardAccessor* to) {
+    to->_attr_name = _attr_name;
+  }
+
+ private:
+  // no need of py::object here because the attr_name is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _attr_name{nullptr};
+};
+
+/**
  * Represents x.__dict__ acccessor.
  */
 class GetGenericDictGuardAccessor : public GuardAccessor {
@@ -5260,15 +5339,7 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   if (root == nullptr) {
     return false;
   }
-  py::object config_module = py::module_::import("torch._dynamo.config");
-  bool enable_cpp_framelocals_guard_eval =
-      config_module.attr("enable_cpp_framelocals_guard_eval").cast<bool>();
-  if (enable_cpp_framelocals_guard_eval) {
-    return ((RootGuardManager*)root)->check_nopybind(f_locals);
-  } else {
-    return ((RootGuardManager*)root)
-        ->check_nopybind((PyObject*)f_locals->to_dict());
-  }
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -5489,6 +5560,12 @@ PyObject* torch_c_dynamo_guards_init() {
       GetAttrGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      GenericGetAttrGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GenericGetAttrGuardAccessor>>(
+      py_m, "GenericGetAttrGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GetGenericDictGuardAccessor,
@@ -6073,6 +6150,16 @@ PyObject* torch_c_dynamo_guards_init() {
                 example_value,
                 guard_manager_enum);
           },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because C++ GuardManager has the ownership of
+      // accessors and guard managers
+      .def(
+          "generic_getattr_manager",
+          &GuardManager::get_child_manager<GenericGetAttrGuardAccessor>,
+          py::arg("attr"),
           py::arg("source"),
           py::arg("example_value"),
           py::arg("guard_manager_enum"),

@@ -11888,6 +11888,10 @@ fn
         self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
+        class Bar:
+            def __init__(self, v):
+                self.v = v
+
         class Foo:
             attribute_map = {}
 
@@ -11895,6 +11899,9 @@ fn
                 self.attribute_map = {
                     "a_premap": "a",
                 }
+                # `bar` attribute requires propagating sources correctly through
+                # object.__getattribute__
+                self.bar = Bar(5)
 
             def __setattr__(self, key, value):
                 if key in super().__getattribute__("attribute_map"):
@@ -11922,7 +11929,7 @@ fn
             return f
 
         def fn(x, f):
-            return x * f.a_premap * f.a * f.b * f.sentinel
+            return x * f.a_premap * f.a * f.b * f.sentinel * f.bar.v
 
         x = torch.randn(4)
 
