@@ -14,6 +14,8 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce, partial
+from typing import Union, Optional
+from torch._prims_common import DimsType
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -1474,6 +1476,61 @@ class TestLinalg(TestCase):
                             dim,
                             keepdim,
                             norm_dtype)
+
+
+    def test_vector_norm_decom_unbacked_checks(self):
+        from torch._refs.linalg import _check_vector_norm_args
+
+        class Mod(torch.nn.Module):
+            def __init__(self, ord, dim):
+                super().__init__()
+                self.ord = ord
+                self.dim = dim
+
+            def forward(self, a):
+                x = a.item()
+                tensor_unbacked_size = torch.ones(x, x + 1, x + 2)
+                _check_vector_norm_args(tensor_unbacked_size, self.ord, self.dim)
+                return tensor_unbacked_size
+
+        def test(
+            ord: Union[float, int],
+            dim: Optional[DimsType],
+            expect_numel_runtime_check: bool,
+            expect_index_0_check: bool = False,
+        ) -> None:
+            m = Mod(ord, dim)
+            exported_program: torch.export.ExportedProgram = torch.export.export(
+                m, args=tuple(torch.tensor([1]))
+            )
+            self.assertEqual(
+                "Runtime assertion failed for expression Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                in exported_program.graph_module.code,
+                expect_numel_runtime_check,
+            )
+            self.assertEqual(
+                "Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                in exported_program.graph_module.code,
+                expect_index_0_check,
+            )
+
+        # dim is int
+        test(-1, 1, True)
+
+        # dim is None
+        test(-1, None, True)
+
+        # len(dim) == 0
+        test(-1, [], True)
+
+        # shape[d] == 0
+        test(-1, [0], False, True)
+
+        # u0 + 1 == 0 is False we do not see a runtime assert in the generated graph.
+        test(-1, [1], False, False)
+
+        test(-1, [0, 1], False, True)
+        test(-1, [0, 0], False, True)
 
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
@@ -5690,6 +5747,26 @@ class TestLinalg(TestCase):
         with torch.no_grad():
             torch.matmul(a, b, out=c)
 
+    @dtypes(torch.float, torch.complex64)
+    def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
+        a = torch.empty((4, 2), device=device, dtype=dtype, requires_grad=True)
+        b = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
+        c = torch.empty((2, 2), device=device, dtype=dtype, requires_grad=True)
+        d = torch.empty((4, 4), device=device, dtype=dtype, requires_grad=False)
+        err_msg = "the 'out' tensor was specified and requires gradients"
+
+        with torch.set_grad_enabled(True), self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+
+        with torch.set_grad_enabled(True):
+            torch.tensordot(a, b, dims=([1], [0]), out=d)
+
+        with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
+            # Hack to avoid resize error for CUDA tensors as resize_cuda_ is different to resize_.
+            c.requires_grad = False
+            torch.tensordot(a, b, dims=([1], [0]), out=c)
+            self.assertEqual(len(w), 1)
+
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
@@ -5845,20 +5922,21 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_ormqr_errors_and_warnings(self, device, dtype):
         test_cases = [
-            # input1 size, input2 size, input3 size, error regex
-            ((10,), (2,), (2,), r"input must have at least 2 dimensions"),
-            ((2, 2), (2,), (2,), r"other must have at least 2 dimensions"),
-            ((10, 6), (20,), (10, 6), r"other.shape\[-2\] must be greater than or equal to tau.shape\[-1\]"),
-            ((6, 6), (5,), (5, 5), r"other.shape\[-2\] must be equal to input.shape\[-2\]"),
-            ((1, 2, 2), (2, 2), (1, 2, 2), r"batch dimensions of tau to be equal to input.shape\[:-2\]"),
-            ((1, 2, 2), (1, 2), (2, 2, 2), r"batch dimensions of other to be equal to input.shape\[:-2\]"),
+            # input1 size, input2 size, input3 size, left, error regex
+            ((10,), (2,), (2,), True, r"input must have at least 2 dimensions"),
+            ((2, 2), (2,), (2,), True, r"other must have at least 2 dimensions"),
+            ((6, 6), (5,), (5, 5), True, r"other.shape\[-2\] must be equal to input.shape\[-2\]"),
+            ((1, 2, 2), (2, 2), (1, 2, 2), True, r"batch dimensions of tau to be equal to input.shape\[:-2\]"),
+            ((1, 2, 2), (1, 2), (2, 2, 2), True, r"batch dimensions of other to be equal to input.shape\[:-2\]"),
+            ((2, 4, 3), (2, 2), (2, 3, 10), True, r"torch.ormqr: other.shape\[-2\] must be equal to input.shape\[-2\]"),
+            ((2, 4, 3), (2, 2), (2, 3, 10), False, r"torch.ormqr: other.shape\[-1\] must be equal to input.shape\[-2\]")
         ]
-        for a_size, tau_size, c_size, error_regex in test_cases:
+        for a_size, tau_size, c_size, left, error_regex in test_cases:
             a = make_tensor(a_size, dtype=dtype, device=device)
             tau = make_tensor(tau_size, dtype=dtype, device=device)
             c = make_tensor(c_size, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, error_regex):
-                torch.ormqr(a, tau, c)
+                torch.ormqr(a, tau, c, left)
 
     def test_blas_empty(self, device):
         def fn(torchfn, *args, test_out=False, **kwargs):
@@ -9422,6 +9500,17 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
         ref = alpha * A @ B + beta * C
         self.assertEqual(rc, ref)
+
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @largeTensorTest('16GB')
+    def test_matmul_mv(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150637
+        # Such matrix will take more than 4Gb in memory
+        n = 50_000
+        A = torch.ones(n, n, dtype=dtype, device=device)
+        B = torch.rand(n, dtype=dtype, device=device)
+        C = torch.matmul(A, B)
+        self.assertEqual(C, B.sum().expand(B.shape))
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
