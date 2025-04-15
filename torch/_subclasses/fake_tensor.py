@@ -876,6 +876,11 @@ class FakeTensor(Tensor):
             aten.div.Tensor,
             aten.add.Tensor,
             aten.sub.Tensor,
+            # a iteration version of mul
+            aten._foreach_mul.List,
+            # scalar tensor could be used as inputs
+            aten.fmax.default,
+            aten.fmin.default,
             # zero dim cpu tensor is passed as some parameter in these backward methods.
             aten._scaled_dot_product_efficient_attention_backward.default,
             aten._efficient_attention_backward.default,
