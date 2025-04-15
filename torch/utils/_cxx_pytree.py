@@ -42,7 +42,7 @@ from torch.utils._pytree import (
 )
 
 
-if python_pytree._cxx_pytree_dynamo_traceable:
+if not python_pytree._cxx_pytree_dynamo_traceable:
     raise ImportError(
         f"{__name__} depends on `optree>={python_pytree._optree_minimum_version}`, "
         "which is an optional dependency of PyTorch. "
