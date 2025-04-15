@@ -5899,7 +5899,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
+                "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
 
@@ -6038,7 +6038,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Foo(), (torch.randn(64).cuda(),))
+        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6991,6 +6991,29 @@ def forward(self, x):
         ):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
+
+    def test_sym_or_sym_and(self):
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                torch._check(sym_or(u0 == 2, u0 == 4, u0 == 6))
+                torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
+                return u0 + u1 + u2
+
+        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
+        ep.module()(torch.tensor([2, 6, 5]))
+        ep.module()(torch.tensor([4, 7, 5]))
+        ep.module()(torch.tensor([6, 5, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
+        ):
+            ep.module()(torch.tensor([3, 6, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+        ):
+            ep.module()(torch.tensor([6, 6, 6]))
 
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
