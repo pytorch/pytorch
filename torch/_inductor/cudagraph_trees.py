@@ -1800,6 +1800,7 @@ def check_memory_pool(
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
     # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
     gc.collect()
+    torch.cuda.synchronize()
 
     segments = get_cudagraph_segments(pool_id)
 

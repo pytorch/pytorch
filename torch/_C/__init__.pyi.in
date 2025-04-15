@@ -913,6 +913,12 @@ class AliasInfo:
     is_write: _bool
     before_set: Set[str]
     after_set: Set[str]
+    def __init__(
+        self,
+        is_write: _bool,
+        before_set: Set[str],
+        after_set: Set[str]
+    ) -> None: ...
 
 # Defined in torch/aten/src/ATen/core/function_schema.h
 class Argument:
@@ -925,6 +931,15 @@ class Argument:
     alias_info: Optional[AliasInfo]
     is_write: _bool
     real_type: JitType
+    def __init__(
+        self,
+        name: str,
+        type: JitType,
+        N: Optional[_int],
+        defualt_value: Optional[Any],
+        kwarg_only: _bool,
+        alias_info: Optional[AliasInfo]
+    ) -> None: ...
 
 class FunctionSchema:
     arguments: List[Argument]
@@ -932,6 +947,15 @@ class FunctionSchema:
     name: str
     overload_name: str
     is_mutable: _bool
+    def __init__(
+        self,
+        name: str,
+        overload_name: str,
+        arguments: List[Argument],
+        returns: List[Argument],
+        is_vararg: _bool,
+        is_varret: _bool
+    ) -> None: ...
 
 class _UpgraderEntry:
     bumped_at_version: _int
@@ -1309,6 +1333,7 @@ def _get_blas_preferred_backend() -> torch._C._BlasBackend: ...
 def _set_blas_preferred_backend(arg: torch._C._BlasBackend): ...
 
 class _BlasBackend:
+    Default: _BlasBackend
     Cublas: _BlasBackend
     Cublaslt: _BlasBackend
     Ck: _BlasBackend
@@ -1357,6 +1382,8 @@ def _set_grad_enabled(enabled: _bool) -> None: ...
 def is_grad_enabled() -> _bool: ...
 def _set_fwd_grad_enabled(enabled: _bool) -> None: ...
 def _is_fwd_grad_enabled() -> _bool: ...
+def _any_requires_grad(*args, **kwargs) -> _bool: ...
+def _any_output_is_alias_to_input_or_output(*args, **kwargs) -> _bool: ...
 def is_inference_mode_enabled() -> _bool: ...
 @overload
 def set_autocast_enabled(device_type: str, enabled: _bool) -> None: ...
@@ -1915,12 +1942,14 @@ def _cuda_record_memory_history_legacy(
     record_context_cpp: _bool,
     alloc_trace_max_entries: _int,
     alloc_trace_record_context: _bool,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: Optional[str],
     context: Optional[str],
     stacks: str,
-    max_entries
+    max_entries: _int,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 
@@ -2255,7 +2284,6 @@ def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails
 
 # Defined in torch/csrc/DeviceAccelerator.cpp
 def _accelerator_getAccelerator() -> _device: ...
-def _accelerator_deviceCount() -> _int: ...
 def _accelerator_setDeviceIndex(device_index: _int) -> None: ...
 def _accelerator_getDeviceIndex() -> _int: ...
 def _accelerator_setStream(Stream) -> None: ...
@@ -2534,12 +2562,6 @@ class _NodeBase:
             return_type: Any,
     ) -> None: ...
     def _update_args_kwargs(self, args: tuple[Any, ...], kwargs: dict[str, Any]): ...
-    def _prepend(self, n: FxNode) -> None: ...
-    def _remove_from_list(self) -> None: ...
-    def __lt__(self, n: Self) -> _bool: ...
-    def __gt__(self, n: Self) -> _bool: ...
-    def __le__(self, n: Self) -> _bool: ...
-    def __ge__(self, n: Self) -> _bool: ...
 
 class _NodeIter(Iterator):
     def __init__(self, root: FxNode, reversed: _bool) -> None: ...
@@ -2554,6 +2576,7 @@ class _StaticCudaLauncher:
         cubin_file: str,
         func_name: str,
         shared_mem_bytes: _int,
+        device: _int,
     ) -> Tuple[_int, _int, _int]:
         ...
 

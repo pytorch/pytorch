@@ -117,7 +117,11 @@ py::object cast_sequence(std::vector<py::object> objs) {
   for (const auto i : c10::irange(num_objs)) {
     sequence[i] = std::move(objs[i]);
   }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
   return std::move(sequence);
+#else
+  return sequence;
+#endif
 }
 
 py::object cast_dict(std::vector<py::object> objs) {
@@ -127,7 +131,11 @@ py::object cast_dict(std::vector<py::object> objs) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
     sequence[obj[0]] = obj[1];
   }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
   return std::move(sequence);
+#else
+  return sequence;
+#endif
 }
 
 py::object unflatten_rec(

@@ -3375,6 +3375,28 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         c10d.destroy_process_group()
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device(f"cuda:{self.rank:d}")
+        t = torch.full(
+            (1024,),
+            self.rank,
+        ).cuda()
+        with dist._time_estimator(group=process_group, device=device) as cm:
+            c10d.all_reduce(t, c10d.ReduceOp.SUM)
+        self.assertTrue(cm.estimated_time is not None)
+        self.assertTrue(cm.estimated_time > 0)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_default_pg_nccl(self):
         torch.cuda.set_device(self.rank)
@@ -4363,7 +4385,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.4")
+        self.assertEqual(ver, "2.6")
+        nccl_version = t["nccl_version"]
+        torch_nccl_version = torch.cuda.nccl.version()
+        self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]

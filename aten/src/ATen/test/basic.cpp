@@ -166,8 +166,10 @@ void TestSqueeze(DeprecatedTypeProperties& type) {
   ASSERT_EQ_RESOLVED(b.dim(), 1);
   a = rand({1}, type);
   b = squeeze(a);
-  // TODO 0-dim squeeze
   ASSERT_TRUE(a[0].equal(b));
+  Tensor c = at::scalar_tensor(1, type.options());
+  Tensor d = squeeze(c);
+  ASSERT_TRUE(c.equal(d));
 }
 
 void TestCopy(DeprecatedTypeProperties& type) {

@@ -16,6 +16,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
+from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -3708,6 +3709,48 @@ class GraphModule(torch.nn.Module):
         q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
+    @unittest.skipIf(
+        not has_triton() or not HAS_WARP_SPEC,
+        reason="FBCODE Triton is required for this test",
+    )
+    def test_triton_template_warp_specialization(self):
+        def make_tensor():
+            return torch.rand(4, 16, 4096, 64, device="cuda", dtype=torch.bfloat16)
+
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+
+        positional_args = (q, k, v)
+        keyword_args = {
+            "kernel_options": {
+                "num_warps": 4,
+                "num_consumer_groups": 0,
+                "num_buffers_warp_spec": 0,
+            }
+        }
+
+        # Check if kernel code contains warp specialization parameters
+        _, kernel_code = run_and_get_code(
+            flex_compiled,
+            *positional_args,
+            **keyword_args,
+        )
+        assert kernel_code is not None, "Failed to retrieve compiled kernel code"
+        assert (
+            "num_consumer_groups" in kernel_code[0]
+        ), "num_consumer_groups missing in kernel definition"
+        assert (
+            "num_buffers_warp_spec" in kernel_code[0]
+        ), "num_buffers_warp_spec missing in kernel definition"
+
+        # Validate correctness
+        C1 = flex_compiled(q, k, v)
+        C2 = flex_attention(q, k, v)
+
+        assert torch.allclose(
+            C1, C2, atol=1e-2, rtol=1e-2
+        ), "Warp specialized kernel result differs from reference"
+
 
 class TestBlockMask(InductorTestCase):
     @supported_platform
@@ -5287,6 +5330,57 @@ class TestLearnableBiases(InductorTestCase):
         self._check_outputs_and_grads(
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
+
+    def test_flex_attention_with_dynamic_max_autotune(self):
+        query = torch.randn(2, 16, 512, 64, device="cuda")
+        key = torch.randn(2, 16, 512, 64, device="cuda")
+        value = torch.randn(2, 16, 512, 64, device="cuda")
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        shape = (2, 16, 512, 16, 512, 64)
+        B, Hq, M, Hkv, N, D = shape
+
+        score_mod = _generate_alibi_bias(8)
+
+        def causal(b, h, m, n):
+            return m >= n
+
+        mask_shape = (1, 1, M, N)
+        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
+
+        compiled_sdpa = torch.compile(
+            flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
+        )
+
+        out = compiled_sdpa(
+            query=query,
+            key=key,
+            value=value,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            enable_gqa=True,
+            kernel_options=None,
+        )
+        out.sum().backward()
+
+        self.assertEqual(
+            out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
+        )
+
+    def test_inspect_bug(self):
+        # https://github.com/pytorch/pytorch/issues/139374
+        def sliding_window(b, h, q_idx, kv_idx, val):
+            return (q_idx - kv_idx).abs() < val
+
+        sliding_window2 = functools.partial(
+            sliding_window, val=torch.randn((), device="cuda")
+        )
+        opt_fn = torch.compile(create_block_mask, fullgraph=True)
+        create_block_mask(sliding_window2, None, None, 1024, 1024)
+        # checks that the compile is working
+        opt_fn(sliding_window2, None, None, 1024, 1024)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

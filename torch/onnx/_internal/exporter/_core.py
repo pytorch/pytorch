@@ -31,6 +31,7 @@ from torch.onnx._internal.exporter import (
     _constants,
     _dispatching,
     _errors,
+    _flags,
     _fx_passes,
     _ir_passes,
     _onnx_program,
@@ -101,7 +102,7 @@ logger = logging.getLogger(__name__)
 current_tracer: _building.OpRecorder | None = None
 
 
-def _torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
+def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
     return _TORCH_DTYPE_TO_ONNX[dtype]
 
 
@@ -109,7 +110,7 @@ class TorchTensor(ir.Tensor):
     def __init__(self, tensor: torch.Tensor, name: str | None = None):
         # Pass the tensor as the raw data to ir.Tensor's constructor
         super().__init__(
-            tensor, dtype=_torch_dtype_to_onnx_dtype(tensor.dtype), name=name
+            tensor, dtype=torch_dtype_to_onnx_dtype(tensor.dtype), name=name
         )
 
     def numpy(self) -> npt.NDArray:
@@ -200,27 +201,33 @@ def _set_shape_type(
     | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
-    # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
-        # FIXME: Consider shape for complex values
         dims = []
         for dim in meta_val.shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
                 dims.append(str(dim.node))
-        value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
-        if complex_to_float:
-            if meta_val.dtype == torch.complex64:
-                value.dtype = ir.DataType.FLOAT
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
-            elif meta_val.dtype == torch.complex128:
-                value.dtype = ir.DataType.DOUBLE
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
+
+        # If the dtype is set already (e.g. by the onnx_symbolic ops),
+        # we don't need to set it again.
+        #
+        # When a user specifies complex in onnx_symbolic, we consider that to
+        # be the intention even though non of the ONNX ops deals with complex values.
+        # In this case, we don't change the dtype or the shape of the tensor.
+        if value.dtype is None:
+            value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
+            if complex_to_float:
+                if meta_val.dtype == torch.complex64:
+                    value.dtype = ir.DataType.FLOAT
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
+                elif meta_val.dtype == torch.complex128:
+                    value.dtype = ir.DataType.DOUBLE
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -432,7 +439,7 @@ def _convert_fx_arg_to_onnx_arg(
     if isinstance(arg, (torch.device, torch.memory_format, torch.layout)):
         return str(arg)
     if isinstance(arg, torch.dtype):
-        return _torch_dtype_to_onnx_dtype(arg)
+        return torch_dtype_to_onnx_dtype(arg)
     # Maybe a Python value
     return arg
 
@@ -775,7 +782,7 @@ def _get_inputs_and_attributes(
             elif isinstance(arg, torch.device):
                 attributes[schema_arg.name] = str(arg)
             elif isinstance(arg, torch.dtype):
-                attributes[schema_arg.name] = _torch_dtype_to_onnx_dtype(arg)
+                attributes[schema_arg.name] = torch_dtype_to_onnx_dtype(arg)
             else:
                 attributes[schema_arg.name] = arg
         for schema_arg in node_schema.arguments:
@@ -791,7 +798,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
+                attr = torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
             else:
                 attr = kwarg  # type: ignore[assignment]
 
@@ -1163,6 +1170,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
+@_flags.set_onnx_exporting_flag
 def export(
     model: torch.nn.Module
     | torch.export.ExportedProgram
@@ -1249,14 +1257,17 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrategy:
                 export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
+                export_status.torch_export_draft_export = result.success
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
-            if result.exported_program is not None:
+            if result.exception is not None:
+                failed_results.append(result)
+            if result.success:
+                assert result.exported_program is not None
                 program = result.exported_program
                 break
-            else:
-                failed_results.append(result)
 
         assert result is not None
         capture_strategy = result.strategy

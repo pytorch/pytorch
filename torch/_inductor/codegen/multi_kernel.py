@@ -8,7 +8,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash, CodeCacheFuture, get_path
+from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
 from ..runtime.benchmarking import benchmarker
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
@@ -315,8 +315,7 @@ class MultiKernelCall:
         path = self.cache_file_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with path.open("w") as fd:
-            fd.write(str(self.picked_kernel))
+        write_atomic(path, str(self.picked_kernel))
         log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
 
     @property

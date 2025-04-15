@@ -50,6 +50,7 @@ import sympy
 
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -60,7 +61,6 @@ if TYPE_CHECKING:
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -852,8 +852,20 @@ def get_first_incompatible_cudagraph_node(
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
+
+        if (
+            not torch._inductor.config.graph_partition
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+        ):
+            # skip cudagraph if a cudagraph_unsafe op is detected.
+            # graph_partition helps by spliting on this cudagraph_unsafe
+            # op and cudagraphifying the subgraphs.
+            return node
+
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
+
     return None
 
 
@@ -903,7 +915,11 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
+                        if isinstance(
+                            result,
+                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
+                        ):
+                            result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
@@ -1259,7 +1275,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 60  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1361,7 +1377,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
             return False
 
         dtype = x.get_dtype()
-        if dtype not in (torch.float16, torch.bfloat16):
+        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
         layout = x.get_layout()
@@ -1372,6 +1388,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         inner_dim = layout.size[1]
         if transposed:
             inner_dim = layout.size[0]
+
+        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
+            inner_dim, 32
+        ):
+            return False
+
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
 
@@ -1627,8 +1649,8 @@ def run_and_get_code(
 
 
 def run_and_get_kernels(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> tuple[Any, list[str]]:
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> tuple[_T, list[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1645,7 +1667,7 @@ def run_fw_bw_and_get_code(fn: Callable[..., Any]) -> tuple[Any, list[str]]:
     return run_and_get_code(run_with_backward)
 
 
-def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
+def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str]:
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
@@ -1689,7 +1711,7 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
     return source_codes
 
 
-def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -1698,7 +1720,9 @@ def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     return source_codes[0]
 
 
-def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+def run_and_get_triton_code(
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -1708,7 +1732,7 @@ def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -
 
 
 def run_and_get_graph_lowering(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[Any, list[GraphLowering]]:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.output_code import CompiledFxGraph
@@ -2246,6 +2270,7 @@ def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
         and dtype == torch.bfloat16
         and torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
+        and config.bfloat16_atomic_adds_enabled
     ):
         return False
     else:
@@ -2363,8 +2388,8 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
 
 
 def run_and_get_cpp_code(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> tuple[Any, str]:
+    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+) -> tuple[_T, str]:
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.
@@ -2387,7 +2412,9 @@ def run_and_get_cpp_code(
     return result, s
 
 
-def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
+def shape_env_from_inputs(
+    inputs: Sequence[InputType], default: bool = False
+) -> Optional[ShapeEnv]:
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
@@ -2403,14 +2430,17 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
 
+    if default:
+        return ShapeEnv()
+
     # TODO(voz): Should we always have one anyway?
     return None
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[list[InputType]], Any],
+    model: Callable[[list[InputType]], _T],
     inputs_to_check: Sequence[int],
-) -> Callable[[list[InputType]], Any]:
+) -> Callable[[list[InputType]], _T]:
     if len(inputs_to_check) == 0:
         return model
 
@@ -2620,10 +2650,24 @@ def register_op_dtype_propagation_rules(
     )
 
 
+def get_current_backend() -> str:
+    from torch._inductor.virtualized import V
+
+    device_str = V.graph.get_current_device_or_throw().type
+    if device_str == "cpu":
+        return config.cpu_backend
+    elif device_str == "mps":
+        return "mps"
+    else:
+        return config.cuda_backend
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
-    if config.triton.codegen_upcast_to_fp32 and (
+    if (
         dtype in (torch.float16, torch.bfloat16)
+        and config.triton.codegen_upcast_to_fp32
+        and get_current_backend() == "triton"
     ):
         return torch.float32
     return dtype
@@ -2709,13 +2753,19 @@ def set_kernel_post_grad_provenance_tracing(
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
     from .virtualized import V
 
-    for node in node_schedule:
-        if node not in (EnableReduction, DisableReduction):
-            if node.node is not None:
-                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+    for snode in node_schedule:
+        if snode not in (EnableReduction, DisableReduction):
+            if snode.node is not None:
+                curr_node_info = (
+                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                        kernel_name, []
+                    )
+                )
+                curr_node_info.extend(
                     origin.name
-                    for origin in node.node.origins  # type: ignore[attr-defined]
-                ]
+                    for origin in snode.node.origins  # type: ignore[attr-defined]
+                    if origin.name not in curr_node_info
+                )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
@@ -2756,3 +2806,35 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
+
+
+def is_cudagraph_unsafe_op(node: Operation) -> bool:
+    """
+    Returns True if the node is an op that is not cudagraphable.
+    Usually only custom ops have this tag.
+    """
+    from . import ir
+
+    if not isinstance(node, ir.FallbackKernel):
+        return False
+
+    if (
+        isinstance(node.op_overload, torch._ops.OpOverload)
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+    ):
+        return True
+
+    return False
+
+
+def get_ld_library_path() -> str:
+    path = os.environ.get("LD_LIBRARY_PATH", "")
+    if config.is_fbcode():
+        from libfb.py.parutil import get_runtime_path
+
+        runtime_path = get_runtime_path()
+        if runtime_path:
+            lib_path = os.path.join(runtime_path, "runtime", "lib")
+            path = os.pathsep.join([lib_path, path]) if path else lib_path
+
+    return path

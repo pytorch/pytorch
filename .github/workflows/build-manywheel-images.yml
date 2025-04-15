@@ -93,13 +93,13 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.8", "12.6"]
+        cuda_version: ["12.8"]
     env:
       GPU_ARCH_TYPE: cuda-aarch64
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main

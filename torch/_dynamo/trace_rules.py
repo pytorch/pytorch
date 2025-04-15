@@ -308,6 +308,8 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
@@ -362,6 +364,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.isinf",
         "math.isnan",
         "math.isqrt",
+        "math.lcm",
         "math.ldexp",
         "math.lgamma",
         "math.log",
@@ -510,7 +513,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._debug_set_fusion_group_inlining",
         "torch._C._demangle",
         "torch._C._disabled_torch_dispatch_impl",
-        "torch._C._disabled_torch_function_impl",
         "torch._C._dispatch_call_boxed",
         "torch._C._dispatch_check_all_invariants",
         "torch._C._dispatch_check_invariants",
@@ -678,6 +680,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._is_multithreading_enabled",
         "torch._C._is_torch_function_enabled",
         "torch._C._is_torch_function_mode_enabled",
+        "torch._C._is_torch_function_all_disabled",
         "torch._C._is_tracing",
         "torch._C._is_view_replay_enabled",
         "torch._C._is_xnnpack_enabled",
@@ -1574,6 +1577,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
+        "torch._scaled_grouped_mm",
         "torch._shape_as_tensor",
         "torch._sobol_engine_draw",
         "torch._sobol_engine_ff_",
@@ -1621,6 +1625,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._values_copy",
         "torch._weight_int4pack_mm",
         "torch._weight_int4pack_mm_for_cpu",
+        "torch._weight_int4pack_mm_with_scales_and_zeros",
         "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
@@ -2233,7 +2238,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
@@ -3171,7 +3175,6 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
-    unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3481,7 +3484,7 @@ FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS)
 # Remove this after fbcode is fully migrated to tracing through torchrec.
 FBCODE_SKIP_TORCHREC_DIRS = {
     "torchrec/distributed",
-    "trochrec/fb/distributed",
+    "torchrec/fb/distributed",
     "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
 }
 
@@ -3577,6 +3580,12 @@ def check_file(filename, is_inlined_call=False):
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
     ):
         return SkipResult(True, "FBCODE_SKIP_TORCHREC_DIRS")
+
+    if (
+        filename.startswith(_module_dir(unittest))
+        and not torch._dynamo.config.enable_trace_unittest
+    ):
+        return SkipResult(True, "unittest")
 
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")

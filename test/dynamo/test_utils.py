@@ -273,6 +273,7 @@ class TestDynamoTimed(TestCase):
             e.inductor_config = None
             e.cuda_version = None
             e.triton_version = None
+            e.python_version = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -336,8 +337,11 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
+ 'python_version': None,
  'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
@@ -422,8 +426,11 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
+ 'python_version': None,
  'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,

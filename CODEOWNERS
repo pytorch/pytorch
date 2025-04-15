@@ -164,6 +164,11 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
+# Dynamic Shapes
+/torch/fx/experimental/symbolic_shapes.py @bobren @laithsakka
+/torch/fx/experimental/sym_node.py @bobren @laithsakka
+/torch/fx/experimental/recording.py @bobren @laithsakka
+
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki
 /caffe2/serialize/ @mikaylagawarecki

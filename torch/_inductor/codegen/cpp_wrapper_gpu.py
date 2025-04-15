@@ -54,6 +54,7 @@ class DeferredTritonCallWrapper:
 
     wrapper_name: str
     kernel_name: str
+    kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
@@ -110,7 +111,11 @@ class DeferredTritonCallWrapper:
                     prefix.writeline(f"bool {name},")
                 else:
                     raise ValueError(f"Unexpected arg type {arg_type}")
-            prefix.writeline(f"{wrapper.device_codegen.cpp_stream_type()} stream_,")
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
+                )
+            )
             if V.graph.aot_mode:
                 prefix.writeline("kernels_type_& kernels_,")
             prefix.writeline(
@@ -118,6 +123,11 @@ class DeferredTritonCallWrapper:
             )
         prefix.writeline("){")
         with prefix.indent():
+            if V.graph.aot_mode:
+                # Emit the original Triton kernel for debugging purposes
+                prefix.writeline("/*")
+                prefix.splice(self.kernel_name_to_body[self.kernel_name])
+                prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
@@ -201,7 +211,9 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+        self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
+        self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
 
     @staticmethod
     def create(
@@ -239,6 +251,9 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def get_autotuning_input_name(self, idx):
+        return f"{self.autotune_input_prefix}_{idx}"
 
     def codegen_inputs(self):
         # See Note: [Input Alignment handling in Inductor]
@@ -288,6 +303,7 @@ class CppWrapperGpu(CppWrapperCpu):
         cpp_definition: Optional[str] = None,
     ):
         if gpu:
+            self._kernel_name_to_body[kernel_name] = kernel_body
             if config.triton.autotune_at_compile_time:
                 # Call PythonWrapperCodegen to create the autotune code block
                 PythonWrapperCodegen.define_kernel(
@@ -322,6 +338,8 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args=[self.val_to_arg_str(desc.tensor)],
             arg_types=[desc.tensor.get_dtype()],
             arg_signatures=[None],
+            # these args are passed to initNDTMADescriptor, which is NOT a triton kernel
+            is_triton_kernel=False,
         )
 
         desc_name = desc.name
@@ -340,8 +358,27 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline(f"{fn}({args});")
 
     def generate_args_decl(
-        self, code: Union[IndentedBuffer, Self], call_args, arg_types, arg_signatures
+        self,
+        code: Union[IndentedBuffer, Self],
+        call_args,
+        arg_types,
+        arg_signatures,
+        is_triton_kernel=True,
     ):
+        """
+        Generates any declarations of args to pass into a kernel call, and then returns the arg names.
+
+        In more detail:
+        * declarations: e.g. this function has a side effect of generating lines like `auto var_0 = ...;`
+        * returns: a string with the list of args, e.g. "var_0, var_1"
+
+        call_args: list of call arguments
+        arg_types: list of argument types
+        arg_signatures: list with signatures of all the args
+        is_triton_kernel: whether these are passed into a triton kernel or not. In particular,
+                          calls to triton kernels will have an additional global scratch space
+                          arg injected at the front of the arg list.
+        """
         new_args: list[str] = []
 
         # Add more cases for other types as needed
@@ -394,12 +431,16 @@ class CppWrapperGpu(CppWrapperCpu):
             process_args(arg, arg_type, arg_signature)
 
         if (
-            global_scratch := self.device_codegen.cpp_global_scratch(
-                next(self.arg_var_id)
+            is_triton_kernel
+            and (
+                global_scratch := self.device_codegen.cpp_global_scratch(
+                    next(self.arg_var_id)
+                )
             )
-        ) is not None:
+            is not None
+        ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(global_scratch_def)
+            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
@@ -412,8 +453,10 @@ class CppWrapperGpu(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -430,6 +473,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
             )
@@ -447,8 +491,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                original_fxnode_name=original_fxnode_name,
             )
 
         stream = (
@@ -464,7 +510,10 @@ class CppWrapperGpu(CppWrapperCpu):
             wrapper_name = f"call_{kernel_name}"
             if wrapper_name not in self._triton_call_wrappers:
                 self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
-                    wrapper_name, kernel_name, arg_types
+                    wrapper_name,
+                    kernel_name,
+                    self._kernel_name_to_body,
+                    arg_types,
                 )
             call_args.append(stream)
             if V.graph.aot_mode:

@@ -12,13 +12,18 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .github/scripts/windows/install_vs2022.ps1
+      - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
+  workflow_dispatch:
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .github/scripts/windows/install_vs2022.ps1
+      - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
@@ -133,7 +138,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel wheel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm" || "${{ matrix.device }}" == "aarch64" ) ]]; then
             # With this install, it gets clang 16.0.6.
@@ -243,7 +248,6 @@ jobs:
           .github/scripts/windows/build_triton.bat
           mkdir -p "${RUNNER_TEMP}/artifacts/"
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
-
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
@@ -263,18 +267,18 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials(PyTorch account) for main
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
           aws-region: us-east-1

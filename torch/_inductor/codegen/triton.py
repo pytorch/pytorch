@@ -31,7 +31,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
-from ..codecache import code_hash, get_path, PyCodeCache
+from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -605,7 +605,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
         )
 
-    _print_PowByNatural = _print_FloatPow
+    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        if expr.args[0].is_Integer:
+            return f"libdevice.pow({float(expr.args[0])}, {self._print(expr.args[1])})"
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
@@ -677,6 +682,10 @@ class TritonPrinter(PythonPrinter):
     def _print_OpaqueUnaryFn_atan(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"libdevice.log2(({self._print(expr.args[0])}).to(tl.float32))"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -924,7 +933,11 @@ class TritonOverrides(OpOverrides):
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
-        return f"tl.full({shape}, {triton_val}, {triton_type})"
+        if value < 0 and not dtype.is_signed:
+            triton_signed_type = f"tl.{triton_type[4:]}"
+            return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
+        else:
+            return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @classmethod
     def constant(cls, value, dtype):
@@ -1352,7 +1365,7 @@ class TritonKernelOverrides(TritonOverrides):
 
         # Our sympy expr printing casts to the current kernel index dtype.
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
-        index_dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
         dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
 
         # after we emit this var we cast it to the correct dtype
@@ -1966,7 +1979,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 index_relative_to_xyr_index = sympy_subs(
                     index, {v: t.expr for v, t in self.range_tree_nodes.items()}
                 )
-                range_trees = self.active_range_trees(reorder=True)
+                range_trees = self.active_range_trees()
 
                 # Partition the index into subexpressions pertaining to each range tree.
                 # For example xindex * 5 + r0_index * 3 is partitioned to
@@ -2543,19 +2556,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in ("argmax", "argmin"):
+                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=torch.int32
-                        if V.kernel.index_dtype == "tl.int32"
-                        else torch.int64,
+                        dtype=accumulator_dtype,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4184,8 +4197,7 @@ class TritonScheduling(SIMDScheduling):
 
             def store_cache():
                 path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
+                write_atomic(path, str(ms))
 
             def load_cache():
                 path = cache_file_path()
@@ -4362,8 +4374,7 @@ class TritonScheduling(SIMDScheduling):
 
         def store_cache():
             path = cache_file_path()
-            with open(path, "w") as fd:
-                fd.write(str(ms) + " " + str(ms_clone))
+            write_atomic(path, str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
         total_clone_ms: float = 0.0
