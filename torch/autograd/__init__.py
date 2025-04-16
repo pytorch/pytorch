@@ -326,16 +326,14 @@ def backward(
                 "use `grad_tensors`."
             )
 
+    inputs_tuple: tuple[Union[torch.Tensor, graph.GradientEdge], ...]
     if inputs is None:
-        inputs = cast(tuple, ())
+        inputs_tuple = ()
     elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
-        inputs = cast(Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (inputs,))
+        inputs_tuple = (inputs,)
     else:
-        inputs = cast(
-            Union[tuple[torch.Tensor, ...], tuple[graph.GradientEdge, ...]],
-            tuple(inputs),
-        )
-        if len(inputs) == 0:
+        inputs_tuple = tuple(inputs)
+        if len(inputs_tuple) == 0:
             raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
@@ -358,7 +356,7 @@ def backward(
         grad_tensors_,
         retain_graph,
         create_graph,
-        inputs,
+        inputs_tuple,
         allow_unreachable=True,
         accumulate_grad=True,
     )
