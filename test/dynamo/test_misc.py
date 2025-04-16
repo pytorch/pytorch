@@ -5774,15 +5774,11 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = (
-                "map doesn't work unless it is captured completely with torch.compile"
-            )
+            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
         else:
             error_message = "Can't inplace modify module params/buffers"
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError, error_message
-        ):
+        with self.assertRaisesRegex(Unsupported, error_message):
             opt_fn = torch.compile(mod, backend="eager", fullgraph=True)
             opt_fn(torch.randn(3, 2))
 
@@ -11892,6 +11888,10 @@ fn
         self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
+        class Bar:
+            def __init__(self, v):
+                self.v = v
+
         class Foo:
             attribute_map = {}
 
@@ -11899,6 +11899,9 @@ fn
                 self.attribute_map = {
                     "a_premap": "a",
                 }
+                # `bar` attribute requires propagating sources correctly through
+                # object.__getattribute__
+                self.bar = Bar(5)
 
             def __setattr__(self, key, value):
                 if key in super().__getattribute__("attribute_map"):
@@ -11926,7 +11929,7 @@ fn
             return f
 
         def fn(x, f):
-            return x * f.a_premap * f.a * f.b * f.sentinel
+            return x * f.a_premap * f.a * f.b * f.sentinel * f.bar.v
 
         x = torch.randn(4)
 
