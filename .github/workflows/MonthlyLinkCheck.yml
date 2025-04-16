@@ -1,4 +1,4 @@
-#Runs once a month and checks links in the repo to ensure they are valid 
+#Runs once a month and checks links in the repo to ensure they are valid
 #If action fails, it creates an issue with the failing links and an "incorrect link" label
 #If link is valid but failing, it can be added to the .lycheeignore file
 #Action can also be run manually as needed.
