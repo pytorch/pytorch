@@ -1,5 +1,4 @@
 import base64
-
 from collections.abc import Iterable
 from typing import Callable, Generic, TypeVar
 
