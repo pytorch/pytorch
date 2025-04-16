@@ -2308,10 +2308,9 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             self.propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
-            # TODO: Handle SymFloat/SymBool
             and not any(
                 (
-                    isinstance(a, SymInt)
+                    isinstance(a, py_sym_types)
                     and (syms := free_unbacked_symbols(a))
                     and self.shape_env is not None
                     and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
