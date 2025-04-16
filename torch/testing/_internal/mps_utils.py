@@ -86,6 +86,7 @@ class MPSSkipInfo:
             self.skip = xfailUnimplemented
 
 
+# fmt: off
 """ Failures due to lack of op implementation on MPS backend """
 UNIMPLEMENTED_XFAILIST = dict(
     {
@@ -382,6 +383,7 @@ UNIMPLEMENTED_XFAILIST = dict(
         ),
     }
 )
+# fmt: on
 
 """Expected failures due to backwards pass issues"""
 XFAILLIST_GRAD = {
