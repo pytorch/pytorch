@@ -387,31 +387,33 @@ auto build_graph(
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
                             .set_data_type(fe::DataType_t::FLOAT));
-  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_uid(SEED)
-                                    .set_name("Seed")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(
-                                        dropoutseed.dtype() == kInt
-                                            ? fe::DataType_t::INT32
-                                            : fe::DataType_t::INT64));
-  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_uid(OFFSET)
-                                      .set_name("Offset")
-                                      .set_dim({1, 1, 1, 1})
-                                      .set_stride({1, 1, 1, 1})
-                                      .set_data_type(
-                                          dropoutoffset.dtype() == kInt
-                                              ? fe::DataType_t::INT32
-                                              : fe::DataType_t::INT64));
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
           .set_is_inference(return_softmaxstats == false)
           .set_causal_mask(is_causal)
-          .set_attn_scale(attn_scale)
-          .set_dropout(dropout_probability, seed, offset);
+          .set_attn_scale(attn_scale);
+  if (dropout_probability != 0.0f) {
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_uid(SEED)
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(
+                                          dropoutseed.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_uid(OFFSET)
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(
+                                            dropoutoffset.dtype() == kInt
+                                                ? fe::DataType_t::INT32
+                                                : fe::DataType_t::INT64));
+    scaled_dot_product_flash_attention_options.set_dropout(dropout_probability, seed, offset);
+  }
   auto Q_ = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_uid(Q)
@@ -504,18 +506,6 @@ auto build_graph_nestedtensor(
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
                             .set_data_type(fe::DataType_t::FLOAT));
-  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_uid(SEED)
-                                    .set_name("Seed")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
-  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_uid(OFFSET)
-                                      .set_name("Offset")
-                                      .set_dim({1, 1, 1, 1})
-                                      .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
   auto SEQ_LEN_Q_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_uid(SEQ_LEN_Q)
@@ -537,10 +527,31 @@ auto build_graph_nestedtensor(
           .set_is_inference(return_softmaxstats == false)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
-          .set_dropout(dropout_probability, seed, offset)
           .set_seq_len_q(SEQ_LEN_Q_)
           .set_seq_len_kv(SEQ_LEN_KV_)
           .set_padding_mask(true);
+  if (dropout_probability != 0.0f) {
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_uid(SEED)
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(
+                                          dropoutseed.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_uid(OFFSET)
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(
+                                            dropoutoffset.dtype() == kInt
+                                                ? fe::DataType_t::INT32
+                                                : fe::DataType_t::INT64));
+    scaled_dot_product_flash_attention_options
+          .set_dropout(dropout_probability, seed, offset);
+  }
   // We hardcode BSHD to cuDNN even though the underlying layout is THD
   auto q_strides = q.strides();
   auto k_strides = k.strides();
@@ -633,7 +644,6 @@ auto build_graph_nestedtensor(
 
   O_->set_ragged_offset(RAG_O_OFF_);
   if (Stats) {
-    TORCH_WARN("STATS OFF WITH VALUE", RAG_LSE_OFF);
     auto RAG_STATS_OFF =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(RAG_LSE_OFF)
@@ -728,25 +738,27 @@ auto build_graph_backward(
                               .set_stride(attn_bias.value().strides().vec()));
     sdpa_backward_options.set_bias(bias.value());
   }
-  auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_uid(SEED)
-                                    .set_name("Seed")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(
-                                        dropoutseed.dtype() == kInt
-                                            ? fe::DataType_t::INT32
-                                            : fe::DataType_t::INT64));
-
-  auto Offset = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_uid(OFFSET)
-                                      .set_name("Offset")
+  if (dropout_probability != 0.0f) {
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_uid(SEED)
+                                      .set_name("Seed")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
                                       .set_data_type(
-                                          dropoutoffset.dtype() == kInt
+                                          dropoutseed.dtype() == kInt
                                               ? fe::DataType_t::INT32
                                               : fe::DataType_t::INT64));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_uid(OFFSET)
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(
+                                            dropoutoffset.dtype() == kInt
+                                                ? fe::DataType_t::INT32
+                                                : fe::DataType_t::INT64));
+    sdpa_backward_options.set_dropout(dropout_probability, seed, offset);
+  }
 
   auto O_ = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_uid(O)
@@ -764,9 +776,6 @@ auto build_graph_backward(
                                   .set_name("DO")
                                   .set_dim(dO.sizes().vec())
                                   .set_stride(dO.strides().vec()));
-  if (dropout_probability != 0.0f) {
-    sdpa_backward_options.set_dropout(dropout_probability, Seed, Offset);
-  }
   auto [Dq, Dk, Dv] = mha_graph->sdpa_backward(
       Q_, K_, V_, O_, Do, Stats, sdpa_backward_options);
   Dq->set_uid(DQ);
@@ -830,18 +839,7 @@ auto build_graph_backward_nestedtensor(
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
                             .set_data_type(fe::DataType_t::FLOAT));
-  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_uid(SEED)
-                                    .set_name("Seed")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
-  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_uid(OFFSET)
-                                      .set_name("Offset")
-                                      .set_dim({1, 1, 1, 1})
-                                      .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
+
   auto SEQ_LEN_Q_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_uid(SEQ_LEN_Q)
@@ -861,10 +859,30 @@ auto build_graph_backward_nestedtensor(
           .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
-          .set_dropout(dropout_probability, seed, offset)
           .set_seq_len_q(SEQ_LEN_Q_)
           .set_seq_len_kv(SEQ_LEN_KV_)
           .set_padding_mask(true);
+  if (dropout_probability != 0.0f) {
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_uid(SEED)
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(
+                                          dropoutseed.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_uid(OFFSET)
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(
+                                            dropoutoffset.dtype() == kInt
+                                                ? fe::DataType_t::INT32
+                                                : fe::DataType_t::INT64));
+    sdpa_backward_options.set_dropout(dropout_probability, seed, offset);
+  }
   auto q_strides = q.strides();
   auto k_strides = k.strides();
   auto v_strides = v.strides();
@@ -969,8 +987,8 @@ auto build_graph_backward_nestedtensor(
                                      .set_data_type(fe::DataType_t::FLOAT));
   STATS->set_ragged_offset(RAG_STATS_OFF_);
   auto do_strides = dO.strides();
-  TORCH_WARN(do_strides, " ?? ", o_strides);
   auto DO_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_ragged_offset(RAG_O_OFF_)
                                  .set_uid(DO)
                                  .set_name("DO")
                                  .set_dim({b, h_q, s_q, d_v})
@@ -982,6 +1000,8 @@ auto build_graph_backward_nestedtensor(
   auto [Dq, Dk, Dv] = mha_graph->sdpa_backward(
       Q_, K_, V_, O_, DO_, STATS, sdpa_backward_options);
   Dq->set_output(true)
+    .set_uid(DQ)
+    .set_ragged_offset(RAG_Q_OFF_)
     .set_dim({b, h_q, s_q, d_qk})
     .set_stride(
          {INT_MAX,
@@ -989,6 +1009,8 @@ auto build_graph_backward_nestedtensor(
           q_strides[strideidx1],
           q_strides[strideidx2]});
   Dk->set_output(true)
+    .set_uid(DK)
+    .set_ragged_offset(RAG_K_OFF_)
     .set_dim({b, h_k, s_kv, d_qk})
     .set_stride(
         {INT_MAX,
@@ -996,6 +1018,8 @@ auto build_graph_backward_nestedtensor(
          k_strides[strideidx1],
          k_strides[strideidx2]});
   Dv->set_output(true)
+    .set_uid(DV)
+    .set_ragged_offset(RAG_V_OFF_)
     .set_dim({b, h_v, s_kv, d_v})
     .set_stride(
         {INT_MAX,
@@ -1101,14 +1125,16 @@ void run_cudnn_SDP_fprop(
       {K, k.data_ptr()},
       {V, v.data_ptr()},
       {SCALE, &scaling_factor},
-      {SEED, _dropoutseed.data_ptr()},
-      {OFFSET, _dropoutoffset.data_ptr()},
       {O, o.data_ptr()}};
   if (return_softmaxstats) {
     variant_pack[LSE] = softmaxstats.data_ptr();
   }
   if (attn_bias.has_value()) {
     variant_pack[BIAS] = attn_bias.value().data_ptr();
+  }
+  if (dropout_probability != 0.0f) {
+    variant_pack[SEED] = _dropoutseed.data_ptr();
+    variant_pack[OFFSET] = _dropoutoffset.data_ptr();
   }
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
@@ -1189,8 +1215,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
       {K, k.data_ptr()},
       {V, v.data_ptr()},
       {SCALE, &scaling_factor},
-      {SEED, dropoutseed.data_ptr()},
-      {OFFSET, dropoutoffset.data_ptr()},
       {O, o.data_ptr()},
       {RAG_Q_OFF, rag_q_off.data_ptr()},
       {RAG_O_OFF, rag_q_off.data_ptr()},
@@ -1199,9 +1223,12 @@ void run_cudnn_SDP_fprop_nestedtensor(
       {SEQ_LEN_Q, seqlen_q.data_ptr()},
       {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
   if (return_softmaxstats) {
-    TORCH_WARN("RETURN SOFTMAX STATS!!");
     variant_pack[LSE] = softmaxstats.data_ptr();
     variant_pack[RAG_LSE_OFF] = cum_seqlen_q.data_ptr();
+  }
+  if (dropout_probability != 0.0f) {
+    variant_pack[SEED] = dropoutseed.data_ptr();
+    variant_pack[OFFSET] = dropoutoffset.data_ptr();
   }
   if (attn_bias.has_value()) {
     TORCH_CHECK("bias not supported with nestedtensor");
@@ -1375,6 +1402,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
     return;
   }
 
+  Tensor dO_ = dO;
   const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
   if (innermost_dO_stride != 1) {
     permute_to_matching_layout(o, dO_);
@@ -1417,7 +1445,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       v,
       attn_bias,
       o,
-      dO,
+      dO_,
       softmaxstats,
       dQ,
       dK,
@@ -1432,7 +1460,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {K, k.data_ptr()},
       {V, v.data_ptr()},
       {O, o.data_ptr()},
-      {DO, dO.data_ptr()},
+      {DO, dO_.data_ptr()},
       {LSE, softmaxstats.data_ptr()},
       // outputs
       {DQ, dQ.data_ptr()},
