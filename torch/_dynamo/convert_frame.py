@@ -732,6 +732,7 @@ def _compile(
         )
 
         try:
+            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -813,7 +814,7 @@ def _compile(
             CompileContext.get().attempt = attempt
             try:
                 with dynamo_timed(
-                    f"bytecode_transform_attempt{attempt}", log_pt2_compile_event=True
+                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
                 ):
                     out_code = transform_code_object(code, transform)
                 break
