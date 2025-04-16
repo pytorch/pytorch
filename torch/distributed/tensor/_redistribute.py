@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from functools import cache
-from typing import cast, NamedTuple
+from typing import cast, NamedTuple, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -73,7 +73,7 @@ def _gen_transform_infos_non_cached(
             if i < device_mesh.ndim - 1:
                 # calculate and save the logical shape for this sharding
                 mesh_dim_size = device_mesh.size(mesh_dim=i)
-                local_shard_size, _ = src._local_shard_size_on_dim(
+                local_shard_size, _ = src._local_shard_size_and_offset(
                     current_logical_shape[src.dim],
                     mesh_dim_size,
                     my_coordinate[i],
@@ -292,14 +292,33 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
+        forward_dtype: Optional[torch.dtype] = None,
+        backward_dtype: Optional[torch.dtype] = None,
     ):
-        current_spec = input._spec
-        ctx.current_spec = current_spec
         ctx.async_op = async_op
+        ctx.backward_dtype = backward_dtype
+        ctx.original_dtype = input._local_tensor.dtype
+
+        if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
+            local_tensor = input._local_tensor.to(dtype=forward_dtype)
+            current_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=input._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=input.shape,
+                    stride=input.stride(),
+                    dtype=forward_dtype,
+                ),
+            )
+        else:
+            local_tensor = input._local_tensor
+            current_spec = input._spec
+
+        ctx.current_spec = current_spec
 
         if current_spec.placements != placements:
             target_spec = DTensorSpec(
-                device_mesh, placements, tensor_meta=input._spec.tensor_meta
+                device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
             local_tensor = input._local_tensor
@@ -308,7 +327,7 @@ class Redistribute(torch.autograd.Function):
             )
         else:
             # use the same local tensor if placements are the same.
-            output = input._local_tensor
+            output = local_tensor
             target_spec = current_spec
 
         return dtensor.DTensor(
@@ -320,10 +339,29 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        current_spec = grad_output._spec
         async_op = ctx.async_op
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
 
-        local_tensor = grad_output._local_tensor
+        if backward_dtype != grad_output._local_tensor.dtype:
+            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+            current_spec = DTensorSpec(
+                mesh=grad_output._spec.device_mesh,
+                placements=grad_output._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=grad_output.shape,
+                    stride=grad_output.stride(),
+                    dtype=backward_dtype,
+                ),
+            )
+            previous_spec = DTensorSpec(
+                mesh=previous_spec.device_mesh,
+                placements=previous_spec.placements,
+                tensor_meta=current_spec.tensor_meta,
+            )
+        else:
+            local_tensor = grad_output._local_tensor
+            current_spec = grad_output._spec
+
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
@@ -331,6 +369,10 @@ class Redistribute(torch.autograd.Function):
             async_op=async_op,
             is_backward=True,
         )
+
+        if output.dtype != ctx.original_dtype:
+            output = output.to(ctx.original_dtype)
+
         # normalize the target placement to replicate if it is partial
         normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
@@ -346,7 +388,7 @@ class Redistribute(torch.autograd.Function):
             tensor_meta=TensorMeta(
                 shape=grad_output.shape,
                 stride=grad_output.stride(),
-                dtype=grad_output.dtype,
+                dtype=output.dtype,
             ),
         )
         output_dtensor = dtensor.DTensor(
@@ -357,6 +399,8 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
+            None,
+            None,
             None,
             None,
             None,

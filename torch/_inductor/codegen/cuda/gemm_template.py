@@ -3,6 +3,7 @@ import copy
 import enum
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
@@ -835,7 +836,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             and self.set_alignment(self.output_node.get_layout(), op.D)
         )
         if not status:
-            log.debug("Skipping due to alignment setting failure. op: %s", op)
+            log.debug(
+                "Skipping due to alignment setting failure. op: %s",
+                op.configuration_name(),
+            )
             return None
 
         # Set epilogue.
@@ -846,7 +850,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         status = self._set_bias_layout_and_alignment(op)
         if not status:
             log.debug(
-                "Skipping due to bias layout and alignment setting failure. op: %s", op
+                "Skipping due to bias layout and alignment setting failure. op: %s",
+                op.configuration_name(),
             )
             return None
 
@@ -879,8 +884,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
+        start_time = time.time()
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:
@@ -901,7 +908,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        log.info("Got cutlass configs: total number of ops: %d, ", len(res))
+        log.info(
+            "Got cutlass configs: total number of ops: %d. Filtering took %.2f seconds",
+            len(res),
+            time.time() - start_time,
+        )
         sorted_res = sorted(res.items())
         return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
 
@@ -958,10 +969,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
-        if not isinstance(X.layout, FixedLayout):
-            raise NotImplementedError("X.layout is not fixed")
-        if not isinstance(W.layout, FixedLayout):
-            raise NotImplementedError("W.layout is not fixed")
+        for input_node in self.input_nodes:
+            if not isinstance(X.layout, FixedLayout):
+                input_node.freeze_layout()
 
         Y = self.output_node
         if template_buffer_node is not None:

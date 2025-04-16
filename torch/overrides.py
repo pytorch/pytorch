@@ -29,7 +29,8 @@ import types
 import warnings
 from collections.abc import Iterable
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import (
@@ -58,12 +59,15 @@ __all__ = [
     "enable_reentrant_dispatch",
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _disable_user_warnings(
-    func: Callable,
+    func: Callable[_P, _R],
     regex: str = ".*is deprecated, please use.*",
     module: str = "torch",
-) -> Callable:
+) -> Callable[_P, _R]:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
     given ``regex`` pattern.
@@ -84,7 +88,7 @@ def _disable_user_warnings(
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=regex, module=module

@@ -135,6 +135,15 @@ class TestCutlassBackend(TestCase):
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
             torch.testing.assert_close(Y_compiled, Y)
 
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_import_cutlass(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+
+        import cutlass  # noqa: F401
+        import cutlass_library  # noqa: F401
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
@@ -1199,6 +1208,28 @@ class TestCutlassBackend(TestCase):
             compiled = torch.compile(torch.mm)
 
             torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_flexible_layout(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                return A @ B
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            _ = torch.compile(model)(B)
 
 
 if __name__ == "__main__":

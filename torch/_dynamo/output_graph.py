@@ -310,7 +310,6 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
-        super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
