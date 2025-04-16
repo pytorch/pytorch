@@ -4511,7 +4511,7 @@ def interpolate(  # noqa: F811
         With ``mode='bicubic'``, it's possible to cause overshoot. For some dtypes, it can produce
         negative values or values greater than 255 for images. Explicitly call ``result.clamp(min=0,max=255)``
         if you want to reduce the overshoot when displaying the image.
-        For ``uint8`` inputs, it's already performs saturating cast operation. So, no manual `clamp` operation is needed.
+        For ``uint8`` inputs, it already performs saturating cast operation. So, no manual `clamp` operation is needed.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
