@@ -251,18 +251,9 @@ struct CUDACachingHostAllocatorImpl
 
 void raw_local_deleter(void* ptr);
 
-struct CUDACachingHostAllocator final
-    : public CachingHostAllocatorInterface<CUDACachingHostAllocatorImpl> {
-  at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        &raw_local_deleter,
-        at::DeviceType::CPU};
-  }
-};
+DECLARE_HOST_ALLOCATOR(CUDACachingHostAllocator, CUDACachingHostAllocatorImpl, raw_local_deleter);
 
+} // namespace
 CUDACachingHostAllocator caching_host_allocator;
 
 static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
