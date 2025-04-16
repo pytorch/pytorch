@@ -404,7 +404,7 @@ def precompute_freqs_cis(
 
 def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
     # xshaped = x.float().reshape(*x.shape[:-1], -1, 2)
-    xshaped = x.float().reshape(x.shape[0], -1, 2, x.shape[3] // 2, 2)
+    xshaped = x.float().reshape(x.shape[0], -1, x.shape[2], x.shape[3] // 2, 2)
     freqs_cis = freqs_cis.view(1, -1, 1, xshaped.size(3), 2)
     x_out2 = torch.stack(
         [

@@ -1,9 +1,9 @@
 import torch
-
 from torch._inductor.experimental.padded_tensor import PaddedTensor
 from torch._inductor.test_case import run_tests, TestCase
 from transformer_model import *
 
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch.utils import _pytree as pytree
 
 
@@ -281,6 +281,112 @@ class ModelTests(TestCase):
                 out_p = out_p.clone()
 
         torch._dynamo.config.error_on_recompile = False
+
+    def test_transformer_bench(self):
+        # Create csv header
+        out_file = "transformer_padded_tensor_bench.csv"
+        with open(out_file, "w") as f:
+            f.write("seqlen,method,time_ms")
+
+        def run_compile(bsz, seqlen_max, bound_max, model_name):
+            with torch.device("cuda"), torch.no_grad():
+                args = ModelArgs.from_name(model_name)
+                transformer = Transformer(args)
+                transformer.setup_caches(bsz, seqlen_max)
+
+                transformer = torch.compile(transformer, fullgraph=True)
+
+                for seqlen in range(3, bound_max):
+                    print("seqlen =", seqlen)
+
+                    inputs = (
+                        torch.randint(0, 3, (bsz, seqlen)),
+                        torch.arange(0, seqlen, dtype=torch.int32),
+                    )
+
+                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs))
+                    print(t)
+
+                    with open(out_file, "a") as f:
+                        f.write(f"\n{seqlen},compile,{t}")
+
+        def run_reduce_overhead(bsz, seqlen_max, bound_max, model_name):
+            with torch.device("cuda"), torch.no_grad():
+                args = ModelArgs.from_name(model_name)
+                transformer = Transformer(args)
+                transformer.setup_caches(bsz, seqlen_max)
+
+                transformer = torch.compile(
+                    transformer, fullgraph=True, mode="reduce-overhead"
+                )
+
+                for seqlen in range(3, bound_max):
+                    print("seqlen =", seqlen)
+
+                    inputs = (
+                        torch.randint(0, 3, (bsz, seqlen)),
+                        torch.arange(0, seqlen, dtype=torch.int32),
+                    )
+
+                    # 3 iterations warmup
+                    torch.compiler.cudagraph_mark_step_begin()
+                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs))
+                    print(t)
+
+                    with open(out_file, "a") as f:
+                        f.write(f"\n{seqlen},reduce_overhead,{t}")
+
+        def run_reduce_overhead_padded(
+            bsz, seqlen_max, bound_max, seqlen_multiple, model_name
+        ):
+            with torch.device("cuda"), torch.no_grad():
+                args = ModelArgs.from_name(model_name)
+                transformer = Transformer(args)
+                transformer.setup_caches(bsz, seqlen_max)
+
+                transformer = torch.compile(
+                    transformer, fullgraph=True, mode="reduce-overhead"
+                )
+
+                for seqlen in range(3, bound_max):
+                    print("seqlen =", seqlen)
+
+                    inputs = (
+                        torch.randint(0, 3, (bsz, seqlen)),
+                        torch.arange(0, seqlen, dtype=torch.int32),
+                    )
+
+                    # Pad inputs
+                    inputs_p = [
+                        PaddedTensor.from_tensor(
+                            inputs[0], multipliers={0: 1, 1: seqlen_multiple}
+                        ),
+                        PaddedTensor.from_tensor(
+                            inputs[1],
+                            multipliers={0: seqlen_multiple},
+                            neutral_element=-1,
+                        ),
+                    ]
+
+                    torch.compiler.cudagraph_mark_step_begin()
+
+                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs_p))
+                    print(t)
+
+                    with open(out_file, "a") as f:
+                        f.write(f"\n{seqlen},reduce_overhead_padded,{t}")
+
+        bsz, seqlen_max = 1, 128
+        seqlen_multiple = 16
+
+        bound_max = 128
+        model_name = "llama-3-8b"
+
+        run_compile(bsz, seqlen_max, bound_max, model_name)
+        run_reduce_overhead(bsz, seqlen_max, bound_max, model_name)
+        run_reduce_overhead_padded(
+            bsz, seqlen_max, bound_max, seqlen_multiple, model_name
+        )
 
 
 if __name__ == "__main__":

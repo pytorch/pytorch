@@ -218,6 +218,7 @@ class PaddedTensor(torch.Tensor):
             "contiguous",
             "reshape",
             "cross_entropy",
+            "__setitem__",
         ]
 
         if func.__name__ in shape_decomp_ops:
