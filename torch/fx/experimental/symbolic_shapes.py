@@ -5721,7 +5721,7 @@ class ShapeEnv:
                     # to determine if we can do size-like replacement, the
                     # upper bound is irrelevant here
                     var_to_range[x] = ValueRanges(2, int_oo)
-        return _bound_sympy_helper(expr, var_to_range)  # type: ignore[arg-type]
+        return bound_sympy(expr, var_to_range)  # type: ignore[arg-type]
 
     @_lru_cache
     def get_axioms(
