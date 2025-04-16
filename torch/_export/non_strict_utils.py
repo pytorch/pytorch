@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
-import inspect
 import functools
+import inspect
 import logging
 import math
 from collections import defaultdict
@@ -164,8 +164,8 @@ def fakify(
 
 def _is_unbacked_symint(symbol):
     if not isinstance(symbol, torch.SymInt):
-        return False 
-    
+        return False
+
     return symbol.node.shape_env.is_unbacked_symint(symbol.node.expr)
 
 
@@ -222,7 +222,7 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
                 lambda a, b: _tensor_min_max(
                     a, b, real_callable=real_callable, tensor_callable=tensor_callable
                 ),
-                items
+                items,
             )
 
     # Fallback to original callable
@@ -236,18 +236,14 @@ def _override_builtin_ops():
     original_pow = math.pow
 
     builtins.max = functools.partial(
-        _tensor_min_max,
-        real_callable=original_max,
-        tensor_callable=torch.maximum
+        _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
     builtins.min = functools.partial(
-        _tensor_min_max,
-        real_callable=original_min,
-        tensor_callable=torch.minimum
+        _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
 
-    math.pow = lambda x,y: x**y
+    math.pow = lambda x, y: x**y
 
     try:
         yield
@@ -255,7 +251,6 @@ def _override_builtin_ops():
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow
-
 
 
 def make_fake_inputs(

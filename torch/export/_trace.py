@@ -26,10 +26,10 @@ from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
     _NonStrictTorchFunctionHandler,
+    _override_builtin_ops,
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
-    _override_builtin_ops,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
@@ -1927,7 +1927,9 @@ def _non_strict_export(
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode), _override_builtin_ops():
+        ), _fakify_module_inputs(
+            fake_args, fake_kwargs, fake_mode
+        ), _override_builtin_ops():
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,
