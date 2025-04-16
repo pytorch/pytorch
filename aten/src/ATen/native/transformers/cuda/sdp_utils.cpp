@@ -642,10 +642,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
       c10::array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
-          check_nonzero_sequence_lengths_dense,
           check_all_tensors_on_device,
           check_tensor_shapes,
-          check_cudnn_tensor_shapes,
           check_cudnn_deterministic,
           check_dtypes_low_precision,
           check_attn_mask_shape,
@@ -658,8 +656,10 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   constexpr auto dense_constraints =
       c10::array_of<bool (*)(sdp_params const&, bool)>(
+      check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>
+      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
+      check_cudnn_tensor_shapes
   );
 
   if (has_only_dense_inputs(params)) {
