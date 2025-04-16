@@ -7,8 +7,8 @@
 
 namespace at::xpu {
 
-inline TORCH_XPU_API c10::Allocator* getCachingHostAllocator() {
-  return at::CachingHostAllocator::GetAllocator(c10::DeviceType::XPU);
+inline TORCH_XPU_API at::HostAllocator* getCachingHostAllocator() {
+  return at::getHostAllocator(at::kXPU);
 }
 
 inline TORCH_XPU_API bool CachingHostAllocator_recordEvent(

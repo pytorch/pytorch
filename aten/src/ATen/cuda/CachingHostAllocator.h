@@ -18,8 +18,8 @@ namespace at::cuda {
 // call between host and device, and passed the corresponding context from the
 // allocation. This is currently invoked by at::native::copy_kernel_cuda.
 //
-inline TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator() {
-  return at::CachingHostAllocator::GetAllocator(c10::DeviceType::CUDA);
+inline TORCH_CUDA_CPP_API at::HostAllocator* getCachingHostAllocator() {
+  return at::getHostAllocator(at::kCUDA);
 }
 
 // Records an event in the specified stream. The allocation corresponding to the
@@ -32,15 +32,24 @@ inline TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
 }
 
 // Releases cached pinned memory allocations via cudaHostFree
-TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache();
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache() {
+  getCachingHostAllocator()->empty_cache();
+}
 
 inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
   return getCachingHostAllocator()->allocate(size);
 }
 
-TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats();
+inline TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats() {
+  return getCachingHostAllocator()->get_stats();
+}
 
-TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats();
-TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats();
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats() {
+  getCachingHostAllocator()->reset_accumulated_stats();
+}
+
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats() {
+  getCachingHostAllocator()->reset_peak_stats();
+}
 
 } // namespace at::cuda
