@@ -35,20 +35,24 @@ ROOT_DIR = Path(__file__).parent.parent
 
 STABLE_CUDA_VERSION = "12.6"
 
+
 class StrEnum(str, Enum):
     def __str__(self) -> str:
         return self.value
+
 
 class CpuArch(StrEnum):
     X86_64 = "x86_64"
     AARCH64 = "aarch64"
     S390X = "s390x"
 
+
 class AcceleratorType(StrEnum):
     CPU = "cpu"
     CUDA = "cuda"
     ROCM = "rocm"
     XPU = "xpu"
+
 
 class OperatingSystem(StrEnum):
     LINUX = "linux"
@@ -490,10 +494,15 @@ if __name__ == "__main__":
                 )
                 if args.to_github_output:
                     # Print the matrix in the format expected by GitHub Actions
-                    with open(operating_system.environ["GITHUB_OUTPUT"], "a") as f:
-                        print(f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix)}", file=f)
+                    with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                        print(
+                            f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix)}",
+                            file=f,
+                        )
                 # TODO: Pretty print the matrix for human readability
-                print(f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix, indent=2)}")
+                print(
+                    f"{operating_system}-{accelerator_type}-matrix={json.dumps(matrix, indent=2)}"
+                )
             elif args.package_type == "libtorch":
                 # TODO: Implement libtorch matrix generation
                 pass
