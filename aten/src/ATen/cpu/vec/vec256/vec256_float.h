@@ -269,7 +269,7 @@ public:
     // Set to +inf where x > ln(FLT_MAX)
     result = _mm256_blendv_ps(result, vec_inf, mask_too_large);
     // final interpretation to float
-    return result; 
+    return result;
   }
 
   Vectorized<float> exp_u20() const {

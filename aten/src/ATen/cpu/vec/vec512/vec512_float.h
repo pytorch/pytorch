@@ -286,7 +286,7 @@ public:
     auto tmp = _mm512_fmadd_ps(vec_a, vec_src, vec_b);
     // headache bis - we loose precision with the cast but it "fits", but ok after f32 -> f16 later
     __m512i casted_integer = _mm512_cvttps_epi32(tmp);
-    // boundary condition, lower than the min -> 0 
+    // boundary condition, lower than the min -> 0
     casted_integer = _mm512_mask_mov_epi32(casted_integer, min_mask, vec_zero);
     // boundary condition, larger than the max -> +oo
     casted_integer = _mm512_mask_mov_epi32(casted_integer, max_mask, vec_infinity);
@@ -294,7 +294,7 @@ public:
     return _mm512_castsi512_ps(casted_integer);
   }
   Vectorized<float> exp_u20() const {
-    // A faster version o exp with ULP=20
+    // A faster version of exp with ULP=20
     const __m512 vec_factorial_1 =
         _mm512_set1_ps(0.999999701f); // 1/factorial(1)
     const __m512 vec_factorial_2 =
