@@ -1076,12 +1076,13 @@ class _DispatchCacheKey:
 @dataclass(frozen=True)
 class _DispatchCacheEntryOutputInfo:
     """
-    Entry type for the FakeTensor dispatch cache for an output. Accounts for two
+    Entry type for the FakeTensor dispatch cache for an output. Accounts for three
     possibilities:
     1) The op is inplace, and a hit means we need to alias the argument at a
        given index.
     2) We need to synthesize a new FakeTensor given tensor metadata. For view
        ops, we further capture the index of the arg to alias.
+    3) If all 3 are None, then it points to value `None`.
     """
 
     inplace_idx: Optional[int]
@@ -1662,6 +1663,9 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> None:
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
+        if output is None:
+            return
+
         if not isinstance(output, FakeTensor):
             raise _BypassDispatchCache("non-FakeTensor output")
 
@@ -1692,6 +1696,11 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
         output: FakeTensor,
     ) -> _DispatchCacheEntryOutputInfo:
+        if output is None:
+            return _DispatchCacheEntryOutputInfo(
+                inplace_idx=None, metadata=None, view_idx=None
+            )
+
         # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
@@ -1802,6 +1811,12 @@ class FakeTensorMode(TorchDispatchMode):
         func: OpOverload,
         args: Sequence[object],
     ) -> Optional[FakeTensor]:
+        if (
+            entry.inplace_idx is None
+            and entry.metadata is None
+            and entry.view_idx is None
+        ):
+            return None
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
