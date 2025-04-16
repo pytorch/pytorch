@@ -62,6 +62,8 @@ def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
 
 
 class MetalExprPrinter(ExprPrinter_):
+    """Converts sympy expression to Metal code snippet"""
+
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
         x = self.doprint(x)
@@ -116,6 +118,26 @@ class MetalExprPrinter(ExprPrinter_):
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
+
+    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 2
+        x, y = map(self.doprint, expr.args)
+        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
+
+    def _print_ToFloat(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<float>({x})"
+
+    def _print_FloorToInt(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<int>(metal::floor({x}))"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"metal::log2({x})"
 
 
 class MetalOverrides(OpOverrides):
