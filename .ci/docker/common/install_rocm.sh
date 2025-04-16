@@ -72,7 +72,7 @@ EOF
             HIP_BRANCH=rocm-6.3.x
             VER_STR=6.3
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-            HIP_BRANCH=rocm-rel-6.4
+            HIP_BRANCH=release/rocm-rel-6.4
             VER_STR=6.4
         fi
         # clr build needs CppHeaderParser but can only find it using conda's python
