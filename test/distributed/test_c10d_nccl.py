@@ -3136,6 +3136,68 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     @requires_nccl_version((2, 19), "Need NCCL 2.19 for user buffer registration")
     @skip_if_lt_x_gpu(4)
     @requires_multicast_support()
+    def test_nccl_user_buffer_registration_reuse(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(self.rank)
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+
+        # Use NCCL memory allocator
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+
+        # allocate memory with ncclMemAlloc
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.arange(1024 * 1024 * 2, device=device)
+
+        # register buffers to NCCL
+        backend.register_mem_pool(pool)
+
+        # allreduce now should use NVIDIA Switches
+        print("run first collective")
+        pg.allreduce(tensor).wait()
+        torch.cuda.synchronize(device=device)
+
+        del tensor
+
+        # allocate memory with ncclMemAlloc
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.arange(1024 * 1024 * 20, device=device)
+            print(tensor.size()[0]*torch.distributed.get_world_size(pg))
+            output_tensors = [torch.arange(tensor.size()[0], device=device) for _ in range(torch.distributed.get_world_size(pg))]
+
+        # allreduce now should use NVIDIA Switches
+        print("run second collective")
+        pg.allgather(output_tensors, tensor).wait()
+        torch.cuda.synchronize(device=device)
+
+        # de-register buffers from NCCL
+        backend.deregister_mem_pool(pool)
+
+        # clean up memory
+        del tensor, pool
+
+        print(os.environ["NCCL_DEBUG_FILE"])
+
+        with open(os.environ["NCCL_DEBUG_FILE"]) as f:
+            nccl_debug_file_content = f.read()
+            # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
+            # should show successful registration in debug output
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                self.assertRegex(
+                    nccl_debug_file_content, "successfully registered NVLS"
+                )
+            else:
+                self.assertRegex(nccl_debug_file_content, "local-registered")
+
+
+    @requires_nccl()
+    @requires_nccl_version((2, 19), "Need NCCL 2.19 for user buffer registration")
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
     def test_nccl_user_buffer_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -3165,6 +3227,8 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
         # clean up memory
         del tensor, pool
+
+        print(os.environ["NCCL_DEBUG_FILE"])
 
         with open(os.environ["NCCL_DEBUG_FILE"]) as f:
             nccl_debug_file_content = f.read()

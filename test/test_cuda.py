@@ -4884,6 +4884,28 @@ class TestBlockStateAbsorption(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
+    def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+        device = torch.device(f"cuda:0")
+
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info(device)
+        pre_reserved = torch.cuda.memory_reserved(device)
+        total_allowed = additional_allowed_memory_in_mb * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed, device)
+
+        dtype = torch.int8
+        return device, dtype
+
+
+    def _teardown_mempool_limited_memory_test(self):
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ""
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory.set_per_process_memory_fraction(1.0)
+
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
         pool2 = torch.cuda.MemPool().id
@@ -4916,6 +4938,7 @@ class TestMemPool(TestCase):
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
             called_dummy_alloc = 123;
             void* ptr;
+            std::cout << "dummy_alloc: " << size << std::endl;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
@@ -4966,6 +4989,7 @@ class TestMemPool(TestCase):
             # holds a reference
             self.assertEqual(pool.use_count(), 2)
 
+
         # pool's use count should be back to 1 at this point as use_mem_pool
         # released its reference
         self.assertEqual(pool.use_count(), 1)
@@ -4999,6 +5023,122 @@ class TestMemPool(TestCase):
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
+
+    def test_mempool_limited_memory_with_allocator(self):
+        pool = torch.cuda.MemPool()
+
+        # MemPool doesn't have an allocator by default
+        self.assertEqual(pool.allocator, None)
+
+        from torch.utils.cpp_extension import load_inline
+
+        dummy_allocator_source = """
+        #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
+        extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            std::cout << "dummy_alloc: " << size << std::endl;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+          }
+        }
+        """
+        dummy_allocator_libname = "dummy_allocator"
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+            with_cuda=True,
+        )
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        # pool should point to the same allocator as the one passed into it
+        self.assertEqual(allocator.allocator(), pool.allocator)
+
+        # pool's use count should be 1 at this point as MemPool object
+        # holds a reference
+        self.assertEqual(pool.use_count(), 1)
+
+        # no allocations happened yet, so called_dummy_alloc and
+        # called_dummy_free should be 0
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        nelem_1mb = 1024 * 1024 // 4
+
+        with torch.cuda.use_mem_pool(pool):
+            out_0 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool's use count should be 2 at this point as use_mem_pool
+            # holds a reference
+            self.assertEqual(pool.use_count(), 2)
+
+
+        # pool's use count should be back to 1 at this point as use_mem_pool
+        # released its reference
+        self.assertEqual(pool.use_count(), 1)
+
+        # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
+        # out tensor
+        self.assertEqual(called_dummy_alloc.value, 123)
+
+        with torch.cuda.use_mem_pool(pool):
+            # pool should have 1 segment since we made a small allocation (1 MB)
+            # above and so the CUDACachingAllocator packed it into a 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_1 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool should still have 1 segment since we made another small allocation
+            # (1 MB) that got packed into the existing 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_2 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool now should have 2 segments since the CUDACachingAllocator had
+            # to make a new 2 MB buffer to accomodate out_2
+            self.assertEqual(len(pool.snapshot()), 2)
+
+        del out_0, out_1, out_2
+
+        self._setup_mempool_limited_memory_test(40)
+        with torch.cuda.use_mem_pool(pool):
+            a = torch.randn(40*nelem_1mb, device="cuda")
+        del a
+        b = torch.randn(30*nelem_1mb, device="cuda")
+        del b
+
+        # pool's destructor calls emptyCache()
+        del pool
+
+        # called_dummy_free should be 321 if dummy_free was used to deallocate
+        # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
+        self._teardown_mempool_limited_memory_test()
+
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()

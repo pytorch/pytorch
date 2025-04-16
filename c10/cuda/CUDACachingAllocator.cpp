@@ -1257,6 +1257,25 @@ class DeviceCachingAllocator {
               alloc_block(params, true, context, lock));
     }
 
+
+    if (!block_found){
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      auto valid_pool = MemPoolContext::getValidMemPool();
+      if (valid_pool && !active_pool) {
+        auto mempool_id = valid_pool->id();
+        auto filter = [](cudaStream_t) { return true; };
+        beginAllocateToPool(mempool_id, filter);
+        auto& pool = get_pool(size, stream);
+        const size_t alloc_size = get_allocation_size(size);
+        AllocParams mempool_params(device, size, stream, &pool, alloc_size, stats);
+        mempool_params.stat_types = get_stat_types_for_pool(pool);
+        block_found = get_free_block(mempool_params);
+        endAllocateToPool(mempool_id);
+        releasePool(mempool_id);
+        params = mempool_params;
+      }
+    }
+
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
       // alloc_block should have thrown an exception already.
@@ -4088,6 +4107,7 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 // can't use __declspec(dllexport) and __declspec(thread)
 // together: https://stackoverflow.com/a/50967977
 static thread_local MemPool* active_mempool_ = nullptr;
+static thread_local MemPool* valid_mempool_ = nullptr;
 
 MemPoolContext::MemPoolContext(MemPool* mempool)
     : prev_mempool_(active_mempool_) {
@@ -4099,7 +4119,14 @@ MemPoolContext::~MemPoolContext() {
 }
 
 MemPool* MemPoolContext::getActiveMemPool() {
+  if(active_mempool_ != nullptr){
+    valid_mempool_ = active_mempool_;
+  }
   return active_mempool_;
+}
+
+MemPool* MemPoolContext::getValidMemPool() {
+  return valid_mempool_;
 }
 
 } // namespace c10::cuda
