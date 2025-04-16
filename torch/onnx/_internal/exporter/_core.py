@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 current_tracer: _building.OpRecorder | None = None
 
 
-def _torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
+def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
     return _TORCH_DTYPE_TO_ONNX[dtype]
 
 
@@ -110,21 +110,23 @@ class TorchTensor(ir.Tensor):
     def __init__(self, tensor: torch.Tensor, name: str | None = None):
         # Pass the tensor as the raw data to ir.Tensor's constructor
         super().__init__(
-            tensor, dtype=_torch_dtype_to_onnx_dtype(tensor.dtype), name=name
+            tensor, dtype=torch_dtype_to_onnx_dtype(tensor.dtype), name=name
         )
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).numpy(force=True)
+            return (
+                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            )
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).numpy(force=True)
+            return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
+
         return self.raw.numpy(force=True)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
@@ -218,7 +220,7 @@ def _set_shape_type(
         # be the intention even though non of the ONNX ops deals with complex values.
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
-            value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
+            value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
             if complex_to_float:
                 if meta_val.dtype == torch.complex64:
                     value.dtype = ir.DataType.FLOAT
@@ -439,7 +441,7 @@ def _convert_fx_arg_to_onnx_arg(
     if isinstance(arg, (torch.device, torch.memory_format, torch.layout)):
         return str(arg)
     if isinstance(arg, torch.dtype):
-        return _torch_dtype_to_onnx_dtype(arg)
+        return torch_dtype_to_onnx_dtype(arg)
     # Maybe a Python value
     return arg
 
@@ -782,7 +784,7 @@ def _get_inputs_and_attributes(
             elif isinstance(arg, torch.device):
                 attributes[schema_arg.name] = str(arg)
             elif isinstance(arg, torch.dtype):
-                attributes[schema_arg.name] = _torch_dtype_to_onnx_dtype(arg)
+                attributes[schema_arg.name] = torch_dtype_to_onnx_dtype(arg)
             else:
                 attributes[schema_arg.name] = arg
         for schema_arg in node_schema.arguments:
@@ -798,7 +800,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
+                attr = torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
             else:
                 attr = kwarg  # type: ignore[assignment]
 

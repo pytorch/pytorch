@@ -102,7 +102,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
@@ -113,6 +113,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -908,7 +909,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1160,7 +1161,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
             self.generate_c_shim_fallback_kernel(extern_kernel, args)
@@ -1209,10 +1210,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
-        self.generate_c_shim_fallback_kernel(fallback_kernel, args)
-
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_out_helper(
         self,
         kernel: str,
         out: str,
@@ -1652,7 +1650,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
-    def codegen_multi_output(self, name, value):
+    def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
         pass
