@@ -1039,7 +1039,7 @@ class CommonTemplate:
 
     def test_expand_clone_broadcast(self):
         """
-        Test expand followed by clone. This uses explicit Triton broadcasts.
+        Test expand followed by clone. This uses an explicit Triton broadcast.
         """
         base_size = (1, 32)
         expanded_size = (32, 32)
