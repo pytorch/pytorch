@@ -267,18 +267,6 @@ bool gemv_use_fast_path<at::BFloat16>(
       beta == 0.0;
 }
 
-static void bf16_gemv_trans(
-    const int m,
-    const int n,
-    const at::BFloat16 alpha,
-    const at::BFloat16* a,
-    const int lda,
-    const at::BFloat16* x,
-    const int incx,
-    const at::BFloat16 beta,
-    at::BFloat16* y,
-    const int incy);
-
 void bf16_gemv_trans(
   const int m,
   const int n,
