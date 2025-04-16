@@ -49,7 +49,7 @@ def device_count() -> int:
     return mod.device_count()
 
 
-#TODO: replace with C code once generic CachingAllocator is upstreamed
+# TODO: replace with C code once generic CachingAllocator is upstreamed
 def empty_cache() -> None:
     acc = current_accelerator()
     if acc is None:
