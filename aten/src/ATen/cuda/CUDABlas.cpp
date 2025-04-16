@@ -644,12 +644,12 @@ void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(a
   #ifdef USE_ROCM
   if (std::is_same_v<C_Dtype, float>)
     TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #else
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+
+    if (prop->major < 8)
+      TORCH_CHECK(false, "bgemm input type at::BFloat16 is only supported for CUDA devices with compute capability 8.0 or higher");
   #endif
-
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-
-  if (prop->major < 8)
-    TORCH_CHECK(false, "bgemm input type at::BFloat16 is only supported for CUDA devices with compute capability 8.0 or higher");
 
 
   // See Note [Writing Nondeterministic Operations]
@@ -1143,12 +1143,12 @@ inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DT
   #ifdef USE_ROCM
   if (std::is_same_v<C_Dtype, float>)
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #else
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+
+    if (prop->major < 8)
+      TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
   #endif
-
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-
-  if (prop->major < 8)
-    TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
 
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
