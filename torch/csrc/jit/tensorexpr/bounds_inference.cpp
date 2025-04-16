@@ -18,7 +18,7 @@ namespace torch::jit::tensorexpr {
 using namespace analysis;
 
 template <typename Container>
-BoundsInfo mergeTensorAccesses(
+static BoundsInfo mergeTensorAccesses(
     const Container& accesses,
     const std::unordered_map<VarPtr, BufPtr>& varToBuf,
     bool distinctAccessKinds) {

@@ -350,6 +350,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
 TCPStore::~TCPStore() = default;
 
+c10::intrusive_ptr<Store> TCPStore::clone() {
+  TCPStoreOptions opts;
+  opts.port = addr_.port;
+  opts.isServer = false;
+  opts.waitWorkers = false;
+  opts.timeout = timeout_;
+  opts.useLibUV = usingLibUv_;
+
+  return c10::make_intrusive<TCPStore>(addr_.host, opts);
+}
+
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
   if (!numWorkers_.has_value()) {
@@ -637,6 +648,63 @@ void TCPStore::multiSet(
     buffer.appendBytes(values[i]);
   }
   buffer.flush();
+}
+
+void TCPStore::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& data) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePush);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_PUSH);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendBytes(data);
+  buffer.flush();
+}
+
+std::vector<uint8_t> TCPStore::queuePop(const std::string& key) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePop);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  doWait(keyPrefix_ + key, timeout_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_POP);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
+  auto keys = client_->receiveValue<int64_t>();
+  C10D_CHECK_WITH(
+      QueueEmptyError, keys > 0, "expected one key to be ready in queuePop");
+
+  return client_->receiveBits();
+}
+
+int64_t TCPStore::queueLen(const std::string& key) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queueLen);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_LEN);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
+  return client_->receiveValue<int64_t>();
 }
 
 bool TCPStore::hasExtendedApi() const {

@@ -373,7 +373,11 @@ Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
-  Tensor result = at::empty(self.sizes(), ScalarType::Float, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  auto out_dtype = self.scalar_type();
+  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
+    out_dtype = kFloat;
+  }
+  Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }

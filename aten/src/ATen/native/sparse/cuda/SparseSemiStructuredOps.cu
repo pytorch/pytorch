@@ -209,7 +209,7 @@ void spgemm_cutlass(
                           std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
                 return {ElementComputeEpilogue{alpha.to<float>()}};
             } else {
-                return {alpha.to<ElementComputeEpilogue>()};
+                return {{alpha.to<ElementComputeEpilogue>()}};
             }
         }()
     };
@@ -219,7 +219,7 @@ void spgemm_cutlass(
                           std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
                 return {ElementComputeEpilogue{beta.to<float>()}};
             } else {
-                return {beta.to<ElementComputeEpilogue>()};
+                return {{beta.to<ElementComputeEpilogue>()}};
             }
         }()
     };
@@ -230,7 +230,7 @@ void spgemm_cutlass(
                         ElementC(0),
                         {cute::_1{}, cute::_0{}, problem_size.m()}};
             } else {
-                return {ElementC(0)};
+                return {{ElementC(0)}};
             }
         }()
     };

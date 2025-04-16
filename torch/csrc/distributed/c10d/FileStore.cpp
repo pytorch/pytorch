@@ -297,6 +297,10 @@ FileStore::FileStore(std::string path, int numWorkers)
   addHelper(refCountKey_, 1);
 }
 
+c10::intrusive_ptr<Store> FileStore::clone() {
+  return c10::make_intrusive<FileStore>(path_, numWorkers_);
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape)
 FileStore::~FileStore() {
   // If the file does not exist - exit.

@@ -32,6 +32,9 @@ _TORCH_DTYPE_TO_ONNX_COMPATIBLE: dict[torch.dtype, ir.DataType] = {
     torch.int64: ir.DataType.INT64,
     torch.int8: ir.DataType.INT8,
     torch.uint8: ir.DataType.UINT8,
+    torch.uint16: ir.DataType.UINT16,
+    torch.uint32: ir.DataType.UINT32,
+    torch.uint64: ir.DataType.UINT64,
 }
 
 

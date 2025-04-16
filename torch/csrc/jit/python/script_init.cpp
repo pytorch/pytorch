@@ -246,7 +246,7 @@ FunctionDefaults calcOverloadedFunctionDefaults(
 
 } // namespace
 
-bool checkMutableFunctionDefault(const py::object& def_arg) {
+static bool checkMutableFunctionDefault(const py::object& def_arg) {
   if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
     return true;
   }
@@ -262,7 +262,7 @@ bool checkMutableFunctionDefault(const py::object& def_arg) {
   return false;
 }
 
-void checkMutableFunctionDefault(
+static void checkMutableFunctionDefault(
     const SourceRange& range,
     const Argument& arg,
     const py::object& def_arg) {
@@ -276,7 +276,7 @@ void checkMutableFunctionDefault(
   }
 }
 
-FunctionSchema getSchemaWithNameAndDefaults(
+static FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
     const std::optional<std::string>& new_name,
@@ -472,7 +472,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
   return retval;
 }
 
-void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
+static void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
@@ -484,7 +484,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
 }
 
 // this is used in our test suite to check that we correctly preserved type tags
-bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
+static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   struct Work {
     IValue a;
     IValue b;
@@ -605,7 +605,7 @@ struct slot_dict_impl {
 };
 
 template <typename T>
-py::list debugMakeList(const T& list) {
+static py::list debugMakeList(const T& list) {
   py::list result;
   for (const auto& elem : list) {
     result.append(py::cast(elem));
@@ -613,7 +613,7 @@ py::list debugMakeList(const T& list) {
   return result;
 }
 template <typename T>
-py::list debugMakeNamedList(const T& list) {
+static py::list debugMakeNamedList(const T& list) {
   py::list result;
   for (auto elem : list) {
     result.append(py::cast(std::make_pair(elem.name, elem.value)));
@@ -621,7 +621,7 @@ py::list debugMakeNamedList(const T& list) {
   return result;
 }
 template <typename T>
-py::set debugMakeSet(const T& list) {
+static py::set debugMakeSet(const T& list) {
   py::set result;
   for (const auto& elem : list) {
     result.add(py::cast(elem));
@@ -674,7 +674,7 @@ struct DeepCopyMemoTable {
   std::shared_ptr<IValue::HashIdentityIValueMap> map;
 };
 
-IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
+static IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
     memo["__torch_script_memo_table"] =
         DeepCopyMemoTable{std::make_shared<IValue::HashIdentityIValueMap>()};
@@ -684,7 +684,7 @@ IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   return ivalue.deepcopy(ivalue_memo);
 }
 
-ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
+static ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   ExtraFilesMap r;
   for (const auto& it : pydict) {
     r[py::cast<std::string>(it.first)] = "";
@@ -692,14 +692,16 @@ ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   return r;
 }
 
-void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
+static void extra_files_to_python(
+    const ExtraFilesMap& m,
+    const py::dict& pydict) {
   // py::dict is pointer-like type so it gets modified despite const&
   for (const auto& it : m) {
     pydict[py::str(it.first)] = py::bytes(it.second);
   }
 }
 
-void pyCompilationUnitDefine(
+static void pyCompilationUnitDefine(
     CompilationUnit& cu,
     const std::string& src,
     const ResolutionCallback* rcb,

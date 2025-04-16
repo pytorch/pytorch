@@ -9,6 +9,7 @@
 
 #include <cuda_runtime_api.h>
 #include <future>
+#include <unordered_map>
 
 namespace at::cuda {
 namespace {
@@ -71,6 +72,8 @@ using Block = HostBlock<CUDAStream>;
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
+  std::unordered_map<void*, bool> use_host_register;
+
   void allocate_host_memory(size_t size, void** ptr) override {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
@@ -89,13 +92,16 @@ struct CUDACachingHostAllocatorImpl
     }
 
     auto start = std::chrono::system_clock::now();
-    if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            pinned_use_cuda_host_register()) {
+    bool use_register = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_cuda_host_register();
+    if (use_register) {
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
+    use_host_register[*ptr] = use_register;
+
     auto end = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
@@ -108,15 +114,19 @@ struct CUDACachingHostAllocatorImpl
 
   void free_block(Block* block) override {
     auto start = std::chrono::system_clock::now();
-    if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            pinned_use_cuda_host_register()) {
-      void* ptr = block->ptr_;
+    // Users may change the allocator config at will. torch unit tests do this.
+    // However, allocations using cudaHostRegister should use corresonding
+    // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
+    void* ptr = block->ptr_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
+    if (use_host_register[ptr]) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       std::free(ptr);
     } else {
-      AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+      AT_CUDA_CHECK(cudaFreeHost(ptr));
     }
+    use_host_register.erase(ptr);
     auto end = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 

@@ -972,6 +972,14 @@ class FakeTensorTest(TestCase):
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
 
+    def test_fast_div(self):
+        mode = FakeTensorMode()
+        with mode:
+            x = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+        from torch._subclasses.fake_impls import get_fast_op_impls
+        fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
+        y = fast_div(mode, x, 2)
+        self.assertEqual(y.dtype, torch.float32)
 
 instantiate_parametrized_tests(FakeTensorTest)
 

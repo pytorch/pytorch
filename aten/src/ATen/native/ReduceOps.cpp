@@ -472,7 +472,7 @@ Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
 }
 
 template <class Stub>
-void impl_func_cum_ops(
+static void impl_func_cum_ops(
     const Tensor& self,
     int64_t dim,
     const Tensor& result,
@@ -769,7 +769,7 @@ inline bool isnan_(T x) {
 }
 
 template<typename T1, typename T2, typename Operation>
-void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
+static void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
       T1 out = c10::load(self_data);
@@ -1182,7 +1182,7 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
-inline bool should_use_acc_buffer(at::TensorIterator& iter) {
+static inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   const auto ndim = iter.ndim();
   if (!iter.device().is_cpu() || iter.noutputs() != 1) {
     return false;
@@ -1591,7 +1591,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::norm(self, p, IntArrayRef{}, false);
 }
 
-inline TensorIterator get_allany_iter(
+static inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1608,7 +1608,7 @@ inline TensorIterator get_allany_iter(
 }
 
 template <int identity, typename Stub>
-inline void allany_impl(
+static inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1653,7 +1653,7 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
 }
 
 template <bool is_all>
-Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+static Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
   // Default implementation in terms of all-reduce or single dim reduce
   if (!dim) {
     Tensor out;
@@ -1732,7 +1732,7 @@ TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, co
 }
 
 template <class Stub>
-void argmax_argmin_impl(
+static void argmax_argmin_impl(
     const Tensor& self,
     std::optional<int64_t> dim,
     bool keepdim,

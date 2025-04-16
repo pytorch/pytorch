@@ -60,7 +60,7 @@ template <
     std::enable_if_t<std::is_same_v<
         decltype(detail::bin_op_deducer(std::declval<Op>())),
         void>>* = nullptr>
-void visitBinaryOp(
+static void visitBinaryOp(
     NodePtr<Op> v,
     const std::string& op_str,
     IRPrinter* printer,

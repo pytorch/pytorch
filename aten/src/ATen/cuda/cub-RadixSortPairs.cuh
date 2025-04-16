@@ -1,3 +1,5 @@
+#pragma once
+
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/cub.cuh>
@@ -66,20 +68,7 @@ void radix_sort_pairs_impl(
       int64_t begin_bit,                             \
       int64_t end_bit);
 
-AT_INSTANTIATE_SORT_PAIRS(int32_t, 1)
-AT_INSTANTIATE_SORT_PAIRS(int32_t, 2)
-AT_INSTANTIATE_SORT_PAIRS(int32_t, 4)
-AT_INSTANTIATE_SORT_PAIRS(int64_t, 1)
-AT_INSTANTIATE_SORT_PAIRS(int64_t, 2)
-AT_INSTANTIATE_SORT_PAIRS(int64_t, 4)
-
 #define AT_INSTANTIATE_SORT_PAIRS_8(scalar_t, ScalarType) \
   AT_INSTANTIATE_SORT_PAIRS(scalar_t, 8)
-
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
-AT_INSTANTIATE_SORT_PAIRS(uint16_t, 8)
-AT_INSTANTIATE_SORT_PAIRS(uint32_t, 8)
-AT_INSTANTIATE_SORT_PAIRS(uint64_t, 8)
-AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
 
 } // namespace at::cuda::cub::detail

@@ -30,7 +30,7 @@ enum OnnxType : int {
   ONNX_UINT32,
 };
 
-std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
+static std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
     // ScalarType type.
@@ -46,7 +46,7 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {ONNX_UINT32, at::kLong},
 };
 
-void handleNegativeStartEndIndex(
+static void handleNegativeStartEndIndex(
     int64_t& start,
     int64_t& end,
     int64_t& axis,
@@ -63,7 +63,7 @@ void handleNegativeStartEndIndex(
   }
 }
 
-std::optional<at::Tensor> runTorchSlice_opset9(
+static std::optional<at::Tensor> runTorchSlice_opset9(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
   assert(inputTensorValues.size() == 1);
@@ -103,7 +103,7 @@ std::optional<at::Tensor> runTorchSlice_opset9(
   return std::optional<at::Tensor>(updated_val);
 }
 
-std::optional<at::Tensor> runTorchSlice_opset10(
+static std::optional<at::Tensor> runTorchSlice_opset10(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
   const int maxSliceInputCount = 5;
@@ -198,7 +198,7 @@ std::optional<at::Tensor> runTorchSlice_opset10(
 }
 
 // Refer to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF
-at::Tensor runTorchArange_opset11(
+static at::Tensor runTorchArange_opset11(
     const Node* node,
     const std::vector<at::Tensor>& inputTensorValues) {
   TORCH_INTERNAL_ASSERT(inputTensorValues.size() == 3);
@@ -542,7 +542,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
   }
 }
 
-bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
+static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
   auto parentNode = val->node();
   return (parentNode->kind() == prim::Param &&
           valsToParamsMap.find(val) !=
@@ -553,7 +553,7 @@ bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
            AttributeKind::t); // Check other types?
 }
 
-bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
+static bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
   for (auto input : n->inputs()) {
     if (valsToParamsMap.find(input) != valsToParamsMap.end()) {
       return true;
@@ -562,7 +562,7 @@ bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
   return false;
 }
 
-std::vector<at::Tensor> getValues(
+static std::vector<at::Tensor> getValues(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
   size_t numInputs = node->inputs().size();
@@ -587,7 +587,7 @@ std::vector<at::Tensor> getValues(
   return inputTensorValues;
 }
 
-bool areNodeInputsConstant(
+static bool areNodeInputsConstant(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
   return std::all_of(
@@ -596,7 +596,7 @@ bool areNodeInputsConstant(
       [&valsToParamsMap](Value* v) { return isConstant(v, valsToParamsMap); });
 }
 
-std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
+static std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   std::vector<Node*> parentNodes;
   for (auto val : node->inputs()) {
     // If the parent of 'node' is an onnx::Constant node,
@@ -619,7 +619,10 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // This is more of a partial evaluation analysis, where operations on constant
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
-void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
+static void ConstantFoldONNX(
+    Block* b,
+    ParamMap& paramsDict,
+    int opset_version) {
   if (opset_version < ONNX_OPSET_9) {
     TORCH_WARN(
         "Constant folding supported for only opsets >= 9. "

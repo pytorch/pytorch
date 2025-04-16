@@ -7,7 +7,7 @@ import sys
 import unittest
 
 import torch
-from torch._dynamo.config import is_fbcode
+from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

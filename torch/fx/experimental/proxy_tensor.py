@@ -1404,10 +1404,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
-        self.decomp_layers = 0
+        self.decomp_layers: int = 0
         from torch._inductor import config
 
-        self.emulate_precision_casts = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(

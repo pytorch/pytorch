@@ -956,7 +956,7 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-thread_local bool emitBytecodeDefaultInputs =
+static thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
@@ -966,7 +966,7 @@ void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
   emitBytecodeDefaultInputs = enabled;
 }
 
-thread_local bool emitDefautlArgsWithOutArgs =
+static thread_local bool emitDefautlArgsWithOutArgs =
     caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
 bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
   return emitDefautlArgsWithOutArgs;
@@ -975,7 +975,7 @@ void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
 }
 
-thread_local bool emitDefaultEmitPromotedOps =
+static thread_local bool emitDefaultEmitPromotedOps =
     caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
 bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
   return emitDefaultEmitPromotedOps;

@@ -1,4 +1,5 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
@@ -45,7 +46,6 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   }
 };
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
@@ -69,9 +69,19 @@ void initAOTIPackageBindings(PyObject* module) {
       .def("get_call_spec", &AOTIModelPackageLoaderPybind::get_call_spec)
       .def(
           "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)
-      .def("load_constants", &AOTIModelPackageLoaderPybind::load_constants)
+      .def(
+          "load_constants",
+          &AOTIModelPackageLoaderPybind::load_constants,
+          py::arg("constants_map"),
+          py::arg("use_inactive"),
+          py::arg("check_full_update"),
+          py::arg("user_managed") = false)
       .def(
           "update_constant_buffer",
-          &AOTIModelPackageLoaderPybind::update_constant_buffer);
+          &AOTIModelPackageLoaderPybind::update_constant_buffer,
+          py::arg("tensor_map"),
+          py::arg("use_inactive"),
+          py::arg("validate_full_updates"),
+          py::arg("user_managed") = false);
 }
 } // namespace torch::inductor

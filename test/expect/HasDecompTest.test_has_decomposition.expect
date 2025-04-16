@@ -383,6 +383,7 @@ aten::_fw_primal_copy
 aten::_fw_primal_copy.out
 aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
+aten::_grouped_mm
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
 aten::_histogramdd_bin_edges.out
@@ -650,6 +651,7 @@ aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
 aten::_weight_int4pack_mm_for_cpu
+aten::_weight_int4pack_mm_with_scales_and_zeros
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out

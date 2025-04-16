@@ -862,6 +862,30 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + sum(range(6)))
 
+    def test_list_extend(self):
+        def f(x):
+            y = [1]
+            y.extend(y[-1] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
+    def test_deque_extendleft(self):
+        import collections
+
+        def f(x):
+            y = collections.deque([1])
+            y.extendleft(y[0] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):

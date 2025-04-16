@@ -4,7 +4,6 @@
 
 #include <utility>
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,

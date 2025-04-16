@@ -978,7 +978,15 @@ class CachingAutotuner(KernelInterface):
                 self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
             )
-        return config2launcher.get(best_config)
+
+        if best_config not in config2launcher:
+            # On a Coordesc cache hit, we might not have loaded the launcher
+            # This can happen because PyCodeCache saves CachingAutotuners in memory,
+            # even for separate compile IDs (which can have different inputs without changing output code)
+            config2launcher[best_config] = self._precompile_config(
+                best_config
+            ).make_launcher()
+        return config2launcher[best_config]
 
     def run(
         self,

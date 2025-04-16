@@ -381,7 +381,7 @@ SugaredValuePtr ModuleValue::getitem(
       << "ParameterList, and ParameterDict modules are subscriptable");
 }
 
-void checkInterface(
+static void checkInterface(
     const SourceRange& loc,
     GraphFunction& m,
     const std::shared_ptr<ModuleValue>& self,
@@ -582,7 +582,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
+static std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -595,7 +595,7 @@ std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
 }
 
 // helper function for instantiating a SugaredValue from an IValue
-std::shared_ptr<SugaredValue> toSugaredValue(
+static std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -1057,7 +1057,7 @@ TypePtr registerNamedTuple(
   return tt;
 }
 
-bool isEnumClass(py::object obj) {
+static bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
@@ -1068,7 +1068,7 @@ bool isEnumClass(py::object obj) {
   return ret == 1;
 }
 
-std::shared_ptr<SugaredValue> createSimpleEnumValue(
+static std::shared_ptr<SugaredValue> createSimpleEnumValue(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {

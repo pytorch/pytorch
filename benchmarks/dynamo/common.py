@@ -81,6 +81,7 @@ log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
 # Suppress torch.profiler spam
 os.environ["KINETO_LOG_LEVEL"] = "5"
@@ -1395,6 +1396,8 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
+                # This will cause memory stats to be overshadowed by this eager run.
+                # To fix that, memory stats will be reset later.
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
             if pytree.is_namedtuple_instance(example_outputs):
@@ -1410,6 +1413,14 @@ class AOTInductorModelCache:
             dynamic_shapes = _tree_map_with_path(
                 _produce_dynamic_shapes_for_export, combined_args
             )
+
+            # delete example_outputs and reset memory stats here
+            del example_outputs
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                empty_gpu_cache(current_device)
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
 
             ep = torch.export.export(
                 model,
@@ -3549,6 +3560,7 @@ def run(runner, args, original_dir=None):
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
 
         torch.backends.mkldnn.deterministic = True
 
@@ -3735,10 +3747,6 @@ def run(runner, args, original_dir=None):
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
             runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
-
-            # For AOTI, we only measure the memory compression ratio at the run time
-            # instead of the compile time, so use a warmup run to trigger AOTI compilation.
-            args.use_warm_peak_memory = True
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."

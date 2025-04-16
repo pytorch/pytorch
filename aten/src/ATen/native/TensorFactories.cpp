@@ -2072,22 +2072,24 @@ Tensor vander(const Tensor& x, std::optional<int64_t> N, bool increasing) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
-Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_complex_cpu(
+    ArrayRef<T> values,
+    const TensorOptions& options) {
   return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_backend(
+static Tensor tensor_complex_backend(
     ArrayRef<T> values,
     const TensorOptions& options) {
   return at::detail::tensor_complex_backend(values, options);

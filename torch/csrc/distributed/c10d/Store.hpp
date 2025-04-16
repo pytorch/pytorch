@@ -32,6 +32,10 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   ~Store() override = default;
 
+  // Clone a thread safe copy of this store object that points to the same
+  // underlying store.
+  virtual c10::intrusive_ptr<Store> clone() = 0;
+
   void set(const std::string& key, const std::string& value);
 
   virtual void set(
@@ -47,7 +51,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& currentValue,
       const std::vector<uint8_t>& newValue) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
+    C10_THROW_ERROR(NotImplementedError, "Not implemented.");
   }
 
   std::string get_to_str(const std::string& key);
@@ -77,7 +81,9 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::string& /* unused */,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       WatchKeyCallback /* unused */) {
-    TORCH_CHECK(false, "watchKey is deprecated, no implementation support it.");
+    C10_THROW_ERROR(
+        NotImplementedError,
+        "watchKey is deprecated, no implementation support it.");
   }
 
   virtual void append(
@@ -93,6 +99,20 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   // Returns true if this store support append, multiGet and multiSet
   virtual bool hasExtendedApi() const;
+
+  virtual void queuePush(
+      const std::string& key,
+      const std::vector<uint8_t>& value) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
+
+  virtual std::vector<uint8_t> queuePop(const std::string& key) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
+
+  virtual int64_t queueLen(const std::string& key) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
 
  protected:
   std::chrono::milliseconds timeout_;

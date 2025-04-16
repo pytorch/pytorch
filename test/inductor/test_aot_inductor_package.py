@@ -467,6 +467,63 @@ class TestAOTInductorPackage(TestCase):
         output = compiled(test_inputs)
         self.assertEqual(expected, output)
 
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
+        "No support for cpp only and cpu",
+    )
+    def test_package_user_managed_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 4096, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        inductor_configs = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        compiled = compile(model, example_inputs, inductor_configs=inductor_configs)
+
+        self.assertEqual(
+            set(compiled.get_constant_fqns()), set(model.state_dict().keys())
+        )
+
+        compiled.load_constants(
+            model.state_dict(), check_full_update=True, user_managed=False
+        )
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = compiled(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Let's try to modify the weight in-place, result shouldn't change.
+        model.linear.weight.data *= 3.7
+        new_output = compiled(test_inputs)
+        self.assertEqual(new_output, output)
+
+        # Recreate a new model that we will test against user_managed=True
+        new_compiled = compile(model, example_inputs, inductor_configs=inductor_configs)
+        new_compiled.load_constants(
+            model.state_dict(), check_full_update=True, user_managed=True
+        )
+
+        expected = model(test_inputs)
+        new_output = new_compiled(test_inputs)
+        self.assertEqual(expected, new_output)
+
+        # Try to modify the weight in-place, result should change.
+        model.linear.weight.data *= 3.7
+        expected = model(test_inputs)
+        new_output = new_compiled(test_inputs)
+        self.assertEqual(new_output, expected)
+
     def test_deepcopy_compiled_model(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):

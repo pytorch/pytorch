@@ -85,8 +85,9 @@ def process_hf_whisper_output(out):
     out_ret = []
     for i, elem in enumerate(out):
         if i == 0:
-            assert isinstance(elem, dict)
-            out_ret.append({k: v for k, v in elem.items() if k != "logits"})
+            if elem is not None:
+                assert isinstance(elem, dict)
+                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
         elif i != 1:
             out_ret.append(elem)
 
@@ -470,7 +471,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

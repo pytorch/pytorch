@@ -9,11 +9,11 @@ import torch
 from torch.ao.quantization.observer import (
     AffineQuantizedObserverBase,
     get_block_size,
+    Granularity,
     MappingType,
     TorchAODType,
     ZeroPointDomain,
 )
-from torch.fx import Node
 
 
 ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
@@ -729,47 +729,138 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
             self.zero_point_domain,
         )
 
-    def convert(self, model: torch.fx.GraphModule, observer_node: Node):
-        print("calling convert")
-        from torch.ao.quantization.fx.utils import create_getattr_from_value
 
-        scale, zero_point = self.calculate_qparams()
-        with model.graph.inserting_before(observer_node):
-            assert self.block_size is not None, "Expecting block_size to be populated"
+class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
+    def __init__(
+        self,
+        mapping_type: MappingType,
+        target_dtype: torch.dtype,
+        granularity: Granularity,
+        averaging_constant=0.01,
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        eps: Optional[float] = None,
+        is_dynamic=False,
+        scale_dtype: Optional[torch.dtype] = None,
+        zero_point_dtype: Optional[torch.dtype] = None,
+        preserve_zero: bool = True,
+        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        # there could be some extra args that's ignored
+        **kwargs,
+    ):
+        self.is_dynamic = is_dynamic
+        self.averaging_constant = averaging_constant
+        if is_dynamic and self.averaging_constant != 1:
+            raise NotImplementedError(
+                "MovingAverageMinMaxObserver doesn't support dynamic quantization for "
+                f"averaging constant of {self.averaging_constant}"
+            )
+
+        super().__init__(
+            mapping_type=mapping_type,
+            target_dtype=target_dtype,
+            granularity=granularity,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            eps=eps,
+            scale_dtype=scale_dtype,
+            zero_point_dtype=zero_point_dtype,
+            preserve_zero=preserve_zero,
+            zero_point_domain=zero_point_domain,
+        )
+
+    def forward(self, input: torch.Tensor):
+        if input.numel() == 0:
+            return input
+
+        input_detached = input.detach()
+        self.original_dtype = input_detached.dtype
+        assert self.granularity is not None, "granularity is None"
+        self.block_size = get_block_size(input_detached.shape, self.granularity)
+
+        shape_for_reduction, reduction_dims = _get_reduction_params(
+            self.block_size, input_detached.size()
+        )
+        input_detached = input_detached.view(shape_for_reduction)
+        min_val = torch.amin(input_detached, dim=reduction_dims, keepdim=False)
+        max_val = torch.amax(input_detached, dim=reduction_dims, keepdim=False)
+        if not hasattr(self, "min_val") or not hasattr(self, "max_val"):
+            self.min_val = min_val
+            self.max_val = max_val
+        else:
             assert (
-                self.original_dtype is not None
-            ), "Expecting original_dtype to be populated"
-            scale_node = create_getattr_from_value(model, model.graph, "_scale", scale)
-            zero_point_node = create_getattr_from_value(
-                model, model.graph, "_zero_point", zero_point
-            )
-            q_node = model.graph.call_function(
-                torch.ops.pt2e_quant.quantize_affine,
-                (
-                    observer_node.args[0],
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {},
-            )
-            dq_node = model.graph.call_function(
-                torch.ops.pt2e_quant.dequantize_affine,
-                (
-                    q_node,
-                    self.block_size,
-                    scale_node,
-                    zero_point_node,
-                    self.target_dtype,
-                    self.quant_min,
-                    self.quant_max,
-                    self.zero_point_domain.name,
-                ),
-                {"output_dtype": self.original_dtype},
-            )
-            observer_node.replace_all_uses_with(dq_node)
-            model.graph.erase_node(observer_node)
+                self.min_val.shape == min_val.shape
+            ), f"Can't update existing min_val - shape mismatch, self.min_val:{self.min_val.shape} != min_val:{min_val.shape}"
+            assert (
+                self.max_val.shape == max_val.shape
+            ), f"Can't update existing max_val - shape mismatch, self.max_val {self.max_val.shape} != max_val:{max_val.shape}"
+            min_val = self.min_val + self.averaging_constant * (min_val - self.min_val)
+            max_val = self.max_val + self.averaging_constant * (max_val - self.max_val)
+            self.min_val.copy_(min_val)
+            self.max_val.copy_(max_val)
+
+        # returning original input
+        return input
+
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
+        assert hasattr(self, "min_val") and hasattr(
+            self, "max_val"
+        ), "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
+
+        return choose_qparams_affine_with_min_max(
+            self.min_val,
+            self.max_val,
+            self.mapping_type,
+            [],  # BlockSize is not needed because the min/max are already reduced
+            self.target_dtype,
+            self.quant_min,
+            self.quant_max,
+            self.eps,
+            self.scale_dtype,
+            self.zero_point_dtype,
+            self.preserve_zero,
+            self.zero_point_domain,
+        )
+
+
+class AffineQuantizedPlaceholderObserver(AffineQuantizedObserverBase):
+    def __init__(
+        self,
+        mapping_type: MappingType,
+        target_dtype: torch.dtype,
+        granularity: Granularity,
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        eps: Optional[float] = None,
+        is_dynamic=False,
+        scale_dtype: Optional[torch.dtype] = None,
+        zero_point_dtype: Optional[torch.dtype] = None,
+        preserve_zero: bool = True,
+        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        # there could be some extra args that's ignored
+        **kwargs,
+    ):
+        self.is_dynamic = is_dynamic
+
+        super().__init__(
+            mapping_type=mapping_type,
+            target_dtype=target_dtype,
+            granularity=granularity,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            eps=eps,
+            scale_dtype=scale_dtype,
+            zero_point_dtype=zero_point_dtype,
+            preserve_zero=preserve_zero,
+            zero_point_domain=zero_point_domain,
+        )
+
+    def forward(self, input):
+        self.block_size = get_block_size(input.shape, self.granularity)
+        self.original_dtype = input.dtype
+        return input
+
+    def calculate_qparams(self):
+        raise Exception(  # noqa: TRY002
+            "calculate_qparams should not be called for PlaceholderObserver"
+        )

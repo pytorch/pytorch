@@ -13,7 +13,7 @@ namespace torch::jit {
 // "Whether to emit compact debug_pkl when saving a model to .pt file."
 // "Compact file is smaller but cannot be loaded by old torch binaries."
 // TODO(qihan) remove when all binaries are using string table.
-thread_local bool should_use_format_with_string_table_ = true;
+static thread_local bool should_use_format_with_string_table_ = true;
 
 class SourceRangeSerializer {
  public:

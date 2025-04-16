@@ -197,6 +197,133 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_replicate_to_replicate_forward_backward_datatype_conversion(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        replica_spec = [Replicate()]
+
+        forward_datatypes = [
+            torch.bfloat16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float32,
+            torch.bfloat16,
+            torch.float32,
+            None,
+            None,
+        ]
+        backward_datatypes = [
+            torch.bfloat16,
+            torch.float32,
+            torch.bfloat16,
+            torch.float32,
+            None,
+            None,
+            torch.bfloat16,
+            torch.float32,
+        ]
+
+        comm_mode = CommDebugMode()
+
+        for forward_dtype, backward_dtype in zip(forward_datatypes, backward_datatypes):
+            local_tensor = torch.randn(
+                12, 3, device=self.device_type, requires_grad=True
+            )
+            # 1) test replicate -> replicate forward
+            #    forward datatype cast to self.forward_dtype and backward datatype cast to self.backward_dtype
+            replica_tensor = distribute_tensor(local_tensor, device_mesh, replica_spec)
+
+            with comm_mode:
+                reshard_replica_tensor = replica_tensor.redistribute(
+                    device_mesh,
+                    replica_spec,
+                    forward_dtype=forward_dtype,
+                    backward_dtype=backward_dtype,
+                )
+            self.assertEqual(replica_tensor.size(), local_tensor.size())
+            self.assertEqual(replica_tensor.to(forward_dtype), reshard_replica_tensor)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            # 2) test replicate -> replicate backward:
+            # should give gradient as replicate
+            grad_output = torch.ones_like(reshard_replica_tensor)
+            with comm_mode:
+                reshard_replica_tensor.backward(grad_output)
+            grad_input = replica_tensor.grad
+            self.assertEqual(grad_input.placements, replica_spec)
+            self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_shard_to_replicate_forward_backward_datatype_conversion(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        replica_spec = [Replicate()]
+
+        shard_dim_and_input_sizes = [
+            (0, (self.world_size * 3, 3)),
+            (0, (self.world_size * 3 + 1, 3)),
+            (0, (self.world_size * 3 + 2, 3)),
+            (1, (3, self.world_size * 3)),
+            (1, (3, self.world_size * 3 + 1)),
+            (1, (3, self.world_size * 3 + 2)),
+        ]
+
+        forward_datatypes = [
+            torch.bfloat16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float32,
+            torch.bfloat16,
+            torch.float32,
+            None,
+            None,
+        ]
+        backward_datatypes = [
+            torch.bfloat16,
+            torch.float32,
+            torch.bfloat16,
+            torch.float32,
+            None,
+            None,
+            torch.bfloat16,
+            torch.float32,
+        ]
+
+        comm_mode = CommDebugMode()
+
+        for forward_dtype, backward_dtype in zip(forward_datatypes, backward_datatypes):
+            for shard_dim, input_size in shard_dim_and_input_sizes:
+                # 1) test shard -> replicate forward
+                shard_spec = [Shard(shard_dim)]
+                expected_tensor = torch.randn(
+                    input_size, device=self.device_type, requires_grad=True
+                )
+                dtensor = distribute_tensor(expected_tensor, device_mesh, shard_spec)
+                with comm_mode:
+                    reshard_dtensor = dtensor.redistribute(
+                        device_mesh,
+                        replica_spec,
+                        forward_dtype=forward_dtype,
+                        backward_dtype=backward_dtype,
+                    )
+                self.assertEqual(reshard_dtensor.size(), torch.Size(input_size))
+                self.assertEqual(expected_tensor, reshard_dtensor.to_local())
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+                )
+
+                # 2) test shard -> replicate backward:
+                # should give gradient as shard
+                grad_output = torch.ones_like(reshard_dtensor)
+                with comm_mode:
+                    reshard_dtensor.backward(grad_output)
+                grad_input = dtensor.grad
+                self.assertEqual(grad_input.placements, shard_spec)
+                self.assertEqual(
+                    grad_input.to_local(), torch.ones(dtensor.to_local().size())
+                )
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
     def test_replicate_to_partial(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)

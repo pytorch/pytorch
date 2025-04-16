@@ -99,6 +99,7 @@ class ExampleTests(TestCase):
                 rewrite_case.example_args,
                 rewrite_case.example_kwargs,
                 dynamic_shapes=rewrite_case.dynamic_shapes,
+                strict=True,
             )
 
 

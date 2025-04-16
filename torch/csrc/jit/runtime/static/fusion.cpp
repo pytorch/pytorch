@@ -19,7 +19,7 @@
 
 namespace torch::jit {
 
-void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
+static void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
@@ -60,7 +60,7 @@ static Operation createStaticSubgraphRuntime(const Node* node) {
   };
 }
 
-RegisterOperators StaticSubgraphOps({torch::jit::Operator(
+static RegisterOperators StaticSubgraphOps({torch::jit::Operator(
     prim::StaticSubgraph,
     createStaticSubgraphRuntime,
     AliasAnalysisKind::INTERNAL_SPECIAL_CASE)});

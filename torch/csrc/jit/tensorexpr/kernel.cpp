@@ -1242,7 +1242,7 @@ NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
 }
 
 template <typename T>
-std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
+static std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
   std::vector<size_t> idx(v.size());
   iota(idx.begin(), idx.end(), 0);

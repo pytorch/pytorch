@@ -16,7 +16,7 @@ def _get_device_index(device: _device_t, optional: bool = False) -> int:
             raise RuntimeError("Accelerator expected")
         if acc.type != device.type:
             raise ValueError(
-                f"{device.type} doesn't match the current accelerator {torch.accelerator.current_accelerator()}."
+                f"{device.type} doesn't match the current accelerator {acc}."
             )
         device_index = device.index
     if device_index is None:

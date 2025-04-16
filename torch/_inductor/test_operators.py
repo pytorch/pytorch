@@ -12,7 +12,7 @@ if not torch._running_with_deploy():
     )
 
     _test_lib_impl = torch.library.Library("_inductor_test", "IMPL")
-    for dispatch_key in ("CPU", "CUDA", "Meta"):
+    for dispatch_key in ("CPU", "CUDA", "MPS", "Meta"):
         _test_lib_impl.impl("realize", lambda x: x.clone(), dispatch_key)
 
     class Realize(Function):

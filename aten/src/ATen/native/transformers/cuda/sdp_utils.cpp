@@ -553,9 +553,10 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
     }
     return false;
-  } else if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+  } else if (has_for_nested_inputs(params) && (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad())) {
     if (debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support does not support backward.");
+      return false;
     }
   }
 
@@ -645,7 +646,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   constexpr auto dense_constraints =
       c10::array_of<bool (*)(sdp_params const&, bool)>(
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/>
+      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>
   );
 
   if (has_only_dense_inputs(params)) {
@@ -729,6 +730,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto ck_mem_efficient_dtypes =
+      c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
@@ -787,6 +790,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
       return false;
     }
+  }
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    return check_tensor_dtype(params, ck_mem_efficient_dtypes, debug);
   }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else

@@ -77,7 +77,7 @@ void CppPrinter::printPrologue() {
 }
 
 template <typename T>
-inline std::enable_if_t<!std::is_floating_point_v<T>, void> visit_mod(
+static inline std::enable_if_t<!std::is_floating_point_v<T>, void> visit_mod(
     std::ostream& os,
     const ExprPtr& lhs,
     const ExprPtr& rhs) {
@@ -85,7 +85,7 @@ inline std::enable_if_t<!std::is_floating_point_v<T>, void> visit_mod(
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
+static inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
     std::ostream& os,
     const ExprPtr& lhs,
     const ExprPtr& rhs) {
@@ -93,35 +93,35 @@ inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
 }
 
 template <typename T>
-inline std::
+static inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
     visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "std::max(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
-inline std::
+static inline std::
     enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
     visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "(" << *lhs << " < " << *rhs << ") ? " << *rhs << " : " << *lhs;
 }
 
 template <typename T>
-inline std::
+static inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
     visit_min(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "std::min(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
-inline std::
+static inline std::
     enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
     visit_min(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << *lhs << " < " << *rhs << " ? " << *lhs << " : " << *rhs;
 }
 
 template <typename T>
-void visit_binary_op(
+static void visit_binary_op(
     std::ostream& os,
     const ExprPtr& lhs,
     const ExprPtr& rhs,
@@ -142,7 +142,7 @@ void visit_binary_op(
 }
 
 template <typename Op>
-void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
+static void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
   switch (v->lhs()->dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                                      \
   case ScalarType::Name:                                           \
@@ -400,6 +400,6 @@ void CppCodeGen::call_raw(const std::vector<void*>& args) {
   os() << "int main() {}" << '\n';
 }
 
-RegisterCodeGen<CppCodeGen> cpp_codegen_reg("cpp_codegen");
+static RegisterCodeGen<CppCodeGen> cpp_codegen_reg("cpp_codegen");
 
 } // namespace torch::jit::tensorexpr

@@ -7,9 +7,6 @@
 
 namespace c10d::intra_node_comm {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-bool isIntraNodeCommSupported();
-
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
 // Forces detectedTopology() to return Topology::FULLY_CONNECTED, so

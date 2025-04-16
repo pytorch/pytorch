@@ -2617,6 +2617,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
+make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
 # 1) Easy
@@ -3376,6 +3377,11 @@ def gather(x, dim, index, sparse_grad=False):
 
 @register_lowering(aten.embedding, type_promotion_kind=None)
 def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False):
+    if sparse:
+        return fallback_handler(aten.embedding.default)(
+            weight, indices, padding_idx, scale_grad_by_freq, sparse
+        )
+
     assert not sparse
     assert isinstance(weight, TensorBox)
     assert isinstance(indices, TensorBox)

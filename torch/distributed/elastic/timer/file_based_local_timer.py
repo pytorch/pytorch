@@ -13,7 +13,8 @@ import signal
 import sys
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 from torch.distributed.elastic.timer.debug_info_logging import (
@@ -21,6 +22,9 @@ from torch.distributed.elastic.timer.debug_info_logging import (
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 
@@ -36,8 +40,8 @@ def _retry(max_retries: int, sleep_time: float) -> Callable:
         sleep_time: float, the time to sleep between retries.
     """
 
-    def wrapper(func: Callable) -> Callable:
-        def wrapper(*args, **kwargs):
+    def wrapper(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             for i in range(max_retries):
                 try:
                     return func(*args, **kwargs)

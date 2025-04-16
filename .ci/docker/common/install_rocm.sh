@@ -19,6 +19,13 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # Make sure rocm packages from repo.radeon.com have highest priority
+    cat << EOF > /etc/apt/preferences.d/rocm-pin-600
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
+
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
     echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list

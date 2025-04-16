@@ -865,6 +865,7 @@ def _optimized_add(
     from sympy.core.basic import _args_sortkey as sortkey
 
     def make_optimized(ordered_args):
+        assert ordered_args is not None
         result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
@@ -882,20 +883,27 @@ def _optimized_add(
             return make_optimized(rhs._args + lhs._args)
 
         #  (a1+a3) + (a0+a2) => (a0+a1+a2+a3)
-        new_args = list(lhs._args)
-        for a in rhs._args:
-            new_args = _binary_search_insert_arg(new_args, a)
-        return make_optimized(new_args)
+        if len(lhs._args) <= 2 and len(rhs._args) <= 2:
+            new_args = list(lhs._args)
+            for a in rhs._args:
+                new_args = _binary_search_insert_arg(new_args, a)
+                if new_args is None:
+                    break
+            # None means an element already exists.
+            if new_args is not None:
+                return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
         new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
     # a1 + (a0+a2)=> (a0+a1+a2)
     if rhs_is_optimized_summation and lhs.is_symbol:
         new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 

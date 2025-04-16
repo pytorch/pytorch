@@ -20,8 +20,10 @@ import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._library.fake_profile import MissingOpProfile, OpProfile, TensorMetadata
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -2170,6 +2172,130 @@ Dynamic shape operator
     def test_impl_device_invalid(self):
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
+
+    def test_override_impl(self):
+        lib = self.lib()
+        op_name = f"{self.test_ns}::foo"
+        torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
+        op = self.ns().foo.default
+
+        def foo_impl1(x):
+            return x * 1
+
+        # Register cpu impl to foo_impl1
+        lib.impl("foo", foo_impl1, "CPU")
+        self.assertEqual(op(torch.ones(3)), torch.ones(3))
+
+        def foo_impl2(x):
+            return torch.cat([x, x])
+
+        with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
+            lib.impl("foo", foo_impl2, "CPU")
+
+        # Override cpu impl to foo_impl2
+        lib.impl(op_name, foo_impl2, "CPU", allow_override=True)
+        self.assertEqual(op(torch.ones(3)), torch.ones(6))
+
+    def test_override_fake(self):
+        lib = self.lib()
+        op_name = f"{self.test_ns}::foo"
+        torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
+        op = self.ns().foo.default
+
+        def foo_impl1(x):
+            return x * 1
+
+        # Register fake kernel to foo_impl1
+        torch.library.register_fake(op_name, foo_impl1, lib=lib)
+
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [3])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        def foo_impl2(x):
+            return torch.cat([x, x])
+
+        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
+            torch.library.register_fake(op_name, foo_impl2, lib=lib)
+
+        # Override fake kernel to foo_impl2
+        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [6])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+        # Use scoped_library to temporarily register Fake kernel to foo_impl1
+        with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
+            torch.library.register_fake(
+                op_name, foo_impl1, lib=lib2, allow_override=True
+            )
+            with torch._subclasses.FakeTensorMode():
+                self.assertEqual(op(torch.ones(3)).shape, [3])
+            self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        # Fake kernel should go back to foo_impl2
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [6])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+    def test_override_meta(self):
+        lib = self.lib()
+        op_name = f"{self.test_ns}::foo"
+        torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
+        op = self.ns().foo.default
+
+        def foo_impl1(x):
+            return x * 1
+
+        # Register Meta kernel to foo_impl1
+        lib.impl("foo", foo_impl1, "Meta")
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        def foo_impl2(x):
+            return torch.cat([x, x])
+
+        with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
+            lib.impl("foo", foo_impl2, "Meta")
+
+        # Override Meta kernel to foo_impl2
+        lib.impl("foo", foo_impl2, "Meta", allow_override=True)
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+        # Use scoped_library to temporarily register Meta kernel to foo_impl1
+        with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
+            lib2.impl("foo", foo_impl1, "Meta", allow_override=True)
+            self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        # Meta kernel should go back to foo_impl2
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
+
+        # Use register_fake to override Meta kernel to foo_impl1
+        torch.library.register_fake(op_name, foo_impl1, lib=lib, allow_override=True)
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+    def test_override_cea(self):
+        lib = self.lib()
+        op_name = f"{self.test_ns}::foo"
+        torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
+        op = self.ns().foo.default
+
+        def foo_impl1(x):
+            return x * 1
+
+        # Register CEA impl to foo_impl1
+        lib.impl("foo", foo_impl1, "CompositeExplicitAutograd")
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [3])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
+
+        def foo_impl2(x):
+            return torch.cat([x, x])
+
+        # Override Meta/fake kernel with foo_impl2
+        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        with torch._subclasses.FakeTensorMode():
+            self.assertEqual(op(torch.ones(3)).shape, [6])
+        self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
     @scoped_load_inline
     def test_autograd_function_backed_op(self, load_inline):
@@ -4330,6 +4456,147 @@ class TestTypeConversion(TestCase):
 
         result_type = tuple_to_list(Tuple[int, float, str])
         self.assertEqual(result_type, list[typing.Union[int, float, str]])
+
+
+class TestOpProfiles(TestCase):
+    def get_sample_op_profile(self) -> dict[str, set[OpProfile]]:
+        return {
+            "mylib.foo.default": {
+                OpProfile(
+                    args_profile=(
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                        TensorMetadata(
+                            rank=2,
+                            dtype=torch.float32,
+                            device=torch.device("cpu"),
+                            layout=torch.strided,
+                        ),
+                    ),
+                    out_profile=TensorMetadata(
+                        rank=2,
+                        dtype=torch.float32,
+                        device=torch.device("cpu"),
+                        layout=torch.strided,
+                    ),
+                )
+            }
+        }
+
+    def test_fake_registration(self):
+        fm = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)
+        )
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            with (
+                self.assertRaisesRegex(
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo.default",
+                ),
+                fm,
+            ):
+                torch.ops.mylib.foo(t1, t2)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles), fm:
+                torch.ops.mylib.foo(t1, t2)
+
+                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo"):
+                    torch.ops.mylib.foo(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
+
+            with (
+                self.assertRaisesRegex(
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo.default",
+                ),
+                fm,
+            ):
+                torch.ops.mylib.foo(t1, t2)
+
+    def test_duplicate_registration_impl(self):
+        fm = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)
+        )
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            @torch.library.register_fake("mylib::foo", lib=lib)
+            def foo_impl_fake(a, b):
+                return (a + b).to(dtype=torch.bfloat16)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
+
+            with torch._library.fake_profile.register_fake_profile(op_profiles):
+                with fm:
+                    self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.float32)
+
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
+
+    def test_duplicate_registration_custom_op(self):
+        fm = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)
+        )
+        t1 = fm.from_tensor(torch.ones(3, 3))
+        t2 = fm.from_tensor(torch.ones(3, 3))
+
+        op_profiles = self.get_sample_op_profile()
+
+        @torch.library.custom_op("mylib::foo1", mutates_args=())
+        def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @torch.library.register_fake("mylib::foo1")
+        def foo_impl_fake(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
+
+        op_profiles = {
+            "mylib.foo1.default": self.get_sample_op_profile()["mylib.foo.default"]
+        }
+
+        with torch._library.fake_profile.register_fake_profile(op_profiles):
+            with fm:
+                self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.float32)
+
+        with fm:
+            self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
 
 
 only_for = ("cpu", "cuda")

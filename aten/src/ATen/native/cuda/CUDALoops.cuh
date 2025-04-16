@@ -612,28 +612,41 @@ struct check_binary_functor_types_for_specialization<
 };
 
 // The following is a list of type specializations for vectorized_templated
-// elementwise kernel. It refers to the first and second runtime types of the
-// arguments of a binary functor.
-
+// elementwise kernel. The three types refer to runtime types of the output
+// tensor, first tensor argument, and the second tensor argument used for a
+// binary functor.
 constexpr std::array rt_binary_specializations = {
-    std::array<c10::ScalarType, 2>(
+    std::array<c10::ScalarType, 3>(
         {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<float>::value,
          c10::CppTypeToScalarType<BFloat16>::value}),
-    std::array<c10::ScalarType, 2>(
-        {c10::CppTypeToScalarType<BFloat16>::value,
-         c10::CppTypeToScalarType<float>::value}),
-    std::array<c10::ScalarType, 2>(
+    std::array<c10::ScalarType, 3>(
         {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<BFloat16>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<float>::value,
          c10::CppTypeToScalarType<Half>::value}),
-    std::array<c10::ScalarType, 2>(
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<Half>::value,
+         c10::CppTypeToScalarType<float>::value}),
+    std::array<c10::ScalarType, 3>(
         {c10::CppTypeToScalarType<Half>::value,
+         c10::CppTypeToScalarType<Half>::value,
          c10::CppTypeToScalarType<float>::value})};
 
 bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
   if (iter.ninputs() != 2)
     return false;
   for (auto spec : rt_binary_specializations)
-    if (iter.input_dtype(0) == spec[0] && iter.input_dtype(1) == spec[1])
+    if (iter.dtype(0) == spec[0] && iter.input_dtype(0) == spec[1] &&
+        iter.input_dtype(1) == spec[2])
       return true;
   return false;
 }
@@ -648,6 +661,7 @@ struct type_specialized_kernel_launcher {
       typename loader_t,
       typename storer_t>
   static void apply(
+      ScalarType ret_t,
       ScalarType arg0_t,
       ScalarType arg1_t,
       int64_t numel,
@@ -657,10 +671,9 @@ struct type_specialized_kernel_launcher {
       out_calc_t output_offset_calculator,
       loader_t loader,
       storer_t storer) {
-    using traits = function_traits<func_t>;
-    using return_t = typename traits::result_type;
-    if (arg0_t == rt_binary_specializations[arg_index][0] &&
-        arg1_t == rt_binary_specializations[arg_index][1])
+    if (ret_t == rt_binary_specializations[arg_index][0] &&
+        arg0_t == rt_binary_specializations[arg_index][1] &&
+        arg1_t == rt_binary_specializations[arg_index][2])
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
@@ -668,11 +681,12 @@ struct type_specialized_kernel_launcher {
           out_calc_t,
           loader_t,
           storer_t,
-          return_t,
           decltype(c10::impl::ScalarTypeToCPPType<
                    rt_binary_specializations[arg_index][0]>::t),
           decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][1]>::t)>(
+                   rt_binary_specializations[arg_index][1]>::t),
+          decltype(c10::impl::ScalarTypeToCPPType<
+                   rt_binary_specializations[arg_index][2]>::t)>(
           numel,
           f,
           data,
@@ -712,7 +726,6 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 #ifdef USE_ROCM
     // Attempt to call specialized vectorized elementwise kernel
     // that enables interleaving.
-
     if (check_binary_rt_types_for_specialization(iter) &&
         memory::can_vectorize_up_to<func_t>(data) > 1) {
       // constexpr to reduce the amount of kernels generated for
@@ -740,6 +753,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
             type_specialized_kernel_launcher,
             rt_binary_specializations.size()>::
             with_args(
+                iter.dtype(0),
                 iter.input_dtype(0),
                 iter.input_dtype(1),
                 numel,

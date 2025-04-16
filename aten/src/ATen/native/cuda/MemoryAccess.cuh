@@ -407,8 +407,8 @@ struct vectorized_templated {
   // float(float,bfloat16) and functor add on float(float,float).
   template <typename scalar_t>
   __device__ inline void store(scalar_t* from, int idx) {
-    using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t* to = reinterpret_cast<scalar_t*>(data[0]) + block_work_size * idx;
+    using vec_t = aligned_vector<CastToT, vec_size>;
+    CastToT* to = reinterpret_cast<CastToT*>(data[0]) + block_work_size * idx;
     vec_t* to_ = reinterpret_cast<vec_t*>(to);
     int thread_idx = threadIdx.x;
 #pragma unroll

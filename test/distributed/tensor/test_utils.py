@@ -3,13 +3,17 @@
 import itertools
 
 import torch
-from torch.distributed._tensor import distribute_tensor, DTensor
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._utils import (
+    _compute_local_shape_and_global_offset,
+    _explicit_order_placements,
+    compute_local_shape_and_global_offset,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -17,6 +21,113 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+class LocalTest(TestCase):
+    def test_explicit_order_placements(self):
+        # mesh_shape: ShapeType, placements: Sequence[Placement]
+        test_cases = [
+            {
+                "mesh_shape": [2, 4],
+                "placements": [Replicate(), Replicate()],
+                "ordered": [(0, Replicate()), (1, Replicate())],
+            },
+            {
+                "mesh_shape": [3, 2],
+                "placements": [Shard(0), Replicate()],
+                "ordered": [(0, Shard(0)), (1, Replicate())],
+            },
+            {
+                "mesh_shape": [2, 4],
+                "placements": [_StridedShard(0, split_factor=4), Shard(0)],
+                "ordered": [(1, Shard(0)), (0, Shard(0))],
+            },
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [Shard(0), _StridedShard(0, split_factor=4), Shard(0)],
+                "ordered": [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))],
+            },
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [
+                    _StridedShard(0, split_factor=12),
+                    _StridedShard(0, split_factor=4),
+                    Shard(0),
+                ],
+                "ordered": [(2, Shard(0)), (1, Shard(0)), (0, Shard(0))],
+            },
+        ]
+        for test_case in test_cases:
+            actual = _explicit_order_placements(
+                test_case["mesh_shape"], test_case["placements"]
+            )
+            expected = test_case["ordered"]
+
+            self.assertEqual(
+                actual,
+                expected,
+                f"mesh_shape={test_case['mesh_shape']} placements={test_case['placements']}, output: {actual=}, {expected=}",
+            )
+
+        error_cases = [
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [Shard(0), _StridedShard(0, split_factor=3), Shard(0)],
+                "exception_type": RuntimeError,
+                "exception_text": "Can only convert _StridedShard to ordered Shard if split_factor",
+            },
+            {
+                "mesh_shape": [2, 3, 4],
+                "placements": [
+                    _StridedShard(0, split_factor=3),
+                    Shard(0),
+                    Shard(0),
+                ],
+                "exception_type": NotImplementedError,
+                "exception_text": r"Strided sharding does not allow Shard\(\) to appear after the strided part has ended",
+            },
+            {
+                "mesh_shape": [2, 3],
+                "placements": [
+                    Shard(0),
+                ],
+                "exception_type": RuntimeError,
+                "exception_text": "Expected one placement per mesh dim",
+            },
+        ]
+        for test_case in error_cases:
+            with self.assertRaisesRegex(
+                test_case["exception_type"], test_case["exception_text"]
+            ):
+                _explicit_order_placements(
+                    test_case["mesh_shape"], test_case["placements"]
+                )
+
+    def test_compute_local_shape_and_global_offset_uneven(self):
+        # This case is not only 'uneven' bug also has an empty shard
+        # (e.g. most DP ranks have local shape 18,4096, one has 8,4096, one has 0,4096
+        global_shape = (4096, 4096)
+        DP = 30
+        TP = 8
+        mesh_shape = (DP, TP)
+        placements = [_StridedShard(0, split_factor=8), Shard(0)]
+        TP_shard_size = global_shape[0] / TP
+        for my_coordinate in itertools.product(range(DP), range(TP)):
+            local_shape, global_offset = _compute_local_shape_and_global_offset(
+                global_shape, mesh_shape, list(my_coordinate), placements
+            )
+            dp_rank, tp_rank = my_coordinate
+            expected_shard_size = 18
+            expected_shard_offset = tp_rank * TP_shard_size + 18 * dp_rank
+            if dp_rank == 28:
+                expected_shard_size = 8
+            elif dp_rank == 29:
+                expected_shard_size = 0
+                # we define the offset value of a zero-sized shard as the dim size
+                # this actually matters, because DCP uses offset to deduplicate shards when saving
+                expected_shard_offset = 4096
+            self.assertEqual(local_shape, (expected_shard_size, 4096))
+            self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
 class UtilTest(DTensorTestBase):
@@ -113,6 +224,25 @@ class UtilTest(DTensorTestBase):
         expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
         self.assertEqual(local_shape, expected_local_shape)
         self.assertEqual(global_offset, expected_global_offset)
+
+    @with_comms
+    def test_uneven_fsdp_tp_meta_compute(self):
+        # FSDP + TP uneven sharding
+        tp_size = 2
+        dp_size = self.world_size // tp_size
+        global_mesh = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        global_tensor_shape = torch.Size([15, 5])
+        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
+        rank = global_mesh.get_rank()
+        expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
+        expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
+        self.assertEqual(local_shape[0], expected_shapes[rank])
+        self.assertEqual(global_offset[0], expected_offsets[rank])
 
     @with_comms
     def test_hsdp_tp_meta_compute(self):

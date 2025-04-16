@@ -221,6 +221,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
+# TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)

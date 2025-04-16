@@ -50,7 +50,7 @@ def lower_pt2e_quantized_to_x86(
         m.recompile()
 
     lowered_model = (
-        torch.export.export_for_training(model, example_inputs)
+        torch.export.export_for_training(model, example_inputs, strict=True)
         .run_decompositions(_post_autograd_decomp_table())
         .module()
     )

@@ -30,6 +30,14 @@ if TYPE_CHECKING:
     import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
+_NP_UNSUPPORTED_DTYPES_8BIT = frozenset(
+    {
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    }
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +117,59 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
+def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
+    """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
+    import onnxruntime as ort
+
+    from torch.onnx._internal.exporter import _core
+
+    if tensor.dtype == torch.bfloat16 or tensor.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
+        if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
+            # This requires ONNX Runtime 1.21 or newer
+            if tensor.dtype == torch.bfloat16:
+                uint_type = torch.uint16
+            else:
+                uint_type = torch.uint8
+            onnx_type = _core.torch_dtype_to_onnx_dtype(tensor.dtype)
+            # Make tensor contiguous to ensure view() works
+            tensor = tensor.contiguous()
+            return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
+                tensor.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
+            )
+        raise RuntimeError(
+            f"Failed to convert tensor of type '{tensor.dtype}' to OrtValue. "
+            "Please ensure that ONNX Runtime is built with DLPack support or is the latest version"
+        )
+    # TODO(#151064): Use dlpack when ORT properly supports it
+    return ort.OrtValue.ortvalue_from_numpy(tensor.numpy(force=True))
+
+
+def _from_ort_value(value: ort.OrtValue) -> torch.Tensor:
+    if value.element_type() in (
+        ir.DataType.BFLOAT16,
+        ir.DataType.FLOAT8E4M3FN,
+        ir.DataType.FLOAT8E4M3FNUZ,
+        ir.DataType.FLOAT8E5M2,
+        ir.DataType.FLOAT8E5M2FNUZ,
+    ):
+        # This requires ONNX Runtime 1.21 or newer
+        try:
+            return torch.from_dlpack(value._get_c_value())
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to convert OrtValue to torch.Tensor. "
+                "Please ensure that ONNX Runtime is built with DLPack support or is the latest version"
+            ) from e
+    return torch.from_numpy(value.numpy())
+
+
 class ONNXProgram:
-    """A class to represent an ONNX program that is callable with torch tensors."""
+    """A class to represent an ONNX program that is callable with torch tensors.
+
+    Attributes:
+        model: The ONNX model as an ONNX IR model object.
+        exported_program: The exported program that produced the ONNX model.
+    """
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
@@ -151,16 +210,17 @@ ONNXProgram(
 
         # We don't expect non-tensor as inputs
         ort_input = {
-            k.name: v.numpy(force=True)
+            k.name: _to_ort_value(v)
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
-        outputs = self._inference_session.run(None, ort_input, run_options=run_options)
+        outputs = self._inference_session.run_with_ort_values(
+            None, ort_input, run_options=run_options
+        )
         logger.debug("Inference session run completed.")
-        # TODO(justinchuby): Maybe output complex tensors as needed
-        return tuple(torch.from_numpy(output) for output in outputs)
+        return tuple(_from_ort_value(output) for output in outputs)
 
     def compute_values(
         self, value_names: Sequence[str], args=(), kwargs=None
