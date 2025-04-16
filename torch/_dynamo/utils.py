@@ -776,6 +776,11 @@ def compile_times(repr="str", aggregate: bool = False):
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
 
+    def get_metric(name):
+        if name not in compilation_time_metrics:
+            return 0
+        return sum(compilation_time_metrics[name])
+
     if repr == "str":
         rows = [
             (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
@@ -783,7 +788,53 @@ def compile_times(repr="str", aggregate: bool = False):
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
+        out += "\n\n"
+
+        # Calculate approximate component breakdown
+        # Triton time
+        # These triton times are for both fwd and bwd
+        triton_kernels = get_metric("async_compile.wait")
+        triton_autotuning = get_metric("CachingAutotuner.benchmark_all_configs")
+        triton_total = triton_kernels + triton_autotuning
+
+        inductor_fwd_triton = get_metric("compile_fx.<locals>.fw_compiler_base")
+        inductor_bwd_triton = get_metric("compile_fx.<locals>.bw_compiler")
+
+        # Inductor time - For inductor fwd or bwd, go to tlparse
+        inductor_total = inductor_fwd_triton + inductor_bwd_triton - triton_kernels
+
+        # Dynamo time
+        entire_frame_fwd = get_metric("_compile.compile_inner")
+        all_but_dynamo_fwd = get_metric("OutputGraph.call_user_compiler")
+
+        dynamo_total = entire_frame_fwd - all_but_dynamo_fwd
+
+        # AOT Dispatcher time
+        aot_total = entire_frame_fwd - dynamo_total - inductor_fwd_triton
+
+        # unaccounted
+        accounted = dynamo_total + aot_total + inductor_total + triton_total
+        unaccounted = (
+            entire_frame_fwd + inductor_bwd_triton + triton_autotuning - accounted
+        )
+
+        if accounted:
+            out += "Approximate Compilation Time Breakdown:\n"
+
+            def fmt_helper(name, x):
+                percent = x / accounted * 100
+                return name, f"{x:.4f}", f"{percent:.0f}"
+
+            rows = [
+                fmt_helper("dynamo", dynamo_total),
+                fmt_helper("aot_dispatcher", aot_total),
+                fmt_helper("inductor", inductor_total),
+                fmt_helper("triton", triton_total),
+                fmt_helper("unaccounted", unaccounted),
+            ]
+            out += tabulate(rows, headers=("Component", "Runtimes (s)", "Percent (%)"))
         return out
+
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
@@ -1267,6 +1318,8 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -4121,6 +4174,8 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+    # This emulates
+    # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -4135,12 +4190,14 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
     if vt.is_realized() or (
         hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
     ):
+        func = None
         if isinstance(vt, TensorWithTFOverrideVariable):
-            return True
+            func = getattr(vt.class_type, "__torch_function__", None)
 
-        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-            vt.value, "__torch_function__"
-        )
+        elif isinstance(vt, UserDefinedObjectVariable):
+            func = getattr(vt.value, "__torch_function__", None)
+
+        return func not in (None, torch._C._disabled_torch_function_impl)
 
     return False
 

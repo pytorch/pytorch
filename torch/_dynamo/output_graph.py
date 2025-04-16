@@ -79,6 +79,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
+from .device_interface import get_interface_for_device
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
@@ -309,7 +310,6 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
-        super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -477,6 +477,19 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: set[str] = set()
+
+        self.compiler_trace_stack = contextlib.ExitStack()
+
+    def mark_bytecode_tracing_start(self):
+        self.compiler_trace_stack.enter_context(
+            dynamo_timed(
+                "bytecode_tracing",
+                log_pt2_compile_event=True,
+            )
+        )
+
+    def mark_bytecode_tracing_stop(self):
+        self.compiler_trace_stack.close()
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -1017,6 +1030,8 @@ class OutputGraph:
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
         assert reason is not None
 
         from .decorators import disable
@@ -1347,8 +1362,14 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
+            device_types = compile_pg._device_types
+            assert len(device_types) == 1, (
+                "Expect only one device type but got {}".format("+".join(device_types))
+            )
             with (
-                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
+                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
+                    compile_pg.rank() % torch.accelerator.device_count()
+                ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states = [None] * compile_pg.size()
