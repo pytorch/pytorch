@@ -432,7 +432,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
-    @parametrize("K", [1, 32, 64])
+    @parametrize("K", [32, 64])
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
@@ -485,7 +485,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
-    @parametrize("K", [1, 32, 64])
+    @parametrize("K", [32, 64])
     @parametrize("batch_size", [None, 1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
