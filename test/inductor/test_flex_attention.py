@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    largeTensorTest,
 )
 from torch.utils._triton import has_triton
 
@@ -55,6 +56,16 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+
+def large_tensor_test_class(size, device=None):
+    def decorator(cls):
+        for name, method in list(cls.__dict__.items()):
+            if callable(method) and name.startswith("test_"):
+                setattr(cls, name, largeTensorTest(size, device)(method))
+        return cls
+
+    return decorator
 
 
 @contextmanager
@@ -325,6 +336,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
+@large_tensor_test_class("2GB")
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4494,6 +4506,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
+@large_tensor_test_class("2GB")
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4943,6 +4956,7 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
+@large_tensor_test_class("2GB")
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
