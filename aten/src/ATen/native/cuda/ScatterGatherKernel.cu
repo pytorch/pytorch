@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
-
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ceil_div.h>
 #include <ATen/MemoryOverlap.h>
 
 #include <ATen/native/ScatterGatherChecks.h>
@@ -11,6 +11,7 @@
 
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -112,6 +113,33 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <int Alignment>
+__global__ void vectorized_gather_kernel(char * out, char * inp, int64_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride) {
+    int64_t ind = idx[blockIdx.x];
+    CUDA_KERNEL_ASSERT(ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds");
+    int32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; // off is guaranteed to be within int32 limits
+    if (off >= slice_size) return;
+    auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
+    at::native::memory::st_vec<Alignment>(out + blockIdx.x * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
+}
+
+
+
+template <int64_t Alignment>
+void vectorized_gather_kernel_launch(char * out, char * inp, int64_t * idx, int num_ind,
+                                     int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes){
+
+  constexpr int64_t max_num_threads=256;
+  auto num_threads = at::round_up(
+      at::ceil_div(slice_size_in_bytes, Alignment),
+      static_cast<int64_t>(C10_WARP_SIZE));
+  dim3 grid = {static_cast<uint32_t>(num_ind), static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), 1};
+  auto block = std::min(max_num_threads, num_threads);
+  vectorized_gather_kernel<Alignment><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
+  ind_dim_size, inp_stride_bytes, out_stride_bytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+}
 
 template <bool is_scatter_like, typename scalar_t>
 struct _cuda_scatter_gather_internal_kernel {
@@ -132,17 +160,41 @@ struct _cuda_scatter_gather_internal_kernel {
       return;
     }
 
+
     char* self_ptr = (char*)iter.data_ptr(0);
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
+    if constexpr (!is_scatter_like) {
+      // we can go to faster path if we are indexing on the first dim
+      // the dst and src are contiguous and all the dims and pts are multiple of 16
+      size_t element_size = sizeof(scalar_t);
+      constexpr int64_t alignment = 16;
+      //TensorIterator strides and sizes are ordered fastest moving to slowest moving,
+      //in consrast to regular sizes
+      using at::native::memory::get_alignment;
+      // we need contiguous source and dst slices and aligned pointers and strides and slice size to do vectorized loads
+      // also we need idx to be expanded in the last dimension so we can copy entire slices
+      if (iter.ndim() == 2 && iter.strides(2)[0]==0 && (size_t)iter.strides(0)[0]==element_size &&
+          (size_t)iter.strides(1)[0]==element_size && get_alignment(self_ptr) == 16 && get_alignment(src_ptr) == 16 &&
+          get_alignment((size_t)(iter.shape()[0] * element_size)) == 16 && get_alignment((size_t)(index_stride * element_size)) == 16 &&
+          iter.strides(0)[1] == 16) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto ind_dim_size = index_size;
+        auto inp_stride_bytes = index_stride * element_size;
+        auto out_stride_bytes = iter.strides(0)[1];
+        vectorized_gather_kernel_launch<alignment>(self_ptr, src_ptr, (int64_t*)index_ptr, num_ind, slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes);
+        return;
+      }
+    }
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "index out of bounds");
+        && "scatter gather kernel index out of bounds");
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -153,6 +205,7 @@ struct _cuda_scatter_gather_internal_kernel {
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
+
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
