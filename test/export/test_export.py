@@ -4272,7 +4272,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v0
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Could not view a tensor with shape torch.Size\(\[u0, u1\]\) as a tensor with shape \(u0, u2\)!"
+            r"Could not view a tensor with shape torch.Size\(\[u0, u1\]\) as a tensor with shape \(u0, u2\)!",
         ):
             export(N(), (t,))
 
