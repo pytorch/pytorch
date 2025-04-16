@@ -7,6 +7,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
+from sympy.geometry.util import OrderedSet
+
 import torch
 
 from ... import ir
@@ -26,7 +28,7 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_epilogue_visitor import CutlassEVTCodegen
+from .cutlass_python_evt import CutlassEVTCodegen
 from .cutlass_utils import torch_dtype_to_cutlass_type
 
 
@@ -822,6 +824,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         ):
             return None
 
+        if not self._has_tma_epilogue(op):
+            return None
+
         # Filter ops by alignment.
         if not self._alignment_match(op):
             log.debug(
@@ -1000,13 +1005,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder = self.input_reorder
         else:
             input_reorder = None
-        kernel_call_signature = kernel.def_kernel(
-            inputs=inputs,  # type: ignore[arg-type]
-            outputs=[Y],
-            names_str=names_str,
-            input_reorder=input_reorder,
-        )
-        test_call_statement = self.test_call_statement(kernel, inputs, names_str)
+
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
         op = self.fix_op_layout(op, X, W, Bias, Y)
@@ -1032,16 +1031,41 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 should_swap_xw = True
 
         if epilogue_nodes:
+            evt_read_names, evt_write_names, buffer_renames, evt_py_code = (
+                CutlassEVTCodegen.ir_to_evt_python_code(Y.get_name(), epilogue_nodes)
+            )
+            read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
+            write_names = OrderedSet(evt_write_names)
+
+            name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+            epilogue_inputs = [name_to_buffer[name] for name in read_names]
+            epilogue_outputs = [name_to_buffer[name] for name in write_names]
+
             evt_name, evt_args, evt_code = self._render_evt(
                 op,
-                epilogue_nodes,
-                Y.get_name(),
+                evt_py_code,
+                evt_read_names,
+                evt_write_names,
+                buffer_renames,
                 Y.get_layout().dtype,
                 W.get_layout().dtype,
             )
         else:
+            epilogue_inputs = []
+            epilogue_outputs = []
             evt_name = None
+            evt_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
             evt_code = ""
+
+        kernel_call_signature = kernel.def_kernel(
+            inputs=inputs,  # type: ignore[arg-type]
+            outputs=[Y],
+            epilogue_inputs=[],
+            epilogue_outputs=epilogue_inputs + epilogue_outputs,
+            names_str=names_str,
+            input_reorder=input_reorder,
+        )
+        test_call_statement = self.test_call_statement(kernel, inputs, names_str)
 
         instance_definition, instance_type = self._define_gemm_instance(op, evt_name)
 
@@ -1061,7 +1085,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             instance_definition=instance_definition,
             instance_type=instance_type,
             input_reorder=self.input_reorder,
-            epilogue_args=self._render_evt_args(),
+            epilogue_args=evt_args,
             test_call_statement=test_call_statement,
             op_conf_name=op.configuration_name(),
             epilogue_visitor_tree=evt_code,
@@ -1099,14 +1123,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         ]
         return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
-    def _render_evt_args(self):
-        return f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
-
     def _render_evt(
         self,
         op: "cutlass_gemm_op.GemmOperation",
-        epilogue_nodes: list[IRNode],
-        output_name: str,
+        evt_py_code: str,
+        read_names: list[str],
+        write_names: list[str],
+        buffer_renames: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
@@ -1244,28 +1267,23 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         return True
 
-    def _render_evt_args(self):
-        return f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
-
     def _render_evt(
         self,
         op: "cutlass_gemm_op.GemmOperation",
-        epilogue_nodes: list[IRNode],
-        output_name: str,
+        evt_py_code: str,
+        read_names: list[str],
+        write_names: list[str],
+        buffer_renames: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
-        read_names, write_names, buffer_renames, evt_py_code = (
-            CutlassEVTCodegen.ir_to_evt_python_code(output_name, epilogue_nodes)
-        )
-
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
-        evt_name, evt_code = trace(
+        evt_name, evt_args, evt_code = trace(
             evt_py_code,
             create_example_tensors(
                 read_names, write_names, buffer_renames, name_to_buffer
@@ -1274,12 +1292,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             output_dtype,
             op.tile_description,
             op.epilogue_schedule,
-            name_to_buffer,
+            name_to_buffer
         )
-        breakpoint()
+
         return (
             evt_name,
-            "",
+            evt_args,
             evt_code,
         )
 
