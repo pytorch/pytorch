@@ -689,16 +689,30 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   std::unique_ptr<T> impl_;
 };
 
+/** Set the host allocator for DeviceType `t`. This allocator manages pinned memory on the host
+ *  that can be accessed efficiently by the specified device type.
+ *
+ *  The passed in allocator pointer is expected to have static lifetime; this function does NOT 
+ *  take ownership of the raw pointer. (This prevents existing pointers to an allocator from 
+ *  being invalidated when SetHostAllocator is called.)
+ *
+ *  Note that this function is not thread-safe and should only be called during initialization.
+ *
+ *  The 'priority' parameter determines whether this allocator can replace an existing one.
+ *  The default priority is 0 (lowest). Only allocators with equal or higher priority can 
+ *  overwrite existing ones. This allows for customizing the default pinned memory allocation
+ *  strategy when needed.
+ */
 #define DECLARE_HOST_ALLOCATOR(name, impl, deleter) \
   struct name final                                 \
       : public at::CachingHostAllocatorInterface<impl, deleter> {};
 
 TORCH_API void setHostAllocator(
-    at::DeviceType t,
-    at::HostAllocator* alloc,
+    at::DeviceType device_type,
+    at::HostAllocator* allocator,
     uint8_t priority = 0);
 
-TORCH_API at::HostAllocator* getHostAllocator(const at::DeviceType& t);
+TORCH_API at::HostAllocator* getHostAllocator(at::DeviceType device_type);
 
 template <DeviceType t>
 struct HostAllocatorRegisterer {
