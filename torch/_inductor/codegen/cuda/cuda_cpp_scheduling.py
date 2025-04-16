@@ -211,7 +211,7 @@ class CUDACPPScheduling(BaseScheduling):
             return False
 
         try:
-            from torch._inductor.codegen.cuda.cutlass_epilogue_visitor import (
+            from torch._inductor.codegen.cuda.cutlass_python_evt import (
                 CutlassEVTCodegen,
             )
 
