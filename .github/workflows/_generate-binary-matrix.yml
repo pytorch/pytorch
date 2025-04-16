@@ -43,6 +43,9 @@ on:
         description: The generated matrix for macos cpu builds
         value: ${{ jobs.generate-matrix.outputs.macos-cpu-matrix }}
 
+env:
+  PACKAGE_TYPE: ${{ inputs.package-type }}
+
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest
