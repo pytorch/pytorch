@@ -7309,7 +7309,7 @@ def forward(self, b_a_buffer, x):
                 module_treespec = tree_structure(module_out)
                 self.assertTrue(
                     torch.allclose(
-                        tree_unflatten(ep.module()(xs), module_treespec), module_out
+                        ep.module()(xs), module_out
                     )
                 )
 

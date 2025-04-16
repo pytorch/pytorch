@@ -106,7 +106,7 @@ def check_meta_consistency_vt(
     vars2: list[VariableTracker],
     lhs_name: str,
     rhs_name: str,
-    include_contiguity: bool = True
+    include_contiguity: bool = True,
 ) -> None:
     from torch._higher_order_ops.utils import check_meta_consistency
 
@@ -125,7 +125,13 @@ def check_meta_consistency_vt(
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name, include_contiguity=include_contiguity)
+    return check_meta_consistency(
+        unwrapped1,
+        unwrapped2,
+        lhs_name,
+        rhs_name,
+        include_contiguity=include_contiguity
+    )
 
 
 @contextlib.contextmanager
@@ -1341,7 +1347,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             operands_seq,
             "body_fn_output",
             "carried_inputs",
-            include_contiguity=False
+            include_contiguity=False,
         )
 
         (
@@ -1551,7 +1557,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             results.items,
             "initial_xs",
             "combine_fn_output",
-            include_contiguity=False
+            include_contiguity=False,
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1771,8 +1777,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_vars = _make_inlined(tx, pytree.tree_leaves)(
                 out_vars
             ).unpack_var_sequence(tx)
+
             # additional output checking
-            init_treespec = args[0].keywords["spec_init"]
             _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
 
             check_meta_consistency_vt(

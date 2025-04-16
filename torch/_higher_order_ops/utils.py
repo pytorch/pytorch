@@ -148,7 +148,7 @@ def check_meta_consistency(
     rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
-    include_contiguity: bool = True
+    include_contiguity: bool = True,
 ) -> None:
     def diff_meta_pairs(
         lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
@@ -161,8 +161,12 @@ def check_meta_consistency(
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
                     diff_tensor_meta(
-                        _extract_tensor_metadata(lhs, include_contiguity=include_contiguity),
-                        _extract_tensor_metadata(rhs, include_contiguity=include_contiguity),
+                        _extract_tensor_metadata(
+                            lhs, include_contiguity=include_contiguity
+                        ),
+                        _extract_tensor_metadata(
+                            rhs, include_contiguity=include_contiguity
+                        ),
                         check_grad=False,
                     )
                 )
