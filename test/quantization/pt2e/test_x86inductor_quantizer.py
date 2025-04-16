@@ -2840,13 +2840,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
             node_occurrence = {
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                torch.ops.onednn.qconv2d_pointwise.default: 6,
+                torch.ops.onednn.qconv_pointwise.default: 6,
                 torch.ops.onednn.qconv2d_pointwise.binary: 3,
                 torch.ops.onednn.qlinear_pointwise.default: 1,
             }
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.onednn.qconv2d_pointwise.default,
+                torch.ops.onednn.qconv_pointwise.default,
                 torch.ops.onednn.qconv2d_pointwise.binary,
                 torch.ops.onednn.qlinear_pointwise.default,
             ]

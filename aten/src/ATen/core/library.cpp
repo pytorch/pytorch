@@ -58,7 +58,7 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
-#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
 namespace detail {
   std::vector<TorchLibraryInit*> torch_library_initializers;
 } // namespace detail

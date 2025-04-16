@@ -190,6 +190,37 @@ class TestHfStorage(TestCase):
             metadata = reader.read_metadata()
             self.assertEqual(metadata.storage_data, expected_metadata["weight_map"])
 
+    def test_read_metadata_when_metadata_file_does_not_exist(self) -> None:
+        mock_module = MagicMock()
+        sys.modules["safetensors.torch"] = mock_module
+        sys.modules["huggingface_hub"] = mock_module
+        with tempfile.TemporaryDirectory() as path:
+            reader = _HuggingFaceStorageReader(path=path)
+            reader.fs = FileSystem()
+            # there is one safetensor file, but no metadata file,
+            # so we create metadata from the safetensor file
+            file_name = "test.safetensors"
+            open(os.path.join(path, file_name), "w").close()
+
+            keys = ["tensor_0", "tensor_1"]
+            mock_module.safe_open.return_value.__enter__.return_value.keys.return_value = (
+                keys
+            )
+
+            metadata = reader.read_metadata()
+
+            self.assertEqual(
+                metadata.state_dict_metadata,
+                {
+                    keys[0]: BytesStorageMetadata(),
+                    keys[1]: BytesStorageMetadata(),
+                },
+            )
+            self.assertEqual(
+                metadata.storage_data,
+                {keys[0]: file_name, keys[1]: file_name},
+            )
+
 
 if __name__ == "__main__":
     run_tests()
