@@ -8036,7 +8036,7 @@ class WhileLoop(ExternKernel):
         real_outputs = [
             MultiOutput(
                 FixedLayout(
-                    device=device,
+                    device=output.get_device(),  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
                     size=output.get_size(),
                     stride=output.get_stride(),
