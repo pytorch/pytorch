@@ -205,9 +205,9 @@ class FakeTensorTest(TestCase):
         # eager mode doesn't consider zero dim cpu tensor case, so this test case is to block addition of that case.
         with FakeTensorMode() as mode, self.assertRaisesRegex(
                 RuntimeError, "Unhandled FakeTensor Device Propagation for .*") as exc:
-            x = torch.tensor(0.0)
-            y = torch.rand([4, 4], device="cuda")
-            out = x + y
+            x = torch.rand([4, 4], device="cuda")
+            y = torch.tensor(1.0)
+            out = torch.nextafter(x, y)
 
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
