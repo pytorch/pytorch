@@ -130,7 +130,7 @@ def check_meta_consistency_vt(
         unwrapped2,
         lhs_name,
         rhs_name,
-        include_contiguity=include_contiguity
+        include_contiguity=include_contiguity,
     )
 
 
@@ -1800,7 +1800,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             carry_vars,
             "init",
             "carry",
-            include_contiguity=False
+            include_contiguity=False,
         )
 
         xs_proxy = xs.as_proxy()
