@@ -19,6 +19,7 @@ from torch.quantization._quantized_conversions import (
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
     SM53OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -461,9 +462,17 @@ class TestMatmulCuda(TestCase):
 
         for output_dtype in output_dtypes:
             if batch_size:
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    with self.assertRaises(Exception):
+                        torch.bmm(a, b, out_dtype=output_dtype)
+                        continue
                 out = torch.bmm(a, b, out_dtype=output_dtype)
                 baseline = torch.bmm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.bmm(a, b)
             else:
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    with self.assertRaises(Exception):
+                        torch.mm(a, b, out_dtype=output_dtype)
+                        continue
                 out = torch.mm(a, b, out_dtype=output_dtype)
                 baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
 
@@ -508,9 +517,20 @@ class TestMatmulCuda(TestCase):
 
         for output_dtype in output_dtypes:
             if batch_size:
+                # Catch edge case on compute capability < 8
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    with self.assertRaises(Exception):
+                        torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                        continue
+
                 out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
                 baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.baddbmm(c, a, b)
             else:
+                # Catch edge case on compute capability < 8
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    with self.assertRaises(Exception):
+                        torch.addmm(c, a, b, out_dtype=output_dtype)
+                        continue
                 out = torch.addmm(c, a, b, out_dtype=output_dtype)
                 baseline = torch.addmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.addmm(c, a, b)
 
