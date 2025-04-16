@@ -1017,7 +1017,7 @@ static Tensor _mask_to_indices(const Tensor& mask) {
   TORCH_CHECK(
       mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
   TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
-  return at::native::flatten( at::nonzero(mask) );
+  return at::native::flatten(at::nonzero(mask));
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
