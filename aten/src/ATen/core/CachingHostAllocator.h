@@ -624,7 +624,7 @@ protected:
 struct TORCH_API HostAllocator : public at::Allocator {
   // Associates the pinned memory allocation with a stream to track
   // dependencies. This ensures the memory won't be reused until the stream's
-  // operations complete.
+  // operations complete
   virtual bool record_event(void* ptr, void* ctx, c10::Stream stream) = 0;
 
   // Frees all cached pinned memory and returns it to the system, clearing the
@@ -635,10 +635,10 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // allocation patterns, and timing metrics
   virtual HostStats get_stats() = 0;
 
-  // Resets the cumulative allocation statistics.
+  // Resets the cumulative allocation statistics
   virtual void reset_accumulated_stats() = 0;
 
-  // Resets the peak memory usage metrics.
+  // Resets the peak memory usage metrics
   virtual void reset_peak_stats() = 0;
 };
 
