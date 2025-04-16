@@ -1745,6 +1745,11 @@ class OutputGraph:
                     )
                     update_used_symbols(used_symbols, fake)
 
+        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
+        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
+            for assertion in assertion_list:
+                used_symbols |= free_symbols(assertion.expr)
+
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
             symbol = placeholder_binds_symbol(node)
