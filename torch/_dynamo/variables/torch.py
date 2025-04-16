@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -169,19 +169,23 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-tracing_state_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    torch._dynamo.external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-    torch.compiler.is_compiling: True,
-    torch.compiler.is_dynamo_compiling: True,
-    torch.compiler.is_exporting: True,
-    torch.nn.modules.activation._is_make_fx_tracing: False,
-}
+@functools.lru_cache(None)
+def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
+    # Defined as a function to avoid circular import like torch.onnx
+    return {
+        torch.jit.is_scripting: False,
+        torch.jit.is_tracing: False,
+        torch._C._get_tracing_state: None,
+        torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.onnx.is_in_onnx_export: False,
+        torch._dynamo.external_utils.is_compiling: True,
+        torch._utils.is_compiling: True,
+        torch.compiler.is_compiling: True,
+        torch.compiler.is_dynamo_compiling: True,
+        torch.compiler.is_exporting: True,
+        torch.nn.modules.activation._is_make_fx_tracing: False,
+    }
+
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
@@ -199,7 +203,7 @@ def get_overridable_functions():
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more = {
+    more: set[Callable[..., Any]] = {
         torch.ones,
         torch.ones_like,
         torch.zeros,
@@ -456,7 +460,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        @register(*tracing_state_functions)
+        @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
@@ -470,7 +474,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
-            return ConstantVariable.create(tracing_state_functions[self.value])
+            return ConstantVariable.create(tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
         def handle_dispatch_key_set_functions(
