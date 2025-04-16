@@ -11,6 +11,7 @@ on:
   workflow_dispatch:  # Allows manual triggering of the workflow
 jobs:
   linkChecker:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     permissions:
       issues: write
