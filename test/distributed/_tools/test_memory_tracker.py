@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 
 
 class TestMemoryTracker(TestCase):
-    @unittest.skipIf(not TEST_CUDA or not TEST_XPU, "no cuda/xpu")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_local_model(self):
         """
         Minimal test case to check the memory tracker can collect the expected
