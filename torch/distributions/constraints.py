@@ -293,14 +293,12 @@ class _RemovedEventDimConstraint(Constraint):
     def check(self, value):
         unsqueezed_value = value.unsqueeze(-1 - self.base_event_dim)
         result = self.base_constraint.check(unsqueezed_value)
-        if result.dim() < self.base_event_dim:
-            expected = self.event_dim
+        if value.dim() < self.event_dim:
             raise ValueError(
-                f"Expected value.dim() >= {expected} but got {value.dim()}"
+                f"Expected value.dim() >= {self.event_dim} but got {value.dim()}"
             )
-        result = result.reshape(
-            result.shape[: result.dim() - 1 - self.base_event_dim] + (-1,)
-        )
+        num_dim_to_keep = value.dim() - self.event_dim
+        result = result.reshape(result.shape[:num_dim_to_keep] + (-1,))
         result = result.all(-1)
         return result
 
