@@ -275,7 +275,8 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  virtual bool record_event(void* ptr, void* ctx, S stream) {
+  virtual bool record_event(void* ptr, void* ctx, c10::Stream s) {
+    S stream = S(s);
     auto* block = reinterpret_cast<B*>(ctx);
 
     // Note: we need to check if the passed-in `ctx` is valid. This is because
@@ -659,9 +660,7 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     impl_->free(ctx);
   }
 
-  template <typename S>
-  bool record_event(void* ptr, void* ctx, c10::Stream s) override {
-    S stream = S(s);
+  bool record_event(void* ptr, void* ctx, c10::Stream stream) override {
     return impl_->record_event(ptr, ctx, stream);
   }
 
