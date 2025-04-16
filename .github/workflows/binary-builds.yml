@@ -24,12 +24,28 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+  generate-matrix:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_generate-binary-matrix.yml
+    with:
+      package-type: wheel
   linux-cpu:
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - generate-matrix
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.linux-cpu-matrix) }}
     uses: ./.github/workflows/_linux-binary.yml
     with:
+      accelerator_type: ${{ matrix.accelerator_type }}
+      accelerator_version: ${{ matrix.accelerator_version }}
+      build_name: ${{ matrix.build_name }}
+      builds_on: ${{ matrix.builds_on }}
+      container_image: ${{ matrix.container_image }}
       package_type: wheel
-      accelerator_type: cpu
+      python_version: ${{ matrix.python_version }}
+      pytorch_extra_install_requirements: ${{ matrix.pytorch_extra_install_requirements }}
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      test_on: ${{ matrix.test_on }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

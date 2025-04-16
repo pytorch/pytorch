@@ -19,10 +19,18 @@ on:
         required: true
         type: string
         description: Builds on
+      container_image:
+        required: true
+        type: string
+        description: Container image
       package_type:
         required: true
         type: string
         description: Package type
+      python_version:
+        required: true
+        type: string
+        description: Python version
       pytorch_extra_install_requirements:
         required: true
         type: string
@@ -43,13 +51,11 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: true 
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
       DESIRED_CUDA: ${{ inputs.accelerator_type }}
-      DESIRED_PYTHON: ${{ matrix.python_version }}
-      DOCKER_IMAGE: ${{ matrix.container_image }}
+      DESIRED_PYTHON: ${{ inputs.python_version }}
+      DOCKER_IMAGE: ${{ inputs.container_image }}
       GPU_ARCH_TYPE: ${{ inputs.accelerator_type }}
       GPU_ARCH_VERSION: ${{ inputs.accelerator_version }}
       PACKAGE_TYPE: ${{ inputs.package_type }}
@@ -64,7 +70,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   test:
-    needs: 
+    needs:
       - build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -75,7 +81,19 @@ jobs:
       DESIRED_CUDA: ${{ inputs.accelerator_type }}
       GPU_ARCH_TYPE: ${{ inputs.accelerator_type }}
       GPU_ARCH_VERSION: ${{ inputs.accelerator_version }}
-      DOCKER_IMAGE: ${{ matrix.container_image }}
+      DOCKER_IMAGE: ${{ inputs.container_image }}
       runs_on: ${{ inputs.test_on }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  upload:
+    needs:
+      - test
+    uses: ./.github/workflows/_binary-upload.yml
+    with:
+      build_name: upload-${{ inputs.build_name }}
+      package_type: ${{ inputs.package_type }}
+      GPU_ARCH_TYPE: ${{ inputs.accelerator_type }}
+      # TODO: I know this isn't the correct DESIRED_CUDA, need to fix
+      DESIRED_CUDA: ${{ inputs.accelerator_type }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
