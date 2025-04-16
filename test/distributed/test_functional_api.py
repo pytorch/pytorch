@@ -89,7 +89,7 @@ def new_subgroups(group_size: int, pg_tag=None):
     return cur_subgroup, subgroups
 
 
-@unittest.skipIf(TEST_HPU)
+@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
 class TestExpand(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -179,7 +179,7 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual(2, group_size)
 
 
-@unittest.skipIf(TEST_HPU)
+@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
 class TestPgTag(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -256,7 +256,7 @@ class TestPgTag(MultiThreadedTestCase):
 
 
 @instantiate_parametrized_tests
-@unittest.skipIf(TEST_HPU)
+@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -402,7 +402,7 @@ class TestMetaCollectives(TestCase):
         self.assertEqual(x.size(), out.size())
 
 
-@unittest.skipIf(TEST_HPU)
+@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
 class TestGradCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -655,7 +655,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
 
 
 @instantiate_parametrized_tests
-@unittest.skipIf(TEST_HPU)
+@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
 class TestFunctionalAutograd(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()
