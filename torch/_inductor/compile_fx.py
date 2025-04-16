@@ -322,7 +322,12 @@ def _unlift_graph(
     return unlifted_gm
 
 
-def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
+def _get_subgraph_names(
+    gm: GraphModule, skip_invoke_subgraph: bool = False
+) -> Generator[str, None, None]:
+    # invoke_subgraph can call the same subgraph multiple times, so this set
+    # ensures that we don't run redundant passes.
+    seen_invoke_subgraph_names: OrderedSet[str] = OrderedSet()
     for node in sorted(
         itertools.chain(
             gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
@@ -330,6 +335,9 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
             gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.invoke_subgraph
+            ),
         )
     ):
         if node.target == torch.ops.higher_order.cond:
@@ -345,6 +353,16 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
         elif node.target == torch.ops.higher_order.scan:
             combine_subgraph_name = node.args[0].name
             yield combine_subgraph_name
+        elif (
+            not skip_invoke_subgraph
+            and node.target == torch.ops.higher_order.invoke_subgraph
+        ):
+            get_attr_node = node.args[0]
+            assert get_attr_node.op == "get_attr"
+            subgraph_name = get_attr_node.target
+            if subgraph_name not in seen_invoke_subgraph_names:
+                seen_invoke_subgraph_names.add(subgraph_name)
+                yield subgraph_name
 
 
 def _recursive_pre_grad_passes(
@@ -372,7 +390,13 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        for subgraph_name in _get_subgraph_names(gm):
+        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+        # invoke_subgraph HOP before calling the partitioner on the outer graph.
+        # AOTAutograd has access to partition_fn, which internally calls the
+        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+        # skip_invoke_subgraph.
+        for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph=True):
             subgraph = getattr(gm, subgraph_name)
             _recursive_joint_graph_passes(subgraph)
         joint_graph_passes(gm)
