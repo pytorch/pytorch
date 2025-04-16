@@ -15,7 +15,12 @@
 namespace torch::autograd {
 
 struct InputBuffer {
-  explicit InputBuffer(size_t size) : buffer(size) {}
+  explicit InputBuffer(size_t size)
+      : buffer(size),
+        opt_accum_streams(size),
+        opt_first_producer_evts(size),
+        opt_first_producer_streams(size),
+        accum_counts(size, 0) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
@@ -28,7 +33,9 @@ struct InputBuffer {
       size_t pos,
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream);
+      const std::optional<c10::Stream>& opt_consumer_stream,
+      // How many times we expect to add to this pos in total
+      int num_dependencies);
 
   Variable operator[](size_t pos) {
     return buffer[pos];
@@ -38,6 +45,15 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& g);
 
   std::vector<Variable> buffer;
+  // The stream used for accumulation when a variable is used multiple times.
+  std::vector<std::optional<c10::Stream>> opt_accum_streams;
+  // Record an event on the first producer stream so we can delay
+  // waiting for it until the second producer is seen. See Note: [Delay
+  // synchronizing the first producer]
+  std::vector<std::optional<c10::Event>> opt_first_producer_evts;
+  std::vector<std::optional<c10::Stream>> opt_first_producer_streams;
+  // Count the number of times we've added to each position.
+  std::vector<int> accum_counts;
 };
 
 } // namespace torch::autograd

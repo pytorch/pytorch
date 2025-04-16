@@ -26,7 +26,13 @@ namespace {
 // See https://github.com/pytorch/pytorch/issues/60306
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
-void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+void mb_record_stream_any_impl(
+    Variable& var,
+    const c10::Stream& stream,
+    const c10::Stream& prev_stream) {
+  if (stream == prev_stream) {
+    return;
+  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
@@ -82,6 +88,20 @@ bool can_accumulate_inplace(const Variable& v) {
       at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
       v.storage().use_count() == 1);
 }
+
+void mb_wait_stream(
+    const std::optional<c10::Stream>& lhs,
+    const std::optional<c10::Stream>& rhs,
+    c10::DeviceType device_type) {
+  TORCH_INTERNAL_ASSERT(lhs && rhs);
+  if (*lhs == *rhs) {
+    return;
+  }
+  auto event = c10::Event{device_type};
+  event.record(*rhs);
+  lhs->wait(event);
+}
+
 } // anonymous namespace
 
 static void accumulate(
@@ -126,101 +146,173 @@ static void accumulate(
   }
 }
 
+// Note [Stream sync contract when dealing with multi-deviced-ness]
+//
+// An operator can deal with multiple devices, e.g. if it does a device
+// transfer, etc. However, for the purpose of stream synchronization, the engine
+// is only aware of single canonical device/stream for each op/node.
+//
+// For the proper synchronization, the op author should make sure of the
+// following:
+//
+// 1) A node producing a gradient should have it ready on the current
+//   stream during node execution.
+// 2) A node consuming a gradient should wait on the current stream before using
+//    it.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
-    const std::optional<c10::Stream>& opt_producer_stream,
-    const std::optional<c10::Stream>& opt_consumer_stream) {
+    const std::optional<c10::Stream>& opt_producer_stream_,
+    const std::optional<c10::Stream>& opt_consumer_stream,
+    int num_dependencies) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
+
   if (!var.defined()) {
     return;
   }
-
-  // Switches to accumulate device
-  // The device (and stream) chosen for accumulation is:
-  //  (1) var is not a CUDA/privateuse1 variable. Accumulation happens on var's
-  //  device. (2) var is a CUDA/privateuse1 variable and it, the consumer, and
-  //  the producer share the same device:
-  //       (2a) Uses the consumer's stream as the accumulation stream
-  //       (2b) Syncs the accumulation stream with the producer's stream (if
-  //       different) (2c) Accumulates.
-  //  (3) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the consumer but not the producer:
-  //       (3a) Uses the consumer's stream as the accumulation stream
-  //       (3b) Syncs the accumulation stream with the consumer device's default
-  //       stream (3c) Accumulates.
-  //  (4) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the producer but not the consumer:
-  //       (4a) Uses the producer device's default stream as the accumulation
-  //       stream (4b) Syncs the accumulation stream with the producer's
-  //       stream (4c) Accumulates.
-  //  (5) var is a CUDA/MTIA/privateuse1 variable and it does not share a device
-  //  with the consumer or producer.
-  //      Accumulation happens on the var device's default stream.
-
+  int curr_producer_idx = accum_counts[pos]++;
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
-  std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
   const auto device_type = device->type();
-  if (device->is_cuda() || device->is_mtia() || device->is_privateuseone()) {
-    const auto on_producer =
-        opt_producer_stream && device == opt_producer_stream->device();
-    const auto on_consumer =
-        opt_consumer_stream && device == opt_consumer_stream->device();
+  bool is_accelerator =
+      device->is_cuda() || device->is_mtia() || device->is_privateuseone();
 
-    if (on_producer && on_consumer) {
-      // (2a)
-      opt_accumulate_stream = opt_consumer_stream;
-      if (opt_accumulate_stream != opt_producer_stream) {
-        // (2b)
-        auto event = c10::Event{device_type};
-        event.record(*opt_producer_stream);
-        opt_accumulate_stream->wait(event);
-        record_stream_any_impl(var, *opt_accumulate_stream);
-      }
+  //
+  // [ Non-accelerator case ]
+  //
+  if (!is_accelerator) {
+    if (curr_producer_idx == 0) {
+      TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
+      buffer[pos] = std::move(var);
     } else {
-      std::optional<c10::Stream> opt_sync_stream = std::nullopt;
-      const auto guard = c10::impl::VirtualGuardImpl{device_type};
-      if (on_consumer && !on_producer) {
-        // (3a)
-        opt_accumulate_stream = opt_consumer_stream;
-        opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
-      } else if (on_producer && !on_consumer) {
-        // (4a)
-        opt_accumulate_stream =
-            guard.getDefaultStream(opt_producer_stream->device());
-        opt_sync_stream = opt_producer_stream;
-      } else {
-        // (5)
-        opt_accumulate_stream = guard.getDefaultStream(*device);
-      }
-      if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
-        // (3b), (4b)
-        c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
-        auto event = c10::Event{device_type};
-        event.record(*opt_sync_stream);
-        opt_accumulate_stream->wait(event);
-        const auto guard = c10::impl::VirtualGuardImpl(device_type);
-        record_stream_any_impl(var, *opt_accumulate_stream);
-      }
-    }
-  }
-
-  auto& old_var = buffer[pos];
-  if (!old_var.defined()) {
-    buffer[pos] = std::move(var);
-  } else {
-    if (opt_accumulate_stream) {
-      c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
-      accumulate(buffer, pos, std::move(var));
-    } else {
-      // (1) non-CUDA/privateuse1 variable
-      //     Accumulation happens on variable's device
       c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
     }
+    return;
+  }
+
+  // Handle the case where var is on an accelerator but producer node has no
+  // canonical stream, e.g. this can happen if forward is DtoH
+  const std::optional<c10::Stream>& opt_producer_stream =
+      (opt_producer_stream_.has_value()
+           ? opt_producer_stream_
+           : std::optional<c10::Stream>(
+                 at::accelerator::getCurrentStream(device->index())));
+
+  TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
+
+  //
+  // [ Single producer case ]
+  //
+  // If during forward, a tensor is used only once, there's only a single
+  // producer node corresponding to the input buffer we're adding to.
+  // There is no need to accumulate in this case.
+  if (num_dependencies == 1) {
+    mb_wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
+    mb_record_stream_any_impl(
+        var, *opt_consumer_stream, /*prev_stream=*/*opt_producer_stream);
+    TORCH_INTERNAL_ASSERT(curr_producer_idx == 0);
+    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
+    buffer[pos] = std::move(var);
+    return;
+  }
+  //
+  // [ Multiple producer case ]
+  //
+  // First producer
+  // ==============
+  //
+  // - Determine the accumulation stream:
+  //    case 1) var's device matches consumer node's canonical device
+  //            (The producer node's canonical device may or may not match)
+  //            -> accumulator stream = consumer stream
+  //    case 2) var's device matches producer node's canonical device
+  //            and does not match consumer node's canonical device
+  //            -> accumulator stream = producer stream
+  //    case 3) var device matches neither
+  //            -> accumulator stream = var device's current stream
+  //            See Note [Stream sync contract when dealing with
+  //            multi-deviced-ness]
+  //
+  // - Record stream (var will be used on the accum stream)
+  // - Because we are the first producer, there's no accumulation necessary.
+  //   Just move var into the buffer.
+  //
+  // Nth producer
+  // ============
+  //
+  // - The accumulation stream (determined at "first producer") waits for
+  //   the new producer stream
+  // - Record stream (var will be used on the accum stream)
+  // - Accumulate var into buffer
+  // - If we are the last producer, the consumer waits for the accumulation
+  //   stream. (No-op for case 1)
+  //
+  //
+  // Note: [Delay synchronizing the first producer]
+  //
+  // In case 1, we delay synchronizing the first producer with the
+  // consumer until we see the second producer. For more details, see
+  // "test_side_stream_backward_overlap".
+  //
+  // There are two pieces of logic that happen:
+  //    Part 1: At the first iteration, record an event on the first
+  //            producer stream and stash it.
+  //    Part 2: At the second iteration, have the consumer wait for
+  //            for the stashed event.
+  //
+  bool matches_consumer = opt_consumer_stream->device() == *device;
+
+  if (curr_producer_idx == 0) {
+    // [ First producer ]
+    // Determine the accumulation stream
+    if (matches_consumer) {
+      // Case 1
+      opt_accum_streams[pos] = opt_consumer_stream;
+      // Part 1 of Note: [Delay synchronizing the first producer]
+      opt_first_producer_evts[pos] = c10::Event{device_type};
+      opt_first_producer_evts[pos]->record(*opt_producer_stream);
+      opt_first_producer_streams[pos] = opt_producer_stream;
+    } else if (opt_producer_stream->device() == *device) {
+      // Case 2
+      opt_accum_streams[pos] = opt_producer_stream;
+    } else {
+      // Case 3
+      opt_accum_streams[pos] =
+          at::accelerator::getCurrentStream(device->index());
+    }
+    mb_record_stream_any_impl(
+        var,
+        *opt_accum_streams[pos],
+        /*prev_stream=*/*opt_producer_stream);
+    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
+    buffer[pos] = std::move(var);
+  } else {
+    // [ Nth producer ]
+    auto accum_stream = opt_accum_streams[pos];
+    TORCH_INTERNAL_ASSERT(accum_stream);
+    mb_wait_stream(accum_stream, opt_producer_stream, device_type);
+    mb_record_stream_any_impl(
+        var, *accum_stream, /*prev_stream=*/*opt_producer_stream);
+    if (matches_consumer && curr_producer_idx == 1) {
+      TORCH_INTERNAL_ASSERT(
+          opt_first_producer_streams[pos] && opt_first_producer_evts[pos]);
+      // Part 2 of Note: [Delay synchronizing the first producer]
+      if (*accum_stream != *opt_first_producer_streams[pos]) {
+        accum_stream->wait(*opt_first_producer_evts[pos]);
+      }
+    }
+    {
+      c10::OptionalStreamGuard stream_guard{accum_stream};
+      accumulate(buffer, pos, std::move(var));
+    }
+    if (curr_producer_idx == num_dependencies - 1) {
+      mb_wait_stream(opt_consumer_stream, accum_stream, device_type);
+    }
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
