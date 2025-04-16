@@ -1535,6 +1535,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
       dropoutoffset,
       handle);
 
+  TORCH_WARN(!q.is_nested(), !k.is_nested(), !v.is_nested(), !o.is_nested(), !dO_.is_nested(), !softmaxstats.is_nested(), !dQ.is_nested(), !dK.is_nested(), !dV.is_nested());
+  TORCH_WARN(q.defined(), k.defined(), v.defined(), o.defined(), dO_.defined(), softmaxstats.defined(), dQ.defined(), dK.defined(), dV.defined(), rag_q_off.defined(), rag_k_off.defined(), rag_v_off.defined(), rag_stats_off.defined(), seqlen_q.defined(), seqlen_kv.defined());
+
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
       {Q, q.data_ptr()},
