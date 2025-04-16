@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/utils/byte_order.h>
 
 #include <ATen/ATen.h>
 #include <fmt/format.h>
@@ -154,7 +155,10 @@ class ScriptModuleDeserializer final {
       bool restore_shapes = false);
 
  private:
-  IValue readArchive(const std::string& archive_name);
+  IValue readArchive(
+      const std::string& archive_name,
+      const torch::utils::THPByteOrder& byte_order =
+          torch::utils::THP_nativeByteOrder());
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::shared_ptr<PyTorchStreamReader> reader_;
@@ -167,7 +171,9 @@ class ScriptModuleDeserializer final {
   SourceImporter source_importer_;
 };
 
-IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
+IValue ScriptModuleDeserializer::readArchive(
+    const std::string& archive_name,
+    const torch::utils::THPByteOrder& byte_order) {
   auto type_resolver = [&](const c10::QualifiedName& qn) {
     auto cls = source_importer_.loadType(qn);
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
@@ -182,7 +188,8 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       device_,
       *reader_,
       nullptr,
-      storage_context_);
+      storage_context_,
+      byte_order);
 }
 
 void rewriteQuantizedConvForBC(const Module& module) {
@@ -262,19 +269,31 @@ Module ScriptModuleDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
+  torch::utils::THPByteOrder byte_order = torch::utils::THP_nativeByteOrder();
+  if (reader_->hasRecord("byteorder")) {
+    auto [record_ptr, record_size] = reader_->getRecord("byteorder");
+    std::string byte_order_record =
+        std::string(static_cast<char*>(record_ptr.get()), record_size);
+
+    if (byte_order_record == "little") {
+      byte_order = torch::utils::THP_LITTLE_ENDIAN;
+    } else if (byte_order_record == "big") {
+      byte_order = torch::utils::THP_BIG_ENDIAN;
+    }
+  }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
     TORCH_CHECK(false, "Legacy model format is not supported on mobile.");
   }
-  auto tuple = readArchive("constants").toTuple();
+  auto tuple = readArchive("constants", byte_order).toTuple();
   for (auto constant : tuple->elements()) {
     constants_table_.push_back(constant.toIValue());
   }
-  auto m_ivalue = readArchive("data");
+  auto m_ivalue = readArchive("data", byte_order);
   auto m = Module(m_ivalue.toObject());
   rewriteQuantizedConvForBC(m);
   // Checking for and loading saved traced inputs
   if (restore_shapes && reader_->hasRecord("traced_inputs.pkl")) {
-    auto dict = readArchive("traced_inputs").toGenericDict();
+    auto dict = readArchive("traced_inputs", byte_order).toGenericDict();
     for (const auto& entry : dict) {
       auto inputs = entry.value().toList().vec();
       auto g =
