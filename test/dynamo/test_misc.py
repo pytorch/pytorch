@@ -1952,6 +1952,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             res = opt_fn(g, torch.ones(2, 2))
 
+    def test_no_guarding_on_store_fast(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, y):
+            z = y
+            return x * 2
+
+        f(torch.randn(3), torch.randn(4))
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            f(torch.randn(3), torch.randn(6))
+
     def test_get_attr_function(self):
         def fn(g, x):
             return g(x)
@@ -6730,10 +6740,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_guard_sym_node_fstring_when_used(self):
         def fn(x):
-            # assign fstring to a variable causes the fstring to be used,
-            # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            if "10" in f_str:
+                return x.sin()
+            return x.cos()
 
         guard_failure = None
 
