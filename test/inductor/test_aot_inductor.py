@@ -27,7 +27,11 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQu
 from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
+from torch.testing._internal.common_cuda import (
+    IS_SM89,
+    PLATFORM_SUPPORTS_FP8,
+    SM80OrLater,
+)
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -878,6 +882,10 @@ class AOTInductorTestsTemplate:
             Model(), list_example_inputs, dynamic_shapes=dynamic_shapes
         )
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
+    )
     def test_addmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -918,6 +926,10 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
+    )
     def test_bmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -4267,7 +4279,7 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "buf3, u0",
             "buf4, u0",
-            "buf3, buf4, buf2, u0",
+            "buf4, buf5, buf3, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4278,7 +4290,6 @@ class AOTInductorTestsTemplate:
                 scalar_line,
                 1,
             ).run(code)
-
         self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("mark_unbacked", (True, False))
