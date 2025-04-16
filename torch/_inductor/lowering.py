@@ -2625,7 +2625,7 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten_rms_norm_fused, warn=False)  # (MPS-only and faster than decomp)
+make_fallback(aten._rms_norm_fused, warn=False)  # (MPS-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
