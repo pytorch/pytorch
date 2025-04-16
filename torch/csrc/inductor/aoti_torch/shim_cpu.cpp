@@ -17,7 +17,7 @@ using namespace torch::aot_inductor;
 #if AT_MKLDNN_ENABLED()
 
 template <typename T>
-c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   c10::List<T> scalars_list;
   scalars_list.reserve(len);
   for (int64_t i = 0; i < len; i++) {
