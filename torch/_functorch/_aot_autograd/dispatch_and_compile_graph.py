@@ -91,7 +91,7 @@ class WrapResult(NamedTuple):
 def apply_wrappers(
     fn: Callable[..., Any],
     args: Sequence[Tensor],
-    wrappers: Sequence[Callable[..., Any]]
+    wrappers: Sequence[Callable[..., Any]],
 ) -> "WrapResult":
     res = WrapResult(fn, args)
     for wrapper in wrappers:
