@@ -226,8 +226,8 @@ void InputBuffer::add(
   // B. Record stream (var will be used on the accum stream)
   // C. Accumulate var into buffer
   // D. (Cases 2 and 3 only) If we are the last producer, we need to have
-  //    consumer wait for the accumulation stream. We've only sync'd
-  //    between producer/current stream of the streams so far.
+  //    consumer wait for the accumulation stream. For case 1 this is
+  //    not necessary because the consumer stream is the accumulation stream.
   //
   //
   // Note: [Delay synchronizing the first producer]
@@ -243,8 +243,6 @@ void InputBuffer::add(
   //
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   bool matches_consumer = opt_consumer_stream->device() == *device;
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  bool matches_producer = opt_producer_stream->device() == *device;
 
   if (current_index == 0) {
     // [ First producer ]
@@ -269,7 +267,6 @@ void InputBuffer::add(
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     // C) Move var into the buffer
     buffer[pos] = std::move(var);
-    return;
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
@@ -290,9 +287,8 @@ void InputBuffer::add(
       accumulate(buffer, pos, std::move(var));
     }
     if (!matches_consumer && current_index == num_dependencies - 1) {
-      // D) (Case 2/3 only) Last producer has consumer wait for accum
+      // D) (Case 2/3 only) Consumer stream waits for accumulation stream.
       mb_wait_stream(opt_consumer_stream, accum_stream, device_type);
-      // I'm not sure we should record_stream here
     }
   }
 }
