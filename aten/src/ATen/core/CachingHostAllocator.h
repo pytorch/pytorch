@@ -704,16 +704,16 @@ TORCH_API void setHostAllocator(
 
 TORCH_API at::HostAllocator* getHostAllocator(at::DeviceType device_type);
 
-template <DeviceType t>
+template <DeviceType device_type>
 struct HostAllocatorRegisterer {
-  explicit HostAllocatorRegisterer(HostAllocator* alloc) {
-    at::setHostAllocator(t, alloc);
+  explicit HostAllocatorRegisterer(HostAllocator* allocator) {
+    at::setHostAllocator(device_type, allocator);
   }
 };
 
-#define REGISTER_HOST_ALLOCATOR(t, f)                      \
-  namespace {                                              \
-  static c10::HostAllocatorRegisterer<t> g_allocator_d(f); \
+#define REGISTER_HOST_ALLOCATOR(device_type, allocator)                     \
+  namespace {                                                               \
+  static at::HostAllocatorRegisterer<device_type> g_allocator_d(allocator); \
   }
 
 } // namespace at
