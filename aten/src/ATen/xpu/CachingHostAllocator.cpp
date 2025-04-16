@@ -32,20 +32,13 @@ struct XPUCachingHostAllocatorImpl
   }
 };
 
-void raw_local_deleter(void* ptr);
-
 DECLARE_HOST_ALLOCATOR(
     XPUCachingHostAllocator,
     XPUCachingHostAllocatorImpl,
-    raw_local_deleter)
-
-static XPUCachingHostAllocator caching_host_allocator;
+    raw_local_deleter,
+    caching_host_allocator)
 
 REGISTER_HOST_ALLOCATOR(at::kXPU, &caching_host_allocator);
-
-void raw_local_deleter(void* ptr) {
-  getXPUCachingHostAllocator().free(ptr);
-}
 
 } // anonymous namespace
 } // namespace at::xpu

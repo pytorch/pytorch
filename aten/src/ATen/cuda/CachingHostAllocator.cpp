@@ -249,17 +249,13 @@ struct CUDACachingHostAllocatorImpl
   }
 };
 
-void raw_local_deleter(void* ptr);
-
-DECLARE_HOST_ALLOCATOR(CUDACachingHostAllocator, CUDACachingHostAllocatorImpl, raw_local_deleter);
-
-CUDACachingHostAllocator caching_host_allocator;
+DECLARE_HOST_ALLOCATOR(
+    CUDACachingHostAllocator,
+    CUDACachingHostAllocatorImpl,
+    raw_local_deleter,
+    caching_host_allocator);
 
 REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
-
-void raw_local_deleter(void* ptr) {
-  getCUDACachingHostAllocator().free(ptr);
-}
 
 } // anonymous namespace
 } // namespace at::cuda

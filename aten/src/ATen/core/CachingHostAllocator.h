@@ -688,9 +688,14 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   std::unique_ptr<T> impl_;
 };
 
-#define DECLARE_HOST_ALLOCATOR(name, impl, deleter) \
-  struct name final                                 \
-      : public at::CachingHostAllocatorInterface<impl, deleter> {};
+#define DECLARE_HOST_ALLOCATOR(name, impl, deleter, instance)       \
+  void deleter(void* ptr);                                          \
+  struct name final                                                 \
+      : public at::CachingHostAllocatorInterface<impl, deleter> {}; \
+  static name instance;                                                    \
+  void deleter(void* ptr) {                                         \
+    instance.free(ptr);                                             \
+  }
 
 /**
  * Set the host allocator for DeviceType `device_type`. This allocator manages
@@ -705,15 +710,16 @@ TORCH_API void setHostAllocator(
 TORCH_API at::HostAllocator* getHostAllocator(at::DeviceType device_type);
 
 template <DeviceType device_type>
-struct HostAllocatorRegisterer {
-  explicit HostAllocatorRegisterer(HostAllocator* allocator) {
+struct HostAllocatorRegistry {
+  explicit HostAllocatorRegistry(HostAllocator* allocator) {
     at::setHostAllocator(device_type, allocator);
   }
 };
 
-#define REGISTER_HOST_ALLOCATOR(device_type, allocator)                     \
-  namespace {                                                               \
-  static at::HostAllocatorRegisterer<device_type> g_allocator_d(allocator); \
+#define REGISTER_HOST_ALLOCATOR(device_type, allocator) \
+  namespace {                                           \
+  static at::HostAllocatorRegistry<device_type>         \
+      g_host_allocator_registry_instance(allocator);    \
   }
 
 } // namespace at
