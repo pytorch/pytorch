@@ -3857,9 +3857,9 @@ class Scheduler:
         # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
-        possible_fusions_group_by_priority: dict[
+        possible_fusions_group_by_priority: defaultdict[
             int, list[tuple[BaseSchedulerNode, BaseSchedulerNode]]
-        ] = {}
+        ] = defaultdict(list)
 
         for node1, node2 in possible_fusions:
             assert node1.get_device() == node2.get_device()
@@ -3867,14 +3867,9 @@ class Scheduler:
             fusion_pair_priority = int(
                 self.get_backend(device).get_fusion_pair_priority(node1, node2)
             )
-            if fusion_pair_priority not in possible_fusions_group_by_priority:
-                possible_fusions_group_by_priority[fusion_pair_priority] = [
-                    (node1, node2),
-                ]
-            else:
-                possible_fusions_group_by_priority[fusion_pair_priority].append(
-                    (node1, node2)
-                )
+            possible_fusions_group_by_priority[fusion_pair_priority].append(
+                (node1, node2)
+            )
         # return the possible fusions with highest priority
         possible_fusions_with_highest_priority = min(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
