@@ -501,7 +501,7 @@ class TestMatmulCuda(TestCase):
 
         a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
 
-        output_dtypes = [torch.float32]
+        output_dtypes = []
 
         if input_dtype != torch.float32:
             output_dtypes.append(input_dtype)

@@ -655,11 +655,7 @@ void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(a
   const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
-#if defined(USE_ROCM)
   auto compute_type = CUBLAS_COMPUTE_32F;
-#else
-  auto compute_type = CUDA_R_32F;
-#endif
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
