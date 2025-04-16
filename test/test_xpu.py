@@ -758,7 +758,6 @@ if __name__ == "__main__":
             .decode("ascii")
             .strip()
         )
-        print(rc)
         expected_res = "test_case_1" in rc
         self.assertTrue(expected_res)
 
