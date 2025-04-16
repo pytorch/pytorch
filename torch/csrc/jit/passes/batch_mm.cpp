@@ -110,7 +110,7 @@ static bool shape_is_fast_for_reduce(
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
-RegisterOperators mm_tree_reduction_reg({Operator(
+static RegisterOperators mm_tree_reduction_reg({Operator(
     "prim::MMTreeReduce(...) -> Tensor",
     [](Stack& stack) {
       auto num_inputs = pop(stack).toInt();
@@ -323,7 +323,7 @@ static bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   return other_side_input.numel() <= 1024 * 2048;
 }
 
-RegisterOperators mm_batch_side_reg({Operator(
+static RegisterOperators mm_batch_side_reg({Operator(
     prim::MMBatchSide,
     [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;

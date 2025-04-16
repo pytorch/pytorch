@@ -1709,34 +1709,6 @@ class InstructionTranslatorBase(
         self.popn(2)
         self.push(None)
 
-    def CALL_FINALLY(self, inst):
-        """
-        pushes the address of the next instruction onto the stack and increments
-        bytecode counter by delta
-        """
-        # Python 3.8 only
-        addr = self.indexof[self.next_instruction]
-        self.push(ConstantVariable.create(addr))
-        self.jump(inst)
-
-    def END_FINALLY(self, inst):
-        # Python 3.8 only
-        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
-        tos = self.pop()
-        if isinstance(tos, ConstantVariable):
-            self.instruction_pointer = tos.as_python_constant()
-        else:
-            pass
-
-    def POP_FINALLY(self, inst):
-        # Python 3.8 only
-        preserve_tos = inst.argval
-        if preserve_tos:
-            tos = self.pop()
-        _ = self.pop()
-        if preserve_tos:
-            self.push(tos)  # type: ignore[possibly-undefined]
-
     def FOR_ITER(self, inst):
         it = self.pop().realize()
         try:
@@ -3755,6 +3727,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            msg = inspect.getattr_static(
+                func.get_function(), "_torchdynamo_disable_msg", None
+            )
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+
         result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
@@ -3774,11 +3762,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
-                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                    "attempting to trace into the function.",
+                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                    "to force tracing into the function. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
-                    # TODO suggest mark_force_inline when implemented
                 ]
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",
@@ -3789,23 +3776,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=hints,
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
-            func.get_function(), "_torchdynamo_disable", False
-        ):
-            msg = inspect.getattr_static(
-                func.get_function(), "_torchdynamo_disable_msg", None
-            )
-            unimplemented_v2(
-                gb_type="Skip inlining `torch.compiler.disable()`d function",
-                context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
-                f"with `torch.compiler.disable` (reason: {msg})",
-                hints=[
-                    "Remove the `torch.compiler.disable` call",
-                ],
-            )
-        else:
-            return result
+        return result
 
     @staticmethod
     def build_inline_tracer(

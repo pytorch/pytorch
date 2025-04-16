@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -64,7 +64,12 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 
 
@@ -226,9 +231,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        # TODO putting this here to avoid duplication, because we could hit this
+        # from several paths (e.g., SuperVariable or `var_getattr`s).
+        if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+            unimplemented_v2(
+                gb_type="can't handle functions not implemented in python ",
+                context=f"{fn}",
+                explanation="Dynamo can only handle functions defined in python",
+                hints=[
+                    "Move usage of this function out of `torch.compile` region",
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -363,6 +377,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle patch_dynamo_config call
+        if self.fn is torch._dynamo.patch_dynamo_config:
+            try:
+                args_const = [arg.as_python_constant() for arg in args]
+                kwargs_const = {
+                    key: val.as_python_constant() for key, val in kwargs.items()
+                }
+                changes = torch._dynamo.patch_dynamo_config(
+                    *args_const, **kwargs_const
+                ).changes
+                return variables.DynamoConfigPatchVariable(changes)
+            except AsPythonConstantNotImplementedError as e:
+                raise RuntimeError(
+                    "Cannot convert patch_dynamo_config args/kwargs to constants. "
+                    "Please fix your call to patch_dynamo_config by using simpler inputs. "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
         if self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -540,13 +571,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
+        self.force_apply_to_var_sequence(tx, result.append)
+        return result
+
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
         while True:
             try:
-                result.append(self.next_variable(tx))
+                fn(self.next_variable(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
-        return result
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
@@ -958,11 +992,15 @@ class WrappedUserMethodVariable(UserMethodVariable):
         self.context.exit(tx)
         return result
 
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
-        kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
@@ -977,6 +1015,11 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
@@ -1080,6 +1123,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def has_closure(self):
         return self.closure is not None
 
+    def const_getattr(self, tx, name):
+        if name == "__name__":
+            return self.fn_name.as_python_constant()
+        return super().const_getattr(tx, name)
+
     def has_self(self):
         return False
 
@@ -1169,6 +1217,46 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen.store_attr(name)
 
 
+class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("fn_name", None)
+        kwargs.pop("code", None)
+        kwargs.pop("f_globals", None)
+        kwargs.pop("defaults", None)
+        kwargs.pop("kwdefaults", None)
+        kwargs.pop("annotations", None)
+        kwargs.pop("closure", None)
+        kwargs.pop("wrapped_fn", None)
+        super().__init__(
+            wrapped.fn_name,
+            wrapped.code,
+            wrapped.f_globals,
+            wrapped.defaults,
+            wrapped.kwdefaults,
+            wrapped.annotations,
+            wrapped.closure,
+            wrapped.wrapped_fn,
+        )
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -1231,6 +1319,14 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            if config.dont_skip_tracing:
+                from .builder import SourcelessBuilder
+
+                # re-build the function, attempting to not skip
+                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # if we still get SkipFunctionVariable, then we *really* should skip this function
+                if not isinstance(rebuilt_fn, SkipFunctionVariable):
+                    return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
@@ -1246,11 +1342,10 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{qualname}` or the file `{path}` "
-                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                        "attempting to trace into the function.",
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
-                        # TODO suggest mark_force_inline when implemented
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
@@ -1316,6 +1411,31 @@ class SkipFunctionVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
 
         return fn_var_getattr(tx, self.value, self.source, name)
+
+
+class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("value", None)
+        kwargs.pop("reason", None)
+        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class WrapperUserFunctionVariable(VariableTracker):
@@ -1553,6 +1673,8 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
