@@ -24,7 +24,7 @@ class BytesWriter:
         self._data.extend(i.to_bytes(8, byteorder="big", signed=False))
 
     def write_str(self, s: str) -> None:
-        payload = base64.b64decode(s.encode("utf-8"))
+        payload = base64.b64encode(s.encode("utf-8"))
         self.write_bytes(payload)
 
     def write_bytes(self, b: bytes) -> None:
@@ -51,7 +51,7 @@ class BytesReader:
         return result
 
     def read_str(self) -> str:
-        return base64.b64encode(self.read_bytes()).decode("utf-8")
+        return base64.b64decode(self.read_bytes()).decode("utf-8")
 
     def read_bytes(self) -> bytes:
         size = self.read_uint64()
