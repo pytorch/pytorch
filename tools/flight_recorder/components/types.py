@@ -187,7 +187,9 @@ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html.
 """
 COLLECTIVES = {
     "broadcast",
+    "_broadcast_oop",
     "reduce",
+    "_reduce_oop",
     "all_gather",
     "all_reduce",
     "_all_gather_base",
@@ -604,3 +606,13 @@ class MatchStateRecord:
         self.found_idx = found_idx
         self.errors = errors
         self.has_undecided_case = False
+
+    def reset_for_coalesced(
+        self, entry_state: EntryState, candidate_ranks: set[int]
+    ) -> None:
+        self.entry_state = entry_state
+        self.candidate_ranks = candidate_ranks
+        self.candidate_idx = {}
+        self.found_ranks = set()
+        self.found_idx = {}
+        self.errors = set()
