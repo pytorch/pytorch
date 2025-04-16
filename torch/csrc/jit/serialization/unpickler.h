@@ -6,6 +6,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/utils/byte_order.h>
 
 namespace torch::jit {
 
@@ -43,7 +44,8 @@ class TORCH_API Unpickler {
         type_resolver_(std::move(type_resolver)),
         use_storage_device_(false),
         type_parser_(type_parser),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(caffe2::serialize::kProducedFileFormatVersion),
+        byte_order_(torch::utils::THP_nativeByteOrder()) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
@@ -58,7 +60,8 @@ class TORCH_API Unpickler {
         obj_loader_(std::move(obj_loader)),
         use_storage_device_(false),
         type_parser_(type_parser),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(caffe2::serialize::kProducedFileFormatVersion),
+        byte_order_(torch::utils::THP_nativeByteOrder()) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
@@ -81,7 +84,8 @@ class TORCH_API Unpickler {
         use_storage_device_(use_storage_device),
         type_parser_(type_parser),
         storage_context_(std::move(storage_context)),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(caffe2::serialize::kProducedFileFormatVersion),
+        byte_order_(torch::utils::THP_nativeByteOrder()) {}
 
   // consume the pickle stream, producing an IValue from the contents.
   // Type Tags: the pickler will restore the type tags on
@@ -101,6 +105,10 @@ class TORCH_API Unpickler {
   // the version manually.
   void set_version(uint64_t version_number) {
     version_ = version_number;
+  }
+
+  void set_byte_order(const torch::utils::THPByteOrder& byte_order) {
+    byte_order_ = byte_order;
   }
 
   static c10::TypePtr defaultTypeParser(const std::string& str) {
@@ -194,6 +202,9 @@ class TORCH_API Unpickler {
 
   // See [NOTE] skip_next_read_global
   uint8_t skip_next_read_global = 0;
+
+  // Used to load binary data from systems with different endianness
+  torch::utils::THPByteOrder byte_order_;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);
