@@ -86,8 +86,8 @@ from torch._subclasses.fake_tensor import (
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
@@ -966,7 +966,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _simplify_symints(symints: list[torch.SymInt]) -> list[torch.Symint]:
+    def _simplify_symints(symints: list[torch.SymInt]) -> list[torch.SymInt]:
         """
         Given a list of SymInts, simplify them down to just their free symbols.
         The goal here is to get the minimum set of SymInts whose guards are equivalent
@@ -985,13 +985,12 @@ class FxGraphCache:
         set of guards on the underlying symbols.
         """
         free_symbols = [s.node.expr.free_symbols for s in symints]
-        # Put all the sets together
-        if not free_symbols:
-            return []
-        unique_symbols = set.union(*free_symbols)
+        # Flatten the list of sets into a single deduplicated set
+        unique_symbols = OrderedSet().union(*free_symbols)
         result = []
         shape_env = FxGraphCache._get_shape_env()
         for symbol in unique_symbols:
+            # TODO: hint here is incorrect, it needs tob e filled with the hint of the original SymInt, but evaluated?
             new_symint = torch.SymInt(SymNode(symbol, shape_env, pytype=int, hint=None))
             result.append(new_symint)
         return result
