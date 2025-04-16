@@ -1917,9 +1917,15 @@ def xfailIfS390X(func):
     return unittest.expectedFailure(func) if IS_S390X else func
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    def dec_fn(fn):
-        reason = f"skipIfXpu: {msg}"
+    reason = f"skipIfXpu: {msg}"
 
+    if isinstance(func, type):
+        if torch.xpu.is_available():
+            func.__unittest_skip__ = True  # type: ignore[attr-defined]
+            func.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
+        return func
+
+    def dec_fn(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if TEST_XPU:
@@ -1927,6 +1933,7 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
             else:
                 return fn(*args, **kwargs)
         return wrapper
+
     if func:
         return dec_fn(func)
     return dec_fn

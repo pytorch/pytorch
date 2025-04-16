@@ -693,5 +693,84 @@ class TestXpuTrace(TestCase):
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
 
+class TestSkipIfXpuDecroator(TestCase):
+    def test_skip_if_xpu_for_class(self):
+        script = """
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
+
+@skipIfXpu
+class TestFoo(TestCase):
+    def test_case_1(self):
+        print("test_case_1")
+        self.assertTrue(True)
+
+    def test_case_2(self):
+        print("test_case_2")
+        self.assertTrue(True)
+
+    def test_case_3(self):
+        print("test_case_3")
+        self.assertTrue(True)
+
+if __name__ == "__main__":
+    run_tests()
+"""
+        rc = (
+            subprocess.check_output(
+                [sys.executable, "-c", script], stderr=subprocess.STDOUT
+            )
+            .decode("ascii")
+            .strip()
+        )
+        expected_ref = torch.xpu.is_available()
+        expected_res = "test_case_1" not in rc
+        self.assertEqual(expected_ref, expected_res)
+        expected_res = "test_case_2" not in rc
+        self.assertEqual(expected_ref, expected_res)
+        expected_res = "test_case_3" not in rc
+        self.assertEqual(expected_ref, expected_res)
+
+    def test_skip_if_xpu_for_case(self):
+        script = """
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
+
+class TestFoo(TestCase):
+    def test_case_1(self):
+        print("test_case_1")
+        self.assertTrue(True)
+
+    @skipIfXpu
+    def test_case_2(self):
+        print("test_case_2")
+        self.assertTrue(True)
+
+    def test_case_3(self):
+        print("test_case_3")
+        self.assertTrue(True)
+
+if __name__ == "__main__":
+    run_tests()
+"""
+        rc = (
+            subprocess.check_output(
+                [sys.executable, "-c", script], stderr=subprocess.STDOUT
+            )
+            .decode("ascii")
+            .strip()
+        )
+        print(rc)
+        expected_res = "test_case_1" in rc
+        self.assertTrue(expected_res)
+
+        expected_ref = torch.xpu.is_available()
+        expected_res = "test_case_2" not in rc
+        self.assertEqual(expected_ref, expected_res)
+
+        expected_res = "test_case_3" in rc
+        self.assertTrue(expected_res)
+
+
+instantiate_device_type_tests(TestSkipIfXpuDecroator, globals(), allow_xpu=True)
+
 if __name__ == "__main__":
     run_tests()
