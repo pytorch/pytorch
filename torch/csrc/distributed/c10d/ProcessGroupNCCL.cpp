@@ -5052,6 +5052,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     const AllToAllOptions& opts) {
   int64_t input_total_numel = 0;
   int64_t output_total_numel = 0;
+  // use split sizes field to record tensor list sizes
+  // for uneven all2all bw calculation
+  std::vector<int64_t> inSplitSizes;
+  std::vector<int64_t> outSplitSizes;
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
@@ -5063,6 +5067,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         "Tensors must be on the same device")
     input_total_numel += inputTensors[r].numel();
     output_total_numel += outputTensors[r].numel();
+    inSplitSizes.push_back(inputTensors[r].numel());
+    outSplitSizes.push_back(outputTensors[r].numel());
   }
 
   RECORD_PARAM_COMMS_DATA(
@@ -5077,8 +5083,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       input_total_numel, // inNelems
       output_total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
+      allElementsEqual(inSplitSizes) ? std::vector<int64_t>() : inSplitSizes, // inSplitSizes
+      allElementsEqual(outSplitSizes) ? std::vector<int64_t>() : outSplitSizes, // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize
