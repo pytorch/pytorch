@@ -230,7 +230,7 @@ class FlightRecorderE2ETest(TestCase):
     def testBuildDB(self):
         config = JobConfig()
         args = config.parse_args([])
-        version = "2.6"  # Same as the version in FlightRecorder.hpp
+        version = "2.7"  # Same as the version in FlightRecorder.hpp
         LOADED_FR_DETAIL_TEMPLATE["dump_file_rank_0"]["version"] = version
         LOADED_FR_DETAIL_TEMPLATE["dump_file_rank_1"]["version"] = version
         # Test case 1: matched all_reduce case.
@@ -259,6 +259,58 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(db.collectives[0].record_id, 0)
         self.assertEqual(db.collectives[0].collective_name, "nccl:allreduce_coalesced")
         self.assertEqual(db.collectives[0].pass_check, True)
+        # Test case 3: matched slow path, two broadcast coalesce case.
+        details3 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
+        # sequence ID should not increase for coalesced collectives
+        details3["dump_file_rank_0"]["entries"].append(
+            create_one_entry(0, "broadcast", [[4, 4]], [[4, 4]])
+        )
+        details3["dump_file_rank_0"]["entries"].append(
+            create_one_entry(1, "broadcast", [[4, 4]], [[4, 4]])
+        )
+        details3["dump_file_rank_0"]["entries"].append(
+            create_one_entry(2, "coalesced", [[]], [[]])
+        )
+        details3["dump_file_rank_1"]["entries"].append(
+            create_one_entry(0, "broadcast", [[4, 4]], [[4, 4]])
+        )
+        details3["dump_file_rank_1"]["entries"].append(
+            create_one_entry(1, "broadcast", [[4, 4]], [[4, 4]])
+        )
+        details3["dump_file_rank_1"]["entries"].append(
+            create_one_entry(2, "coalesced", [[]], [[]])
+        )
+        db = build_db(details3, args, version)
+        self.assertEqual(len(db.collectives), 1)
+        self.assertEqual(db.collectives[0].record_id, 2)
+        self.assertEqual(db.collectives[0].collective_name, "nccl:coalesced")
+        self.assertEqual(db.collectives[0].pass_check, True)
+        # Test case 4: mis-matched uneven all-gather case.
+        details4 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
+        # sequence ID should not increase for coalesced collectives
+        details4["dump_file_rank_0"]["entries"].append(
+            create_one_entry(0, "_broadcast_oop", [[4, 4]], [[4, 4]])
+        )
+        details4["dump_file_rank_0"]["entries"].append(
+            create_one_entry(1, "_broadcast_oop", [[5, 5]], [[5, 5]])
+        )
+        details4["dump_file_rank_0"]["entries"].append(
+            create_one_entry(2, "coalesced", [[]], [[]])
+        )
+        details4["dump_file_rank_1"]["entries"].append(
+            create_one_entry(0, "_broadcast_oop", [[4, 4]], [[4, 4]])
+        )
+        details4["dump_file_rank_1"]["entries"].append(
+            create_one_entry(1, "_broadcast_oop", [[4, 4]], [[4, 4]])
+        )
+        details4["dump_file_rank_1"]["entries"].append(
+            create_one_entry(2, "coalesced", [[]], [[]])
+        )
+        db = build_db(details4, args, version)
+        self.assertEqual(len(db.collectives), 1)
+        self.assertEqual(db.collectives[0].record_id, 1)
+        self.assertEqual(db.collectives[0].collective_name, "nccl:_broadcast_oop")
+        self.assertEqual(db.collectives[0].pass_check, False)
 
 
 if __name__ == "__main__":
