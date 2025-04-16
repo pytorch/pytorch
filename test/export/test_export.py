@@ -5415,7 +5415,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             (
                 "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
-                "Suggested fixes:(.*\n)*.*" "K1 = 3"
+                "Suggested fixes:(.*\n)*.*"
+                "K1 = 3"
             ),
         ):
             export(
