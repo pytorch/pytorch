@@ -156,6 +156,38 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
+  bool is_pinned(void* ptr) override {
+    // First check if driver is broken/missing, in which case PyTorch CPU
+    // functionalities should still work, we should report `false` here.
+    if (!at::cuda::is_available()) {
+      return false;
+    }
+    // cudaPointerGetAttributes grabs context on the current device, so we set
+    // device to one that already has context, if exists.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index = getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
+    cudaPointerAttributes attr{};
+    // We do not believe that CUDA needs mutable access to the data here.
+    cudaError_t err = cudaPointerGetAttributes(&attr, data);
+#if !defined(USE_ROCM)
+    if (err == cudaErrorInvalidValue) {
+      (void)cudaGetLastError(); // clear CUDA error
+      return false;
+    }
+    AT_CUDA_CHECK(err);
+#else
+    // HIP throws hipErrorUnknown here
+    if (err != cudaSuccess) {
+      (void)cudaGetLastError(); // clear HIP error
+      return false;
+    }
+#endif
+    return attr.type == cudaMemoryTypeHost;
+  }
+
   bool pinned_use_background_threads() override {
     return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
         pinned_use_background_threads();

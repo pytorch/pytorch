@@ -30,6 +30,15 @@ struct XPUCachingHostAllocatorImpl
   bool query_event(XPUEvent& event) override {
     return event.query();
   }
+
+  bool is_pinned(void* ptr) override {
+    if (!at::xpu::is_available()) {
+      return false;
+    }
+
+    return sycl::usm::alloc::host ==
+        sycl::get_pointer_type(ptr, c10::xpu::get_device_context());
+  }
 };
 
 DECLARE_HOST_ALLOCATOR(
