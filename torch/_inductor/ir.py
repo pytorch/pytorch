@@ -6594,7 +6594,7 @@ class AssertScalar(ExternKernel):
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
                 self.scalar, simplify=False
             )
-            wrapper.writeline(f"if not {sizevar}:")
+            wrapper.writeline(f"if not ({sizevar}):")
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None
