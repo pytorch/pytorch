@@ -85,9 +85,6 @@ struct SDPALogicalParams {
 
     if (num_head_q != num_head_kv) { // Check whether the attention is a
                                      // Grouped-Query Attention (GQA)
-      TORCH_INTERNAL_ASSERT(
-          num_head_q % num_head_kv == 0,
-          "Number of heads in key and value must divide the number of heads in query.");
       int group_num = num_head_kv;
       int group_size = num_head_q / num_head_kv;
       // oneDNN requires the shape of the query tensor to be represented as
