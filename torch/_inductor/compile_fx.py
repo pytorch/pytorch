@@ -1049,12 +1049,15 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            # It is safe to run FakeTensorProp under no_grad because by the time
-            # we're in inductor, we assume that AOTAutograd has already "taken care"
-            # of autograd, so there should be no more autograd-related API's in the
-            # graph.
-            with torch.no_grad():
-                fake_mode = fake_tensor_prop(gm, example_inputs)
+            with dynamo_timed(
+                "additional_fake_tensor_prop", log_pt2_compile_event=True
+            ):
+                # It is safe to run FakeTensorProp under no_grad because by the time
+                # we're in inductor, we assume that AOTAutograd has already "taken care"
+                # of autograd, so there should be no more autograd-related API's in the
+                # graph.
+                with torch.no_grad():
+                    fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
