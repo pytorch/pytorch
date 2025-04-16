@@ -3807,20 +3807,22 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # Gathers enough original dimensions such that this new dimension can be created
         # Note that this accumulation will terminate because we've verified a and the shape
         # specify the same number of elements above
+        deferred = []
+        def maybe_throw_dde():
+            # NOTE: if a data-dependent error has been thrown here, it's done so because the
+            # guard_or_true(), in the process of accumulating original dimensions, has bypassed
+            # earlier data-dependent errors in an attempt to later produce a successful reshape/view.
+            # This may have proved unsuccessful, and the original error has been thrown, to instruct
+            # the user how to torch._check their way past this error.
+            for f in deferred:
+                f()
+
         accum = a_.shape[idx]
         end = idx
         while guard_or_true(accum % length != 0):
+            deferred.append(lambda: bool(accum % length != 0))
             if end == a_.ndim - 1:
-                # throw UserError so compile can graph break
-                op_type = "reshape" if allow_copy else "view"
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    (
-                        f"Could not {op_type} a tensor with shape {a.shape} as a tensor with "
-                        f"shape {shape}! If these shape expressions are unbacked, please add "
-                        f"torch._check() calls to inform the compiler how to perform this {op_type}."
-                    ),
-                )
+                maybe_throw_dde()
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
@@ -3834,12 +3836,14 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
+                maybe_throw_dde()
                 msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
 
-        # Splits the (possibly flattened) dimension to create the desired dim length
+        # Splits the (possibly flattened) dimension to create the desired dim length.
+        # guard_or_true is safe due to the tail unsqueeze routine.
         if guard_or_true(accum != length):
             a_ = prims.split_dim(a_, idx, length)
 
