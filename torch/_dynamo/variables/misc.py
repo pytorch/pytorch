@@ -218,7 +218,7 @@ class SuperVariable(VariableTracker):
             inner_fn.__func__, types.FunctionType
         ):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                inner_fn.__func__, self.typevar, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
