@@ -1265,7 +1265,7 @@ class FakeTensorMode(TorchDispatchMode):
         # succeeds, we don't have to do anything as the cache infra already
         # accounts for it.
         self._failed_to_cache_hops: dict[
-            torch._ops.HigherOrderOperator, dict[str, str]
+            torch._ops.HigherOrderOperator, dict[tuple[int, str], str]
         ] = defaultdict(lambda: dict())
 
     @contextlib.contextmanager
@@ -1537,10 +1537,9 @@ class FakeTensorMode(TorchDispatchMode):
                     )
 
                 identifier = func.identifier_fn(*args)  # type: ignore[attr-defined]
-                if identifier and identifier in self._failed_to_cache_hops[func]:
-                    raise _BypassDispatchCache(
-                        self._failed_to_cache_hops[func][identifier]
-                    )
+                key = (id(subgraph_mod), identifier)
+                if identifier and key in self._failed_to_cache_hops[func]:
+                    raise _BypassDispatchCache(self._failed_to_cache_hops[func][key])
 
                 # Run the subgraphs under the fake tensor mode and check if all
                 # the ops are fake tensor cacheable. If any of the subgraph op
@@ -1550,11 +1549,11 @@ class FakeTensorMode(TorchDispatchMode):
                         func.call_subgraph_fn(*args, **kwargs)  # type: ignore[attr-defined]
                     except _BypassDispatchCache as e:
                         # Save this information so that we can early exit next
-                        # time if the same hop with same identifier is seen
+                        # time if the same hop with same key is seen
                         # again
                         msg = f"hop {func.name()} failed because of {str(e)}"
                         if identifier:
-                            self._failed_to_cache_hops[func][identifier] = msg
+                            self._failed_to_cache_hops[func][key] = msg
 
                         raise _BypassDispatchCache(msg) from None
 
