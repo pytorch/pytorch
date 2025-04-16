@@ -33,6 +33,10 @@ namespace at::native {
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 constexpr int ALIGNED_VEC_LOAD_BYTES = 16;
+constexpr int ALIGNED_COLUMN_COUNT = 4;
+constexpr int SMEM_BUFFER_SIZE_BYTES = 16384;
+constexpr int NUM_TMA_STAGE = 2;
+constexpr int SMEM_SIZE = 49152;
 
 namespace {
 
@@ -79,8 +83,12 @@ inline std::tuple<dim3, dim3> getCatGridRocm(unsigned int max_elements_per_tenso
 
 template<typename T>
 inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_tensor,
-  ptrdiff_t nTensors) {
-  constexpr unsigned int threads_per_block =  512;
+  ptrdiff_t nTensors, bool use_fast_tma) {
+
+  unsigned int threads_per_block =  128;
+  if(use_fast_tma)
+    threads_per_block =  512;
+
   constexpr unsigned int min_aligned_vec_per_thread = 1;
   constexpr unsigned int max_tb_per_sm = 32;
 
@@ -289,12 +297,11 @@ __global__ void CatArrayBatchedCopy_aligned16_contig(
     }
 }
 
-template <typename T, int chunk_size, int stage_num>
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+template <int block_dim, int stage_num>
 struct SMEM {
-  alignas(16) T in_stage[stage_num][chunk_size];
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  alignas(16) char in_stage[stage_num][block_dim];
   alignas(16) ::cuda::barrier<::cuda::thread_scope_block> bar[stage_num];
-  #endif
 };
 
 template <typename = void>
@@ -311,10 +318,10 @@ __device__ static inline bool elect_sync(const std::uint32_t& membermask) {
   return static_cast<bool>(is_elected);
 }
 
-template <typename ITYPE, typename IndexType, int inputsNum>
+template <typename T, typename ITYPE, typename IndexType, int inputsNum>
 struct Parameters {
   int lengths[inputsNum];
-  const ITYPE* data[inputsNum];
+  const T* data[inputsNum];
   IndexType nElements[inputsNum];
   int buffer_len = 0;
   int Dims[inputsNum];
@@ -329,21 +336,21 @@ struct Parameters {
 template <typename T, typename ITYPE, typename IndexType, int batch_size, int stride_size, int inputsNum, int block_dim>
 __device__ void initial_parameters(
   CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
-  Parameters<ITYPE, IndexType, inputsNum> &cal_parameters,
+  Parameters<T, ITYPE, IndexType, inputsNum> &cal_parameters,
   int scalar_t_num){
   #pragma unroll
   for(int i=0; i<inputsNum; i++){
     cal_parameters.dimSize_total += inputs.dimSize[i];
     cal_parameters.nElements[i] = inputs.nElements[i]/scalar_t_num;
     cal_parameters.Dims[i] = inputs.dimSize[i]/scalar_t_num;
-    cal_parameters.data[i] = reinterpret_cast<const ITYPE*>(inputs.input[i]);
+    cal_parameters.data[i] = reinterpret_cast<const T*>(inputs.input[i]);
     cal_parameters.f2D += cal_parameters.Dims[i];
     cal_parameters.total_len += cal_parameters.nElements[i];
   }
 
   cal_parameters.dimSize_total /= scalar_t_num;
   cal_parameters.repeats = blockDim.x / cal_parameters.dimSize_total;
-  int num_loads = block_dim / cal_parameters.dimSize_total;
+  int num_loads = block_dim / sizeof(ITYPE) / cal_parameters.dimSize_total;
   cal_parameters.f2D -= cal_parameters.Dims[inputsNum - 1];
 
   #pragma unroll
@@ -354,14 +361,14 @@ __device__ void initial_parameters(
   }
 }
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 using ArrivalToken = ::cuda::barrier<::cuda::thread_scope_block>::arrival_token;
 
 template <typename T, typename ITYPE, typename IndexType, int inputsNum, int block_dim, int num_stages>
 __device__ void TMA_load(
   int stage,
-  Parameters<ITYPE, IndexType, inputsNum> &cal_parameters,
-  SMEM<ITYPE, block_dim, num_stages> &smem,
+  int scalar_t_num,
+  Parameters<T, ITYPE, IndexType, inputsNum> &cal_parameters,
+  SMEM<block_dim, num_stages> &smem,
   ArrivalToken (&token)[num_stages]){
 
   int acc_length = 0, acc_length_bytes = 0;
@@ -374,10 +381,10 @@ __device__ void TMA_load(
             ::cuda::ptx::space_cluster,
             ::cuda::ptx::space_global,
             &smem.in_stage[stage][acc_length],
-            &cal_parameters.data[i][cal_parameters.src_start[i]],
+            &cal_parameters.data[i][cal_parameters.src_start[i]*scalar_t_num],
             length_bytes,
             (uint64_t*)&smem.bar[stage]);
-      acc_length += cal_parameters.lengths[i];
+      acc_length += cal_parameters.lengths[i] * sizeof(ITYPE);
       acc_length_bytes += length_bytes;
     }
     token[stage]= ::cuda::ptx::mbarrier_arrive_expect_tx(
@@ -388,11 +395,10 @@ __device__ void TMA_load(
       acc_length_bytes);
   }
 }
-#endif
 
-template<typename ITYPE, typename IndexType, int inputsNum>
+template<typename T, typename ITYPE, typename IndexType, int inputsNum>
 __device__ uint16_t cal_index(
-  Parameters<ITYPE, IndexType, inputsNum> cal_parameters,
+  Parameters<T, ITYPE, IndexType, inputsNum> cal_parameters,
   uint16_t mod,
   uint16_t pos_r){
   uint16_t in_index;
@@ -402,9 +408,10 @@ __device__ uint16_t cal_index(
     in_index = mod < cal_parameters.Dims[0] ? (pos_r*cal_parameters.Dims[0] + mod) : ((mod < cal_parameters.f2D) ? (cal_parameters.lengths[0] + pos_r * cal_parameters.Dims[1] + mod - cal_parameters.Dims[0]) : (cal_parameters.lengths[0] + cal_parameters.lengths[1] + pos_r * cal_parameters.Dims[2] + mod - cal_parameters.f2D));
   return in_index;
 }
+#endif
 
 //TMA - generic kernel
-template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int num_stages=1, int block_dim=128>
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int num_stages=1, int smem_bytes=128>
 __global__ void CatArrayBatchedCopy_contig_TMA(
     T* output,
     CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
@@ -412,36 +419,28 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
     const int concatDim,
     IndexType dimStride) {
 
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
     IndexType nElements = inputs.nElements[blockIdx.y];
 
-    using ITYPE = typename std::conditional<sizeof(T) == 2, __half2,
-    typename std::conditional<std::is_same<T, float>::value, float4,
-        typename std::conditional<std::is_same<T, int>::value, int4, T>::type>::type>::type;
-
-    int scalar_t_num = 1;
-    if(sizeof(T)==2){
-      scalar_t_num = 2;
-    }else if(std::is_same<T, int>::value or std::is_same<T, float>::value){
-      scalar_t_num = 4;
-    }
+    using ITYPE = at::native::memory::aligned_vector<T, ALIGNED_COLUMN_COUNT>;
+    int scalar_t_num = ALIGNED_COLUMN_COUNT;
 
     if(tid >= nElements) return;
     IndexType offset = inputs.offset[blockIdx.y];
     IndexType dimSize = inputs.dimSize[blockIdx.y];
     IndexType dataOffset = offset * dimStride / scalar_t_num;
 
-    IndexType smem_stride = gridDim.x * block_dim;
-
     extern __shared__ char dynamic_smem[];
 
-    using SMEM_T = SMEM<ITYPE, block_dim, num_stages>;
+    using SMEM_T = SMEM<smem_bytes, num_stages>;
+    IndexType block_dim = smem_bytes/sizeof(ITYPE);
+    IndexType smem_stride = gridDim.x * block_dim;
+
     SMEM_T &smem = reinterpret_cast<SMEM_T&>(dynamic_smem);
     ITYPE *output_vec = reinterpret_cast<ITYPE*>(output);
 
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     ::cuda::barrier<::cuda::thread_scope_block>::arrival_token token[num_stages];
-    #endif
 
     const ITYPE* data = reinterpret_cast<const ITYPE*>(inputs.input[blockIdx.y]);
     IndexType h2_nElements = nElements/scalar_t_num;
@@ -456,7 +455,6 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
           const ITYPE* src = &data[src_start];
           IndexType length_bytes = length * sizeof(ITYPE);
 
-          #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
           init(&smem.bar[stage], 1);
           ::cuda::ptx::fence_proxy_async(::cuda::ptx::space_shared);
           ::cuda::ptx::cp_async_bulk(
@@ -472,7 +470,6 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
                   ::cuda::ptx::space_shared,
                   (uint64_t*)&smem.bar[stage],
                   length_bytes);
-          #endif
         }
       }
     }
@@ -480,19 +477,18 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
     for (int idx = (blockIdx.x * block_dim); idx < h2_nElements; idx += smem_stride) {
       bool elected = elect_sync(~0);
       if(threadIdx.x < 32 && elected){
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
         smem.bar[stage].wait(::cuda::std::move(token[stage]));
-        #endif
       }
       __syncthreads();
 
       IndexType idx_global = idx + threadIdx.x;
+      ITYPE *smem_vec = reinterpret_cast<ITYPE*>(smem.in_stage[stage]);
       for(int out_num = 0; out_num < block_dim; out_num += blockDim.x){
         if (idx_global < h2_nElements) {
           IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
                                                         os.tensorStride, dimSize, concatDim, idx_global * scalar_t_num);
 
-          output_vec[dataOffset + elementOffset/scalar_t_num] = smem.in_stage[stage][out_num + threadIdx.x];
+          output_vec[dataOffset + elementOffset/scalar_t_num] = smem_vec[out_num + threadIdx.x];
         }
         idx_global += blockDim.x;
       }
@@ -504,7 +500,6 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
         IndexType length = src_start + block_dim < h2_nElements ? block_dim : h2_nElements - src_start;
         const ITYPE* src = &data[src_start];
         IndexType length_bytes = length * sizeof(ITYPE);
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
         ::cuda::ptx::cp_async_bulk(
                 ::cuda::ptx::space_cluster,
                 ::cuda::ptx::space_global,
@@ -518,48 +513,40 @@ __global__ void CatArrayBatchedCopy_contig_TMA(
                 ::cuda::ptx::space_shared,
                 (uint64_t*)&smem.bar[stage],
                 length_bytes);
-        #endif
       }
       stage = (stage + 1) % num_stages;
   }
+  #endif
 }
 
 //TMA specialized kernel for 2 and 3 input cases
-//It could have around 2x speedup vs the general version
-template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int inputsNum = 2, int num_stages=1, int block_dim=128>
+//It could have around 2x speedup vs the general version on bf16 datatype
+//It will only be used when the output column dim smaller than the shared memory buffer size
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int inputsNum = 2, int num_stages=1, int smem_bytes=128>
 __global__ void CatArrayBatchedCopy_contig_TMA_fast(
     T* output,
     CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
     TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
     IndexType dimStride) {
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
     IndexType nElements = inputs.nElements[blockIdx.y];
 
-    using ITYPE = typename std::conditional<sizeof(T) == 2, __half2,
-    typename std::conditional<std::is_same<T, float>::value, float4,
-        typename std::conditional<std::is_same<T, int>::value, int4, T>::type>::type>::type;
-
-    int scalar_t_num = 1;
-    if(sizeof(T)==2){
-      scalar_t_num = 2;
-    }else if(std::is_same<T, int>::value or std::is_same<T, float>::value){
-      scalar_t_num = 4;
-    }
-
-    if(tid >= nElements) return;
+    using ITYPE = at::native::memory::aligned_vector<T, ALIGNED_COLUMN_COUNT>;
+    int scalar_t_num = ALIGNED_COLUMN_COUNT;
 
     extern __shared__ char dynamic_smem[];
 
-    using SMEM_T = SMEM<ITYPE, block_dim, num_stages>;
+    using SMEM_T = SMEM<smem_bytes, num_stages>;
     SMEM_T &smem = reinterpret_cast<SMEM_T&>(dynamic_smem);
     ITYPE *output_vec = reinterpret_cast<ITYPE*>(output);
 
-    Parameters<ITYPE, IndexType, inputsNum> cal_parameters;
-    initial_parameters<T, ITYPE, IndexType, batch_size, stride_size, inputsNum, block_dim>(inputs, cal_parameters, scalar_t_num);
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    Parameters<T, ITYPE, IndexType, inputsNum> cal_parameters;
+    initial_parameters<T, ITYPE, IndexType, batch_size, stride_size, inputsNum, smem_bytes>(inputs, cal_parameters, scalar_t_num);
+
     ArrivalToken token[num_stages];
-    #endif
+
     uint16_t wok_threads = cal_parameters.repeats * cal_parameters.dimSize_total;
     uint16_t pos_r = threadIdx.x / cal_parameters.dimSize_total;
     uint16_t mod = threadIdx.x % cal_parameters.dimSize_total;
@@ -569,17 +556,13 @@ __global__ void CatArrayBatchedCopy_contig_TMA_fast(
     if (threadIdx.x < 32 && elected) {
       #pragma unroll
       for (int stage = 0; stage < num_stages; ++stage) {
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
         init(&smem.bar[stage], 1);
         ::cuda::ptx::fence_proxy_async(::cuda::ptx::space_shared);
-        #endif
         #pragma unroll
         for(int i = 0; i < inputsNum; i++){
           cal_parameters.src_start[i] = gridDim.x * cal_parameters.lengths[i] * stage + blockIdx.x * cal_parameters.lengths[i];
         }
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-        TMA_load<T, ITYPE, IndexType, inputsNum, block_dim, num_stages>(stage, cal_parameters, smem, token);
-        #endif
+        TMA_load<T, ITYPE, IndexType, inputsNum, smem_bytes, num_stages>(stage, scalar_t_num, cal_parameters, smem, token);
       }
     }
     int stage = 0;
@@ -589,23 +572,22 @@ __global__ void CatArrayBatchedCopy_contig_TMA_fast(
       cal_parameters.src_start[i] = gridDim.x * cal_parameters.lengths[i] * (num_stages - 1) + blockIdx.x * cal_parameters.lengths[i];
     }
 
-    uint16_t in_index = cal_index<ITYPE, IndexType, inputsNum>(cal_parameters, mod, pos_r);
+    uint16_t in_index = cal_index<T, ITYPE, IndexType, inputsNum>(cal_parameters, mod, pos_r);
     IndexType idx_global = blockIdx.x * cal_parameters.buffer_len;
 
     while(idx_global < cal_parameters.total_len) {
       bool elected = elect_sync(~0);
       if(threadIdx.x < 32 && elected){
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
         smem.bar[stage].wait(::cuda::std::move(token[stage]));
-        #endif
       }
       __syncthreads();
 
       uint16_t tmp_index = in_index;
+      ITYPE *smem_vec = reinterpret_cast<ITYPE*>(smem.in_stage[stage]);
       #pragma unroll
       for(int tid = threadIdx.x; tid < cal_parameters.buffer_len; tid += wok_threads){
         if (threadIdx.x < wok_threads && idx_global +tid < cal_parameters.total_len) {
-          output_vec[idx_global + tid] = smem.in_stage[stage][tmp_index];
+          output_vec[idx_global + tid] = smem_vec[tmp_index];
           if(inputsNum == 2){
             tmp_index += mod < cal_parameters.Dims[0] ? cal_parameters.each_length[0] : cal_parameters.each_length[1];
           }else if(inputsNum == 3){
@@ -622,12 +604,11 @@ __global__ void CatArrayBatchedCopy_contig_TMA_fast(
       }
       elected = elect_sync(~0);
       if(threadIdx.x < 32 && elected){
-        #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-        TMA_load<T, ITYPE, IndexType, inputsNum, block_dim, num_stages>(stage, cal_parameters, smem, token);
-        #endif
+        TMA_load<T, ITYPE, IndexType, inputsNum, smem_bytes, num_stages>(stage, scalar_t_num, cal_parameters, smem, token);
       }
       stage = (stage + 1) % num_stages;
   }
+  #endif
 }
 
 template <typename scalar_t, int batch_size, int stride_size>
@@ -636,6 +617,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = (scalar_t *)(out.mutable_data_ptr());
+  bool in_outIsAligned = is_aligned_vec4(data);
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
 
@@ -674,6 +656,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   int batchCounter = 0;
   int64_t offset = 0;
   for (unsigned i = 0; i < inputs.size() ; i += batch_size) {
+    int64_t total_dims = 0;
     for (batchCounter = 0;
           batchCounter < batch_size &&
             (i+batchCounter) < inputs.size();
@@ -684,12 +667,14 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = inputs[i+batchCounter].get().size(dimension);
       }
-
+      if(dimSize % ALIGNED_COLUMN_COUNT != 0){
+        in_outIsAligned = false;
+      }
       catMetaData.input[batchCounter] = (scalar_t*)(inputs[i+batchCounter].get().const_data_ptr());
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
-
+      total_dims += dimSize;
 #ifdef USE_ROCM
       // On ROCm, CatArrayBatchedCopy_contig is faster
       isAligned = false;
@@ -726,23 +711,26 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 
     dim3 applyBlock, catGrid;
     const int prop_major = at::cuda::getCurrentDeviceProperties()->major;
+    bool use_tma = prop_major >= 9 && isContig && isAligned && in_outIsAligned && sizeof(scalar_t) >= 2;
+    //The swizzle version will only be used when the shared memory buffer could hold at least 1 row of all the concat tensors
+    bool use_fast_tma = use_tma && batchCounter > 1 && batchCounter < 4 && SMEM_BUFFER_SIZE_BYTES/ALIGNED_COLUMN_COUNT/sizeof(scalar_t) >= total_dims;
 
 #ifdef USE_ROCM
     // always base grid size on max_elements_per_tensor
     auto [catGrid, applyBlock] = getCatGridRocm<scalar_t>(
           max_elements_per_tensor, batchCounter);
 #else
-    if (isContig && sizeof(scalar_t) > 2) {
-      int ntensors = batchCounter;
-      if(prop_major >= 9 && batchCounter > 1 && batchCounter < 4){
-        ntensors = 1;
-      }
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
-          max_elements_per_tensor, ntensors);
-    } else {
-      applyBlock = dim3(32 * 16);
-      getCatGrid(batchCounter, catGrid);
-    }
+  if(use_fast_tma){
+    std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
+      max_elements_per_tensor, 1, use_fast_tma);
+  }else if (isContig && sizeof(scalar_t) > 2) {
+    std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
+        max_elements_per_tensor, batchCounter, use_fast_tma);
+  }
+  else {
+    applyBlock = dim3(32 * 16);
+    getCatGrid(batchCounter, catGrid);
+  }
 #endif
 
     if (memory_format != c10::MemoryFormat::Contiguous) {
@@ -756,40 +744,33 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         dimension--;
       }
     }
+
     // Template Declarations for dim = 1, 2, 3, 4
   #define HANDLE_CASE(DIMS) \
-    if (prop_major >= 9) { \
-      if (isContig && isAligned && sizeof(scalar_t) >= 2 && sizeof(scalar_t) <= 8 && batchCounter == 2) {\
-        CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 2, 2, 4096><<<\
-        catGrid, applyBlock, 49152, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      } else if (isContig && isAligned && sizeof(scalar_t) >= 2 && sizeof(scalar_t) <= 8 && batchCounter == 3) {\
-        CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 3, 2, 4096><<<\
-        catGrid, applyBlock, 49152, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      } else if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
-        CatArrayBatchedCopy_contig_TMA<scalar_t, unsigned int, DIMS, batch_size, stride_size,2,1024><<<\
-        catGrid, applyBlock, 49152, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      }else {\
-        CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-            catGrid, applyBlock, 0, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      }\
-    }else{\
-      if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
-        CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-            catGrid, applyBlock, 0, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      } else if (isContig) {\
-        CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-            catGrid, applyBlock, 0, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      } else {\
-        CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-            catGrid, applyBlock, 0, stream.stream()>>>(\
-                data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-      }\
+    if (use_fast_tma && batchCounter == 2) {\
+      CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 2, NUM_TMA_STAGE, SMEM_BUFFER_SIZE_BYTES><<<\
+      catGrid, applyBlock, SMEM_SIZE, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else if (use_fast_tma && batchCounter == 3) {\
+      CatArrayBatchedCopy_contig_TMA_fast<scalar_t, unsigned int, DIMS, batch_size, stride_size, 3, NUM_TMA_STAGE, SMEM_BUFFER_SIZE_BYTES><<<\
+      catGrid, applyBlock, SMEM_SIZE, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else if (use_tma) {\
+      CatArrayBatchedCopy_contig_TMA<scalar_t, unsigned int, DIMS, batch_size, stride_size, NUM_TMA_STAGE, SMEM_BUFFER_SIZE_BYTES><<<\
+      catGrid, applyBlock, SMEM_SIZE, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
+      CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else if (isContig) {\
+      CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else {\
+      CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
     }\
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
@@ -807,6 +788,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         break;
     }
 #undef HANDLE_CASE
+
   }
 }
 // The kernels are templated on an opaque, self-aligned type of the correct
