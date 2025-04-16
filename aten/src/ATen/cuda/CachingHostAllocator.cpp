@@ -253,7 +253,6 @@ void raw_local_deleter(void* ptr);
 
 DECLARE_HOST_ALLOCATOR(CUDACachingHostAllocator, CUDACachingHostAllocatorImpl, raw_local_deleter);
 
-} // namespace
 CUDACachingHostAllocator caching_host_allocator;
 
 static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
