@@ -3,12 +3,16 @@ import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Generic, Optional, TypeVar, Union
 
+import numpy as np
+from numpy.typing import NDArray
+
 import torch
 
 
 __all__ = [
     "BatchSampler",
     "RandomSampler",
+    "RandomBatchSampler",
     "Sampler",
     "SequentialSampler",
     "SubsetRandomSampler",
@@ -346,3 +350,53 @@ class BatchSampler(Sampler[list[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
+
+
+class RandomBatchSampler(Sampler[list[int]]):
+    def __init__(
+        self,
+        data_source: Sized,
+        replacement: bool = False,
+        generator: Optional[np.random.Generator] = None,
+        batch_size: int = 32,
+        drop_last: bool = False,
+    ) -> None:
+        super().__init__()
+        self.data_source = data_source
+        self.replacement = replacement
+        self.generator = generator
+        self.batch_size = batch_size
+        self.drop_last = drop_last and len(data_source) % self.batch_size > 0
+
+        if not isinstance(self.replacement, bool):
+            raise TypeError(
+                f"replacement should be a boolean value, but got replacement={self.replacement}"
+            )
+
+        self.n_batches = len(data_source) // batch_size
+
+    def sample_indices(self) -> NDArray[np.int_]:
+        generator = (
+            self.generator if self.generator is not None else np.random.default_rng()
+        )
+
+        if self.replacement:
+            indices = generator.integers(0, len(self.data_source), len(self.data_source))
+        else:
+            indices = np.arange(len(self.data_source))
+            generator.shuffle(indices)
+
+        return indices
+
+    def __iter__(self) -> Iterator[list[int]]:
+        indices = self.sample_indices()
+        indices_batches = [
+            indices[i : i + self.batch_size]
+            for i in range(0, len(indices), self.batch_size)
+        ]
+        if self.drop_last:
+            indices_batches.pop()
+        yield from indices_batches
+
+    def __len__(self):
+        return self.n_batches
