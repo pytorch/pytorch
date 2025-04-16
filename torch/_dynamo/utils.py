@@ -776,11 +776,6 @@ def compile_times(repr="str", aggregate: bool = False):
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
 
-    def get_metric(name):
-        if name not in compilation_time_metrics:
-            return 0
-        return sum(compilation_time_metrics[name])
-
     if repr == "str":
         rows = [
             (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
@@ -788,53 +783,7 @@ def compile_times(repr="str", aggregate: bool = False):
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
-        out += "\n\n"
-
-        # Calculate approximate component breakdown
-        # Triton time
-        # These triton times are for both fwd and bwd
-        triton_kernels = get_metric("async_compile.wait")
-        triton_autotuning = get_metric("CachingAutotuner.benchmark_all_configs")
-        triton_total = triton_kernels + triton_autotuning
-
-        inductor_fwd_triton = get_metric("compile_fx.<locals>.fw_compiler_base")
-        inductor_bwd_triton = get_metric("compile_fx.<locals>.bw_compiler")
-
-        # Inductor time - For inductor fwd or bwd, go to tlparse
-        inductor_total = inductor_fwd_triton + inductor_bwd_triton - triton_kernels
-
-        # Dynamo time
-        entire_frame_fwd = get_metric("_compile.compile_inner")
-        all_but_dynamo_fwd = get_metric("OutputGraph.call_user_compiler")
-
-        dynamo_total = entire_frame_fwd - all_but_dynamo_fwd
-
-        # AOT Dispatcher time
-        aot_total = entire_frame_fwd - dynamo_total - inductor_fwd_triton
-
-        # unaccounted
-        accounted = dynamo_total + aot_total + inductor_total + triton_total
-        unaccounted = (
-            entire_frame_fwd + inductor_bwd_triton + triton_autotuning - accounted
-        )
-
-        if accounted:
-            out += "Approximate Compilation Time Breakdown:\n"
-
-            def fmt_helper(name, x):
-                percent = x / accounted * 100
-                return name, f"{x:.4f}", f"{percent:.0f}"
-
-            rows = [
-                fmt_helper("dynamo", dynamo_total),
-                fmt_helper("aot_dispatcher", aot_total),
-                fmt_helper("inductor", inductor_total),
-                fmt_helper("triton", triton_total),
-                fmt_helper("unaccounted", unaccounted),
-            ]
-            out += tabulate(rows, headers=("Component", "Runtimes (s)", "Percent (%)"))
         return out
-
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
