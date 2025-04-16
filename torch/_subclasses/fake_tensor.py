@@ -1538,6 +1538,19 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("data dependent output")
 
         if torch.Tag.dynamic_output_shape in func.tags:
+            if func is aten.index.Tensor:
+                _, new_kwargs = normalize_function(  # type: ignore[misc]
+                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                )
+                for index in new_kwargs["indices"]:
+                    # index call nonzero for bool or int8 tensors
+                    if isinstance(index, torch.Tensor) and index.dtype in (
+                        torch.bool,
+                        torch.int8,
+                    ):
+                        raise _BypassDispatchCache("dynamic output shape")
+                return
+
             raise _BypassDispatchCache("dynamic output shape")
 
         if torch.Tag.inplace_view in func.tags:
