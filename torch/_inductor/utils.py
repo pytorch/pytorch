@@ -50,6 +50,7 @@ import sympy
 
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -60,7 +61,6 @@ if TYPE_CHECKING:
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -1324,6 +1324,12 @@ def use_max_autotune() -> bool:
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
+    if layout.dtype not in allowed_layout_dtypes:
+        log.debug(
+            "Not using template since dtype %s is not in allowed layout dtypes %s",
+            layout.dtype,
+            allowed_layout_dtypes,
+        )
     return (
         is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
@@ -1416,7 +1422,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    # output dtype
+    # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
     res = (
         _use_template_for_gpu(layout, layout_dtypes)
         and use_max_autotune()
@@ -2412,7 +2420,9 @@ def run_and_get_cpp_code(
     return result, s
 
 
-def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
+def shape_env_from_inputs(
+    inputs: Sequence[InputType], default: bool = False
+) -> Optional[ShapeEnv]:
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
@@ -2427,6 +2437,9 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
     for input in inputs:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
+
+    if default:
+        return ShapeEnv()
 
     # TODO(voz): Should we always have one anyway?
     return None
