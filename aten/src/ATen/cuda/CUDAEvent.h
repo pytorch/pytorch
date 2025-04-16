@@ -154,7 +154,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         query() && other.query(),
         "Both events must be completed before calculating elapsed time.");
     TORCH_CHECK(
-        (flags_ & cudaEventDefault) && (other.flags_ & cudaEventDefault),
+        !(flags_ & cudaEventDisableTiming) && !(other.flags_ & cudaEventDisableTiming),
         "Both events must be created with argument 'enable_timing=True'.");
 
     float time_ms = 0;
