@@ -310,7 +310,6 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
-        super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -1745,6 +1744,11 @@ class OutputGraph:
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
                     update_used_symbols(used_symbols, fake)
+
+        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
+        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
+            for assertion in assertion_list:
+                used_symbols |= free_symbols(assertion.expr)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
