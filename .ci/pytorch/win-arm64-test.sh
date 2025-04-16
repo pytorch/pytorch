@@ -6,8 +6,6 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 
 run_tests() {
-    source .venv/Scripts/activate
-
     echo Running smoke_test.py...
     python ./.ci/pytorch/smoke_test/smoke_test.py --package torchonly
 
