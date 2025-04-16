@@ -282,18 +282,16 @@ class BlockPtrOptions:
         # We need an explicit broadcast for stores, or if the final reshape does more
         # than add singletons.
         sizevars = V.graph.sizevars
-        require_broadcast = any(self.broadcasting_dims) and (
-            len(pre_broadcast_shape) != len(final_shape)
-            or any(
-                not (
-                    sizevars.statically_known_equals(pre_dim, 1)
-                    or sizevars.statically_known_equals(pre_dim, post_dim)
-                )
+        supports_implicit_broadcast = allow_implicit and (
+            len(pre_broadcast_shape) == len(final_shape)
+            and all(
+                sizevars.statically_known_equals(pre_dim, 1)
+                or sizevars.statically_known_equals(pre_dim, post_dim)
                 for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
         )
 
-        if not allow_implicit or require_broadcast:
+        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         # Reshape to the final shape.
