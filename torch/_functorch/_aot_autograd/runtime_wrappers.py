@@ -2229,10 +2229,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ), _WaitCounter(
                         "pytorch.wait_counter.dynamo_compile"
                     ).guard():
-                        # compilation_metric intends to update the is_forward datafield of the metrics context.
-                        # However, metrics_context is a singleton within a single process and the is_forward datafield has
-                        # been set to True during forward compilation. So, the overwrite needs to be enabled to set
-                        # the is_forward datafield to False for backward compilation.
+                        # `compilation_metric` attempts to update the `is_forward` field of `metrics_context`. Since
+                        # `metrics_context` is a singleton, the `is_forward` field was already set to True during
+                        # forward compilation. To reset it to False for backward compilation, `overwrite` must be enabled.
+                        # Otherwise, in multi-threaded scenarios, a runtime error will occur,
+                        # because `MetricsContext` does not allow updating existing fields when `overwrite` is False.
                         CompileEventLogger.compilation_metric(
                             overwrite=True, is_forward=False
                         )
