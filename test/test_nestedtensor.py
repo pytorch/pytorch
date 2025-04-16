@@ -6668,6 +6668,7 @@ torch.cuda.synchronize()
             q_nt_3, q_nt_3, q_nt_3
         )
         self.assertEqual(attn_out.shape, q_nt_3.shape)
+        print("PASS OUT ASSERT EQUAL")
 
         @parametrize("skip_backward", [True, False])
         def check_forward_backward(skip_backward=False):
@@ -6716,12 +6717,14 @@ torch.cuda.synchronize()
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
+                    print("PASS D1 GRAD")
                     self.assertEqual(
                         d2_grad,
                         unbound_nt_grads[1].unsqueeze(0),
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
+                    print("PASS D2 GRAD")
 
         # Default
         check_forward_backward()
