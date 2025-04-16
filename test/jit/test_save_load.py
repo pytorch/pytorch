@@ -21,6 +21,24 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import clear_class_registry, JitTestCase
 
 
+def remove_prefix(text, prefix):
+    if text.startswith(prefix):
+        return text[len(prefix) :]
+    return text
+
+
+def get_filename(self):
+    # NB: we take __file__ from the module that defined the test
+    # class, so we place the expect directory where the test script
+    # lives, NOT where test/common_utils.py lives.
+    module_id = self.__class__.__module__
+    munged_id = remove_prefix(self.id(), module_id + ".")
+    test_file = os.path.realpath(sys.modules[module_id].__file__)
+    base_name = os.path.join(os.path.dirname(test_file), "serialized", munged_id)
+
+    return base_name + ".input.pt"
+
+
 class TestSaveLoad(JitTestCase):
     def test_different_modules(self):
         """
@@ -1193,6 +1211,207 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         torch._C._get_model_extra_files_from_buffer(script_module_io, re_extra_files)
 
         self.assertEqual(extra_files, re_extra_files)
+
+    def test_save_load_byteorder_le(self):
+        """
+        Check that pytorch can load model saved on little endian systems
+
+        Model for this and next test was created by running on LE and BE systems correspondingly:
+
+        import torch
+        import torch.nn as nn
+        import torch.nn.functional as F
+        from sklearn.datasets import load_iris
+        from sklearn.preprocessing import StandardScaler
+        # Set deterministic behavior
+        torch.manual_seed(0)
+        # Define a simple LSTM model
+        class LSTMClassifier(nn.Module):
+            def __init__(self, input_size, hidden_size, num_classes):
+                super(LSTMClassifier, self).__init__()
+                self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+                self.fc = nn.Linear(hidden_size, num_classes)
+            def forward(self, x):
+                x = x.unsqueeze(1)  # (batch, seq_len=1, input_size)
+                lstm_out, _ = self.lstm(x)
+                return self.fc(lstm_out[:, -1, :])  # logits
+        # Load data
+        X = load_iris().data
+        X = StandardScaler().fit_transform(X)
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        # Train dummy model
+        model = LSTMClassifier(input_size=4, hidden_size=16, num_classes=3)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+        y = torch.randint(0, 3, (150,))
+        for epoch in range(10):
+            out = model(X_tensor)
+            loss = criterion(out, y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        # Save with torch.jit.script
+        scripted_model = torch.jit.script(model)
+        torch.jit.save(scripted_model, "lstm_script_model.pt")
+        # Save with torch.jit.trace
+        traced_model = torch.jit.trace(model, torch.randn(1, 4))
+        torch.jit.save(traced_model, "lstm_traced_model.pt")
+
+        Values to be tested against are obtained by following script:
+
+        import torch
+
+        models = torch.jit.load("lstm_traced_model.pt")
+
+        print(models.fc.bias)
+        print(models.fc.weight)
+
+        Relative error is taken as 5% as it is sufficient for difference between
+        displayed values used as reference values, and if there are byteswapping errors,
+        difference would be greater.
+
+        """
+
+        input_file = get_filename(self)
+
+        models = torch.jit.load(input_file)
+
+        bias = torch.tensor([-1.5764e-01, -1.3106e-01, 6.1719e-05], dtype=torch.float32)
+        weight = torch.tensor(
+            [
+                [
+                    -0.0033,
+                    -0.2372,
+                    -0.0492,
+                    0.0363,
+                    0.0906,
+                    0.3144,
+                    0.3186,
+                    -0.0883,
+                    0.2115,
+                    -0.3499,
+                    -0.2475,
+                    0.1433,
+                    0.0893,
+                    -0.2909,
+                    -0.0106,
+                    -0.0594,
+                ],
+                [
+                    -0.1559,
+                    0.1246,
+                    0.2712,
+                    0.0153,
+                    -0.0260,
+                    -0.1440,
+                    -0.3027,
+                    0.1052,
+                    0.1351,
+                    -0.1492,
+                    -0.0578,
+                    -0.2338,
+                    0.0624,
+                    -0.3280,
+                    -0.3219,
+                    0.1621,
+                ],
+                [
+                    -0.2092,
+                    -0.1407,
+                    -0.0017,
+                    -0.1386,
+                    -0.1418,
+                    -0.0115,
+                    -0.0297,
+                    -0.1113,
+                    0.0208,
+                    -0.1732,
+                    0.1270,
+                    0.1730,
+                    0.0860,
+                    0.0113,
+                    0.1683,
+                    -0.1495,
+                ],
+            ],
+            dtype=torch.float32,
+        )
+
+        self.assertEqual(models.fc.bias, bias, atol=self.precision, rtol=5e-2)
+        self.assertEqual(models.fc.weight, weight, atol=self.precision, rtol=5e-2)
+
+    def test_save_load_byteorder_be(self):
+        """
+        Same as previous test but with data generated on BE system
+        """
+
+        input_file = get_filename(self)
+
+        models = torch.jit.load(input_file)
+
+        bias = torch.tensor([-1.5764e-01, -1.3106e-01, 6.1719e-05], dtype=torch.float32)
+        weight = torch.tensor(
+            [
+                [
+                    -0.0033,
+                    -0.2372,
+                    -0.0492,
+                    0.0363,
+                    0.0906,
+                    0.3144,
+                    0.3186,
+                    -0.0883,
+                    0.2115,
+                    -0.3499,
+                    -0.2475,
+                    0.1433,
+                    0.0893,
+                    -0.2909,
+                    -0.0106,
+                    -0.0594,
+                ],
+                [
+                    -0.1559,
+                    0.1246,
+                    0.2712,
+                    0.0153,
+                    -0.0260,
+                    -0.1440,
+                    -0.3027,
+                    0.1052,
+                    0.1351,
+                    -0.1492,
+                    -0.0578,
+                    -0.2338,
+                    0.0624,
+                    -0.3280,
+                    -0.3219,
+                    0.1621,
+                ],
+                [
+                    -0.2092,
+                    -0.1407,
+                    -0.0017,
+                    -0.1386,
+                    -0.1418,
+                    -0.0115,
+                    -0.0297,
+                    -0.1113,
+                    0.0208,
+                    -0.1732,
+                    0.1270,
+                    0.1730,
+                    0.0860,
+                    0.0113,
+                    0.1683,
+                    -0.1495,
+                ],
+            ],
+            dtype=torch.float32,
+        )
+
+        self.assertEqual(models.fc.bias, bias, atol=self.precision, rtol=5e-2)
+        self.assertEqual(models.fc.weight, weight, atol=self.precision, rtol=5e-2)
 
 
 if __name__ == "__main__":
