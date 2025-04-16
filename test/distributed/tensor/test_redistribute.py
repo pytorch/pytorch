@@ -576,7 +576,7 @@ class RedistributeTest(DTensorTestBase):
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     @with_comms
     def test_multi_dim_mesh(self):

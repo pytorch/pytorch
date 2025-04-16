@@ -211,7 +211,7 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         mesh.get_coordinate()
 
-    @unittest.skipif(not torch.accelerator.is_available(), "No accelerator available!")
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator available!")
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -266,7 +266,7 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
-    @unittest.skipif(not torch.accelerator.is_available(), "No accelerator available!")
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator available!")
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
