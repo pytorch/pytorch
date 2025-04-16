@@ -56,7 +56,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         # Set up the registrations
         # If you want to override any of these, override them in your subclass.
-        self.py_impl(DispatchKey.Autograd)(self._call_Autograd)
+        self.py_autograd_impl(self._call_Autograd)
         self.py_functionalize_impl(self._call_Functionalize)
         self.py_impl(ProxyTorchDispatchMode)(self._call_ProxyTorchDispatchMode)
         self.py_impl(FakeTensorMode)(self._call_FakeTensorMode)
@@ -76,13 +76,6 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
     def _call_Autograd(self, subgraph, *operands, **kwargs):
         if isinstance(subgraph, torch.fx.GraphModule):
             pass
-        if not torch.is_grad_enabled() or pytree.tree_all_only(
-            torch.Tensor,
-            lambda t: not t.requires_grad,  # type: ignore[union-attr]
-            operands,
-        ):
-            with torch._C._AutoDispatchBelowAutograd():
-                return self(subgraph, *operands, **kwargs)
 
         # We assume the subgraph doesn't mutate inputs and there is no aliasing.
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
