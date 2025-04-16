@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 from torch.distributions import Categorical, constraints
+from torch.distributions.constraints import removed_event_dim
 from torch.distributions.distribution import Distribution
 
 
@@ -124,9 +125,9 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        # FIXME this may have the wrong shape when support contains batched
-        # parameters
-        return self._component_distribution.support
+        return removed_event_dim(
+            self._component_distribution.support, self._event_ndims
+        )
 
     @property
     def mixture_distribution(self) -> Categorical:
@@ -164,9 +165,9 @@ class MixtureSameFamily(Distribution):
         return torch.sum(cdf_x * mix_prob, dim=-1)
 
     def log_prob(self, x):
-        x = self._pad(x)
         if self._validate_args:
             self._validate_sample(x)
+        x = self._pad(x)
         log_prob_x = self.component_distribution.log_prob(x)  # [S, B, k]
         log_mix_prob = torch.log_softmax(
             self.mixture_distribution.logits, dim=-1

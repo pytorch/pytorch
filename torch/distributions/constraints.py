@@ -28,6 +28,7 @@ The following constraints are implemented:
 - ``constraints.positive_definite``
 - ``constraints.real_vector``
 - ``constraints.real``
+- ``constraints.removed_event_dim(constraint, base_event_dim)``
 - ``constraints.simplex``
 - ``constraints.symmetric``
 - ``constraints.stack``
@@ -66,6 +67,7 @@ __all__ = [
     "positive_integer",
     "real",
     "real_vector",
+    "removed_event_dim",
     "simplex",
     "square",
     "stack",
@@ -263,6 +265,47 @@ class _IndependentConstraint(Constraint):
 
     def __repr__(self):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
+
+
+class _RemovedEventDimConstraint(Constraint):
+    """
+    Eliminate the first event dimension from a constraint, so that a
+    sample is valid in :meth:`check` if by adding back the first event
+    dimension it is valid in the base constraint.
+    """
+
+    def __init__(self, base_constraint, base_event_dim):
+        assert isinstance(base_constraint, Constraint)
+        assert isinstance(base_event_dim, int)
+        assert base_event_dim >= 0
+        self.base_constraint = base_constraint
+        self.base_event_dim = base_event_dim
+        super().__init__()
+
+    @property
+    def is_discrete(self) -> bool:  # type: ignore[override]
+        return self.base_constraint.is_discrete
+
+    @property
+    def event_dim(self) -> int:  # type: ignore[override]
+        return self.base_event_dim - 1
+
+    def check(self, value):
+        unsqueezed_value = value.unsqueeze(-1 - self.base_event_dim)
+        result = self.base_constraint.check(unsqueezed_value)
+        if result.dim() < self.base_event_dim:
+            expected = self.event_dim
+            raise ValueError(
+                f"Expected value.dim() >= {expected} but got {value.dim()}"
+            )
+        result = result.reshape(
+            result.shape[: result.dim() - self.base_event_dim] + (-1,)
+        )
+        result = result.all(-1)
+        return result
+
+    def __repr__(self):
+        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.base_event_dim})"
 
 
 class _Boolean(Constraint):
@@ -661,6 +704,7 @@ class _Stack(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 independent = _IndependentConstraint
+removed_event_dim = _RemovedEventDimConstraint
 boolean = _Boolean()
 one_hot = _OneHot()
 nonnegative_integer = _IntegerGreaterThan(0)
