@@ -493,6 +493,15 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
+def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    if not original_key.startswith("mast:"):
+        # if original_key is overriden, then dont change it
+        return original_key
+    if (new_key := get_cache_key()) is not None:
+        return new_key
+    return original_key
+
+
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
