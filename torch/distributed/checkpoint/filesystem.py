@@ -310,7 +310,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
-    serialization_format: SerializationFormat,
+    serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
 ) -> WriteResult:
     offset = stream.tell()
 
