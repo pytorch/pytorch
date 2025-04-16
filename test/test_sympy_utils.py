@@ -957,6 +957,25 @@ class TestSingletonInt(TestCase):
         self.assertEqual(j1.free_symbols, set())
 
 class TestFloorDiv(TestCase):
+
+    def _expand_and_check(self, x: sympy.Expr, y: sympy.Expr):
+        """
+        Checks equality after expanding FloorDiv.
+        """
+        x, y = tuple(expr.expand(floordiv=True) for expr in (x, y))
+        self.assertEqual(x, y)
+
+    def test_expand(self):
+        x, y = sympy.symbols("x y")
+        orig = FloorDiv(x, y)
+        expanded = orig.expand(floordiv=True)
+
+        # Check the args of the expanded expression.
+        self.assertTrue(isinstance(expanded, sympy.floor))
+        num, denom = orig.args
+        (quotient,) = expanded.args
+        self.assertEqual(quotient, num / denom)
+
     def test_rewrite_floor_div_mul_pow(self):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(x / y)

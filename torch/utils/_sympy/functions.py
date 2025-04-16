@@ -206,6 +206,13 @@ class FloorDiv(sympy.Function):
         divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
+    def _eval_expand_floordiv(self, **hints):
+        """
+        Expands FloorDiv(x, y) into floor(x / y).
+        """
+        num, denom = self.args
+        return sympy.floor(num / denom)
+
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
