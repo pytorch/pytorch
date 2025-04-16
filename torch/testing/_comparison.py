@@ -865,7 +865,6 @@ class TensorLikePair(Pair):
             actual, expected = actual.values(), expected.values()
             compare_fn = self._compare_regular_values_close
         elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
-            # intercept rtol and atol for bitwise comparison in low dimensional floats
             def bitwise_comp(
                 actual: torch.Tensor,
                 expected: torch.Tensor,
