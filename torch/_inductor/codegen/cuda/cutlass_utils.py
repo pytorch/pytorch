@@ -281,6 +281,23 @@ def gen_ops() -> dict[Any, Any]:
     return _gen_ops_cached(arch, version)
 
 
+DTYPE_TO_CUTLASS_TYPE = {
+    torch.float32: "float",
+    torch.float64: "double",
+    torch.float16: "cutlass::half_t",
+    torch.int64: "int64_t",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
+    torch.uint64: "uint64_t",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
+    torch.bool: "bool",
+    torch.bfloat16: "cutlass::bfloat16_t",
+}
+
+
 def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
