@@ -804,7 +804,7 @@ class ScanAutogradOp(torch.autograd.Function):
         return *[None] * 4, *g_init, *g_xs, *g_additional_inputs
 
 
-@scan_op.py_impl(DispatchKey.Autograd)
+@scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
     if not any(
         el.requires_grad

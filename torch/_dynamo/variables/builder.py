@@ -154,6 +154,7 @@ from .base import (
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
+    DynamoConfigPatchVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
@@ -250,7 +251,6 @@ from .torch import (
     TorchInGraphFunctionVariable,
 )
 from .torch_function import (
-    build_torch_function_fn,
     TensorWithTFOverrideVariable,
     torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
@@ -595,6 +595,8 @@ class VariableBuilder:
         # import here to avoid circular dependencies
         from torch.utils._triton import has_triton, has_triton_tma
 
+        from ..decorators import DynamoConfigPatchProxy
+
         if has_triton():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
@@ -912,6 +914,8 @@ class VariableBuilder:
                     {},
                 )
             )
+        elif isinstance(value, DynamoConfigPatchProxy):
+            return DynamoConfigPatchVariable(value.changes)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1839,9 +1843,6 @@ class VariableBuilder:
             subclass_type = None
         else:
             subclass_type = type(value)
-            options["torch_function_fn"] = build_torch_function_fn(
-                self.tx, value, self.source
-            )
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
