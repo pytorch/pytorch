@@ -288,7 +288,7 @@ class _RemovedEventDimConstraint(Constraint):
 
     @property
     def event_dim(self) -> int:  # type: ignore[override]
-        return self.base_event_dim - 1
+        return self.base_event_dim
 
     def check(self, value):
         unsqueezed_value = value.unsqueeze(-1 - self.base_event_dim)
@@ -299,7 +299,7 @@ class _RemovedEventDimConstraint(Constraint):
                 f"Expected value.dim() >= {expected} but got {value.dim()}"
             )
         result = result.reshape(
-            result.shape[: result.dim() - self.base_event_dim] + (-1,)
+            result.shape[: result.dim() - 1 - self.base_event_dim] + (-1,)
         )
         result = result.all(-1)
         return result
