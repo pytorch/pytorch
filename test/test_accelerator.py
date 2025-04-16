@@ -112,6 +112,34 @@ class TestAccelerator(TestCase):
         self.assertTrue(t_host.is_pinned())
         self.assertEqual(t_acc.cpu(), t_host)
 
+    def test_generic_event_behavior(self):
+        event1 = torch.Event(enable_timing=False)
+        event2 = torch.Event(enable_timing=False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Both events must be recorded before calculating elapsed time",
+        ):
+            event1.elapsed_time(event2)
+
+        event1.record()
+        event2.record()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+        # check default value of enable_timing: False
+        event1 = torch.Event()
+        event2 = torch.Event()
+        event1.record()
+        event2.record()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
 
 if __name__ == "__main__":
     run_tests()

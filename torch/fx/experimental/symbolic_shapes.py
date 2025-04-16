@@ -143,7 +143,9 @@ __all__ = [
     "CURRENT_NODE_KEY",
     "has_free_symbols",
     "has_free_unbacked_symbols",
+    "sym_and",
     "sym_eq",
+    "sym_or",
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
@@ -1299,17 +1301,19 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return result
 
 
-# When a or b is evaluated, a is evaluated eagerly first then b. This causes
-# a data dependent error for an expression “if u0==1 or True”. or over guarding for
-# “if s0==1 or True”.
-
-# On the other hand, when we use operator.or_, then dynamo will generate
-# a sympy expression Sympy.Or(u0==1, True) without evaluating the args first.
-
-# When the whole expression is passed to evaluation in that case, we do not throw a
-# data dependent error or guard because we can statically know the result is True
-# before unpacking the symbols.
-sym_or = operator.or_
+def sym_and(
+    x: Union[bool, SymBool], *others: Union[bool, SymBool]
+) -> Union[bool, SymBool]:
+    """
+    and, but for symbolic expressions, without bool casting.
+    """
+    assert isinstance(x, (bool, SymBool))
+    if len(others) == 0:
+        return x
+    for y in others:
+        assert isinstance(y, (bool, SymBool))
+        x = operator.and_(x, y)
+    return x
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -1327,6 +1331,21 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         return x == y
     else:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
+
+
+def sym_or(
+    x: Union[bool, SymBool], *others: Union[bool, SymBool]
+) -> Union[bool, SymBool]:
+    """
+    or, but for symbolic expressions, without bool casting.
+    """
+    assert isinstance(x, (bool, SymBool))
+    if len(others) == 0:
+        return x
+    for y in others:
+        assert isinstance(y, (bool, SymBool))
+        x = operator.or_(x, y)
+    return x
 
 
 def guard_scalar(
