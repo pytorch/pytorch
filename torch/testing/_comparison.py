@@ -866,9 +866,29 @@ class TensorLikePair(Pair):
             compare_fn = self._compare_regular_values_close
         elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
             # intercept rtol and atol for bitwise comparison in low dimensional floats
-            def bitwise_comp(actual, expected, rtol=0.0, atol=0.0, equal_nan=False):
+            def bitwise_comp(
+                actual: torch.Tensor,
+                expected: torch.Tensor,
+                *,
+                rtol: float,
+                atol: float,
+                equal_nan: bool,
+                identifier: Optional[Union[str, Callable[[str], str]]] = None,
+            ) -> None:
+                if rtol != 0.0 or atol != 0.0:
+                    raise ErrorMeta(
+                        AssertionError,
+                        f"Rtol={rtol} and atol={atol} are not supported for bitwise comparison of low \
+                            dimensional floats. Please use rtol=0.0 and atol=0.0",
+                    )
+
                 return self._compare_regular_values_close(
-                    actual, expected, rtol=0.0, atol=0.0, equal_nan=equal_nan
+                    actual,
+                    expected,
+                    rtol=rtol,
+                    atol=atol,
+                    equal_nan=equal_nan,
+                    identifier=identifier,
                 )
 
             compare_fn = bitwise_comp
@@ -1336,9 +1356,6 @@ def assert_close(
     If ``actual`` and ``expected`` are quantized, they are considered close if they have the same
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
     definition above.
-
-    If ``actual`` and ``expected`` are small floating point dtypes, they are compared bitwise. In other words,
-    ``rtol`` and ``atol`` are set to zero.
 
     ``actual`` and ``expected`` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which
     :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. Except for Python scalars the input types
