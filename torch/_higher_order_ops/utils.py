@@ -894,7 +894,7 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         tangents = args_and_grad_outs[n_primals:]
         grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
-        return tuple(
+        out = tuple(
             (
                 torch.zeros_like(arg)
                 if isinstance(arg, torch.Tensor) and grad is None
@@ -902,6 +902,8 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
             )
             for grad, arg in zip(grad_args, primals)
         )
+        _maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+        return pytree.tree_map(_maybe_clone, out)
 
     return flat_fn
 
