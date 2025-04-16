@@ -986,6 +986,8 @@ class FxGraphCache:
         """
         free_symbols = [s.node.expr.free_symbols for s in symints]
         # Put all the sets together
+        if not free_symbols:
+            return []
         unique_symbols = set.union(*free_symbols)
         result = []
         shape_env = FxGraphCache._get_shape_env()
