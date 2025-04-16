@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -30,7 +30,11 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import get_nonrecursive_disable_wrapper, is_compiling
+from .external_utils import (
+    _dynamo_config_patch_proxy_dunder_call,
+    get_nonrecursive_disable_wrapper,
+    is_compiling,
+)
 from .utils import is_function
 
 
@@ -732,3 +736,105 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+
+
+# Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
+# created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
+class DynamoConfigPatchProxy:
+    def __init__(self, config_patch):
+        self.config_patch = config_patch
+
+    @property
+    def changes(self):
+        return self.config_patch.changes
+
+    # Decorator implementation that simply sets up `self` as a context manager.
+    # Placed in external_utils so that we can trace through it.
+    __call__ = _dynamo_config_patch_proxy_dunder_call
+
+    def __enter__(self):
+        return self.config_patch.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.config_patch.__exit__(exc_type, exc_val, exc_tb)
+
+
+# Criteria for patchable config:
+# - Config values must be constants (i.e. int, float, str, bool, None).
+#     - in particular, NO list, set, dict.
+# - Traceable config patches are only useful for configs that change dynamo behavior
+#   from symbolic_convert and below.
+#     - e.g. patching recompile_limit won't really do anything.
+# - For patching configs that affect Dynamo behavior above symbolic_convert,
+#   ensure that Dynamo behaves soundly even if tracing is done with different config.
+#     - e.g. be careful if patching guard-related configs as configs may have changed
+#       between guard creation and evaluation.
+_allowed_config_patches = (
+    "verbose",
+    "verify_correctness",
+    "rewrite_assert_with_torch_assert",
+    "capture_scalar_outputs",
+    "allow_unspec_int_on_nn_module",
+    "skip_torchrec",
+    "dont_skip_tracing",
+)
+
+for name in _allowed_config_patches:
+    assert hasattr(torch._dynamo.config, name), "nonexistent config"
+
+
+def _patch_dynamo_config_check(changes: dict[str, Any]):
+    for k, v in changes.items():
+        if k not in _allowed_config_patches:
+            raise ValueError(
+                f"patch_dynamo_config does not support patching config {k}"
+            )
+        if not torch._dynamo.utils.is_safe_constant(v):
+            raise ValueError(
+                f"patch_dynamo_config does not support patching config {k} "
+                f"with non-safe-constant value {v}"
+            )
+
+
+# TODO: also implement nonrecursive patch_dynamo_config/dont_skip_tracing.
+# Unlike config.patch, we also need to accept tuple as input in order to
+# deal with context manager reconstruction.
+def patch_dynamo_config(
+    arg1: Optional[Union[str, dict[str, Any], tuple[tuple[str, Any], ...]]] = None,
+    arg2: Any = None,
+    **kwargs: Any,
+) -> DynamoConfigPatchProxy:
+    """
+    A wrapper around torch._dynamo.config.patch that can be traced by Dynamo to
+    temporarily change config values DURING tracing.
+
+    See _allowed_config_patches for the list of allowed config patches.
+
+    Arguments are the same as with torch._dynamo.confing.patch.
+
+    Can be used as a decorator or a context manager.
+
+    User code SHOULD NOT MODIFY the return value of this function.
+
+    WARNING: changing Dynamo config during tracing can lead to unpredictable tracing behavior!
+        Proceed only as advised!
+    """
+    if isinstance(arg1, tuple):
+        arg1 = dict(arg1)
+    config_patch = torch._dynamo.config.patch(arg1, arg2, **kwargs)
+    _patch_dynamo_config_check(config_patch.changes)
+    # check for valid patching using config_patch.changes
+    return DynamoConfigPatchProxy(config_patch)
+
+
+def dont_skip_tracing(fn=None):
+    """
+    Context manager/decorator to trace into functions intentionally marked by developers to be skipped
+    when tracing.
+
+    This decorator will also apply to recursively invoked functions.
+    """
+    ctx = patch_dynamo_config(dont_skip_tracing=True)
+    if fn:
+        return ctx(fn)
+    return ctx
