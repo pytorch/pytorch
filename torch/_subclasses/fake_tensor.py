@@ -1104,14 +1104,14 @@ class _DispatchCacheEntry:
     is_output_tuple: bool = False
 
 
-@dataclass_slots
-@dataclass(frozen=True)
 class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
     """
 
-    reason: str
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+        self.reason = msg
 
 
 @dataclass_slots

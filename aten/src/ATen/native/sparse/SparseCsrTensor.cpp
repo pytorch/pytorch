@@ -276,10 +276,10 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
   // Device Invariants
   // 4.1
   TORCH_CHECK(
-      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kXPU || values.device().type() == kMeta,
+      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kXPU || values.device().type() == kMeta || values.device().type() == kPrivateUse1,
       "device type of values (",
       values.device().type(),
-      ") must be CPU or CUDA or XPU or Meta");
+      ") must be one of CPU, CUDA, XPU, Meta or PrivateUse1")
   // 4.2, 4.3, 4.4
   TORCH_CHECK(
       compressed_indices.get_device() == values.get_device(),
@@ -480,7 +480,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
 }
 
 template <Layout required_layout>
-Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
                                                  IntArrayRef size,
@@ -967,7 +967,7 @@ Tensor empty_like_sparse_csr(
 }
 
 template <bool require_view, bool require_copy>
-Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+static Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
 #ifndef STRIP_ERROR_MESSAGES
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
 #endif
