@@ -164,7 +164,7 @@ SymInt computeStorageNbytes(
       return 0;
     }
 
-    size += strides[i] * (sizes[i] - 1);
+    size += strides[i] * (sizes[i] - 1).max(0);
   }
   return itemsize_bytes * (storage_offset + size);
 }
