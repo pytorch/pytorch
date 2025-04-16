@@ -579,8 +579,16 @@ PickleOpCode Unpickler::readInstruction() {
         }
 
         if (byte_order_ != torch::utils::THP_nativeByteOrder()) {
-          // TODO: half size for complex types, but double the amount
-          switch (dtype.itemsize()) {
+          auto itemsize = dtype.itemsize();
+          auto amount = numel;
+
+          // half size for complex types, but double the amount
+          if (isComplexType(type)) {
+            itemsize /= 2;
+            amount *= 2;
+          }
+
+          switch (itemsize) {
             case 1:
               break;
             case 2:
@@ -588,21 +596,21 @@ PickleOpCode Unpickler::readInstruction() {
                   (int16_t*)storage_ptr.mutable_get(),
                   (const uint8_t*)storage_ptr.mutable_get(),
                   true,
-                  numel);
+                  amount);
               break;
             case 4:
               torch::utils::THP_decodeBuffer(
                   (int32_t*)storage_ptr.mutable_get(),
                   (const uint8_t*)storage_ptr.mutable_get(),
                   true,
-                  numel);
+                  amount);
               break;
             case 8:
               torch::utils::THP_decodeBuffer(
                   (int64_t*)storage_ptr.mutable_get(),
                   (const uint8_t*)storage_ptr.mutable_get(),
                   true,
-                  numel);
+                  amount);
               break;
             default:
               TORCH_CHECK(
