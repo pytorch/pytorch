@@ -18,6 +18,7 @@ struct InputBuffer {
   explicit InputBuffer(size_t size)
       : buffer(size),
         opt_accum_streams(size),
+        opt_first_producer_evts(size),
         opt_first_producer_streams(size),
         accum_counts(size, 0) {}
   InputBuffer(const InputBuffer& other) = delete;
@@ -44,12 +45,12 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& g);
 
   std::vector<Variable> buffer;
-  // The accumulation stream is determined upon seeing the first producer
-  // finish. Remember this stream for future producers.
+  // The stream used for accumulation when a variable is used multiple times.
   std::vector<std::optional<c10::Stream>> opt_accum_streams;
-  // Remember the first producer stream so we can delay synchronizing with
-  // it until the second producer is seen.
-  // See Note: [Delay synchronizing the first producer]
+  // Record an event on the first producer stream so we can delay
+  // waiting for it until the second producer is seen. See Note: [Delay
+  // synchronizing the first producer]
+  std::vector<std::optional<c10::Event>> opt_first_producer_evts;
   std::vector<std::optional<c10::Stream>> opt_first_producer_streams;
   // Count the number of times we've added to each position.
   std::vector<int> accum_counts;

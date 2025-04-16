@@ -146,6 +146,20 @@ static void accumulate(
   }
 }
 
+// Note [Stream sync contract when dealing with multi-deviced-ness]
+//
+// An operator can deal with multiple devices, e.g. if it does a device
+// transfer, etc. However, for the purpose of stream synchronization, the engine
+// is only aware of single canonical device/stream for each op/node.
+//
+// For the proper synchronization, the op author should make sure of the
+// following:
+//
+// 1) A node producing a gradient should have it ready on the current
+//   stream during node execution.
+// 2) A node consuming a gradient should wait on the current stream before using
+//    it.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
@@ -157,7 +171,7 @@ void InputBuffer::add(
   if (!var.defined()) {
     return;
   }
-  int current_index = accum_counts[pos]++;
+  int curr_producer_idx = accum_counts[pos]++;
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   const auto device_type = device->type();
@@ -168,7 +182,7 @@ void InputBuffer::add(
   // [ Non-accelerator case ]
   //
   if (!is_accelerator) {
-    if (current_index == 0) {
+    if (curr_producer_idx == 0) {
       TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
       buffer[pos] = std::move(var);
     } else {
@@ -178,7 +192,7 @@ void InputBuffer::add(
     return;
   }
 
-  // Handle the case where var is on accelerator but producer node has no
+  // Handle the case where var is on an accelerator but producer node has no
   // canonical stream, e.g. this can happen if forward is DtoH
   const std::optional<c10::Stream>& opt_producer_stream =
       (opt_producer_stream_.has_value()
@@ -191,11 +205,14 @@ void InputBuffer::add(
   //
   // [ Single producer case ]
   //
+  // If during forward, a tensor is used only once, there's only a single
+  // producer node corresponding to the input buffer we're adding to.
+  // There is no need to accumulate in this case.
   if (num_dependencies == 1) {
     mb_wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
     mb_record_stream_any_impl(
         var, *opt_consumer_stream, /*prev_stream=*/*opt_producer_stream);
-    TORCH_INTERNAL_ASSERT(current_index == 0);
+    TORCH_INTERNAL_ASSERT(curr_producer_idx == 0);
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     buffer[pos] = std::move(var);
     return;
@@ -206,28 +223,31 @@ void InputBuffer::add(
   // First producer
   // ==============
   //
-  // A. Determine the accumulation stream:
+  // - Determine the accumulation stream:
   //    case 1) var's device matches consumer node's canonical device
   //            (The producer node's canonical device may or may not match)
   //            -> accumulator stream = consumer stream
-  //    case 2) var's device only matches producer node's canonical device
+  //    case 2) var's device matches producer node's canonical device
+  //            and does not match consumer node's canonical device
   //            -> accumulator stream = producer stream
   //    case 3) var device matches neither
   //            -> accumulator stream = var device's current stream
-  // B. Record stream (var will be used on the accum stream)
-  // C. Because we are the first producer, there's no accumulation necessary.
-  //    Just move var into the buffer.
+  //            See Note [Stream sync contract when dealing with
+  //            multi-deviced-ness]
+  //
+  // - Record stream (var will be used on the accum stream)
+  // - Because we are the first producer, there's no accumulation necessary.
+  //   Just move var into the buffer.
   //
   // Nth producer
   // ============
   //
-  // A. The accumulation stream (determined at "first producer") waits for
-  //    the new producer stream
-  // B. Record stream (var will be used on the accum stream)
-  // C. Accumulate var into buffer
-  // D. (Cases 2 and 3 only) If we are the last producer, we need to have
-  //    consumer wait for the accumulation stream. For case 1 this is
-  //    not necessary because the consumer stream is the accumulation stream.
+  // - The accumulation stream (determined at "first producer") waits for
+  //   the new producer stream
+  // - Record stream (var will be used on the accum stream)
+  // - Accumulate var into buffer
+  // - If we are the last producer, the consumer waits for the accumulation
+  //   stream. (No-op for case 1)
   //
   //
   // Note: [Delay synchronizing the first producer]
@@ -237,20 +257,22 @@ void InputBuffer::add(
   // "test_side_stream_backward_overlap".
   //
   // There are two pieces of logic that happen:
-  //    Part 1: At the first iteration, stash the producer stream
-  //    Part 2: At the second iteration, wait for the first producer
+  //    Part 1: At the first iteration, record an event on the first
+  //            producer stream and stash it.
+  //    Part 2: At the second iteration, have the consumer wait for
+  //            for the stashed event.
   //
-  //
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   bool matches_consumer = opt_consumer_stream->device() == *device;
 
-  if (current_index == 0) {
+  if (curr_producer_idx == 0) {
     // [ First producer ]
-    // A) Determine the accumulation stream
+    // Determine the accumulation stream
     if (matches_consumer) {
       // Case 1
       opt_accum_streams[pos] = opt_consumer_stream;
       // Part 1 of Note: [Delay synchronizing the first producer]
+      opt_first_producer_evts[pos] = c10::Event{device_type};
+      opt_first_producer_evts[pos]->record(*opt_producer_stream);
       opt_first_producer_streams[pos] = opt_producer_stream;
     } else if (opt_producer_stream->device() == *device) {
       // Case 2
@@ -260,38 +282,37 @@ void InputBuffer::add(
       opt_accum_streams[pos] =
           at::accelerator::getCurrentStream(device->index());
     }
-    // B) Record stream
     mb_record_stream_any_impl(
-        var, *opt_accum_streams[pos], /*prev_stream=*/*opt_producer_stream);
-
+        var,
+        *opt_accum_streams[pos],
+        /*prev_stream=*/*opt_producer_stream);
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
-    // C) Move var into the buffer
     buffer[pos] = std::move(var);
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    // A) Accumulation stream waits for producer stream
+    TORCH_INTERNAL_ASSERT(accum_stream);
     mb_wait_stream(accum_stream, opt_producer_stream, device_type);
-    // B) Record stream
     mb_record_stream_any_impl(
         var, *accum_stream, /*prev_stream=*/*opt_producer_stream);
-    if (matches_consumer && current_index == 1) {
+    if (matches_consumer && curr_producer_idx == 1) {
+      TORCH_INTERNAL_ASSERT(
+          opt_first_producer_streams[pos] && opt_first_producer_evts[pos]);
       // Part 2 of Note: [Delay synchronizing the first producer]
-      mb_wait_stream(
-          accum_stream, opt_first_producer_streams[pos], device_type);
+      if (*accum_stream != *opt_first_producer_streams[pos]) {
+        accum_stream->wait(*opt_first_producer_evts[pos]);
+      }
     }
     {
-      // C) Accumulate var into buffer
       c10::OptionalStreamGuard stream_guard{accum_stream};
       accumulate(buffer, pos, std::move(var));
     }
-    if (!matches_consumer && current_index == num_dependencies - 1) {
-      // D) (Case 2/3 only) Consumer stream waits for accumulation stream.
+    if (curr_producer_idx == num_dependencies - 1) {
       mb_wait_stream(opt_consumer_stream, accum_stream, device_type);
     }
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
