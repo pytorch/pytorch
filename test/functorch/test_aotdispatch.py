@@ -15,7 +15,14 @@ from functools import partial, wraps
 from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+from common_utils import (
+    decorate,
+    decorateForModules,
+    saved_tensors_hooks_to_gm,
+    skip,
+    skipOps,
+    xfail,
+)
 
 import torch
 import torch._dynamo as torchdynamo
@@ -112,17 +119,71 @@ except ImportError:
 # NB: numpy is a testing dependency!
 
 
-def saved_tensors_hooks_to_gm(pack, unpack):
-    from torch.fx.experimental.proxy_tensor import make_fx
+def amax_to_scale(
+    amax: torch.Tensor,
+    float8_dtype: torch.dtype,
+    round_scales_to_power_of_2: bool = False,
+):
+    amax = amax.to(torch.float64)
+    res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=1e-12)
+    res = res.to(torch.float32)
+    return res
 
-    # TODO: symbolic shapes tracing to be able to provide not the same shape?
-    inp = torch.randn(2, 3)
-    torch._dynamo.mark_dynamic(inp, 0)
-    torch._dynamo.mark_dynamic(inp, 1)
-    pack_out = pack(inp)
-    pack_gm = make_fx(pack)(inp)
-    unpack_gm = make_fx(unpack)(pack_out)
-    return pack_gm, unpack_gm
+
+# Must be at module level to use fx.wrap
+@torch.fx.wrap
+def _pack_fp8_with_scale_wrap(x):
+    if not x.dtype.is_floating_point:
+        return x
+
+    amax = torch.max(torch.abs(x))
+    scale = amax_to_scale(amax, torch.float8_e5m2)
+    x_scaled = x.to(torch.float32) * scale
+    x_fp8 = x_scaled.to(torch.float8_e5m2)
+    return x.dtype, scale, x_fp8
+
+
+@torch.fx.wrap
+def _unpack_fp8_with_scale_wrap(x):
+    if isinstance(x, torch.Tensor):
+        return x
+
+    dtype, scale, x_fp8 = x
+    y = x_fp8.to(dtype) / scale
+    return y
+
+
+@torch.fx.wrap
+def _pack_fp8_wrap(x):
+    if not x.dtype.is_floating_point:
+        return x
+
+    return (x.dtype, x.to(torch.float8_e5m2))
+
+
+@torch.fx.wrap
+def _unpack_fp8_wrap(x):
+    if isinstance(x, torch.Tensor):
+        return x
+
+    dtype, tensor = x
+    return tensor.to(dtype)
+
+
+def pack_fp8(x):
+    return _pack_fp8_wrap(x)
+
+
+def unpack_fp8(packed):
+    return _unpack_fp8_wrap(packed)
+
+
+def pack_fp8_with_scale(x):
+    return _pack_fp8_with_scale_wrap(x)
+
+
+def unpack_fp8_with_scale(packed):
+    return _unpack_fp8_with_scale_wrap(packed)
 
 
 class AOTTestCase(TestCase):
@@ -6620,49 +6681,75 @@ metadata incorrectly.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks(self):
-        eager_ctx = torch.autograd.graph.saved_tensors_hooks
-        inline_ctx = eager_ctx
-        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
-            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
+        ctx = torch.autograd.graph.saved_tensors_hooks
 
-        def _test_pack_hooks(fn, inp_fn, hooks):
+        def _test_pack_hooks(fn, inp_fn, hooks, symbolic_tracing=True):
             torch._dynamo.reset()
             with ExitStack() as stack:
                 # All hooks in eager to get ref
                 for hook, _ in hooks:
                     pack, unpack = hook
-                    stack.enter_context(eager_ctx(pack, unpack))
+                    stack.enter_context(ctx(pack, unpack))
                 ref_x = inp_fn()
-                x = ref_x.detach().clone().requires_grad_()
 
-                ref_y = fn(ref_x)
+                def _f(t):
+                    if t.dtype.is_floating_point:
+                        return t.detach().clone().requires_grad_()
+
+                    return t
+
+                x = pytree.tree_map_only(torch.Tensor, _f, ref_x)
+
+                ref_y = fn(*ref_x)
                 ref_y.sum().backward()
 
             with ExitStack() as stack:
                 for hook, inline in hooks:
                     pack, unpack = hook
                     if inline:
-                        stack.enter_context(
-                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
-                        )
+                        if symbolic_tracing:
+                            stack.enter_context(
+                                ctx(
+                                    *saved_tensors_hooks_to_gm(
+                                        pack,
+                                        unpack,
+                                        "pack_hash",
+                                        "unpack_hash",
+                                    )
+                                )
+                            )
+                        else:
+                            stack.enter_context(
+                                ctx(
+                                    *saved_tensors_hooks_to_gm(
+                                        pack, unpack, "pack_hash", "unpack_hash"
+                                    )
+                                )
+                            )
                     else:
-                        stack.enter_context(eager_ctx(pack, unpack))
+                        stack.enter_context(ctx(pack, unpack))
 
-                y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                y = torch.compile(fn, backend="inductor", fullgraph=True)(*x)
                 y.sum().backward()
                 self.assertEqual(ref_y, y, atol=1e-2, rtol=1e-2)
-                self.assertEqual(ref_x.grad, x.grad, atol=1e-2, rtol=1e-2)
 
+                ref_x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, ref_x)
+                x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
+
+                self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
+
+        # y argument is expected to test saving of int tensor,
+        # to check filtering functionality to not apply hooks for e.g. is_floating_point
         class SAF(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
                 return x
 
             @staticmethod
             def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
+                (saved_x, saved_y) = ctx.saved_tensors
+                return gx + saved_x + saved_y, None
 
         class AF(torch.autograd.Function):
             @staticmethod
@@ -6677,7 +6764,7 @@ metadata incorrectly.
                 d1 = ctx.d1
                 return gx + saved_x * d1
 
-        def fn(x):
+        def fn(x, y):
             x = x.relu()
             x = x + 1
             x = x.relu()
@@ -6685,9 +6772,9 @@ metadata incorrectly.
             x = AF.apply(x)
             return x
 
-        def simple_fn(x):
+        def simple_fn(x, y):
             x = x + 1
-            x = SAF.apply(x)
+            x = SAF.apply(x, y)
             return x
 
         device = torch.device("cuda:0")
@@ -6696,23 +6783,23 @@ metadata incorrectly.
             x = torch.ones(2, 3, device=device, requires_grad=True)
             torch._dynamo.mark_dynamic(x, 0)
             torch._dynamo.mark_dynamic(x, 1)
-            return x
+            y = torch.zeros(2, 3, device=device, dtype=torch.int64)
+            return x, y
 
         def pack_dev_sym_cpu(x):
-            # TODO: support sym tracing with make_fx
-            return (x.device, x.size(1), 10 * x.cpu())
+            return x.dtype, x.device, x.size(1), 10 * x.cpu()
 
         def unpack_dev_sym_cpu(packed):
-            device, dim1, tensor = packed
-            ret = tensor.to(device=device) * dim1
-            return ret
+            dtype, device, dim1, x = packed
+            x = x.to(device=device) * dim1
+            return x.to(dtype)
 
         def pack_tensor(x):
-            return x.cpu()
+            return x.device, x.cpu()
 
         def unpack_tensor(packed):
-            t_cpu = packed
-            return t_cpu.to(device=device)
+            device, t_cpu = packed
+            return t_cpu.to(device)
 
         def pack_bf16(x):
             return x.dtype, x.to(dtype=torch.bfloat16)
@@ -6722,41 +6809,12 @@ metadata incorrectly.
             return x.to(dtype)
 
         def pack_mul2(x):
-            return x * 2
+            return x.dtype, x * 2
 
         def unpack_mul2(x):
-            return x / 2
-
-        FP8_DTYPE = torch.float8_e5m2
-
-        def pack_float8(x):
-            return (x.dtype, x.to(FP8_DTYPE))
-
-        def unpack_float8(packed):
-            dtype, tensor = packed
-            return tensor.to(dtype)
-
-        def amax_to_scale(
-            amax: torch.Tensor,
-            float8_dtype: torch.dtype,
-            round_scales_to_power_of_2: bool = False,
-        ):
-            amax = amax.to(torch.float64)
-            res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=1e-12)
-            res = res.to(torch.float32)
-            return res
-
-        def pack_fp8_with_scale(x):
-            amax = torch.max(torch.abs(x))
-            scale = amax_to_scale(amax, FP8_DTYPE)
-            x_scaled = x.to(torch.float32) * scale
-            x_fp8 = x_scaled.to(FP8_DTYPE)
-            return x.dtype, scale, x_fp8
-
-        def unpack_fp8_with_scale(x):
-            dtype, scale, x_fp8 = x
-            y = x_fp8.to(dtype) / scale
-            return y
+            dtype, x = x
+            x = x / 2
+            return x.to(dtype)
 
         def pack_wrapper_sc(x):
             return WrapperSubclass(x)
@@ -6776,19 +6834,37 @@ metadata incorrectly.
         def unpack_mul2_eager(x):
             return x / 2
 
+        def pack_cpu(x):
+            return x.to(device="cpu")
+
+        def unpack_cpu(x):
+            return x.to(device=device)
+
         for test_fn in [simple_fn, fn]:
+            _test_pack_hooks(
+                test_fn,
+                inp_fn,
+                [((pack_cpu, unpack_cpu), True)],
+                symbolic_tracing=False,
+            )
             _test_pack_hooks(test_fn, inp_fn, [((pack_bf16, unpack_bf16), True)])
             _test_pack_hooks(test_fn, inp_fn, [((pack_mul2, unpack_mul2), True)])
-            _test_pack_hooks(test_fn, inp_fn, [((pack_float8, unpack_float8), True)])
             _test_pack_hooks(test_fn, inp_fn, [((pack_tensor, unpack_tensor), True)])
             _test_pack_hooks(
                 test_fn, inp_fn, [((pack_dev_sym_cpu, unpack_dev_sym_cpu), True)]
             )
             _test_pack_hooks(
-                test_fn, inp_fn, [((pack_fp8_with_scale, unpack_fp8_with_scale), True)]
+                test_fn, inp_fn, [((pack_mul2_eager, unpack_mul2_eager), False)]
             )
             _test_pack_hooks(
-                test_fn, inp_fn, [((pack_mul2_eager, unpack_mul2_eager), False)]
+                test_fn,
+                inp_fn,
+                [((pack_fp8, unpack_fp8), True)],
+            )
+            _test_pack_hooks(
+                test_fn,
+                inp_fn,
+                [((pack_fp8_with_scale, unpack_fp8_with_scale), True)],
             )
             # Disable testing of Subclasses for now
             # _test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
@@ -6799,10 +6875,7 @@ metadata incorrectly.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_recompile(self):
-        eager_ctx = torch.autograd.graph.saved_tensors_hooks
-        inline_ctx = eager_ctx
-        if torch._functorch.aot_autograd.DEBUG_SAVED_TENSORS_HOOKS_USE_SEP_CTX:
-            inline_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
+        ctx = torch.autograd.graph.saved_tensors_hooks
 
         def pack_bf16(x):
             return x.to(dtype=torch.bfloat16)
@@ -6873,10 +6946,14 @@ metadata incorrectly.
                     pack, unpack = hooks
                     if inline:
                         stack.enter_context(
-                            inline_ctx(*saved_tensors_hooks_to_gm(pack, unpack))
+                            ctx(
+                                *saved_tensors_hooks_to_gm(
+                                    pack, unpack, "pack_hash", "unpack_hash"
+                                )
+                            )
                         )
                     else:
-                        stack.enter_context(eager_ctx(pack, unpack))
+                        stack.enter_context(ctx(pack, unpack))
 
                     x = inp_fn()
                     y = torch.compile(fn, backend=cnt, fullgraph=True)(x)
@@ -7307,7 +7384,8 @@ class MockFXGraphCache:
         if gm is not None:
             gm = make_boxed_func(gm)
             gm = MockFXGraphCacheOutput(gm)
-            gm._fx_graph_cache_key = key
+            gm._fx_graph_cache_key = key  # (cache_key, debug lines)
+            gm._fx_graph_cache_debug_lines = []
             gm._time_taken_ns = 0
         return gm, {}
 

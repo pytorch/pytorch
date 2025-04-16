@@ -662,12 +662,37 @@ def build_code_hash(
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-@functools.lru_cache(None)
+def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
+    """
+    This function is a reimplementation of functools.lru_cache with a
+    set function that allows prepopulating the cache.
+    """
+    # Use list for reference semantics
+    _cache: list[bytes] = []
+
+    def wrapper() -> bytes:
+        if len(_cache) == 0:
+            _cache.append(func())
+        return _cache[0]
+
+    def set_val(val: bytes) -> None:
+        assert len(_cache) == 0
+        _cache.append(val)
+
+    def clear() -> None:
+        _cache.clear()
+
+    wrapper.set = set_val  # type: ignore[attr-defined]
+    wrapper.clear = clear  # type: ignore[attr-defined]
+    return wrapper
+
+
+@torch_key_cache
 def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
+    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=False):
         if not config.is_fbcode():
 
             def get_code_hash(root: str) -> bytes:
@@ -762,8 +787,12 @@ class FxGraphHashDetails:
         # Node meta will not be part of gm's reduce function, so lets remember
         # the kernel source code separately
         self.user_defined_triton_source: list[Any] = []
+        self.saved_tensors_hooks_fx_wrap_cache_hashes: tuple[list[str], list[str]] = (
+            [],
+            [],
+        )
         if gm is not None:
-            for module in gm.modules():
+            for name, module in gm.named_modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
                 for node in itertools.chain(
@@ -799,6 +828,15 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
+
+                if "saved_tensors_hooks" in name:
+                    _idx = 0 if "_pack" in name else 1
+                    _list_to_append = self.saved_tensors_hooks_fx_wrap_cache_hashes[
+                        _idx
+                    ]
+                    for node in module.graph.nodes:
+                        if node.meta and node.meta.get("is_wrapped", False):
+                            _list_to_append.append(node.meta["user_cache_hash"])
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
@@ -1021,16 +1059,20 @@ class FxGraphCache:
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(
-                shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
-            )
-            log.debug(
-                "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
-                key,
-                candidate.guards_expr,
-                hints,
-                hit,
-            )
+            if config.unsafe_skip_cache_dynamic_shape_guards:
+                hit = True
+            else:
+                hit = bool(
+                    shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
+                )
+                log.debug(
+                    "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
+                    key,
+                    candidate.guards_expr,
+                    hints,
+                    hit,
+                )
+
             if hit:
                 graph = candidate
                 break
@@ -1078,7 +1120,7 @@ class FxGraphCache:
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
-        if graph.guards_expr:
+        if not config.unsafe_skip_cache_dynamic_shape_guards and graph.guards_expr:
             check = bool(
                 shape_env.evaluate_guards_expression(graph.guards_expr, symints)
             )
@@ -1944,7 +1986,7 @@ def cpp_prefix() -> str:
 _libgomp: Optional[CDLL] = None
 
 
-def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
+def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, None]:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
     def convert_arg(arg: Any) -> Any:
@@ -1978,15 +2020,18 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         del converted_args[-len(kwargs) :]
 
     result = func(*converted_args, **kwargs)
+    if result is None:
+        return None
+
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
         for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
-    else:
-        assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
-        return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
+
+    assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
+    return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
 # Precompiled headers are persistent past program runtime, but associated with one
@@ -2007,15 +2052,16 @@ def _precompile_header(
     )
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
-    # us to properly invalidate the file cache when any header dependency changes.
+    # us to properly invalidate the file cache when any header dependency changes.  This
+    # is thread-safe, as each thread will get its own temporary directory.
     #
     # N.B. we can't use NamedTemporaryFile here because Windows errors out on attempts
     # to read from a file with an open write handle.
     with tempfile.TemporaryDirectory() as preprocessing_dir:
-        preprocessing_header = Path(preprocessing_dir) / "header.h"
+        preprocessing_header = Path(preprocessing_dir) / "header.hpp"
         preprocessing_header.write_text(f"#include <{header}>\n")
         preprocessor = CppBuilder(
-            name=str(preprocessing_header),
+            name=str(preprocessing_header)[:-4],  # strip off the .hpp extension
             sources=str(preprocessing_header),
             BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
         )

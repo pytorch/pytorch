@@ -926,6 +926,7 @@ def _compile(
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
         )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
@@ -1228,6 +1229,7 @@ class ConvertFrame:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1386,6 +1388,8 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
+
+        input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):

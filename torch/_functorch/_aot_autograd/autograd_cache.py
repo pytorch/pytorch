@@ -13,6 +13,7 @@ import os
 import pickle
 import shutil
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
@@ -180,6 +181,11 @@ def check_node_safe(node: Node):
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
+        if node.meta and node.meta.get("is_wrapped", False):
+            # This is fx.wrap function
+            if node.meta.get("user_cache_hash", None):
+                # If user explicitly specified cache hash - allow to cache it.
+                return
         # We support only torch.* functions for now
         # We can probably add an allowlist of safe non-torch implementations as well
         if not is_torch_function(node.target):
@@ -238,6 +244,11 @@ def check_cacheable(gm: torch.fx.GraphModule):
         )
     for node in nodes:
         check_node_safe(node)
+
+    for n, m in gm.named_modules():
+        # Check all submodules?
+        if "saved_tensors_hooks" in n:
+            check_cacheable(m)
 
 
 def check_metadata_cacheable(metadata: ViewAndMutationMeta):
@@ -359,7 +370,7 @@ def autograd_cache_key(
 
 @dataclass
 class FXGraphCacheLoadable:
-    fx_graph_cache_key: str
+    fx_graph_cache_info: tuple[str, list[str]]
 
     def is_backward(self) -> bool:
         return False
@@ -384,10 +395,10 @@ class FXGraphCacheLoadable:
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
-
+        (cache_key, debug_lines) = self.fx_graph_cache_info
         result, cache_info = FxGraphCache.load_with_key(
-            self.fx_graph_cache_key,
-            [],
+            cache_key,
+            debug_lines,
             example_inputs,
             local=True,
             remote_cache=remote_cache,
@@ -395,7 +406,7 @@ class FXGraphCacheLoadable:
             constants=constants,
         )
         if result is None:
-            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_info)
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -486,6 +497,9 @@ class AOTAutogradCacheEntry:
     # backward_time_taken is essentially just the time inductor took to compile
     forward_time_taken_ns: int
     backward_time_taken_ns: int
+
+    # Used by standalone_compile
+    sanitized_aot_config: AOTConfig
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -823,6 +837,10 @@ class AOTAutogradCache:
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
+                cache_info["cache_bypass_exception_type"] = type(e).__name__
+                cache_info["cache_bypass_traceback"] = traceback.format_exc().split(
+                    "\n"
+                )
                 # TODO: this gets logged implicitly by cache_bypass_reason,
                 # and here we explicitly log it into tlparse.
                 # We may want to log this as an extra column in Scuba, though.
