@@ -2992,9 +2992,8 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_neq_assert(self):
-        torch._dynamo.config.capture_scalar_outputs = True
-
         @torch.compile(fullgraph=True)
         def func(a):
             torch._check(a.item() != 5)
@@ -3005,6 +3004,7 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_sym_or_assert(self):
         torch._dynamo.config.capture_scalar_outputs = True
 
