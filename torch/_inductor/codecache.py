@@ -2087,6 +2087,9 @@ def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
 
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
+    """Compiles and caches C++ libraries.  Users of this class supply the source code to
+    be compiled, while compilation flags are set by CppBuilder."""
+
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: dict[str, Any] = {}
@@ -2134,6 +2137,8 @@ class CppCodeCache:
         extra_flags: Sequence[str] = (),
         optimized_code: Optional[str] = None,
     ) -> Any:
+        """Compile and load a C++ library.  Returns a callable that returns the loaded
+        library."""
         compile_command = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
