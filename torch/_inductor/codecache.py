@@ -87,6 +87,7 @@ from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from torch.fx.experimental.sym_node import SymNode
 from torch.utils._ordered_set import OrderedSet
 
 from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
@@ -965,12 +966,42 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
+    def _simplify_symints(symints: list[torch.SymInt]) -> list[torch.Symint]:
+        """
+        Given a list of SymInts, simplify them down to just their free symbols.
+        The goal here is to get the minimum set of SymInts whose guards are equivalent
+        to the guards for a full graph being cached.
+
+        Specifically, if you're given symints passed to a forward/backward function like:
+        [s0, s1, s0*s1, 2*s0],
+
+        this should return:
+        [s0, s1]
+
+        This relies on the invariant that the guard expression produced by
+        `produce_guards_expression(inputs)` is true if and only if
+        `produce_guards_expression(simplify_symints(inputs))` is true,
+        since all guards produced by the original symints are derived from the
+        set of guards on the underlying symbols.
+        """
+        free_symbols = [s.node.expr.free_symbols for s in symints]
+        # Put all the sets together
+        unique_symbols = set.union(*free_symbols)
+        result = []
+        shape_env = FxGraphCache._get_shape_env()
+        for symbol in unique_symbols:
+            new_symint = torch.SymInt(SymNode(symbol, shape_env, pytype=int, hint=None))
+            result.append(new_symint)
+        return result
+
+    @staticmethod
     def _filter_backed_symints(inputs: Sequence[InputType]) -> list[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
+        symints = [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
+        return FxGraphCache._simplify_symints(symints)
 
     @staticmethod
     def _get_shape_env() -> Optional[ShapeEnv]:
