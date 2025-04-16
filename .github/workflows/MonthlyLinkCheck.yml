@@ -22,7 +22,7 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --accept=200,403,429 --base . --verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'
+          args: --accept=200,403,429 --base . --exclude-all-private --verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'
           token: ${{ secrets.CUSTOM_TOKEN }}
           fail: true
 
