@@ -570,7 +570,7 @@ class SymNode:
         # incompatible with runtime reasoning.
         if r and not self.has_hint():
             _advise_is_size(SymInt(self))
-        return r 
+        return r
 
     def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
@@ -1224,6 +1224,7 @@ sizes_strides_methods = {
     "is_channels_last_strides_3d": sympy_is_channels_last_strides_3d,
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
+
 
 def to_node(self, num):
     if isinstance(num, SymTypes):

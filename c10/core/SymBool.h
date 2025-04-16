@@ -132,17 +132,17 @@ inline bool guard_or_false(
 }
 
 inline bool statically_known_true(
-  bool b,
-  const char* file [[maybe_unused]],
-  int64_t line [[maybe_unused]]) {
-return b;
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
+  return b;
 }
 
 inline bool statically_known_true(
-  const c10::SymBool& b,
-  const char* file,
-  int64_t line) {
-return b.statically_known_true(file, line);
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.statically_known_true(file, line);
 }
 
 inline bool guard_or_true(
