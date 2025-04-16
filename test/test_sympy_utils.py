@@ -1026,6 +1026,17 @@ class TestFloorDiv(TestCase):
         rewritten = FloorDiv.rewrite(expr)
         self.assertEqual(rewritten, sympy.S.Zero)
 
+    def test_no_distribute_mul_floordiv(self):
+        """
+        Test that multiplication doesn't distribute with floor division.
+        """
+        x = sympy.Symbol("x")
+        expr = 2 * sympy.floor(x / 2)
+        rewritten = FloorDiv.rewrite(expr)
+        self._expand_and_check(expr, rewritten)
+        self.assertEqual(rewritten.count(sympy.Mul), 1)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
 class TestIdentity(TestCase):
     def test_expand_identity(self):
         """
