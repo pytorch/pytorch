@@ -3006,8 +3006,6 @@ class TestGuardsExpressions(TestCase):
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_sym_or_assert(self):
-        torch._dynamo.config.capture_scalar_outputs = True
-
         @torch.compile(fullgraph=True)
         def func(a, b):
             torch._check(operator.or_(a.item() == 5, b.item() == 5))
