@@ -1049,12 +1049,15 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            # It is safe to run FakeTensorProp under no_grad because by the time
-            # we're in inductor, we assume that AOTAutograd has already "taken care"
-            # of autograd, so there should be no more autograd-related API's in the
-            # graph.
-            with torch.no_grad():
-                fake_mode = fake_tensor_prop(gm, example_inputs)
+            with dynamo_timed(
+                "additional_fake_tensor_prop", log_pt2_compile_event=True
+            ):
+                # It is safe to run FakeTensorProp under no_grad because by the time
+                # we're in inductor, we assume that AOTAutograd has already "taken care"
+                # of autograd, so there should be no more autograd-related API's in the
+                # graph.
+                with torch.no_grad():
+                    fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
@@ -2079,13 +2082,17 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-            return min_cut_rematerialization_partition(
-                gm,
-                joint_inputs,
-                compiler="inductor",
-                static_lifetime_input_indices=static_lifetime_input_indices,
-                **kwargs,
-            )
+
+            with dynamo_utils.dynamo_timed(
+                "min_cut_rematerialization_partition", log_pt2_compile_event=True
+            ):
+                return min_cut_rematerialization_partition(
+                    gm,
+                    joint_inputs,
+                    compiler="inductor",
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    **kwargs,
+                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
