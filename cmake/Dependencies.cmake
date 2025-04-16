@@ -1177,6 +1177,9 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    # Suppress warning to unblock libnop comiplation by clang-17
+    # See https://github.com/pytorch/pytorch/issues/151316
+    target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
       unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
