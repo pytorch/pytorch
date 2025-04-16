@@ -44,8 +44,14 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& g);
 
   std::vector<Variable> buffer;
+  // The accumulation stream is determined upon seeing the first producer
+  // finish. Remember this stream for future producers.
   std::vector<std::optional<c10::Stream>> opt_accum_streams;
+  // Remember the first producer stream so we can delay synchronizing with
+  // it until the second producer is seen.
+  // See Note: [Delay synchronizing the first producer]
   std::vector<std::optional<c10::Stream>> opt_first_producer_streams;
+  // Count the number of times we've added to each position.
   std::vector<int> accum_counts;
 };
 
