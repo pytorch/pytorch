@@ -965,10 +965,14 @@ static PyObject* THPModule_setAllowTF32OneDNN(
 static PyObject* THPModule_allowTF32OneDNN(
     PyObject* _unused,
     PyObject* noargs) {
+#ifdef USE_XPU
   if (at::globalContext().allowTF32OneDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+#else
+  Py_RETURN_NONE;
+#endif
 }
 
 static PyObject* THPModule_deterministicAlgorithms(

@@ -1449,8 +1449,9 @@ if HAS_CUDA:
                     thrown = True
                     if not IS_ARM64:
                         self.assertTrue(
-                            "at::cuda::blas::gemm<float>" in str(e)
-                            or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                            "at::cuda::blas::gemm<float, float>" in str(e)
+                            or "at::cuda::blas::gemm_internal_cublas<float, float>"
+                            in str(e)
                         )
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
@@ -3047,6 +3048,23 @@ if HAS_CUDA:
             run(shape_x=(3, 4), shape_y=(10, 11))
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        def test_meta_tensor(self):
+            def foobar(x, y):
+                return x * 2, y * 3
+
+            foo_c = torch.compile(mode="reduce-overhead")(foobar)
+            t = torch.empty((1, 16, 128, 128), device="meta")
+            y = torch.rand([64], device="cuda")
+
+            eager_out = foobar(t, y)
+
+            for _ in range(3):
+                compiled_out = foo_c(t, y)
+
+            compiled_out = foo_c(t, y)
+            self.assertEqual(eager_out, compiled_out)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

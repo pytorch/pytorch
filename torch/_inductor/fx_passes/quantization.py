@@ -940,7 +940,7 @@ def _register_quantization_maxpool2d():
             *max_pool2d_args,
         )
         dequantize_lowmem_maxpool2d_pattern = CallFunction(
-            prims._low_memory_max_pool2d_with_offsets.default,
+            prims._low_memory_max_pool_with_offsets.default,
             get_dequantize_per_tensor_activation_pattern(),
             KeywordArg("kernel_size"),
             *max_pool2d_args,

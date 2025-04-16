@@ -11,14 +11,14 @@
 #include <ATen/ops/item_native.h>
 #endif
 
-#include <torch/csrc/autograd/grad_mode.h>
+#include <ATen/core/grad_mode.h>
 
 namespace at::native {
 
 Scalar item(const Tensor& self) {
   auto numel = self.sym_numel();
   TORCH_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
-  if (torch::autograd::GradMode::is_enabled() && self.requires_grad()) {
+  if (at::GradMode::is_enabled() && self.requires_grad()) {
     TORCH_WARN_ONCE("Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.\n"
                     "Consider using tensor.detach() first.");
   }

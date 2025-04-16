@@ -699,9 +699,38 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
-            # Redirect to torch.select for indexing with symint.
-            if isinstance(args[1], torch.SymInt):
-                return torch.select, [args[0], 0, args[1]], {}
+
+            def rewrite(dim, item):
+                # Redirect to torch.select for indexing.
+                if isinstance(item, (int, torch.SymInt)):
+                    return dim, (torch.select, [dim, item])
+                # Redirect to torch.ops.aten.slice for slicing.
+                if isinstance(item, slice):
+                    return dim + 1, (
+                        torch.ops.aten.slice,
+                        [dim, item.start, item.stop, item.step or 1],
+                    )
+                # Otherwise do nothing.
+
+            items = args[1] if isinstance(args[1], tuple) else (args[1],)
+            dim = 0
+            # Sequence rewrites.
+            sequence = []
+            for item in items:
+                if (r := rewrite(dim, item)) is None:
+                    return func, args, kwargs
+                dim, call_spec = r
+                sequence.append(call_spec)
+
+            def run():
+                # Run sequence.
+                t = args[0]
+                for _method, _args in sequence:
+                    t = _method(t, *_args)
+                return t
+
+            return run, [], {}
+
         return func, args, kwargs
 
     def __torch_function__(self, func, types, args=(), kwargs=None):

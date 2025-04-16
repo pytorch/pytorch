@@ -3924,6 +3924,9 @@ class CompiledAutograd1(torch.nn.Module):
 
         x = torch.randn(10, 10, requires_grad=True)
 
+        # https://github.com/pytorch/pytorch/issues/147171
+        torch._inductor.config.fallback_random = True
+
         @torch.compile(backend="aot_eager")
         def fn(x):
             return SideEffectfulBackward.apply(x).sum()
