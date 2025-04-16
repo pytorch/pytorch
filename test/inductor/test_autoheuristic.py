@@ -158,6 +158,7 @@ class AutoHeuristicTest(TestCase):
         fx_graph_cache=False,
         fx_graph_remote_cache=False,
     )
+    @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     def test_global_feedback(self):
         self.run_mixed_mm()
         path = self.get_path_to_autoheuristic_log("mixed_mm")
