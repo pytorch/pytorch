@@ -827,11 +827,21 @@ class CppGemmTemplate(CppTemplate):
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
-        only_one_input = (
-            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
-        )
 
         def reorder_and_filter(inputs, layout_or_out):
+            # de-duplicate inputs to align with triton
+            # when the length of input_indices is less than the length of inputs
+            assert len(inputs) >= len(input_indices)
+            if len(inputs) > len(input_indices) and not isinstance(
+                inputs[0], torch.Tensor
+            ):
+                new_inputs = []
+                for inp in inputs:
+                    if inp not in new_inputs:
+                        new_inputs.append(inp)
+            else:
+                new_inputs = inputs
+
             if has_bias:
                 assert len(input_indices) >= 3
                 # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
@@ -839,19 +849,19 @@ class CppGemmTemplate(CppTemplate):
                 x_idx = input_indices[1]
                 w_idx = input_indices[2]
                 return [
-                    inputs[x_idx],
-                    inputs[w_idx],
-                    inputs[inp_idx],
-                    *[inputs[idx] for idx in input_indices[3:]],
+                    new_inputs[x_idx],
+                    new_inputs[w_idx],
+                    new_inputs[inp_idx],
+                    *[new_inputs[idx] for idx in input_indices[3:]],
                 ], layout_or_out
-            elif len(inputs) >= len(input_indices):
+            elif len(new_inputs) >= len(input_indices):
                 assert len(input_indices) >= 2
-                return [inputs[idx] for idx in input_indices], layout_or_out
+                return [new_inputs[idx] for idx in input_indices], layout_or_out
             else:
                 # For when input is used for x and w, i.e. X@X.T or similar
                 # Assumes the first input is the only input
-                assert len(inputs) == 1
-                return [inputs[0]] * len(input_indices), layout_or_out
+                assert len(new_inputs) == 1
+                return [new_inputs[0]] * len(input_indices), layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
         is_mkldnn_wgt = (
@@ -934,8 +944,6 @@ class CppGemmTemplate(CppTemplate):
             new_inputs, new_layout = normalize_shapes(
                 *maybe_to_dense(*reorder_and_filter(inputs, layout))
             )
-            if only_one_input and isinstance(new_inputs[0], torch.Tensor):
-                return new_inputs[1:], new_layout
             return cls.prep_weight(
                 new_inputs, new_layout, micro_gemm, pre_block_weights
             )
