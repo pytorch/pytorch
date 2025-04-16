@@ -32,7 +32,7 @@ jobs:
         with:
           title: Broken links detected in docs 🔗
           content-filepath: ./lychee/out.md
-          labels: 'incorrect link'
+          labels: 'module: docs'
           
     
       - name: Suggestions
