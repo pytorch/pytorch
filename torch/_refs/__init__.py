@@ -3717,6 +3717,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
+    from torch._dynamo.exc import UserError, UserErrorType
     from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
     # Creates a valid shape
@@ -3810,9 +3811,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         end = idx
         while guard_or_true(accum % length != 0):
             if end == a_.ndim - 1:
+                # throw UserError so compile can graph break
                 op_type = "reshape" if allow_copy else "view"
-                raise torch._dynamo.exc.UserError(
-                    torch._dynamo.exc.UserErrorType.ANTI_PATTERN,
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
                     (
                         f"Could not {op_type} a tensor with shape {a.shape} as a tensor with "
                         f"shape {shape}! If these shape expressions are unbacked, please add "
