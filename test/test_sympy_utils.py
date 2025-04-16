@@ -983,6 +983,7 @@ class TestFloorDiv(TestCase):
         self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
 
         rewritten = FloorDiv.rewrite(expr)
+        self._expand_and_check(expr, rewritten)
         self.assertTrue(isinstance(rewritten, FloorDiv))
         self.assertEqual(rewritten.args, (x, y))
 
@@ -1010,6 +1011,7 @@ class TestFloorDiv(TestCase):
         self.assertEqual(expr.count(FloorDiv), 0)
 
         rewritten = FloorDiv.rewrite(expr)
+        self._expand_and_check(expr, rewritten)
         self.assertEqual(rewritten.count(FloorDiv), 2)
 
 class TestIdentity(TestCase):
