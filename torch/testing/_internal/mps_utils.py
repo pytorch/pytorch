@@ -688,7 +688,14 @@ MACOS_13_XFAILLIST = {
     # Precision issues
     "atan2": MPSSkipInfo(
         TEST_OUTPUT_MATCH,
-        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.bool],
+        dtypes=[
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.bool,
+            torch.int64,
+        ],
         upper=14.0,
     ),
     "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
