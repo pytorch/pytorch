@@ -667,12 +667,15 @@ class ConfigModule(ModuleType):
         config = self
 
         class ConfigPatch(ContextDecorator):
+            def __init__(self) -> None:
+                self.changes = changes
+
             def __enter__(self) -> None:
                 assert not prior
-                for key in changes.keys():
+                for key in self.changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
-                for k, v in changes.items():
+                for k, v in self.changes.items():
                     config.__setattr__(k, v)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
