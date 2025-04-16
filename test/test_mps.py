@@ -85,7 +85,6 @@ def mps_ops_grad_modifier(ops):
         # precision issues
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
-        'nn.functional.binary_cross_entropy': [torch.float16],
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
@@ -833,9 +832,6 @@ def mps_ops_modifier(ops):
         # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
         'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16, torch.bfloat16],
-
-        # float output for float16 input on MPS
-        'logit': [torch.float16, torch.bfloat16],
     }
 
     ON_MPS_XFAILLIST = {
