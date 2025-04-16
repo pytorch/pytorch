@@ -5968,8 +5968,187 @@ class TestCudaAutocast(TestAutocast):
         self.assertEqual(val, "LAZY")
 
 
+class TestCompileKernel(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel(self):
+        # Simple vector addition kernel
+        kernel_source = """
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+        
+        # Compile the kernel
+        add_kernel = torch.cuda.compile_kernel(kernel_source, "add_tensors")
+        
+        # Prepare data
+        N = 1024
+        a = torch.rand(N, device="cuda")
+        b = torch.rand(N, device="cuda")
+        c = torch.empty_like(a)
+        
+        # Calculate grid and block dimensions
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+        
+        # Launch kernel
+        add_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a, b, c, N]
+        )
+        
+        # Verify results
+        expected = a + b
+        torch.testing.assert_close(c, expected)
+        
+        # Test with different tensor types
+        a_int = torch.randint(0, 100, (N,), device="cuda", dtype=torch.int32)
+        b_int = torch.randint(0, 100, (N,), device="cuda", dtype=torch.int32)
+        c_int = torch.empty_like(a_int)
+        
+        # Integer addition kernel
+        int_kernel_source = """
+        __global__ void add_int_tensors(const int* a, const int* b, int* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+        
+        add_int_kernel = torch.cuda.compile_kernel(int_kernel_source, "add_int_tensors")
+        
+        # Launch kernel
+        add_int_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a_int, b_int, c_int, N]
+        )
+        
+        # Verify results
+        expected_int = a_int + b_int
+        torch.testing.assert_close(c_int, expected_int)
+        
+        # Test with header code
+        header_code = """
+        #define SCALE_FACTOR 2.0f
+        
+        __device__ float scale_value(float val) {
+            return val * SCALE_FACTOR;
+        }
+        """
+        
+        scale_kernel_source = """
+        __global__ void scale_tensors(const float* input, float* output, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                output[i] = scale_value(input[i]);
+        }
+        """
+        
+        scale_kernel = torch.cuda.compile_kernel(
+            scale_kernel_source, 
+            "scale_tensors",
+            header_code=header_code
+        )
+        
+        input_tensor = torch.rand(N, device="cuda")
+        output_tensor = torch.empty_like(input_tensor)
+        
+        scale_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[input_tensor, output_tensor, N]
+        )
+        
+        # Verify scaling
+        expected_scaled = input_tensor * 2.0
+        torch.testing.assert_close(output_tensor, expected_scaled)
+        
+        # Test error handling with invalid kernel
+        invalid_kernel_source = """
+        __global__ void invalid_kernel(float* a) {
+            undeclared_variable = 10; // This will cause a compilation error
+        }
+        """
+        
+        with self.assertRaises(RuntimeError):
+            torch.cuda.compile_kernel(invalid_kernel_source, "invalid_kernel")
+    
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_advanced(self):
+        # Test matrix multiplication
+        matmul_kernel_source = """
+        __global__ void matrix_multiply(const float* A, const float* B, float* C, int M, int N, int K) {
+            int row = blockIdx.y * blockDim.y + threadIdx.y;
+            int col = blockIdx.x * blockDim.x + threadIdx.x;
+            
+            if (row < M && col < N) {
+                float sum = 0.0f;
+                for (int i = 0; i < K; i++) {
+                    sum += A[row * K + i] * B[i * N + col];
+                }
+                C[row * N + col] = sum;
+            }
+        }
+        """
+        
+        matmul_kernel = torch.cuda.compile_kernel(matmul_kernel_source, "matrix_multiply")
+        
+        # Matrix dimensions
+        M, K, N = 64, 32, 48
+        
+        # Create matrices
+        A = torch.rand((M, K), device="cuda")
+        B = torch.rand((K, N), device="cuda")
+        C = torch.zeros((M, N), device="cuda")
+        
+        # Calculate grid and block dimensions
+        block_dim = (16, 16, 1)
+        grid_dim = ((N + block_dim[0] - 1) // block_dim[0], 
+                    (M + block_dim[1] - 1) // block_dim[1], 
+                    1)
+        
+        # Launch kernel
+        matmul_kernel(
+            grid=grid_dim,
+            block=block_dim,
+            args=[A.contiguous(), B.contiguous(), C, M, N, K]
+        )
+        
+        # Verify results
+        expected = torch.matmul(A, B)
+        torch.testing.assert_close(C, expected, rtol=1e-5, atol=1e-5)
+        
+        # Test with different compute capability if specified
+        device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        compute_cap = f"{device_props.major}{device_props.minor}"
+        
+        # Recompile with explicit compute capability
+        matmul_kernel_explicit = torch.cuda.compile_kernel(
+            matmul_kernel_source, 
+            "matrix_multiply",
+            compute_capability=compute_cap
+        )
+        
+        C_explicit = torch.zeros((M, N), device="cuda")
+        
+        # Launch kernel
+        matmul_kernel_explicit(
+            grid=grid_dim,
+            block=block_dim,
+            args=[A.contiguous(), B.contiguous(), C_explicit, M, N, K]
+        )
+        
+        # Verify results
+        torch.testing.assert_close(C_explicit, expected, rtol=1e-5, atol=1e-5)
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_parametrized_tests(TestCompileKernel)
 instantiate_device_type_tests(TestCudaOptims, globals())
 
 if __name__ == "__main__":
