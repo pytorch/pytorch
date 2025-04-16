@@ -5933,13 +5933,13 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if size_oblivious and (expr.has(Max) or expr.has(Min)):
+        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
             min_max_replacements = {}
             for atom in (*expr.atoms(Max), *expr.atoms(Min)):
                 a, b = atom.args
-                if isinstance(b, (int, sympy.Integer)):
+                if b == 1 or b == 0:
                     a, b = b, a
-                if isinstance(a, (int, sympy.Integer)):
+                if a == 1 or a == 0:
                     vr = self.bound_sympy(b, size_oblivious=True)
                     if vr.lower >= a:
                         min_max_replacements[atom] = b if atom.func is Max else a
