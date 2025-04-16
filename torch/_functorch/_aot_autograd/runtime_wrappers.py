@@ -2229,7 +2229,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ), _WaitCounter(
                         "pytorch.wait_counter.dynamo_compile"
                     ).guard():
-                        CompileEventLogger.compilation_metric(is_forward=False)
+                        # compilation_metric intends to update the is_forward datafield of the metrics context.
+                        # However, metrics_context is a singleton within a single process and the is_forward datafield has
+                        # been set to True during forward compilation. So, the overwrite needs to be enabled to set
+                        # the is_forward datafield to False for backward compilation.
+                        CompileEventLogger.compilation_metric(
+                            overwrite=True, is_forward=False
+                        )
                         # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             copy.deepcopy(bw_module), placeholder_list
