@@ -24,10 +24,10 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     }
     return false;
   }
-  if (query_size_last > 256) {
+  if (query_size_last > 576) {
     if (debug) {
       TORCH_WARN(
-          "OneDNN attention requires q,k,v to have head dimension less than 256.",
+          "OneDNN attention requires q,k,v to have head dimension less than 576.",
           " Got ",
           query_size_last,
           " instead.");
