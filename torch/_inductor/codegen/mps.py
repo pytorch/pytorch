@@ -134,7 +134,7 @@ class MetalOverrides(OpOverrides):
     def to_dtype_bitcast(
         x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
     ) -> str:
-        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+        return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
 
     @staticmethod
     def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
