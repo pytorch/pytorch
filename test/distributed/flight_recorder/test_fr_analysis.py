@@ -150,9 +150,9 @@ class FlightRecorderEventTest(TestCase):
             output_sizes = [[4, 4]]
             expectedState = MatchState.FULLY_MATCHED
             if collective in [
+                "reduce_scatter",
                 "_reduce_scatter_base",
                 "reduce_scatter_tensor_coalesced",
-                "REDUCESCATTER_coalesced",
             ]:
                 input_sizes = [[4, 4]]
                 output_sizes = [[input_sizes[0][0] * 2]]
@@ -160,7 +160,6 @@ class FlightRecorderEventTest(TestCase):
                 "all_gather",
                 "_all_gather_base",
                 "all_gather_into_tensor_coalesced",
-                "ALLGATHER_coalesced",
             ]:
                 output_sizes = [[math.prod(input_sizes[0]) * 2]]
             if collective == "all_to_all":

@@ -194,6 +194,7 @@ COLLECTIVES = {
     "all_reduce",
     "_all_gather_base",
     "all_gather_into_tensor_coalesced",
+    "reduce_scatter",
     "reduce_scatter_tensor_coalesced",
     "_reduce_scatter_base",
     "gather",
