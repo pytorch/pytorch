@@ -11,6 +11,7 @@ import functools
 import gc
 import importlib
 import itertools
+import json
 import logging
 import math
 import operator
@@ -106,6 +107,8 @@ T = typing.TypeVar("T")
 
 # Defined in CPython's Include/object.h
 TPFLAGS_MAPPING = 1 << 6
+
+GLOBAL_INT = 1
 
 
 # Specializes a test to run only if translation validation is set.
@@ -3184,6 +3187,58 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertTrue(same(opt_fn(m2, v), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
+
+    def test_global_state_guard_serialization(self):
+        GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+        guards = GlobalStateGuard()
+        serialized_guards = guards.dump()
+        json_guards = json.loads(serialized_guards)
+
+        samples = []
+        # Test on non autocast state and autocast cache states.
+        self.assertIn("autocast_state", json_guards)
+        for key, value in json_guards.items():
+            if type(value) == int:
+                variant = value + 1
+            elif type(value) == bool:
+                variant = not value
+            elif isinstance(value, dict) and key == "autocast_state":
+                variant = value.copy()
+                variant["cached_enabled"] = not variant["cached_enabled"]
+                continue
+            else:
+                self.fail(f"Unknown global state type {key}: {value}")
+            new_dict = json_guards.copy()
+            new_dict[key] = variant
+            samples.append(new_dict)
+
+        for sample in samples:
+            guards.load(json.dumps(sample))
+            self.assertFalse(guards.check())
+
+        guards.load(json.dumps(json_guards))
+        self.assertTrue(guards.check())
+
+        # Test on autocast states.
+        def _test_autocast(dtype):
+            with torch.autocast("cpu", dtype):
+                guards = GlobalStateGuard()
+                serialized_guards = guards.dump()
+                json_guards = json.loads(serialized_guards)
+
+                for i, enabled in enumerate(json_guards["autocast_state"]["enabled"]):
+                    if enabled:
+                        self.assertEqual(
+                            type(json_guards["autocast_state"]["dtype"][i]), int
+                        )
+                        json_guards["autocast_state"]["dtype"][i] += 1
+                        guards.load(json.dumps(json_guards))
+                        self.assertFalse(guards.check())
+
+        _test_autocast(torch.float16)
+        _test_autocast(torch.float32)
+        _test_autocast(torch.float64)
+        _test_autocast(torch.bfloat16)
 
     def test_type_copy(self):
         def fn(seq):
@@ -11833,6 +11888,10 @@ fn
         self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
+        class Bar:
+            def __init__(self, v):
+                self.v = v
+
         class Foo:
             attribute_map = {}
 
@@ -11840,6 +11899,9 @@ fn
                 self.attribute_map = {
                     "a_premap": "a",
                 }
+                # `bar` attribute requires propagating sources correctly through
+                # object.__getattribute__
+                self.bar = Bar(5)
 
             def __setattr__(self, key, value):
                 if key in super().__getattribute__("attribute_map"):
@@ -11867,7 +11929,7 @@ fn
             return f
 
         def fn(x, f):
-            return x * f.a_premap * f.a * f.b * f.sentinel
+            return x * f.a_premap * f.a * f.b * f.sentinel * f.bar.v
 
         x = torch.randn(4)
 
@@ -11888,6 +11950,57 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_guard_filter_fn_by_id(self):
+        def guard_filter_fn(entries):
+            return [entry.guard_type != "ID_MATCH" for entry in entries]
+
+        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn})
+        def fn(x):
+            return id(x)
+
+        inputs = (torch.randn(3, 2),)
+        fn(*inputs)
+
+        inputs_1 = (torch.randn(3, 2),)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(*inputs_1), id(inputs[0]))
+
+    def test_guard_filter_fn_by_is_global(self):
+        def guard_filter_fn(entries):
+            return [not entry.is_global for entry in entries]
+
+        global GLOBAL_INT
+
+        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn})
+        def fn(x):
+            return x + GLOBAL_INT
+
+        GLOBAL_INT = 1
+        fn(torch.randn(3, 2))
+
+        GLOBAL_INT = 2
+        inputs = (torch.randn(3, 2),)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(*inputs), inputs[0] + 1)
+
+    def test_guard_filter_fn_by_name_and_value(self):
+        def guard_filter_fn(entries):
+            return [
+                not (entry.name == "y" and entry.value is None) for entry in entries
+            ]
+
+        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn})
+        def fn(x, y):
+            if y is not None:
+                x += y
+            return x
+
+        fn(torch.randn(3, 2), None)
+
+        inputs = (torch.randn(3, 2), torch.tensor(1))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(*inputs), inputs[0])
 
 
 class TestTracer(JitTestCase):

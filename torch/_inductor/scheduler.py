@@ -45,6 +45,7 @@ from .ir import (
     GraphPartitionSignature,
     MultiOutput,
     MultiOutputLayout,
+    NoneLayout,
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -464,6 +465,38 @@ class BaseSchedulerNode:
             | self.scheduler.completed_operations
         )
 
+        def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
+            # Inside of NodeUser, we track that the read and write are equivalent
+            # before deciding if the use can be inplace.
+            # But if that use is fused into a larger kernel, we need to check equivalence
+            # of other accesses in fused scheduler node as well.
+            fused_node = buf_to_be_inplaced.scheduler.get_fused_node(self)
+            buf_name = buf_to_be_inplaced.get_name()
+            # Dedup read/writes with equivalent indices
+            # TODO - would be nice if we could just cache accesses on ReadWrites,
+            # and inforce variant that this class & members are functional..
+            deps: OrderedSet[Dep] = OrderedSet()
+            for user in buf_to_be_inplaced.users:
+                user_node = user.node
+                if not isinstance(user_node, BaseSchedulerNode):
+                    continue
+
+                if (
+                    buf_to_be_inplaced.scheduler.get_fused_node(user_node)
+                    is not fused_node
+                ):
+                    continue
+
+                deps |= (
+                    o
+                    for o in user_node.read_writes.reads_and_writes()
+                    if o.name == buf_name
+                )
+                if len(deps) > 1:
+                    return False
+
+            return True
+
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -515,6 +548,7 @@ class BaseSchedulerNode:
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
                         and can_match_buffer_size(input_buf.node, buf.node)
+                        and single_index_in_fused_node(input_buf)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -637,6 +671,13 @@ class BaseSchedulerNode:
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
+            return {}
+        if (
+            isinstance(self, ExternKernelSchedulerNode)
+            and isinstance(self.node, ir.FallbackKernel)
+            and self.node.op_overload
+            is torch._prims.rng_prims.graphsafe_run_with_rng_state
+        ):
             return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
@@ -948,6 +989,7 @@ kernel_name_to_op = {
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
     "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
+    "extern_kernels._scaled_grouped_mm": torch.ops.aten._scaled_grouped_mm,
 }
 
 
@@ -3459,6 +3501,24 @@ class Scheduler:
             why("prologue fusion will not increase amount of bytes read in kernel")
             return False
 
+        # we want to avoid attempting to fuse predictably unprofitable prologues
+        # such as increasing the unaligned reads or writes.
+        # TODO - would be nice to generalize this, however, we would need more explicit
+        # knowledge of memory access patterns in the TritonTemplate in order to know
+        # the stride order to check alignment.
+        origins = tuple(
+            e.target
+            for n in prologue_node.get_nodes()
+            if n.node is not None
+            for e in n.node.get_origins()
+            if e.op == "call_function"
+        )
+        if origins == (torch.ops.aten.constant_pad_nd.default,):
+            why(
+                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
+            )
+            return False
+
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
@@ -3856,6 +3916,8 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
+                elif isinstance(inp, ir.GeneratorState):
+                    continue
                 else:
                     storage = inp.data
                     assert (
@@ -4510,7 +4572,9 @@ class Scheduler:
                     if (
                         buffer
                         and get_device_type(buffer) == "cpu"
-                        and not isinstance(buffer.layout, MultiOutputLayout)
+                        and not isinstance(
+                            buffer.layout, (NoneLayout, MultiOutputLayout)
+                        )
                         and buffer.get_size() == []
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
