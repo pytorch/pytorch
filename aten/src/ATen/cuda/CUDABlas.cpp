@@ -783,9 +783,9 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
 template<>
 void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
 {
-  if (at::globalContext().allowFP16ReductionCuBLAS()) {
+  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+    TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
@@ -806,11 +806,6 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
 template<>
 void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
-  if (at::globalContext().allowBF16ReductionCuBLAS()) {
-    // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
-  }
-
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
       bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
@@ -1312,9 +1307,9 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
 template<>
 void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float))
 {
-  if (at::globalContext().allowFP16ReductionCuBLAS()) {
+  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
@@ -1333,11 +1328,6 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
 template<>
 void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
-  if (at::globalContext().allowBF16ReductionCuBLAS()) {
-    // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
-  }
-
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
@@ -1489,26 +1479,16 @@ bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
 
-  #ifdef USE_ROCM
-  if (std::is_same_v<C_Dtype, float>)
-    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
-  #endif
-
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
     #endif
-    
-    // Do not allow fp16 reductions with fp32 output
-    if (at::globalContext().allowBF16ReductionCuBLAS())
-      TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported with allowBF16ReductionCuBLAS");
   } else if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
     #ifdef USE_ROCM
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
     #endif
-
-    if (at::globalContext().allowFP16ReductionCuBLAS())
-      TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16ReductionCuBLAS");
+    if (at::globalContext().allowFP16AccumulationCuBLAS())
+      TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   using opmath_t = at::opmath_type<Dtype>;

@@ -493,13 +493,6 @@ class TestMatmulCuda(TestCase):
         dtype = input_dtype
         torch.backends.cuda.preferred_blas_library(backend)
 
-        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-
-        # Low precision accumulation is not supported for fp32 output
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
-
         def create_inputs(B=None):
             if B is None:
                 a = torch.randn(M, K, device=device, dtype=dtype)
@@ -532,25 +525,19 @@ class TestMatmulCuda(TestCase):
             self.assertEqual(out.dtype, output_dtype)
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
 
     @onlyCUDA
     @skipIfRocm
-    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_fp16_or_bf16_accum_and_fp32_out_failure(self, input_dtype, batch_size, backend):
+    def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
         M, N, K = 32, 32, 32
         device = "cuda"
-        dtype = input_dtype
+        dtype = torch.float16
         torch.backends.cuda.preferred_blas_library(backend)
 
-        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        # Low precision accumulation is not supported for fp32 output
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+        orig_fp16_accum = torch.backends.cuda.matmul.allow_fp16_accumulation
+        torch.backends.cuda.matmul.allow_fp16_accumulation = True
 
         def create_inputs():
             a = torch.randn(M, K, device=device, dtype=dtype)
@@ -575,9 +562,7 @@ class TestMatmulCuda(TestCase):
         with self.assertRaises(Exception):
             torch.mm(a, b, out_dtype=torch.float32)
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
-
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
