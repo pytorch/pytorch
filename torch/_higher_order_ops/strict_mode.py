@@ -60,7 +60,7 @@ def strict_mode_op_dense(callable, operands):
     return callable(*operands)
 
 
-strict_mode_op.py_impl(DispatchKey.Autograd)(
+strict_mode_op.py_autograd_impl(
     autograd_not_implemented(strict_mode_op, deferred_error=True)
 )
 

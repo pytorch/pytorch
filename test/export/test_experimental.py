@@ -60,7 +60,9 @@ class TestExperiment(TestCase):
             )
 
             # ExportedProgram from original module.
-            original_exported_module = torch.export.export_for_training(m_func(), inps)
+            original_exported_module = torch.export.export_for_training(
+                m_func(), inps, strict=True
+            )
 
             # Check whether input annotations are the same as tracing the original module.
             orig_ph_name_list = [
@@ -116,7 +118,7 @@ class TestExperiment(TestCase):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export_for_training(m, example_inputs)
+        ep = torch.export.export_for_training(m, example_inputs, strict=True)
         joint_ep = _export_forward_backward(ep)
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),
@@ -226,7 +228,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
         ep = torch.export.export_for_training(
-            m, example_inputs, dynamic_shapes={"x": {0: Dim("x0")}}
+            m, example_inputs, dynamic_shapes={"x": {0: Dim("x0")}}, strict=True
         )
         _export_forward_backward(ep)
 
@@ -261,7 +263,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         labels = torch.ones(4, dtype=torch.int64)
         inputs = (x, labels)
 
-        ep = export_for_training(net, inputs)
+        ep = export_for_training(net, inputs, strict=True)
         ep = _export_forward_backward(ep)
 
     def test_joint_loss_index(self):
@@ -281,7 +283,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         inputs = (torch.randn(4, 4),)
         for i in [0, 1]:
-            ep = export_for_training(Foo(i), inputs)
+            ep = export_for_training(Foo(i), inputs, strict=True)
             ep_joint = _export_forward_backward(ep, joint_loss_index=i)
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:
