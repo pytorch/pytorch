@@ -16,6 +16,7 @@ ciflow_push_tags:
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
+- ciflow/periodic-rocm-mi300
 - ciflow/rocm
 - ciflow/rocm-mi300
 - ciflow/s390
