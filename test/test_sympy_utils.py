@@ -1014,6 +1014,27 @@ class TestFloorDiv(TestCase):
         self._expand_and_check(expr, rewritten)
         self.assertEqual(rewritten.count(FloorDiv), 2)
 
+    def test_rewrite_floor_div_rational_const(self):
+        expr = sympy.floor(sympy.S.One / 5, evaluate=False)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.Mul), 0)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        # Expression evaluates to a compile time constant
+        rewritten = FloorDiv.rewrite(expr)
+        self.assertEqual(rewritten, sympy.S.Zero)
+
+    def test_no_distribute_mul_floordiv(self):
+        """
+        Test that multiplication doesn't distribute with floor division.
+        """
+        x = sympy.Symbol("x")
+        expr = 2 * sympy.floor(x / 2)
+        rewritten = FloorDiv.rewrite(expr)
+        self._expand_and_check(expr, rewritten)
+        self.assertEqual(rewritten.count(sympy.Mul), 1)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
 class TestIdentity(TestCase):
     def test_expand_identity(self):
         """
