@@ -432,9 +432,9 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                f"std::{s}<int64_t>({{x, 2LL*x, 3LL*x}})"
                 if sys.platform in ["darwin", "win32"]
-                else f"std::{s}({{x, 2L*x, 3L*x}})",
+                else f"std::{s}<int64_t>({{x, 2L*x, 3L*x}})",
             )
 
 
