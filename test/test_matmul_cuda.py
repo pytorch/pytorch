@@ -427,25 +427,19 @@ class TestMatmulCuda(TestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(a, blist, gOlist, a.grad, bgradlist, outlist)
 
+
     @onlyCUDA
     @skipIfRocm
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
-    @parametrize("K", [32, 64])
+    @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
         torch.backends.cuda.preferred_blas_library(backend)
-
-        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-
-        # Low precision accumulation is not supported for fp32 output
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
         def create_inputs(B=None):
             if B is None:
@@ -477,15 +471,13 @@ class TestMatmulCuda(TestCase):
 
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
 
     @onlyCUDA
     @skipIfRocm
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
-    @parametrize("K", [32, 64])
+    @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):

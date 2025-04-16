@@ -618,12 +618,22 @@ void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::H
       num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
-      at::cuda::blas::gemm<at::Half>(
-        transa, transb,
-        m, n, k,
-        alpha, (a + i * stridea), lda,
-        (b + i * strideb), ldb, beta,
-        (c + i * stridec), ldc);
+      if (std::is_same_v<C_Dtype, float>) {
+        float* c_ptr = (float*)(c + i * stridec);
+        at::cuda::blas::gemm<at::Half, float>(
+            transa, transb,
+            m, n, k,
+            alpha, (a + i * stridea), lda,
+            (b + i * strideb), ldb, beta,
+            c_ptr, ldc);
+      } else {
+        at::cuda::blas::gemm<at::Half>(
+            transa, transb,
+            m, n, k,
+            alpha, (a + i * stridea), lda,
+            (b + i * strideb), ldb, beta,
+            (c + i * stridec), ldc);
+      }
     }
   }
 #endif // USE_ROCM
@@ -650,14 +660,36 @@ void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(a
 #else
   auto compute_type = CUDA_R_32F;
 #endif
-  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
-                                  opa, opb, (int)m, (int)n, (int)k,
-                                  (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
-                                  b, CUDA_R_16BF, (int)ldb, strideb,
-                                  (void*)&fbeta, c, std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF,
-                                  (int)ldc, stridec, (int)num_batches,
-                                  compute_type,
-                                  CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 5) {
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
+                                opa, opb, (int)m, (int)n, (int)k,
+                                (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
+                                b, CUDA_R_16BF, (int)ldb, strideb,
+                                (void*)&fbeta, c, std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF,
+                                (int)ldc, stridec, (int)num_batches,
+                                compute_type,
+                                CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  } else {
+    for (const auto i : c10::irange(num_batches)) {
+      if (std::is_same_v<C_Dtype, float>) {
+        float* c_ptr = (float*)(c + i * stridec);
+        at::cuda::blas::gemm<at::BFloat16, float>(
+            transa, transb,
+            m, n, k,
+            alpha, (a + i * stridea), lda,
+            (b + i * strideb), ldb, beta,
+            c_ptr, ldc);
+      } else {
+        at::cuda::blas::gemm<at::BFloat16>(
+            transa, transb,
+            m, n, k,
+            alpha, (a + i * stridea), lda,
+            (b + i * strideb), ldb, beta,
+            (c + i * stridec), ldc);
+      }
+    }
+  }
 }
 
 template <>
