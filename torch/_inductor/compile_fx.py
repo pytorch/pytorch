@@ -70,7 +70,7 @@ from torch._inductor.output_code import (
     index_expanded_dims,
     OutputCode,
 )
-from torch._inductor.runtime.cache_dir_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,

@@ -250,7 +250,6 @@ from .torch import (
     TorchInGraphFunctionVariable,
 )
 from .torch_function import (
-    build_torch_function_fn,
     TensorWithTFOverrideVariable,
     torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
@@ -1839,9 +1838,6 @@ class VariableBuilder:
             subclass_type = None
         else:
             subclass_type = type(value)
-            options["torch_function_fn"] = build_torch_function_fn(
-                self.tx, value, self.source
-            )
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
