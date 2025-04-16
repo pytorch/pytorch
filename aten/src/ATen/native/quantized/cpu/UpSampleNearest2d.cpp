@@ -117,7 +117,7 @@ static void upsample_nearest2d_out_frame_nhwc(
 }
 
 template <nn_compute_source_index_fn_t nn_compute_source_index_fn>
-Tensor _upsample_nearest2d_quantized_cpu(
+static Tensor _upsample_nearest2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     std::optional<double> scales_h,

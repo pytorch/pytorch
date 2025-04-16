@@ -317,7 +317,7 @@ class AutoFunctionalized(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized")
+        super().__init__("auto_functionalized", cacheable=True)
 
     def __call__(
         self,
@@ -346,7 +346,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized_v2")
+        super().__init__("auto_functionalized_v2", cacheable=True)
 
     def __call__(
         self,
