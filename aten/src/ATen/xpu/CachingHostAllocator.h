@@ -15,7 +15,7 @@ inline TORCH_XPU_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
     c10::xpu::XPUStream stream) {
-  return getCachingHostAllocator()->record_event(ptr, ctx, stream.unwrap);
+  return getCachingHostAllocator()->record_event(ptr, ctx, stream.unwrap());
 }
 
 inline TORCH_XPU_API void CachingHostAllocator_emptyCache() {
