@@ -50,6 +50,11 @@ reduceops_common_args = merge_dicts(
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
 """
     ),
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 multi_dim_common = merge_dicts(
@@ -78,11 +83,6 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         If ``None``, all dimensions are reduced.
 """
     },
-    {
-        "opt_keepdim": """
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
-"""
-    },
 )
 
 single_dim_common = merge_dicts(
@@ -92,6 +92,17 @@ single_dim_common = merge_dicts(
     dim (int): the dimension to reduce.
 """
     ),
+    {
+        "opt_dim": """
+    dim (int, optional): the dimension to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int, optional): the dimension to reduce.
+        If ``None``, all dimensions are reduced.
+"""
+    },
     {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -5661,7 +5672,7 @@ Example::
             [ 4.,  5.,  6.]])
     >>> torch.kthvalue(x, 2, 0, True)
     torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -6682,7 +6693,7 @@ Example::
             [-1.6092,  0.5419, -0.2993,  0.3195]])
     >>> torch.argmax(a, dim=1)
     tensor([ 0,  2,  0,  1])
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -6908,7 +6919,7 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -6965,7 +6976,7 @@ Example::
     torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
     >>> a.nanmedian(0)
     torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7037,7 +7048,7 @@ Example::
     tensor(2.)
     >>> torch.quantile(a, 0.4, interpolation='nearest')
     tensor(1.)
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7077,7 +7088,7 @@ Example::
     tensor([1., 2.])
     >>> t.nanquantile(0.5, dim=1)
     tensor([   nan, 1.5000])
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7137,7 +7148,7 @@ Example::
    :noindex:
 
 See :func:`torch.minimum`.
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7336,7 +7347,7 @@ Example::
             [1],
             [3],
             [1]])
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7523,7 +7534,7 @@ Example::
     torch.return_types.mode(
     values=tensor([0, 2, 0, 0, 0, 0, 2]),
     indices=tensor([1, 3, 4, 4, 2, 4, 4]))
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -8609,7 +8620,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
