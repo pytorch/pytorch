@@ -10,11 +10,11 @@ from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import TEST_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
-@skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
+@unittest.skipIf(TEST_XPU, "AutoHeuristic doesn't currently work on the XPU stack")
 class AutoHeuristicTest(TestCase):
     def count_lines_in_file(self, file_path):
         with open(file_path) as file:
