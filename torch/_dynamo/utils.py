@@ -1269,6 +1269,15 @@ class CompilationMetrics:
     python_version: Optional[str] = None
     pgo_put_remote_code_state_time_us: Optional[int] = None
     pgo_get_remote_code_state_time_us: Optional[int] = None
+    # The number of elements within parameters. This is classically what people
+    # think of when they think of parameters in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
+    # per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters counted by fields. This is mostly a proxy for
+    # the number of distinct type of params.
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
