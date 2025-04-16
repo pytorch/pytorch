@@ -1,4 +1,7 @@
 # Add links to this file that you want ignored by the link checker
 
 #Linkchecker assumes this is a link so ignoring it.Original file is RELEASE.md
-https://github.com/pypi/warehouse/issues/726
+https://github.com/pypi/warehouse/issues/*
+
+#Ignore links with "file:///" to catch any other example links
+file:\/\/\/.*
