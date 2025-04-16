@@ -1747,17 +1747,18 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
     l_y_ = L_y_
     map_body_1 = self.map_body_1
     map_impl = torch.ops.higher_order.map_impl(map_body_1, [l_xs_], [l_y_]);  map_body_1 = l_xs_ = l_y_ = None
-    getitem = map_impl[0];  map_impl = None
-    return (getitem,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor, l_y_ : torch.Tensor):
+    child_1 = child[0];  child_1 = None
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
-    getitem = map_impl[0];  map_impl = None
-    return (getitem,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
 
     def test_map_multi_return(self):
@@ -1775,9 +1776,9 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], []);  map_body_0 = l_x_ = None
-    getitem = map_impl[0]
-    getitem_1 = map_impl[1];  map_impl = None
-    return (getitem, getitem_1)""",
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1];  map_impl = None
+    return (getitem_1, getitem_2)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -1809,14 +1810,14 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], []);  map_body_0 = l_x_ = None
-    getitem = map_impl[0]
-    getitem_1 = map_impl[1]
-    getitem_2 = map_impl[2]
-    getitem_3 = map_impl[3]
-    getitem_4 = map_impl[4]
-    getitem_5 = map_impl[5]
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1]
+    getitem_3 = map_impl[2]
+    getitem_4 = map_impl[3]
+    getitem_5 = map_impl[4]
+    getitem_6 = map_impl[5]
     value = map_impl[6];  map_impl = None
-    return (getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, value)""",
+    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, value)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -1855,8 +1856,8 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], [3]);  map_body_0 = l_x_ = None
-    getitem = map_impl[0];  map_impl = None
-    return (getitem,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -1886,8 +1887,8 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], [3]);  map_body_0 = l_x_ = None
-    getitem = map_impl[0];  map_impl = None
-    return (getitem,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -2277,12 +2278,15 @@ def forward(self):
         mod = Module()
 
         mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
-        ):
-            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        # There is graph break right when we enter body of map
+        # Since we are tracing through the Python dispatch logic, it ends up 8 graphs.
+        self.assertEqual(len(backend.graphs), 8)
+        self.assertEqual(
+            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        )
 
     def test_map_side_effect(self):
         backend = EagerAndRecordGraphs()
@@ -2307,12 +2311,17 @@ def forward(self):
         mod = Module()
 
         mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
-        ):
-            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        # Since we are tracing through the Python dispatch logic, it ends up 9 graphs.
+        self.assertEqual(len(backend.graphs), 9)
+        self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -2913,10 +2922,7 @@ class GraphModule(torch.nn.Module):
         actual_stack = self._get_source_fn_stack(gm, {"cos", "add", "sin"})
         self.assertExpectedInline(
             pprint.pformat(actual_stack),
-            """\
-{'add': ['map_impl', 'map_impl', 'add'],
- 'cos': ['map_impl', 'cos'],
- 'sin': ['sin']}""",
+            """{'add': ['map', 'map', 'add'], 'cos': ['map', 'cos'], 'sin': ['sin']}""",
         )
 
     def test_grad_source_fn_stack(self):
