@@ -1,4 +1,5 @@
 #include <c10/core/Allocator.h>
+#include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
@@ -46,7 +47,7 @@ namespace {
 }
 
 // Struct containing memory allocator summary statistics for host.
-struct HostStats {
+struct TORCH_API HostStats {
   // COUNT: allocations requested by client code. Note that active
   // count can be extracted by looking at current allocations
   Stat allocation;
@@ -343,7 +344,7 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
   }
 
-  HostStats getStats() {
+  HostStats get_stats() {
     HostStats stats;
 
     // To keep getStats lightweight we do *not* flush any available blocks
@@ -394,7 +395,7 @@ struct CachingHostAllocatorImpl {
     return stats;
   }
 
-  void resetAccumulatedStats() {
+  void reset_accumulated_stats() {
     // Reseting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -419,7 +420,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  void resetPeakStats() {
+  void reset_peak_stats() {
     // Reseting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -620,8 +621,29 @@ protected:
   alignas(64) HostStatsStaged stats_;
 };
 
+struct TORCH_API HostAllocator : public at::Allocator {
+  // Associates the pinned memory allocation with a stream to track
+  // dependencies. This ensures the memory won't be reused until the stream's
+  // operations complete.
+  virtual bool record_event(void* ptr, void* ctx, c10::Stream stream) = 0;
+
+  // Frees all cached pinned memory and returns it to the system, clearing the
+  // allocator's internal cache
+  virtual void empty_cache() = 0;
+
+  // Returns comprehensive statistics about the allocator's memory usage,
+  // allocation patterns, and timing metrics
+  virtual HostStats get_stats() = 0;
+
+  // Resets the cumulative allocation statistics.
+  virtual void reset_accumulated_stats() = 0;
+
+  // Resets the peak memory usage metrics.
+  virtual void reset_peak_stats() = 0;
+};
+
 template <typename T, c10::DeleterFnPtr deleteFunc>
-struct CachingHostAllocatorInterface : public at::Allocator {
+struct CachingHostAllocatorInterface : public HostAllocator {
   CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
@@ -638,11 +660,12 @@ struct CachingHostAllocatorInterface : public at::Allocator {
   }
 
   template <typename S>
-  bool record_event(void* ptr, void* ctx, S stream) {
+  bool record_event(void* ptr, void* ctx, c10::Stream s) override {
+    S stream = S(s);
     return impl_->record_event(ptr, ctx, stream);
   }
 
-  void empty_cache() {
+  void empty_cache() override {
     impl_->empty_cache();
   }
 
@@ -651,16 +674,16 @@ struct CachingHostAllocatorInterface : public at::Allocator {
     impl_->copy_data(dest, src, count);
   }
 
-  HostStats getStats() {
-    return impl_->getStats();
+  HostStats get_stats() override {
+    return impl_->get_stats();
   }
 
-  void resetAccumulatedStats() {
-    impl_->resetAccumulatedStats();
+  void reset_accumulated_stats() override {
+    impl_->reset_accumulated_stats();
   }
 
-  void resetPeakStats() {
-    impl_->resetPeakStats();
+  void reset_peak_stats() override {
+    impl_->reset_peak_stats();
   }
 
   std::unique_ptr<T> impl_;
@@ -669,6 +692,25 @@ struct CachingHostAllocatorInterface : public at::Allocator {
 #define DECLARE_HOST_ALLOCATOR(name, impl, deleter) \
   struct name final                                 \
       : public at::CachingHostAllocatorInterface<impl, deleter> {};
+
+TORCH_API void setHostAllocator(
+    at::DeviceType t,
+    at::HostAllocator* alloc,
+    uint8_t priority = 0);
+
+TORCH_API at::HostAllocator* getHostAllocator(const at::DeviceType& t);
+
+template <DeviceType t>
+struct HostAllocatorRegisterer {
+  explicit HostAllocatorRegisterer(HostAllocator* alloc) {
+    at::setHostAllocator(t, alloc);
+  }
+};
+
+#define REGISTER_HOST_ALLOCATOR(t, f)                      \
+  namespace {                                              \
+  static c10::HostAllocatorRegisterer<t> g_allocator_d(f); \
+  }
 
 } // namespace at
 C10_DIAGNOSTIC_POP()

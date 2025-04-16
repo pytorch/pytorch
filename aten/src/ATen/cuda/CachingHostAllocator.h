@@ -18,14 +18,18 @@ namespace at::cuda {
 // call between host and device, and passed the corresponding context from the
 // allocation. This is currently invoked by at::native::copy_kernel_cuda.
 //
-TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator();
+inline TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator() {
+  return at::CachingHostAllocator::GetAllocator(c10::DeviceType::CUDA);
+}
 
 // Records an event in the specified stream. The allocation corresponding to the
 // input `ptr`/`ctx` will not be re-used until the event has occurred.
-TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
+inline TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
-    c10::cuda::CUDAStream stream);
+    c10::cuda::CUDAStream stream) {
+  return getCachingHostAllocator()->record_event(ptr, ctx, stream.unwrap());
+}
 
 // Releases cached pinned memory allocations via cudaHostFree
 TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache();
