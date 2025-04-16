@@ -8730,11 +8730,11 @@ class TestMPS(TestCaseMPS):
 
     @parametrize("dtype", [torch.int32, torch.int64, torch.int16, torch.int8, torch.uint8])
     def test_inplace_bitwise_not(self, dtype):
-       # Start with bitwise not here (reported by @qqaatw)
-       x_mps, x_cpu = [torch.arange(64, device=device, dtype=dtype) for device in ["cpu", "mps"]]
-       for x in [x_mps, x_cpu]:
-           x[::2].bitwise_not_()
-       self.assertEqual(x_mps.cpu(), x_cpu)
+        # Start with bitwise not here (reported by @qqaatw)
+        x_mps, x_cpu = [torch.arange(64, device=device, dtype=dtype) for device in ["cpu", "mps"]]
+        for x in [x_mps, x_cpu]:
+            x[::2].bitwise_not_()
+        self.assertEqual(x_mps.cpu(), x_cpu)
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
