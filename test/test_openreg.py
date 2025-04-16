@@ -1,18 +1,25 @@
 # Owner(s): ["module: cpp"]
 
 import os
+import unittest
 
 import psutil
 import pytorch_openreg  # noqa: F401
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
 
+    @unittest.skipIf(not IS_LINUX, "Only works on linux")
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
