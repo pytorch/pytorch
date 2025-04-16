@@ -1304,6 +1304,7 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
+
                 a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
                     tx, [a], {}
                 )

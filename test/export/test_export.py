@@ -4688,9 +4688,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return y * p
 
         ep = export(M(), (torch.tensor(5), torch.randn(5)), strict=False)
-        FileCheck().check_count("torch.ops.aten.scalar_tensor.default", count=1, exactly=True).run(str(ep.graph))
-        FileCheck().check_count("torch.ops.aten.clamp.default", count=1, exactly=True).run(str(ep.graph))
-        FileCheck().check_count("torch.ops.aten.pow.Tensor_Scalar", count=1, exactly=True).run(str(ep.graph))
+        FileCheck().check_count("torch.sym_min", count=1, exactly=True).run(str(ep.graph))
+        FileCheck().check_count("operator.pow", count=1, exactly=True).run(str(ep.graph))
 
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):

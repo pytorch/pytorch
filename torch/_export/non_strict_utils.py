@@ -193,12 +193,6 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
 
         # Case 3: SymInts
         elif isinstance(arg1, torch.SymInt) or isinstance(arg2, torch.SymInt):
-            if _is_unbacked_symint(arg1) or _is_unbacked_symint(arg2):
-                arg1 = torch.tensor(arg1) if _is_unbacked_symint(arg1) else arg1
-                arg2 = torch.tensor(arg2) if _is_unbacked_symint(arg2) else arg2
-                return _tensor_min_max(arg1, arg2, real_callable=real_callable, tensor_callable=tensor_callable)
-
-            # Else use symbolic min/max
             return (
                 torch.sym_max(arg1, arg2)
                 if tensor_callable is torch.maximum
