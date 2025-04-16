@@ -25,7 +25,7 @@ jobs:
           args: --accept=200,403,429 --base . --exclude-all-private --verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'
           token: ${{ secrets.CUSTOM_TOKEN }}
           fail: true
-
+          
       - name: Create Issue From File
         if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: peter-evans/create-issue-from-file@v5
@@ -34,7 +34,6 @@ jobs:
           content-filepath: ./lychee/out.md
           labels: 'module: docs'
           
-    
       - name: Suggestions
         if: failure()
         run: |
