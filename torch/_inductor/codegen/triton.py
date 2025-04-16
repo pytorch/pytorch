@@ -2100,8 +2100,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Stores require an explicit broadcast. We do this in two phases:
         #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
-        #  2. In case the block pointer has higher dimensionality, broadcast/reshape the
-        #     result to the block shape of the pointer.
+        #  2. In case the block pointer has different dimensionality, broadcast/reshape the
+        #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
         # These dims no longer need broadcasting.
