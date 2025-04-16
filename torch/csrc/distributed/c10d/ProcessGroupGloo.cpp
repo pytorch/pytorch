@@ -785,10 +785,25 @@ ProcessGroupGloo::ProcessGroupGloo(
   contexts_.reserve(options_->devices.size());
   for (const auto i : c10::irange(options_->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
-    auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
+
+#ifdef GLOO_SHARED_STORE
+    auto underlyingStore = store_;
+#else
+    auto& underlyingStore = *store_;
+#endif
+
+    auto store = std::make_shared<::gloo::rendezvous::PrefixStore>(
+        std::to_string(i), underlyingStore);
+
+#ifdef GLOO_SHARED_STORE
+    auto connectStore = store;
+#else
+    auto& connectStore = *store;
+#endif
+
     context->setTimeout(options_->timeout);
     try {
-      context->connectFullMesh(store, options_->devices[i]);
+      context->connectFullMesh(connectStore, options_->devices[i]);
     } catch (const std::runtime_error& e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.

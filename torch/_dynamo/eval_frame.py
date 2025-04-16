@@ -597,7 +597,7 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if (
+        if config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -805,8 +805,9 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
+    def __init__(self, msg: Optional[str] = None) -> None:
         super().__init__(callback=None)
+        self.msg = msg
 
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -854,6 +855,7 @@ class DisableContext(_TorchDynamoContext):
                 _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+        _fn._torchdynamo_disable_msg = self.msg  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -1899,11 +1901,20 @@ class TorchPatcher:
         # with torch.deploy internally.
         from .decorators import disable
 
-        torch.jit.trace = disable(torch.jit.trace)
-        torch.jit.trace_module = disable(torch.jit.trace_module)
-        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.jit.trace = disable(
+            torch.jit.trace, reason="tracing into TorchScript not fully supported"
+        )
+        torch.jit.trace_module = disable(
+            torch.jit.trace_module,
+            reason="tracing into TorchScript not fully supported",
+        )
+        torch.jit._get_trace_graph = disable(
+            torch.jit._get_trace_graph,
+            reason="tracing into TorchScript not fully supported",
+        )
         torch.fx._symbolic_trace.Tracer.trace = disable(
-            torch.fx._symbolic_trace.Tracer.trace
+            torch.fx._symbolic_trace.Tracer.trace,
+            reason="tracing into FX not fully supported",
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
@@ -1945,7 +1956,12 @@ class TorchPatcher:
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
-                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                    opt_mod,
+                    fused_fn_name,
+                    disable(
+                        getattr(opt_mod, fused_fn_name),
+                        reason="don't trace into fused optimizer",
+                    ),
                 )
 
         optimizer_classes = [
@@ -1962,10 +1978,14 @@ class TorchPatcher:
 
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
-                opt.step = disable(opt.step)
+                opt.step = disable(
+                    opt.step, reason=f"optimizer {opt} step not supported"
+                )
 
             if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
+                opt._init_group = disable(
+                    opt._init_group, reason=f"optimizer {opt} _init_group not supported"
+                )
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

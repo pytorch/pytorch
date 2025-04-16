@@ -45,7 +45,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 
@@ -672,7 +672,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -1379,6 +1379,47 @@ class TestPrologueFusion(TestCase):
             FileCheck().check(_get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
+
+    @parametrize("prologue", (False, True))
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM Different layout decisions")
+    def test_conv1x1_cast(self, prologue):
+        with torch._inductor.config.patch(
+            prologue_fusion=prologue, force_layout_optimization=True
+        ):
+            conv1x1 = (
+                torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+                .to(memory_format=torch.channels_last)
+                .to(GPU_TYPE)
+                .to(dtype=torch.float16)
+            )
+            input_tensor = (
+                torch.randn(4, 3, 32, 32)
+                .contiguous(memory_format=torch.channels_last)
+                .to(GPU_TYPE)
+            )
+
+            def foo(mod, input):
+                return torch.nn.functional.conv2d(
+                    input,
+                    mod.weight.to(input.dtype),
+                    None,
+                    mod.stride,
+                    mod.padding,
+                    mod.dilation,
+                    mod.groups,
+                )
+
+            with torch.no_grad():
+                out_eager = foo(conv1x1, input_tensor)
+                foo_c = torch.compile(foo)
+                out, code = run_and_get_code(foo_c, conv1x1, input_tensor)
+
+                FileCheck().check_not("extern_kernels.convolution").run(code[0])
+                if prologue:
+                    self.check_code(
+                        code[0], num_kernels=1, num_allocs=1, num_deallocs=2
+                    )
+                self.assertEqual(out_eager, out, atol=1e-2, rtol=0)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):

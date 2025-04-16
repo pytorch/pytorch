@@ -87,6 +87,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 if TYPE_CHECKING:
     # Cyclic dependency...
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 log = logging.getLogger(__name__)
@@ -730,7 +731,7 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen"):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
@@ -1267,6 +1268,12 @@ class BuiltinVariable(VariableTracker):
 
                 # Inline the user function
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
+        elif isinstance(arg, (variables.ExceptionVariable,)):
+            if len(arg.args) == 0:
+                value = f"{arg.exc_type}"
+            else:
+                value = ", ".join(a.as_python_constant() for a in arg.args)
+            return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -1798,10 +1805,10 @@ class BuiltinVariable(VariableTracker):
         name_var: VariableTracker,
         default=None,
     ):
-        name = name_var.as_python_constant()
-
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
+
+        name = name_var.as_python_constant()
 
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
@@ -1933,6 +1940,20 @@ class BuiltinVariable(VariableTracker):
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
                     )
                 elif name == "data":
+                    # See comments on `test_set_data_on_scoped_tensor` for plans
+                    # to support this.
+                    if obj.source is None:
+                        unimplemented_v2(
+                            gb_type="Failed to mutate tensor data attribute",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dyanmo only supports mutating `.data`"
+                            " of tensor created outside `torch.compile` region",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable

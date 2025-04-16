@@ -132,6 +132,7 @@ class MPSBasicTests(TestCase):
             "chebyshev_polynomial_u",
             "chebyshev_polynomial_v",
             "chebyshev_polynomial_w",
+            "hermite_polynomial_h",
         ],
     )
     def test_pointwise_binary_op(self, op_name):
@@ -162,6 +163,7 @@ class MPSBasicTests(TestCase):
 # Copy tests
 for test_name in [
     "test_min_max_reduction",
+    "test_add_complex4",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -200,13 +202,14 @@ for test_name in [
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
-    "test_low_memory_max_pool_dilation_1",
-    "test_low_memory_max_pool_dilation_2",
+    "test_low_memory_max_pool_dilation_1_dim_2",
+    "test_low_memory_max_pool_dilation_2_dim_2",
     "test_max_min",
     "test_max_pool2d2",
     "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
+    "test_neg_max_uint8",
     "test_pow2",
     "test_prod",
     "test_randint_int64_mod",
@@ -228,6 +231,7 @@ for test_name in [
     "test_sum_keepdims",
     "test_tanh",
     "test_vectorized_ops_masked",
+    "test_var_mean_tile_reduction_True",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",

@@ -2,6 +2,7 @@
 
 
 from contextlib import nullcontext
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import torch
@@ -35,6 +36,15 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 invoke_subgraph_counter = 0
+
+
+# During the tracing of the joint graph, we construct this information. This is
+# used to filter out grad_outs/tangents in the `backward` method of
+# InvokeSubgraphAutogradOp.
+@dataclass
+class FilterTangentInfo:
+    indexes_with_none: set[int] = field(default_factory=set)
+    indexes_with_no_grad: set[int] = field(default_factory=set)
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -189,11 +199,40 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
             )
 
+            with context:
+                fw_outs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+
+            num_fw_outs = len(fw_outs)
+
+            # Collect the indexes of none in the output to check that the grad
+            # is None at the corresponding index in the backward. This check is
+            # performed in the autograd.Function - InvokeSubgraphAutogradOp.
+            # Also collect the indexes of no_grad in the output to filter out
+            # the grad_outs in the `backward` method.
+            filter_tangent_info = FilterTangentInfo()
+
+            for idx, fw_out in enumerate(fw_outs):
+                if fw_out is None:
+                    filter_tangent_info.indexes_with_none.add(idx)
+                elif not fw_out.requires_grad:
+                    filter_tangent_info.indexes_with_no_grad.add(idx)
+
             if grad_outputs is None:
                 # Infer grad_outputs to be the same properties as the fw_outputs
                 # if they're not passed in
-                with context:
-                    grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+                # Although fw_outs are equivalent to grad_outputs for tracing
+                # purposes, we have to carefully handle the None and fw_out that do
+                # not have require_grad. At those indexes, we will have None in the
+                # backward graph.
+                grad_outputs = fw_outs
+                grad_outputs = [grad for grad in grad_outputs if grad is not None]
+                grad_outputs = [grad for grad in grad_outputs if grad.requires_grad]
+
+                # Force grad_out to be contiguous. This is because at runtime,
+                # grad_out could have different strides than fw_outs. So, we
+                # force the grad_outs to be contiguous for both tracing and
+                # runtime.
+                grad_outputs = [grad.contiguous() for grad in grad_outputs]
 
             if any(
                 not isinstance(out, torch.Tensor)
@@ -214,7 +253,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
                 fw_inputs,
                 grad_outputs,
             )
-            return fw_graph, bw_graph, len(grad_outputs)
+            return fw_graph, bw_graph, num_fw_outs, filter_tangent_info
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -224,11 +263,20 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, fw_graph, bw_graph, identifier, num_fw_outs, *operands):
+    def forward(
+        ctx,
+        fw_graph,
+        bw_graph,
+        identifier,
+        num_fw_outs,
+        filter_tangent_info,
+        *operands,
+    ):
         ctx._fw_graph = fw_graph
         ctx._bw_graph = bw_graph
         ctx._identifier = identifier
         ctx._num_fw_outs = num_fw_outs
+        ctx._filter_tangent_info = filter_tangent_info
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -238,6 +286,12 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             )
 
         save_tensors_and_symints_for_backward(ctx, operands)
+
+        # Check that None is at expected indexes.
+        for idx, o in enumerate(out):
+            if o is None:
+                assert idx in filter_tangent_info.indexes_with_none
+
         return out
 
     @staticmethod
@@ -246,10 +300,23 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         identifier = ctx._identifier
         primals = saved_tensors_and_symints(ctx)
         num_fw_outs = ctx._num_fw_outs
+        filter_tangent_info = ctx._filter_tangent_info
 
         # While tracing we made the assumption that tangents are contiguous. So,
         # force the grad_outs to be contiguous.
-        contiguous_grad_outs = tuple([o.contiguous() for o in grad_outs])
+        # Also filter out grads that are None or do not require_grad. This was
+        # the assumption we made during the tracing of joint_graph.
+        contiguous_grad_outs = []
+        for idx, o in enumerate(grad_outs):
+            if o is None:
+                assert idx in filter_tangent_info.indexes_with_none
+            elif idx in filter_tangent_info.indexes_with_no_grad:
+                # Deliberately skip over the grad_outs which we know should be
+                # None because the corresponding fwd_out does not require_grad.
+                pass
+            else:
+                contiguous_grad_outs.append(o.contiguous())
+        contiguous_grad_outs = tuple(contiguous_grad_outs)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
         # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
@@ -258,7 +325,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents
         )[:-num_fw_outs]
-        return None, None, None, None, *grads
+        return None, None, None, None, None, *grads
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -294,11 +361,13 @@ def _(subgraph, identifier, operands):
         ):
             return saved_autograd_fn(*operands)
 
-    fw_graph, bw_graph, num_fw_outs = create_fw_bw_graph(subgraph, operands)
+    fw_graph, bw_graph, num_fw_outs, filter_tangent_info = create_fw_bw_graph(
+        subgraph, operands
+    )
 
     def autograd_fn_callable(*args):
         return InvokeSubgraphAutogradOp.apply(
-            fw_graph, bw_graph, identifier, num_fw_outs, *args
+            fw_graph, bw_graph, identifier, num_fw_outs, filter_tangent_info, *args
         )
 
     # Save the autograd_fn_callable in the dispatch set cache.

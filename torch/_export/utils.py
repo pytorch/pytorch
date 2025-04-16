@@ -58,6 +58,8 @@ placeholder_prefixes = {
     InputKind.TOKEN: "token",
 }
 
+_DISABLE_ATEN_TO_ASSERTION_PASS = False
+
 
 def _collect_and_set_constant_attrs(
     graph_signature, constants, mod
@@ -577,6 +579,59 @@ def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
+@contextmanager
+def _disable_aten_to_metadata_assertions():
+    global _DISABLE_ATEN_TO_ASSERTION_PASS
+    orig_val = _DISABLE_ATEN_TO_ASSERTION_PASS
+    _DISABLE_ATEN_TO_ASSERTION_PASS = True
+    try:
+        yield
+    finally:
+        _DISABLE_ATEN_TO_ASSERTION_PASS = orig_val
+
+
+def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    if _DISABLE_ATEN_TO_ASSERTION_PASS:
+        return
+
+    aten_to_variants = [
+        torch.ops.aten.to.device,
+        torch.ops.aten.to.dtype,
+        torch.ops.aten.to.dtype_layout,
+    ]
+    for node in gm.graph.nodes:
+        if node.target in aten_to_variants:
+            if (
+                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                and node.args[0] == node.prev.args[0]
+            ):
+                # skip if already guarded
+                continue
+
+            if (tensor_val := node.args[0].meta.get("val")) is not None:
+                with gm.graph.inserting_before(node), _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        stack_trace=node.meta.get("stack_trace"),
+                    ),
+                ):
+                    gm.graph.call_function(
+                        torch.ops.aten._assert_tensor_metadata.default,
+                        args=(node.args[0],),
+                        kwargs={
+                            "dtype": tensor_val.dtype,
+                            "device": tensor_val.device,
+                            "layout": tensor_val.layout,
+                        },
+                    )
+
+
 def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
@@ -600,6 +655,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
+
+        # insert runtime assertions for aten.to nodes
+        _insert_aten_to_metadata_assert_pass(gm)
+
     # update output specs
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)

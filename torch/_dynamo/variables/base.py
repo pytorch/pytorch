@@ -29,7 +29,8 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
-    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
+    from ..codegen import PyCodegen
+    from ..symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class SourceType(Enum):
@@ -399,7 +400,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return None
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx) -> list["VariableTracker"]:

@@ -18,6 +18,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
+#include <ATen/native/cuda/GroupMM.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -265,24 +266,16 @@ static bool getDisableAddmmCudaLt() {
 
 #ifdef USE_ROCM
 static bool isSupportedHipLtROCmArch(int index) {
-    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
-    std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs, index);
 }
 #endif
 
@@ -354,7 +347,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #endif
   // if lt path fails, we recurse back into this function here and force the lt path to off
   disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
-  at::ScalarType scalar_type = self.scalar_type();
+  at::ScalarType scalar_type = mat1.scalar_type();
+  bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
 #if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11040)) || defined(USE_ROCM)
@@ -449,7 +443,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   if (useLtInterface) {
 #if defined(USE_ROCM)
     bool okay = true;
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    if (is_float_output_with_half_input) {
+      TORCH_CHECK(false, "float output with half input is not enabled for ROCm");
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -463,26 +460,27 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
               activation_to_gemm_and_blas_arg(activation));
         }
-        else {
-          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
-              args.transa == 't',
-              args.transb == 't',
-              args.m,
-              args.n,
-              args.k,
-              alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->const_data_ptr<scalar_t>(),
-              args.lda,
-              args.matb->const_data_ptr<scalar_t>(),
-              args.ldb,
-              // This condition is needed for mm case on ROCm for hipblasLt path.
-              // Passing the bias ptr as null to avoid accuracy issues for mm case.
-              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-              args.result->data_ptr<scalar_t>(),
-              args.result_ld,
-              activation_to_gemm_and_blas_arg(activation)
-          );
-        }});
+
+        okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+            args.transa == 't',
+            args.transb == 't',
+            args.m,
+            args.n,
+            args.k,
+            alpha.to<at::opmath_type<scalar_t>>(),
+            args.mata->const_data_ptr<scalar_t>(),
+            args.lda,
+            args.matb->const_data_ptr<scalar_t>(),
+            args.ldb,
+            // This condition is needed for mm case on ROCm for hipblasLt path.
+            // Passing the bias ptr as null to avoid accuracy issues for mm case.
+            (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+            args.result->data_ptr<scalar_t>(),
+            args.result_ld,
+            activation_to_gemm_and_blas_arg(activation)
+        );
+      });
+    }
     if (!okay) {
       // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
@@ -499,7 +497,35 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #endif
 
     bool okay = true;
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    if (is_float_output_with_half_input) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        scalar_type,
+        "addmm_cuda_lt",
+        [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+        }
+        else {
+          okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
+              args.transa == 't',
+              args.transb == 't',
+              args.m,
+              args.n,
+              args.k,
+              alpha.to<at::opmath_type<scalar_t>>(),
+              args.mata->const_data_ptr<scalar_t>(),
+              args.lda,
+              args.matb->const_data_ptr<scalar_t>(),
+              args.ldb,
+              self.const_data_ptr<scalar_t>(),
+              args.result->data_ptr<float>(),
+              args.result_ld,
+              activation_epilogue
+          );
+        }});
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -530,7 +556,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_epilogue
           );
-        }});
+      }});
+    }
     if (!okay) {
       // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
@@ -538,7 +565,35 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #endif
   } else
   {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+    if (is_float_output_with_half_input) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        scalar_type,
+        "addmm_cuda",
+        [&] {
+          using opmath_t = at::opmath_type<scalar_t>;
+          opmath_t alpha_val = alpha.to<opmath_t>();
+          opmath_t beta_val = beta.to<opmath_t>();
+          const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
+
+          float* result_ptr = args.result->mutable_data_ptr<float>();
+          at::cuda::blas::gemm<scalar_t, float>(
+              args.transa,
+              args.transb,
+              args.m,
+              args.n,
+              args.k,
+              alpha_val,
+              mat1_ptr,
+              args.lda,
+              mat2_ptr,
+              args.ldb,
+              beta_val,
+              result_ptr,
+              args.result_ld);
+        });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
@@ -565,6 +620,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_ptr,
               args.result_ld);
         });
+    }
     switch (activation) {
       case Activation::RELU:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -637,39 +693,77 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   int64_t num_batches = result_->sizes()[0];
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
+  bool is_float_output_with_half_input = (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    opmath_t alpha_val = alpha.to<opmath_t>();
-    opmath_t beta_val = beta.to<opmath_t>();
-    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
-    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
-    const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
-    const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
-    // If batch is 1 call gemm rather than bgemm
-    if (num_batches == 1) {
-      at::cuda::blas::gemm<scalar_t>(
+  if (is_float_output_with_half_input) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(batch1.scalar_type(), "baddbmm_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t alpha_val = alpha.to<opmath_t>();
+      opmath_t beta_val = beta.to<opmath_t>();
+      const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+      const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+      const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+      const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
+
+      float* result_ptr = result_->mutable_data_ptr<float>();
+
+      // If batch is 1 call gemm rather than bgemm
+      if (num_batches == 1) {
+          at::cuda::blas::gemm<scalar_t, float>(
+              transa, transb,
+              m, n, k,
+              alpha_val,
+              batch1_ptr, lda,
+              batch2_ptr, ldb,
+              beta_val,
+              result_ptr, ldc);
+        } else {
+          at::cuda::blas::bgemm<scalar_t, float>(
+            transa, transb,
+            m, n, k,
+            alpha_val,
+            batch1_ptr, lda, batch1_->strides()[0],
+            batch2_ptr, ldb, batch2_->strides()[0],
+            beta_val,
+            result_ptr, ldc, result_->strides()[0],
+            num_batches
+          );
+        }
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, batch1.scalar_type(), "baddbmm_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t alpha_val = alpha.to<opmath_t>();
+      opmath_t beta_val = beta.to<opmath_t>();
+      const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+      const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+      const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+      const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
+      scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
+      // If batch is 1 call gemm rather than bgemm
+      if (num_batches == 1) {
+        at::cuda::blas::gemm<scalar_t>(
+            transa, transb,
+            m, n, k,
+            alpha_val,
+            batch1_ptr, lda,
+            batch2_ptr, ldb,
+            beta_val,
+            result_ptr, ldc);
+      } else {
+        at::cuda::blas::bgemm<scalar_t>(
           transa, transb,
           m, n, k,
           alpha_val,
-          batch1_ptr, lda,
-          batch2_ptr, ldb,
+          batch1_ptr, lda, batch1_->strides()[0],
+          batch2_ptr, ldb, batch2_->strides()[0],
           beta_val,
-          result_ptr, ldc);
-    } else {
-      at::cuda::blas::bgemm<scalar_t>(
-        transa, transb,
-        m, n, k,
-        alpha_val,
-        batch1_ptr, lda, batch1_->strides()[0],
-        batch2_ptr, ldb, batch2_->strides()[0],
-        beta_val,
-        result_ptr, ldc, result_->strides()[0],
-        num_batches
-      );
-   }
-  });
+          result_ptr, ldc, result_->strides()[0],
+          num_batches
+        );
+      }
+    });
+  }
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
@@ -950,43 +1044,31 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
-static bool _scaled_mm_allowed_device() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
+static bool _scaled_mm_allowed_device(bool sm90_only=false) {
 #ifdef USE_ROCM
-    std::string device_arch = dprops->gcnArchName;
     static const std::vector<std::string> archs = {
         "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1200", "gfx1201"
+        "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
     };
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
-    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (sm90_only) {
+      return dprops->major == 9;
+    } else {
+      return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+    }
 #endif
 }
 
 #ifdef USE_ROCM
 static bool _scaled_mm_is_fnuz() {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx942"};
-    for (std::string arch : archs) {
-        size_t substring = device_arch.find(arch);
-        if (substring != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
 
@@ -1425,16 +1507,20 @@ namespace {
     }
   }
 
-  bool transposed(const Tensor& mat) {
+  bool check_valid_strides_and_return_transposed(const Tensor& mat) {
     IntArrayRef tensor_strides = mat.strides();
     IntArrayRef tensor_sizes = mat.sizes();
     int end_dim = mat.dim() - 1;
+    int alignment = 16 / mat.element_size();
+    TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
     if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
+      TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
       return true;
     } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
+      TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
       return false;
     } else {
-      TORCH_CHECK(false, "Tensor should not be self-overlapping");
+      TORCH_CHECK(false, "Tensor should have a contiguous dimension and not be self-overlapping, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
     }
   }
 
@@ -1500,13 +1586,13 @@ const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
-  TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
-  TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
+  TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
+  TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
   TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
@@ -1524,7 +1610,7 @@ bool use_fast_accum) {
     ").");
 
 
-
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
@@ -1565,6 +1651,125 @@ bool use_fast_accum) {
   TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
 #endif
 
+}
+
+Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+#ifndef USE_ROCM
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+
+  TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  // check that the strides are valid, the fn will throw an error if not
+  check_valid_strides_and_return_transposed(mat_a);
+  check_valid_strides_and_return_transposed(mat_b);
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d");
+
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high output type is supported for grouped gemm");
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+
+  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
+  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
+  at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+  return out;
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#endif
+}
+
+Tensor _bmm_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype) {
+  IntArrayRef batch1_sizes = batch1.sizes();
+  IntArrayRef batch2_sizes = batch2.sizes();
+
+  Tensor out = at::empty({batch1_sizes[0], batch1_sizes[1], batch2_sizes[2]}, batch1.options().dtype(out_dtype));
+  return _bmm_out_dtype_cuda(batch1, batch2, out_dtype, out);
+}
+
+Tensor& _bmm_out_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+
+  Scalar beta(0.0);
+  Scalar alpha(1.0);
+  {
+    NoNamesGuard guard;
+    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
+  }
+
+  return out;
+}
+
+Tensor _baddbmm_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha) {
+  // We need to copy the tensor
+  Tensor out = self.clone().to(self.options().dtype(out_dtype));
+
+  return _baddbmm_out_dtype_cuda(out, batch1, batch2, out_dtype, beta, alpha, out);
+}
+
+Tensor& _baddbmm_out_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+
+  {
+    NoNamesGuard guard;
+    baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
+  }
+
+  return out;
+}
+
+Tensor _mm_dtype_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _mm_dtype_out_cuda(self, mat2, out_dtype, result);
+}
+
+Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "input dtypes must be the same");
+  TORCH_CHECK(out_dtype == self.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+
+  addmm_out_cuda_impl(const_cast<Tensor&>(out), out, self, mat2, 0, 1);
+
+  return out;
+}
+
+Tensor _addmm_dtype_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha) {
+  Tensor result = at::empty(self.sizes(), self.options().dtype(out_dtype));
+  return _addmm_dtype_out_cuda(self, mat1, mat2, out_dtype, beta, alpha, result);
+}
+
+Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(out_dtype == self.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
+
+  addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
+
+  return out;
 }
 
 

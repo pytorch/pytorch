@@ -403,6 +403,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     """
                 )
 
+        # Create a separate function for each input check to avoid "too big to optimize" error
+        for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+            self.prefix.splice(
+                f"""
+                AOTI_NOINLINE static void check_input_{idx}(
+                    AtenTensorHandle* input_handles
+                ) {{
+                """
+            )
+            with self.prefix.indent():
+                gen_check("input_handles", idx, name, tensor)
+            self.prefix.writeline("}")
+
         # force noinline to avoid any potential compilation slowdown due to aggressive
         # inline done by the host compiler
         self.prefix.splice(
@@ -422,8 +435,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
         with self.prefix.indent():
-            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
-                gen_check("input_handles", idx, name, tensor)
+            for idx in range(len(V.graph.graph_inputs)):
+                self.prefix.writeline(f"check_input_{idx}(input_handles);")
         self.prefix.writeline("}")
 
     def write_wrapper_decl(self):
@@ -475,13 +488,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
+                        __check_inputs_outputs(input_handles, output_handles);
                     """
 
                 self.generate_input_output_runtime_checks()
-                run_impl_proto += """
-                    __check_inputs_outputs(input_handles, output_handles);
-                """
-
                 self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
@@ -2041,11 +2051,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         lines = """
 RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache"));
-if (codecache_module.get() == NULL) {
+if (!codecache_module) {
     throw std::runtime_error("Failed to load torch._inductor.codecache");
 }
 custom_op_wrapper = PyObject_GetAttrString(codecache_module, "custom_op_wrapper");
-if (custom_op_wrapper.get() == NULL) {
+if (!custom_op_wrapper) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
 
@@ -2070,11 +2080,6 @@ if (custom_op_wrapper.get() == NULL) {
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
-            def add_py_newref():
-                if sys.version_info < (3, 10):
-                    # Py_NewRef is only available since Python 3.10
-                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
-
             def handle_scalar(scalar):
                 if isinstance(scalar, int):
                     return f"PyLong_FromLongLong({scalar})"
@@ -2135,24 +2140,13 @@ if (custom_op_wrapper.get() == NULL) {
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
-                # device
-                self.include_extra_header("torch/csrc/Device.h")
                 device_str, device_index = self.codegen_device(raw_arg).split(", ")
                 return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
             elif isinstance(raw_arg, torch.dtype):
-                # dtype
-                add_py_newref()
-                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             elif isinstance(raw_arg, torch.layout):
-                # memory layout
-                add_py_newref()
-                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
-                # memory_format
-                add_py_newref()
-                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
                 return (
                     "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
                     f"{self.codegen_memory_format(raw_arg)})))"
@@ -2204,7 +2198,7 @@ if (custom_op_wrapper.get() == NULL) {
         lines = textwrap.dedent(
             f"""
             RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
-            if ({py_args_var}.get() == NULL) {{
+            if (!{py_args_var}) {{
                 throw std::runtime_error("PyTuple_New {py_args_var} failed");
             }}
             PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
@@ -2224,7 +2218,7 @@ if (custom_op_wrapper.get() == NULL) {
             f"""
             // Call the custom op in Python
             RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
-            if (py_{buf_name}.get() == NULL) {{
+            if (!py_{buf_name}) {{
                 if (PyErr_Occurred()) {{
                     return;
                 }}
