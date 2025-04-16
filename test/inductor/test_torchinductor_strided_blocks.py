@@ -1039,7 +1039,7 @@ class CommonTemplate:
 
     def test_expand_clone_broadcast(self):
         """
-        Test expand followed by clone. This maps to an explicit Triton broadcast.
+        Test expand followed by clone. This uses explicit Triton broadcasts.
         """
         base_size = (1, 32)
         expanded_size = (32, 32)
@@ -1059,6 +1059,10 @@ class CommonTemplate:
                 "triton.prefer_nd_tiling": True,
             },
         )
+
+        # We should only need one broadcast.
+        num_broadcasts = triton_code.count("tl.broadcast_to")
+        self.assertEqual(num_broadcasts, 1)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

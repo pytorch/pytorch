@@ -2103,6 +2103,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #  2. In case the block pointer has higher dimensionality, broadcast/reshape the
         #     result to the block shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
+
+        # These dims no longer need broadcasting.
+        for idx, (dim, broadcast_dim) in enumerate(
+            zip(indexing.final_shape, indexing.broadcast_shape)
+        ):
+            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
+                indexing.broadcasting_dims[idx] = False
+
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
