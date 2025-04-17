@@ -105,6 +105,7 @@ class CutlassEVTCodegen:
                 index = data._index(data.ranges)
                 result = data.inner_fn(index)
                 name = node.get_computed_buffer_name()
+                assert name is not None, "Computed buffer name is required for EVT"
                 # EVT requires an output to be named D lol
                 if not D_defined:
                     codegen.output.writeline(f"D = {result}")
