@@ -3037,5 +3037,45 @@ class TestGuardsExpressions(TestCase):
             func(torch.tensor([100]), torch.tensor([1]))
 
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_unbacked_float(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(b.item()*2==11)
+            return b*10
+ 
+        func(torch.tensor([100]), torch.tensor([5.5]))
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([5]), torch.tensor([1.8]))        
+
+        @torch.compile(fullgraph=True)
+        def func2(a, b):
+            torch._check(b.item() == 5.5)
+            return a * 10
+
+        func2(torch.tensor([5]), torch.tensor([5.5]))
+        with self.assertRaises(RuntimeError):
+            func2(torch.tensor([100]), torch.tensor([1.5]))
+
+        @torch.compile(fullgraph=True)
+        def func3(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+            return a.item() * 10
+
+        func3(torch.tensor([5.1]), torch.tensor([100]))
+        func3(torch.tensor([100]), torch.tensor([5.1]))
+        with self.assertRaises(RuntimeError):
+            func3(torch.tensor([100]), torch.tensor([5.2]))
+
+        @torch.compile(fullgraph=True)
+        def func(a):
+            torch._check(a.item() != 5)
+            return a.item() * 10
+
+        func(torch.tensor([100]))
+
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([5]))
+
 if __name__ == "__main__":
     run_tests()

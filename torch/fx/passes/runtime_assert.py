@@ -576,6 +576,8 @@ def insert_deferred_runtime_asserts(
                         if s in (int_oo, -int_oo):
                             return None
                         try:
+                            if isinstance(s, sympy.core.numbers.Float):
+                                return float(s)
                             return int(s)
                         except TypeError:
                             return None

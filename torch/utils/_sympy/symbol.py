@@ -96,6 +96,8 @@ def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Iterable[SymT]]) -> boo
     else:
         return name_str.startswith(tuple(prefix_str[p] for p in prefix))
 
+def symbol_name_is_type(name_str: str, type: SymT) -> bool:
+    return name_str.startswith(prefix_str[prefix])
 
 def free_symbol_is_type(e: sympy.Expr, prefix: Union[SymT, Iterable[SymT]]) -> bool:
     return any(symbol_is_type(v, prefix) for v in e.free_symbols)
