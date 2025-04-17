@@ -27,7 +27,7 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
 from torch.utils._triton import has_triton
 
 
@@ -722,19 +722,19 @@ class TestFlexDecoding(InductorTestCase):
     @expectedFailure  # tl.dot does not support embedding size less than 16
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    def test_bw_decoding_fails(self, dtype):
+    def test_bw_decoding_fails(self, device, dtype):
         make_kv = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
             dtype=dtype,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
         make_q = functools.partial(
             torch.randn,
             (2, 2, 8, 4),
             dtype=dtype,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
         q, k, v, backward_grad = make_q(), make_kv(), make_kv(), make_q()
@@ -1004,12 +1004,12 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
-    def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self):
+    def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self, device):
         KV_S = S - 3
         Q_S = 3
-        offset_kv = torch.randn(KV_S, device=GPU_TYPE, dtype=torch.bfloat16)
-        offset_q = torch.randn(Q_S, device=GPU_TYPE, dtype=torch.bfloat16)
-        offset_tensor = torch.tensor(S // 2 - 3, device=GPU_TYPE, dtype=torch.int32)
+        offset_kv = torch.randn(KV_S, device=device, dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device=device, dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device=device, dtype=torch.int32)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_kv[kv] + offset_q[q]
@@ -1017,7 +1017,7 @@ class TestFlexDecoding(InductorTestCase):
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=self.device)
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=device)
         self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
 
     @supported_platform
@@ -1682,19 +1682,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
-    def test_logsumexp_correctness(self, dtype, score_mod):
+    def test_logsumexp_correctness(self, device, dtype, score_mod):
         make_kv = functools.partial(
             torch.randn,
             (B, Hkv, S, D),
             dtype=dtype,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
         make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=dtype,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
         q, k, v = make_q(), make_kv(), make_kv()
@@ -1734,19 +1734,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
-    def test_logsumexp_only_return(self):
+    def test_logsumexp_only_return(self, device):
         make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=torch.float32,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
         make_kv = functools.partial(
             torch.randn,
             (B, Hkv, S, D),
             dtype=torch.float32,
-            device=GPU_TYPE,
+            device=device,
             requires_grad=True,
         )
 
@@ -1998,7 +1998,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
 
 
-instantiate_device_type_tests(TestFlexDecoding, globals(), only_for=test_device)
+instantiate_device_type_tests(TestFlexDecoding, globals(), only_for=test_device, allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
