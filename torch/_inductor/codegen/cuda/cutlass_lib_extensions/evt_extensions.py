@@ -1,6 +1,10 @@
 from typing import Any, Union
 
-from torch._inductor.ir import ComputedBuffer, InputBuffer
+from torch._inductor.ir import (
+    ComputedBuffer,
+    InputBuffer,
+    is_contiguous_strides_for_shape,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
@@ -61,34 +65,28 @@ if try_import_cutlass():
         torch.bfloat16: DataType.bf16,
     }
 
-    def _check_contiguous(shape: tuple[int, ...], stride: tuple[int, ...]) -> bool:
-        if len(shape) != len(stride):
-            return False
-
-        running_product = 1
-        for shape_i, stride_i in zip(shape, stride):
-            if shape_i == 1:
-                continue
-            if stride_i != running_product:
-                return False
-            running_product *= shape_i
-
-        return True
-
     def create_example_tensors(
         read_names: list[str],
         write_names: list[str],
         buffer_renames: dict[str, str],
-        name_to_buffer: dict[str, Union[ComputedBuffer, InputBuffer]],
-    ):
+        name_to_buffer: dict[str, Buffer],
+    ) -> dict[str, CutlassTensor]:
         example_tensors = {}
 
-        def cutlass_tensor_from_buffer(buffer: Union[ComputedBuffer, InputBuffer]):
-            shape = tuple(int(x) for x in buffer.get_layout().size)
-            stride = tuple(int(x) for x in buffer.get_layout().stride)
+        def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
+            shape = buffer.get_layout().size
+            stride = buffer.get_layout().stride
+            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+                f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
+            )
+            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+                f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
+            )
+            shape = tuple(int(x) for x in shape)
+            stride = tuple(int(x) for x in stride)
 
-            is_column_major = _check_contiguous(shape, stride)
-            is_row_major = _check_contiguous(shape[::-1], stride[::-1])
+            is_column_major = is_contiguous_strides_for_shape(stride, shape)
+            is_row_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
 
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
