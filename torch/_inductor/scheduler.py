@@ -485,7 +485,9 @@ class BaseSchedulerNode:
                     continue
 
                 if (
-                    buf_to_be_inplaced.scheduler.get_fused_node(user_node)
+                    user_node.get_first_name()
+                    not in buf_to_be_inplaced.scheduler.name_to_fused_node
+                    or buf_to_be_inplaced.scheduler.get_fused_node(user_node)
                     is not fused_node
                 ):
                     continue
