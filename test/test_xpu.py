@@ -256,6 +256,15 @@ if __name__ == "__main__":
             ):
                 start_event.elapsed_time(end_event)
 
+        event = torch.xpu.Event(enable_timing=True)
+        self.assertEqual(event.sycl_event, 0)
+        self.assertEqual(event.event_id, 0)
+
+        event.record()
+        self.assertNotEqual(event.sycl_event, 0)
+        self.assertNotEqual(event.event_id, 0)
+        self.assertEqual(event.sycl_event, event.event_id)
+
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
         self.assertEqual(stream.device_index, torch.xpu.current_device())

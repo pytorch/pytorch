@@ -961,6 +961,15 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+        event = torch.cuda.Event(enable_timing=True)
+        self.assertEqual(event.cuda_event, 0)
+        self.assertEqual(event.event_id, 0)
+
+        event.record()
+        self.assertNotEqual(event.cuda_event, 0)
+        self.assertNotEqual(event.event_id, 0)
+        self.assertEqual(event.cuda_event, event.event_id)
+
     def test_events_elapsedtime(self):
         event1 = torch.cuda.Event(enable_timing=False)
         event2 = torch.cuda.Event(enable_timing=False)
