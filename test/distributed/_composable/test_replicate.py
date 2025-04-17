@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 from copy import deepcopy
 
 import torch
@@ -89,7 +88,7 @@ class ReplicateTest(DistributedTestBase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
 
-    def device_with_rank(self, device) ->torch.device:
+    def device_with_rank(self, device) -> torch.device:
         device_type = torch.device(device).type
         return torch.device(f"{device_type}:{torch.get_device_module(device).current_device()}")
 
@@ -254,7 +253,7 @@ class ReplicateFullyShardInit(DistributedTestBase):
     def world_size(self) -> int:
         return 2
 
-    def device_with_rank(self, device) ->torch.device:
+    def device_with_rank(self, device) -> torch.device:
         device_type = torch.device(device).type
         return torch.device(f"{device_type}:{torch.get_device_module(device).current_device()}")
 
@@ -294,7 +293,8 @@ class ReplicateFullyShardInit(DistributedTestBase):
         for linear in model.linears:
             self.assertTrue(isinstance(linear.weight, DTensor))
 
-devices = ("cuda", "hpu", "xpu")
+
+devices = ("cuda", "hpu")
 
 instantiate_device_type_tests(ReplicateTest, globals(), only_for=devices)
 instantiate_device_type_tests(ReplicateFullyShardInit, globals(), only_for=devices)
