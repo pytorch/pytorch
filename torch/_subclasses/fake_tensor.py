@@ -1788,9 +1788,9 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        if output is None:
+        if isinstance(output, (int, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
-                inplace_idx=None, metadata=None, view_idx=None
+                inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )
             return _DispatchCacheEntry(
                 output_infos=(output_info,), is_output_tuple=False
