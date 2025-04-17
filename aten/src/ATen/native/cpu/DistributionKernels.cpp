@@ -60,19 +60,10 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    MKLGeneratorImpl* mklGenerator = get_generator_or_default<MKLGeneratorImpl>(gen, detail::getDefaultMKLGenerator());
-    CPUGeneratorImpl* cpuGenerator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    {
-      std::scoped_lock lock(mklGenerator->mutex_, cpuGenerator->mutex_);
-      if (!mklGenerator->get_lock_seed()) {
-        uint64_t seed = cpuGenerator->random();
-        mklGenerator->set_current_seed(seed);
-        mklGenerator->set_lock_seed(true);
-      }
-    }
-
     scalar_t *self_ptr = self.data_ptr<scalar_t>();
     int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
+
+    auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
@@ -158,16 +149,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       // Variance:    V[X+eps] = 1/lambda**2
       auto eps = std::numeric_limits<tmp_scalar_t>::min();
 
-      MKLGeneratorImpl* mklGenerator = get_generator_or_default<MKLGeneratorImpl>(gen, detail::getDefaultMKLGenerator());
-      CPUGeneratorImpl* cpuGenerator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-      {
-        std::scoped_lock lock(mklGenerator->mutex_, cpuGenerator->mutex_);
-        if (!mklGenerator->get_lock_seed()) {
-          uint64_t seed = cpuGenerator->random();
-          mklGenerator->set_current_seed(seed);
-          mklGenerator->set_lock_seed(true);
-        }
-      }
+      auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
 
       auto sample = [&](int64_t begin, int64_t end) {
         int64_t len = end - begin;

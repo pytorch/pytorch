@@ -33,8 +33,7 @@ Generator createMKLGenerator(uint64_t seed_val) {
 MKLGeneratorImpl::MKLGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     seed_(seed_in),
-    offset_(0),
-    lock_seed_(false) {
+    offset_(0) {
     vslNewStream(&stream_, VSL_BRNG_MCG59, seed_);
   }
 
@@ -65,25 +64,6 @@ uint64_t MKLGeneratorImpl::seed() {
  */
 uint64_t MKLGeneratorImpl::current_seed() const {
   return this->seed_;
-}
-
-/**
- * Sets the lock_seed_ flag of MKLGenerator.
- * See Note [Acquire lock when using random generators]
- *
- * The MKLGenerator uses lock_seed_ as a flag to denote whether
- * it was already initialised with a seed from CPUGenerator in order to
- * avoid the issue in https://github.com/pytorch/pytorch/issues/132395.
- */
-void MKLGeneratorImpl::set_lock_seed(bool lock_seed) {
-  this->lock_seed_ = lock_seed;
-}
-
-/**
- * Gets the lock_seed_ flag of MKLGenerator.
- */
-bool MKLGeneratorImpl::get_lock_seed() const {
-  return this->lock_seed_;
 }
 
 /**
