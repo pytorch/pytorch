@@ -617,7 +617,7 @@ class SymInt:
 
 class SymFloat:
     """
-    Like an float (including magic methods), but redirects all operations on the
+    Like a float (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
     """
@@ -736,7 +736,7 @@ class SymFloat:
 
 class SymBool:
     """
-    Like an bool (including magic methods), but redirects all operations on the
+    Like a bool (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
 
@@ -2295,7 +2295,6 @@ class _TorchCompileInductorWrapper:
 
     def __init__(self, mode, options, dynamic):
         from torch._inductor.compiler_bisector import CompilerBisector
-        from torch.torch_version import TorchVersion
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
@@ -2303,11 +2302,14 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
+        cuda_version = None
+        if hasattr(torch, "version"):
+            from torch.torch_version import TorchVersion
+
+            cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
         if self.config.get("triton.cudagraphs", False) and (
-            (
-                getattr(torch.version, "cuda", None)
-                and TorchVersion(torch.version.cuda) < "12.6"
-            )
+            (cuda_version and cuda_version < "12.6")
             or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
         ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"

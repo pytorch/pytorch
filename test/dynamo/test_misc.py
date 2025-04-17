@@ -7597,11 +7597,22 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch._check(u0 == s0 + s1)
             return x, y, z
 
-        inputs = (x := torch.randn(16, 10), y := torch.randn(16, 10), torch.tensor(32))
+        inputs = (
+            x := torch.randn(16, 10),
+            y := torch.randn(16, 10),
+            torch.tensor(32 - 7),
+        )
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch.compile(fn, fullgraph=True)
         opt(*inputs)
+        with self.assertRaises(RuntimeError):
+            inputs = (
+                x := torch.randn(16, 10),
+                y := torch.randn(16, 10),
+                torch.tensor(32),
+            )
+            opt(*inputs)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(assume_static_by_default=True)
@@ -11888,6 +11899,10 @@ fn
         self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
+        class Bar:
+            def __init__(self, v):
+                self.v = v
+
         class Foo:
             attribute_map = {}
 
@@ -11895,6 +11910,9 @@ fn
                 self.attribute_map = {
                     "a_premap": "a",
                 }
+                # `bar` attribute requires propagating sources correctly through
+                # object.__getattribute__
+                self.bar = Bar(5)
 
             def __setattr__(self, key, value):
                 if key in super().__getattribute__("attribute_map"):
@@ -11922,7 +11940,7 @@ fn
             return f
 
         def fn(x, f):
-            return x * f.a_premap * f.a * f.b * f.sentinel
+            return x * f.a_premap * f.a * f.b * f.sentinel * f.bar.v
 
         x = torch.randn(4)
 

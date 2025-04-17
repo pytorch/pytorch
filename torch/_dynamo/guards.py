@@ -65,7 +65,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger
+from torch._dynamo.utils import CompileEventLogger, get_metrics_context
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -103,6 +103,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
@@ -968,28 +969,20 @@ class GuardBuilder(GuardBuilderBase):
             # duplicate names in the case of cells: a name can be both local and cell
             # and will take up 2 slots of the frame's localsplus. The correct behavior
             # is to refer to the cell, which has a higher index.
-            if config.enable_cpp_framelocals_guard_eval:
-                framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                    self.f_code
-                )
-                framelocals_idx = (
-                    len(framelocals_names_reversed)
-                    - framelocals_names_reversed.index(source.local_name)
-                    - 1
-                )
-                out = root_guard_manager.framelocals_manager(
-                    key=(source.local_name, framelocals_idx),
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-            else:
-                out = root_guard_manager.dict_getitem_manager(
-                    key=source.local_name,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+            framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                self.f_code
+            )
+            framelocals_idx = (
+                len(framelocals_names_reversed)
+                - framelocals_names_reversed.index(source.local_name)
+                - 1
+            )
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1044,6 +1037,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GenericAttrSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.generic_getattr_manager(
+                attr=source.member,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -2143,6 +2144,12 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
 
+            if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
+                metrics_context = get_metrics_context()
+                metrics_context.increment("param_numel", value.numel())
+                metrics_context.increment("param_bytes", value.nbytes)
+                metrics_context.increment("param_count", 1)
+
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
@@ -2493,10 +2500,13 @@ class CheckFunctionManager:
         if guard_filter_fn:
 
             def make_guard_filter_entry(guard):
+                MISSING = object()
                 name = strip_local_scope(guard.name)
                 if name == "":
-                    value = None
+                    has_value = False
+                    value = MISSING
                 else:
+                    has_value = True
                     value = builder.get(guard.name)
                 is_global = is_from_global_source(guard.originating_source)
                 guard_fn = guard.create_fn
@@ -2504,6 +2514,7 @@ class CheckFunctionManager:
                     guard_fn = guard.create_fn.func
                 return GuardFilterEntry(
                     name=name,
+                    has_value=has_value,
                     value=value,
                     guard_type=guard_fn.__name__,
                     derived_guard_types=tuple(guard.guard_types)

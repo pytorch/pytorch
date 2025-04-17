@@ -859,7 +859,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
     def tearDown(self):
         SparseSemiStructuredTensor._FORCE_CUTLASS = False
-        super(self.__class__, self).tearDown()
+        super().tearDown()
 
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
