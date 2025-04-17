@@ -19,16 +19,13 @@ from torch.distributed.tensor._random import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests, TEST_HPU
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     skip_unless_torch_gpu,
     with_comms,
 )
-
-
-TYPE_DEVICE = "hpu" if TEST_HPU else "cuda"
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
@@ -50,7 +47,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
             # create DTensor from Tensor
-            _tensor = torch.empty(*input_size, device=TYPE_DEVICE)
+            _tensor = torch.empty(*input_size, device=self.device_type)
             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
 
             # DTensor random init
@@ -94,7 +91,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # torch random generator keeps different seeds on ranks. This ensures
         # that Replicate DTensor will have the same initialized results
         # across ranks.
-        torch.cuda.manual_seed(self.rank)
+        torch.get_device_module(self.device_type).manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -219,7 +216,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -261,7 +260,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # seed synchronization now does NOT happen after the first `distribute_tensor`
         # call
         dt = distribute_tensor(
-            torch.empty([self.world_size], device=TYPE_DEVICE), device_mesh, [Shard(0)]
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0)],
         )
         self.assertTrue(random._rng_tracker is None)
         # seed synchronization only happens after `manual_seed` or the first DTensor
@@ -361,7 +362,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         size = [4, 4]
 
         dtensor = distribute_tensor(
-            torch.empty(*size, device=TYPE_DEVICE), device_mesh, [Shard(1)]
+            torch.empty(*size, device=self.device_type), device_mesh, [Shard(1)]
         )
 
         # a random op call shifts the offset
@@ -506,13 +507,11 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     shard_dim = placement.dim
                     local_shard_list_on_dim[shard_dim] = []
                     for shard_idx_on_dim in range(mesh_dim_size):
-                        (
-                            shard_size,
-                            shard_offset,
-                        ) = placement._local_shard_size_and_offset(
+                        shard_size, shard_offset = placement._local_shard_size_on_dim(
                             dtensor_shape[shard_dim],
                             mesh_dim_size,
                             shard_idx_on_dim,
+                            return_offset=True,
                         )
                         local_shard_list_on_dim[shard_dim].append(
                             (shard_offset, shard_size)
@@ -566,7 +565,9 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
