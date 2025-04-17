@@ -129,6 +129,8 @@ __all__ = [
     "ShapeEnv",
     "is_concrete_int",
     "is_concrete_float",
+    "is_concrete_bool",
+    "has_static_value",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -137,7 +139,6 @@ __all__ = [
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
-    "is_concrete_bool",
     "is_nested_int",
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
@@ -397,6 +398,46 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
 
     if isinstance(a.node.expr, sympy.core.numbers.Float):
         return True
+
+    return False
+
+
+def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
+    """
+    Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(
+        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
+    ):
+        return True
+
+    return False
+
+
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]):
+    assert isinstance(a, (SymBool, SymFloat, SymInt, bool, float, int))
+    if (
+        isinstance(a, (SymBool, bool)) and is_concrete_bool(a)
+        or isinstance(a, (SymBool, float)) and is_concrete_float(a)
+        or isinstance(a, (SymBool, int)) and is_concrete_int(a)
+    ):
+        return True
+
+    if (
+        (fake_mode := torch._guards.detect_fake_mode())
+        and (shape_env := fake_mode.shape_env)
+    ):
+        return shape_env.bound_sympy(a.node.expr).is_singleton()
 
     return False
 
@@ -770,28 +811,6 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     elif expr.is_Mul:
         return div_by_factor(expr, integer_coefficient(expr))
     return expr
-
-
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    """
-    Utility to check if underlying object
-    in SymBool is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymBool or bool): Object to test if it bool
-    """
-    assert isinstance(a, (SymBool, bool))
-
-    if isinstance(a, bool):
-        return True
-
-    if isinstance(
-        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
-    ):
-        return True
-
-    return False
 
 
 def is_nested_int(s: Union[int, SymInt]) -> TypeGuard[SymInt]:

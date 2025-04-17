@@ -1498,20 +1498,37 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
 
-    def test_user_code_statically_known_true(self):
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_user_code_statically_known(self):
+        from torch.fx.experimental.symbolic_shapes import has_static_value, statically_known_true
 
         @torch.compile(fullgraph=True)
         def f(x):
-            if statically_known_true(x.shape[0] > 50):
-                x += 1
-            else:
+            if statically_known_true(x.shape[0] > 9):
                 x -= 1
+            else:
+                x += 1
+            if has_static_value(x.shape[0]):
+                x -= 1
+            else:
+                x += 1
             return x
 
-        x = torch.ones(51)
+        x = torch.zeros(10)
         torch._dynamo.mark_dynamic(x, 0)
-        self.assertEqual(f(x).sum(), 0)
+        self.assertEqual(f(x).sum(), 20)
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def g(x, y):
+            n = x.item()
+            torch._check(n == 3)
+            if has_static_value(4.0) and has_static_value(n):
+                y += 1
+            return y
+
+        x = torch.tensor([3])
+        y = torch.zeros(1)
+        self.assertEqual(g(x, y).item(), 1)
 
     def test_dictcomp(self):
         def fn1(inputs):
