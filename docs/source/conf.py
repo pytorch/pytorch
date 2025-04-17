@@ -3733,6 +3733,7 @@ def setup(app):
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
+    app.config.add_last_updated = True
     from pytorch_sphinx_theme2 import add_date_info_to_page
     app.connect("html-page-context", add_date_info_to_page)
     return {"version": "0.1", "parallel_read_safe": True}
