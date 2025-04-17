@@ -10,7 +10,7 @@ This note will eventually contain more details on how to use the APIs in torch/c
 | -------- | ------- | ------- | ------- |
 | std::optional\<S> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue representing S | std::optional\<T> | Type? |
 | std::nullopt | nullptr | IValue() | None |
-| RAIIATH | raw bitwise copy into leading bytes of uint64_t | at::Tensor |  Tensor |
+| RAIIATH | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
 | int32_t | raw bitwise copy into leading bytes of uint64_t | at::ScalarType | ScalarType |
 | int32_t | raw bitwise copy into leading bytes of uint64_t | at::Layout | Layout |
 | int32_t | raw bitwise copy into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
