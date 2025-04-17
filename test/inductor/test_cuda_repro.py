@@ -21,6 +21,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import (
+    IS_BIG_GPU,
     run_and_get_code,
     run_and_get_graph_lowering,
     run_fw_bw_and_get_code,
@@ -1117,6 +1118,10 @@ class CudaReproTests(TestCase):
         autotuner from catching failures. And set compile_threads=1 so that compile
         failures aren't caught by the asyn runner infra.
         """
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
             z = torch.mm(x, y)

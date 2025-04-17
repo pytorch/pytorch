@@ -475,6 +475,11 @@ class TestKernelBenchmark(TestCase):
     @config.patch(compile_threads=1)
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_remove_inductor_deps_templates(self):
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
+
         @torch.compile
         def f(a):
             a = torch.mm(a, a)
