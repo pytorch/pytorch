@@ -10847,6 +10847,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             _ = math.pow(x, 3)  # calling it again does not result in a second warning
             self.assertEqual(len(w), 1)
 
+    def test_arange_with_int64(self):
+        self.assertEqual(torch.arange(0, 0.5, 1, dtype=torch.int64).numel(), 1)
+        self.assertEqual(torch.arange(0, 1.5, 1, dtype=torch.int64).numel(), 2)
+        self.assertEqual(torch.arange(1.1, 5, 1, dtype=torch.int64).numel(), 4)
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
