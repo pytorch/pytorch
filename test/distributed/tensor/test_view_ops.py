@@ -205,6 +205,7 @@ class TestViewOps(DTensorTestBase):
         ):
             shard.view(-1)
 
+        # 8 is the uneven case since mesh dim is 6
         tensor = torch.randn((8, 256))
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])

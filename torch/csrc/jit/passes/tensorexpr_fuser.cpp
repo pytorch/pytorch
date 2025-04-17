@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -1436,7 +1437,7 @@ static Operation createTensorExprOp(const Node* node) {
   };
 }
 
-RegisterOperators TensorExprOps({
+static RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
         createTensorExprOp,

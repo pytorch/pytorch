@@ -507,7 +507,7 @@ def propagate_shape_and_sharding(
 
     def is_sharded(input_dim: InputDim) -> bool:
         for placement in input_src_placements:
-            if isinstance(placement, Shard) and placement.dim == input_dim:
+            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
                 return True
         return False
 
@@ -516,7 +516,7 @@ def propagate_shape_and_sharding(
     ) -> tuple[int, Shard]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
-            if isinstance(placement, Shard) and placement.dim == input_dim:
+            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
                 return i, placement
         raise RuntimeError("input_dim is not sharded")
 
