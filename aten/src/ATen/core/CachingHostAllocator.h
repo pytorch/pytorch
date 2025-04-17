@@ -605,6 +605,11 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }
 
+  // Check ptr if it is a pinned memory.
+  virtual bool is_pinned(void* ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for is_pinned");
+  }
+
   alignas(64) std::mutex blocks_mutex_;
   ska::flat_hash_set<B*> blocks_; // block list
   ska::flat_hash_map<void*, B*> ptr_to_block_;
@@ -641,6 +646,9 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Resets the peak memory usage metrics
   virtual void reset_peak_stats() = 0;
+
+  // Checks if the given pointer is a pinned memory allocation
+  virtual bool is_pinned(void* ptr) = 0;
 };
 
 template <typename T, c10::DeleterFnPtr deleteFunc>
@@ -683,6 +691,10 @@ struct CachingHostAllocatorInterface : public HostAllocator {
 
   void reset_peak_stats() override {
     impl_->resetPeakStats();
+  }
+
+  bool is_pinned(void* ptr) override {
+    return impl_->is_pinned(ptr);
   }
 
   std::unique_ptr<T> impl_;
