@@ -24,8 +24,6 @@ struct TORCH_API MKLGeneratorImpl : public c10::GeneratorImpl {
   static c10::DeviceType device_type();
   void get_stream_copy(VSLStreamStatePtr &streamCopy);
   void skip_ahead(uint64_t n);
-  void set_lock_seed(bool lock_seed);
-  bool get_lock_seed() const;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
 
@@ -35,7 +33,6 @@ struct TORCH_API MKLGeneratorImpl : public c10::GeneratorImpl {
   VSLStreamStatePtr stream_;
   uint64_t seed_;
   uint64_t offset_;
-  bool lock_seed_;
 };
 
 namespace detail {
