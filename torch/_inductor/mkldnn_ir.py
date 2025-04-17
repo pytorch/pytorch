@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -22,6 +22,7 @@ from .ir import (
     MultiOutputLayout,
     MutationOutput,
     NoneLayout,
+    ShapeAsConstantBuffer,
     TensorBox,
 )
 from .utils import convert_shape_to_inductor, pad_listlike
@@ -590,8 +591,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: "TensorBox",
-        x_zero_point: "TensorBox",
+        x_scale: Union["ShapeAsConstantBuffer", "TensorBox"],
+        x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
@@ -626,7 +627,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups,
             transposed,
             output_padding,
-            [x_scale, x_zero_point, w_scale, w_zero_point],
+            [x_scale, x_zero_point, w_scale, w_zero_point],  # type: ignore[list-item]
         )
         # swap padding and stride to align with functional conv arg order
         if bias is None:

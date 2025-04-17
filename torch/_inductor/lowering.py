@@ -6931,6 +6931,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    assert isinstance(result, Sequence)
     return list(map(_map_output, result))
 
 
