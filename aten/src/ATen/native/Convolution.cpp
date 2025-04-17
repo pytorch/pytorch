@@ -1225,7 +1225,7 @@ static ConvBackend _select_conv_backend(
       return ConvBackend::MiopenDepthwise;
     } else if (input.is_xpu() || weight.is_xpu()){
       // XPU uses Overrideable backend and treats depthwise conv as normal conv with groups=ic.
-      return ConvBackend::Overrideable; 
+      return ConvBackend::Overrideable;
     } else {
       if (input.ndimension() == 4) {
         return ConvBackend::CudaDepthwise2d;
