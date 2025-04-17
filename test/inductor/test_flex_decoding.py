@@ -54,6 +54,8 @@ if HAS_GPU:
         test_dtypes_fast = [torch.float16]
         SKIP_UT_ON_CPU = False
     elif TEST_ON_XPU:
+        # TODO: Pending on oneDNN's tf32 support.
+        torch.backends.cuda.matmul.allow_tf32 = False
         test_device = ("xpu",)
         test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
         test_dtypes_fast = [torch.float16]

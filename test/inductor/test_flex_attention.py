@@ -41,7 +41,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton
 
 
@@ -108,6 +108,7 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 if HAS_GPU:
     if TEST_ON_CUDA:
@@ -119,7 +120,9 @@ if HAS_GPU:
         )
         test_dtypes_fast = [torch.float16]
         SKIP_UT_ON_CPU = False
-    elif HAS_XPU:
+    elif TEST_ON_XPU:
+        # TODO: Pending on oneDNN's tf32 support.
+        torch.backends.cuda.matmul.allow_tf32 = False
         test_device = ("xpu",)
         test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
         test_dtypes_fast = [torch.float16]
@@ -5598,7 +5601,7 @@ class TestLearnableBiases(InductorTestCase):
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
 
-    def test_inspect_bug(self):
+    def test_inspect_bug(self, device):
         # https://github.com/pytorch/pytorch/issues/139374
         def sliding_window(b, h, q_idx, kv_idx, val):
             return (q_idx - kv_idx).abs() < val
