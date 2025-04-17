@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -118,7 +119,7 @@ def normalize_dim(dim: int, ndim: int) -> int:
     return dim if dim >= 0 else dim + ndim
 
 
-def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
+def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     """Normalize a dim or a sequence of dims, so that they are all positive."""
     if isinstance(dims, int):
         dims = (normalize_dim(dims, ndim),)
