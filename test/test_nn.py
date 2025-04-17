@@ -11532,15 +11532,6 @@ class TestNNDeviceType(NNTestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
-    @expectedFailureMPS
-    def test_ctc_loss_error(self, device):
-        log_probs = torch.rand(0, 0, 4, device=device)
-        targets = torch.tensor([], device=device, dtype=torch.long)
-        input_lengths = torch.tensor([], device=device, dtype=torch.long)
-        target_lengths = torch.tensor([], device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
-            F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)

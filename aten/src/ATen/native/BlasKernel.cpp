@@ -116,7 +116,7 @@ void fp16_gemv_trans(
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
-static void bf16_gemv_trans(
+void bf16_gemv_trans(
     const int m,
     const int n,
     const at::BFloat16 alpha,
@@ -146,14 +146,14 @@ void fp16_gemv_notrans(
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
-static bool scal_use_fast_path(
+bool scal_use_fast_path(
     [[maybe_unused]] int64_t n,
     [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-static bool gemv_use_fast_path(
+bool gemv_use_fast_path(
     [[maybe_unused]] char trans,
     [[maybe_unused]] int64_t m,
     [[maybe_unused]] int64_t n,
@@ -166,7 +166,7 @@ static bool gemv_use_fast_path(
 }
 
 template <typename scalar_t>
-static void scal_fast_path(
+void scal_fast_path(
     [[maybe_unused]] int* n,
     [[maybe_unused]] scalar_t* a,
     [[maybe_unused]] scalar_t* x,
@@ -176,7 +176,7 @@ static void scal_fast_path(
 }
 
 template <typename scalar_t>
-static void gemv_fast_path(
+void gemv_fast_path(
     [[maybe_unused]] const char* trans,
     [[maybe_unused]] const int* m,
     [[maybe_unused]] const int* n,

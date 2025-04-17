@@ -282,16 +282,18 @@ class BlockPtrOptions:
         # We need an explicit broadcast for stores, or if the final reshape does more
         # than add singletons.
         sizevars = V.graph.sizevars
-        supports_implicit_broadcast = allow_implicit and (
-            len(pre_broadcast_shape) == len(final_shape)
-            and all(
-                sizevars.statically_known_equals(pre_dim, 1)
-                or sizevars.statically_known_equals(pre_dim, post_dim)
+        require_broadcast = any(self.broadcasting_dims) and (
+            len(pre_broadcast_shape) != len(final_shape)
+            or any(
+                not (
+                    sizevars.statically_known_equals(pre_dim, 1)
+                    or sizevars.statically_known_equals(pre_dim, post_dim)
+                )
                 for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
         )
 
-        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
+        if not allow_implicit or require_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         # Reshape to the final shape.
@@ -2101,20 +2103,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Stores require an explicit broadcast. We do this in two phases:
-        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
-        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
-        #  2. In case the block pointer has different dimensionality, broadcast/reshape the
-        #     result to the shape of the pointer.
-        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
-
-        # These dims no longer need broadcasting.
-        for idx, (dim, broadcast_dim) in enumerate(
-            zip(indexing.final_shape, indexing.broadcast_shape)
-        ):
-            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                indexing.broadcasting_dims[idx] = False
-
+        # Stores require an explicit broadcast.
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
@@ -4100,7 +4089,7 @@ class TritonScheduling(SIMDScheduling):
         wrapper = V.graph.wrapper_code
         origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
-            wrapper.make_comment(origins)
+            wrapper.writeline(origins)
 
         if config.debug_fusion:
             from torch._inductor.scheduler import (
@@ -4118,7 +4107,7 @@ class TritonScheduling(SIMDScheduling):
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
-                wrapper.make_comment(
+                wrapper.writeline(
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 

@@ -480,7 +480,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
 }
 
 template <Layout required_layout>
-static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
                                                  IntArrayRef size,
@@ -967,7 +967,7 @@ Tensor empty_like_sparse_csr(
 }
 
 template <bool require_view, bool require_copy>
-static Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
 #ifndef STRIP_ERROR_MESSAGES
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
 #endif

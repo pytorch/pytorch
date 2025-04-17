@@ -1269,15 +1269,6 @@ class CompilationMetrics:
     python_version: Optional[str] = None
     pgo_put_remote_code_state_time_us: Optional[int] = None
     pgo_get_remote_code_state_time_us: Optional[int] = None
-    # The number of elements within parameters. This is classically what people
-    # think of when they think of parameters in a ML model.
-    param_numel: Optional[int] = None
-    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
-    # per element.
-    param_bytes: Optional[int] = None
-    # The number of parameters counted by fields. This is mostly a proxy for
-    # the number of distinct type of params.
-    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -4132,8 +4123,6 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
-    # This emulates
-    # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -4148,14 +4137,12 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
     if vt.is_realized() or (
         hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
     ):
-        func = None
         if isinstance(vt, TensorWithTFOverrideVariable):
-            func = getattr(vt.class_type, "__torch_function__", None)
+            return True
 
-        elif isinstance(vt, UserDefinedObjectVariable):
-            func = getattr(vt.value, "__torch_function__", None)
-
-        return func not in (None, torch._C._disabled_torch_function_impl)
+        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+            vt.value, "__torch_function__"
+        )
 
     return False
 
