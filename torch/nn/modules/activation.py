@@ -1614,7 +1614,7 @@ class Softmin(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.softmin(input, self.dim, _stacklevel=5)
+        return F.softmin(input, self.dim)
 
     def extra_repr(self):
         return f"dim={self.dim}"
@@ -1673,7 +1673,7 @@ class Softmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.softmax(input, self.dim, _stacklevel=5)
+        return F.softmax(input, self.dim)
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}"
@@ -1706,7 +1706,7 @@ class Softmax2d(Module):
             raise ValueError(
                 f"Softmax2d: expected input to be 3D or 4D, got {input.dim()}D instead"
             )
-        return F.softmax(input, -3, _stacklevel=5)
+        return F.softmax(input, -3)
 
 
 class LogSoftmax(Module):
@@ -1749,7 +1749,7 @@ class LogSoftmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.log_softmax(input, self.dim, _stacklevel=5)
+        return F.log_softmax(input, self.dim)
 
     def extra_repr(self):
         return f"dim={self.dim}"
