@@ -35,6 +35,12 @@ from torch._export.passes.lift_constants_pass import (
     _materialize_and_lift_constants,
     ConstantAttrMap,
 )
+from torch._export.passes.replace_autocast_with_hop_pass import (
+    replace_autocast_with_hop_pass,
+)
+from torch._export.passes.replace_set_grad_with_hop_pass import (
+    replace_set_grad_with_hop_pass,
+)
 from torch._export.utils import (
     _collect_param_buffer_metadata,
     _compiling_state_context,
@@ -68,7 +74,7 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._utils_internal import log_export_usage
+from torch._utils_internal import export_training_ir_rollout_check, log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
@@ -86,6 +92,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.graph_module import _get_attr
+from torch.jit._trace import TopLevelTracedModule
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -537,13 +544,6 @@ def _produce_aten_artifact(
     )
 
     if pre_dispatch:
-        from torch._export.passes.replace_autocast_with_hop_pass import (
-            replace_autocast_with_hop_pass,
-        )
-        from torch._export.passes.replace_set_grad_with_hop_pass import (
-            replace_set_grad_with_hop_pass,
-        )
-
         # Note: replace_set_grad_with_hop_pass need to be after lift_constant_pass because
         # a getattr of a constant tensor doesn't have meta["val"] until after lift_constant_pass.
         # If replace_set_grad_with_hop_pass is before lift_constant_pass,
@@ -1302,8 +1302,6 @@ def _temp_disable_texpr_fuser():
 
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
     with _temp_disable_texpr_fuser():
-        from torch.jit._trace import TopLevelTracedModule
-
         export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
 
         if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
@@ -2093,9 +2091,6 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-
-    from torch._utils_internal import export_training_ir_rollout_check
-
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
