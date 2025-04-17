@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sympy
-from sympy import Add, S
+from sympy import S
 
 
 """
