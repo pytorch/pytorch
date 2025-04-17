@@ -25,6 +25,10 @@ static Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t outp
   TORCH_CHECK(alpha.to<double>() != 0,
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
+  // Limit of CELU(x, alpha) as alpha -> inf = x
+  if (inv_alpha == 0) {
+    return qx;
+  }
   return quantized_elu(qx, output_scale, output_zero_point, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
