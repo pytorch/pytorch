@@ -36,7 +36,7 @@ struct AllocAligned {
 
 #if defined(__ANDROID__)
     p = memalign(kGEMMLOWPCacheLineSize, sizeof(T));
-#elif defined(_MSC_VER)
+#elif defined(_WIN32)
     p = _aligned_malloc(sizeof(T), kGEMMLOWPCacheLineSize);
 #else
     auto res = posix_memalign((void**)&p, kGEMMLOWPCacheLineSize, sizeof(T));
@@ -54,7 +54,7 @@ struct AllocAligned {
   static void release(T* p) {
     if (p) {
       p->~T();
-#if defined(_MSC_VER)
+#if defined(_WIN32)
       _aligned_free((void*)p);
 #else
       free((void*)p);
