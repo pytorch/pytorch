@@ -1130,6 +1130,7 @@ def aot_module_simplified(
         bw_compiler=bw_compiler,
         inference_compiler=inference_compiler,
         partition_fn=partition_fn,
+        #specializations=specializations,
         decompositions=decompositions,
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
@@ -1142,6 +1143,7 @@ def aot_module_simplified(
         cache_info=None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
+    # TODO: make process_inputs elongate inputs according to specializations
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
 
     def dispatch_and_compile():

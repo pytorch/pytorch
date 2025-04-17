@@ -1194,6 +1194,8 @@ class OutputGraph:
             stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
+                # What if here we forked and for each detected specialization, we call
+                # compile_and_call_fx_graph
                 output.extend(
                     self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
