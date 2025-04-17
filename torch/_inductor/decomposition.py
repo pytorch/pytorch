@@ -261,6 +261,7 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
 def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
@@ -287,6 +288,7 @@ def addmm(
     self: torch.Tensor,
     mat1: torch.Tensor,
     mat2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
@@ -315,6 +317,7 @@ def addmm(
 def mm(
     self: torch.Tensor,
     input2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)

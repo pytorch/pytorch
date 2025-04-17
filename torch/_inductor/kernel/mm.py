@@ -20,6 +20,7 @@ from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
+from ..codegen.subgraph import SubgraphTemplate
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import (
     add_layout_constraint,
@@ -56,7 +57,7 @@ from .mm_common import (
     scaled_mm_options,
     should_fallback_to_aten,
 )
-
+from torch.fx.experimental.proxy_tensor import make_fx
 
 try:
     import triton
@@ -69,6 +70,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 mm_template = TritonTemplate(
     name="mm",
@@ -501,6 +503,88 @@ scaled_mm_device_tma_template = TritonTemplate(
 )
 
 
+# partition_k_mm_template = TritonTemplate(
+#     name="partition_k_mm",
+#     grid=partition_k_mm_grid,
+#     source=r"""
+# {{def_kernel("A", "B")}}
+#     M = {{size("A", 0)}}
+#     N = {{size("B", 1)}}
+#     K = {{size("A", 1)}}
+#     if M * N == 0:
+#         # early exit due to zero-size input(s)
+#         return
+
+#     stride_am = {{stride("A", 0)}}
+#     stride_ak = {{stride("A", 1)}}
+#     stride_bk = {{stride("B", 0)}}
+#     stride_bn = {{stride("B", 1)}}
+
+#     pid = tl.program_id(0)
+#     num_pid_m = (M + BLOCK_M - 1) // BLOCK_M
+#     num_pid_n =  (N + BLOCK_N - 1) // BLOCK_N
+#     num_pid_pk = PK
+#     num_pid_nk = num_pid_n * num_pid_pk
+#     num_pid_in_group = GROUP_M * num_pid_nk
+#     group_id = pid // num_pid_in_group
+#     first_pid_m = group_id * GROUP_M
+#     group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+#     pid_m = first_pid_m + (pid % group_size_m)
+#     pid_nk = (pid % num_pid_in_group) // group_size_m
+#     pid_n = pid_nk // num_pid_pk
+#     pid_pk = pid_nk % num_pid_pk
+
+#     pk_size = K // PK
+
+#     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+#     if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+#         offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+#     else:
+#         offs_a_m = rm % M
+#     if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+#         offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+#     else:
+#         offs_b_n = rn % N
+
+#     offs_k = (pid_pk * BLOCK_K + tl.arange(0, BLOCK_K)) % K
+#     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+
+
+#     for k_idx in range(0, tl.cdiv(pk_size, BLOCK_K)):
+#         {% if not EVEN_K %}
+#         a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
+#         b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
+#         {% endif %}
+#         a_k_idx_vals = offs_k[None, :] + (k_idx * pk_size)
+#         b_k_idx_vals = offs_k[:, None] + (k_idx * pk_size)
+
+#         idx_m = offs_a_m[:, None]
+#         idx_n = a_k_idx_vals
+#         {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+
+#         idx_m = b_k_idx_vals
+#         idx_n = offs_b_n[None, :]
+#         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+#         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+
+#     # rematerialize rm and rn to save registers
+#     offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+#     offs_ck = pid_pk
+
+#     idx_m = offs_cm[:, None, None]
+#     idx_n = offs_cn[None, :, None]
+#     idx_k = offs_ck[None, None, :]
+
+#     acc_reshaped = acc[:, :, None]
+#     mask = (idx_m < M) & (idx_n < N)
+
+#     # inductor generates a suffix
+#     {{store_output(("idx_m", "idx_n", "idx_k"), "acc_reshaped", "mask")}}
+# """,
+# )
+
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
 def lazy_register_extern_choice(fn):
@@ -584,6 +668,18 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
+def decomposeK(a, b, kPartitions):
+    m = a.shape[0]
+    n = b.shape[1]
+    k = a.shape[1]
+
+    B = k // kPartitions
+    a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
+    b_reshaped = b.reshape(B, kPartitions, n)
+    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    reduced_buf = torch.sum(result, 0)
+    return (reduced_buf.to(a.dtype), )
+
 
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
@@ -613,25 +709,22 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
-    static_shape, is_nonzero = _is_static_problem(layout)
-
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
-    extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m, n, k, *mm_config_kwargs(device_type, _is_large_block_for_cpu)
-        ):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -644,6 +737,38 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
+
+    decompose_k_threshold = 16
+
+    # Only do split-k optimization if K is much larger than m, n and m, n are small
+    if V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * m) and V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * n):
+        from ..decomposition import select_decomp_table
+        from torch._dispatch.python import enable_python_dispatcher
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
+        
+        kPartitions = [64, 256,]
+
+        for kPart in kPartitions:
+            if k % kPart != 0:
+                continue
+
+            with enable_python_dispatcher():
+                decompositions = (
+                    select_decomp_table()
+                )
+
+                decompose_k_subgraph_template = SubgraphTemplate(
+                    name=f"decompose_k_mm_{kPart}",
+                    make_fx_graph=make_fx(functools.partial(decomposeK, kPartitions=kPart), decompositions, tracing_mode="real"),
+                )
+            
+            mat1_tensor, mat2_tensor = AlgorithmSelectorCache.benchmark_example_value(mat1), AlgorithmSelectorCache.benchmark_example_value(mat2)
+            decompose_k_subgraph_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                example_inputs=[mat1_tensor, mat2_tensor],
+            )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
@@ -707,7 +832,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
-
     if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
