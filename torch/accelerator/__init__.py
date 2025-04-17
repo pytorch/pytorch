@@ -53,8 +53,7 @@ def empty_cache() -> None:
     if acc is None:
         return
     mod = torch.get_device_module(acc)
-    if mod.is_initialized():
-        mod.empty_cache()
+    mod.empty_cache()
 
 
 def is_available() -> bool:
