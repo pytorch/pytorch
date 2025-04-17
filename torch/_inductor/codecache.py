@@ -971,19 +971,19 @@ class GuardedCache(Generic[T]):
         key: str,
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-        check_guard_hit: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
+        evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
         hints: list[int],
     ) -> tuple[Optional[T], Optional[bytes], str]:
         """
-        Find the first cache entry in iterate_over_candidates that passes `check_guard_hit`.
+        Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
 
         Args:
             key: The cache key to look up
             local: Whether to check the local cache
             remote_cache: The remote cache to check, if any
-            check_guard_hit: Function that evaluates whether a guard passes the check,
+            evaluate_guards: Function that evaluates whether a guard passes the check,
                 given a list of hint values and the guard expression.
-            hints: List of symint hints paired with check_guard_hit
+            hints: List of symint hints paired with evaluate_guards
 
         Returns:
             A tuple of (graph, pickled_content) if found, or (None, None) if not found
@@ -1008,7 +1008,7 @@ class GuardedCache(Generic[T]):
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(check_guard_hit(candidate.guards_expr, hints))  # type: ignore[attr-defined]
+            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
             if hit:
                 graph = candidate
                 pickled_content = content
@@ -1092,7 +1092,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         constants: CompiledFxGraphConstants,
-        check_guard_hit: Optional[
+        evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
     ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
@@ -1101,7 +1101,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         deserialized CompiledFxGraph object. On a miss, return None.
         `constants` tracks a list of constants, or a way to obtain the list of constants
         associated with a given cache entry
-        `check_guard_hit` allows AOTAutogradCache and other callers to customize
+        `evaluate_guards` allows AOTAutogradCache and other callers to customize
         what constitutes a guard success. Normally, a guard hit happens if
         `shape_env.evaluate_guards_expression` returns True.
         """
@@ -1115,16 +1115,16 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         if config.unsafe_skip_cache_dynamic_shape_guards:
             # This also makes it so we don't add anything to the dynamic
             # shape environment
-            check_guard_hit = lambda x, y: True
+            evaluate_guards = lambda x, y: True  # noqa: E731
 
-        if check_guard_hit is None:
-            check_guard_hit = shape_env.evaluate_guards_expression
+        if evaluate_guards is None:
+            evaluate_guards = shape_env.evaluate_guards_expression
 
         cache_info: dict[str, Any] = dict()
 
         # Use the find_graph_for_key method to find a graph for the given key
         graph, pickled_content, result_status = FxGraphCache.find_guarded_entry(
-            key, local, remote_cache, check_guard_hit, hints
+            key, local, remote_cache, evaluate_guards, hints
         )
         if graph is None:
             cache_info["miss_type"] = result_status
@@ -1171,7 +1171,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            check = bool(check_guard_hit(graph.guards_expr, symints))
+            check = bool(evaluate_guards(graph.guards_expr, symints))
             assert check is True
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
@@ -1380,7 +1380,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        check_guard_hit: Optional[
+        evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
     ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
@@ -1390,7 +1390,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, constants, check_guard_hit
+            key, example_inputs, local, remote_cache, constants, evaluate_guards
         )
         cache_info = {
             **cache_info,

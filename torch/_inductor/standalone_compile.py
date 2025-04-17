@@ -128,13 +128,18 @@ class CompiledArtifact:
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
 
-            with cache_dir_ctx:
+            with (
+                cache_dir_ctx,
+                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+            ):
                 with torch._functorch.config.patch(strict_autograd_cache=True):
                     from torch._functorch._aot_autograd.autograd_cache import (
                         AOTAutogradCache,
                     )
 
-                    entry = AOTAutogradCache._lookup(key, local=True, remote=False)
+                    entry = AOTAutogradCache._lookup(
+                        key, local=True, remote=False, args=[]
+                    )
 
                 assert entry is not None
 
@@ -148,10 +153,7 @@ class CompiledArtifact:
                 context = torch._guards.TracingContext(
                     FakeTensorMode(shape_env=ShapeEnv())
                 )
-                with (
-                    torch._guards.tracing(context),
-                    config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-                ):
+                with torch._guards.tracing(context):
                     compiled_fn = entry.wrap_post_compile(
                         [], entry.sanitized_aot_config, fx_config
                     )

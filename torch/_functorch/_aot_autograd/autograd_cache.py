@@ -390,7 +390,7 @@ class FXGraphCacheLoadable:
             remote_cache = FxGraphCache.get_remote_cache()
         (cache_key, debug_lines) = self.fx_graph_cache_info
 
-        def check_guard_hit(guard_expr, _hints):
+        def check_exact_guard_match(guard_expr, _hints):
             """
             AOTAutogradCache tracks its own guards, so we just need to treat these guard expressions as a second
             cache key of sorts: we just check for equality, i.e. the FXGraphCache entry with
@@ -406,7 +406,7 @@ class FXGraphCacheLoadable:
             remote_cache=remote_cache,
             is_backward=self.is_backward(),
             constants=constants,
-            check_guard_hit=check_guard_hit,
+            evaluate_guards=check_exact_guard_match,
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_info)
@@ -675,14 +675,9 @@ class AOTAutogradCacheEntry:
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache
         if self.guards_expr:
-            shape_env = AOTAutogradCache._get_shape_env()
             symints = AOTAutogradCache._filter_backed_symints(args)
-            assert shape_env is not None
-            check = bool(
-                shape_env.evaluate_guards_expression(self.guards_expr, symints)
-            )
+            check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symints))
             assert check is True
-            log.debug("AOTAutogradCache post-load guards: %s", shape_env.guards)
 
         return compiled_function
 
@@ -931,7 +926,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
         return os.path.join(cls._get_tmp_dir(), key)
 
     @staticmethod
-    def check_guard_hit(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
+    def evaluate_guards(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
         shape_env = AOTAutogradCache._get_shape_env()
@@ -947,8 +942,6 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
         remote_cache: Optional[RemoteCache[JsonDataTy]] = None
         if remote:
             remote_cache = AOTAutogradCache.get_remote_cache()
-        shape_env = AOTAutogradCache._get_shape_env()
-        assert shape_env is not None
 
         symints = AOTAutogradCache._filter_backed_symints(args)
         hints = [hint_int(s) for s in symints]
@@ -959,7 +952,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
                 pickled_content,
                 result_status,
             ) = AOTAutogradCache.find_guarded_entry(
-                key, local, remote_cache, AOTAutogradCache.check_guard_hit, hints
+                key, local, remote_cache, AOTAutogradCache.evaluate_guards, hints
             )
 
             if entry is None and result_status == "guard_miss":
