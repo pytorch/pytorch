@@ -741,7 +741,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     decompose_k_threshold = 16
 
     # Only do split-k optimization if K is much larger than m, n and m, n are small
-    if k >= decompose_k_threshold * m and k >= decompose_k_threshold * n:
+    if V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * m) and V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * n):
         from ..decomposition import select_decomp_table
         from torch._dispatch.python import enable_python_dispatcher
         from torch._inductor.select_algorithm import AlgorithmSelectorCache
