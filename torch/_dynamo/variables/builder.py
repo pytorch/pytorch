@@ -3324,6 +3324,12 @@ class SourcelessBuilder:
             )
         elif isinstance(value, types.GenericAlias):
             return TypingVariable(value)
+        elif is_namedtuple(value):
+            output = [
+                SourcelessBuilder.create(tx, getattr(value, name))
+                for name in namedtuple_fields(type(value))
+            ]
+            return NamedTupleVariable(output, tuple_cls=type(value))
         unimplemented_v2(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
