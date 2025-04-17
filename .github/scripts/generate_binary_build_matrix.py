@@ -173,7 +173,7 @@ WHEEL_CONTAINER_IMAGES = {
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
     "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
-    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
+    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"
