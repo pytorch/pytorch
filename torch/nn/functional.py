@@ -3021,7 +3021,7 @@ def ctc_loss(
     reduction: str = "mean",
     zero_infinity: bool = False,
 ) -> Tensor:
-    r"""Compute the Connectionist Temporal Classification loss.
+    r"""Apply the Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
 
@@ -3112,13 +3112,20 @@ def nll_loss(
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
-        weight (Tensor, optional): A manual rescaling weight given to each
+        weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
             ``True``, the loss is averaged over non-ignored targets. Default: -100
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
@@ -3164,23 +3171,30 @@ def poisson_nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Compute the Poisson negative log likelihood loss.
+    r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
 
     Args:
-        input: Expectation of underlying Poisson distribution.
-        target: Random sample :math:`target \sim \text{Poisson}(input)`.
-        log_input: If ``True`` the loss is computed as
+        input: expectation of underlying Poisson distribution.
+        target: random sample :math:`target \sim \text{Poisson}(input)`.
+        log_input: if ``True`` the loss is computed as
             :math:`\exp(\text{input}) - \text{target} * \text{input}`, if ``False`` then loss is
             :math:`\text{input} - \text{target} * \log(\text{input}+\text{eps})`. Default: ``True``
-        full: Whether to compute full loss, i. e. to add the Stirling
+        full: whether to compute full loss, i. e. to add the Stirling
             approximation term. Default: ``False``
             :math:`\text{target} * \log(\text{target}) - \text{target} + 0.5 * \log(2 * \pi * \text{target})`.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
             :attr:`log_input`\ =\ ``False``. Default: 1e-8
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
@@ -3222,19 +3236,19 @@ def gaussian_nll_loss(
     eps: float = 1e-6,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Compute the Gaussian negative log likelihood loss.
+    r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
 
     Args:
-        input: Expectation of the Gaussian distribution.
-        target: Sample from the Gaussian distribution.
-        var: Tensor of positive variance(s), one for each of the expectations
+        input: expectation of the Gaussian distribution.
+        target: sample from the Gaussian distribution.
+        var: tensor of positive variance(s), one for each of the expectations
             in the input (heteroscedastic), or a single one (homoscedastic),
             or a positive scalar value to be used for all expectations.
-        full (bool, optional): Whether to include the constant term in the loss calculation. Default: ``False``.
-        eps (float, optional): Value added to var, for stability. Default: 1e-6.
-        reduction (str, optional): Specifies the reduction to apply to the output:
+        full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
+        eps (float, optional): value added to var, for stability. Default: 1e-6.
+        reduction (str, optional): specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
@@ -3324,8 +3338,15 @@ def kl_div(
         input: Tensor of arbitrary shape in log-probabilities.
         target: Tensor of the same shape as input. See :attr:`log_target` for
             the target's interpretation.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
             ``'none'``: no reduction will be applied
@@ -3402,13 +3423,20 @@ def cross_entropy(
             see Shape section below for supported shapes.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
             ``True``, the loss is averaged over non-ignored targets. Note that
             :attr:`ignore_index` is only applicable when the target contains class indices.
             Default: -100
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
@@ -3482,7 +3510,7 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Compute Binary Cross Entropy between the target and input probabilities.
+    r"""Measure Binary Cross Entropy between the target and input probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
@@ -3491,8 +3519,15 @@ def binary_cross_entropy(
         target: Tensor of the same shape as input with values between 0 and 1.
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
@@ -3544,7 +3579,7 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Compute Binary Cross Entropy between target and input logits.
+    r"""Calculate Binary Cross Entropy between target and input logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -3553,8 +3588,15 @@ def binary_cross_entropy_with_logits(
         target: Tensor of the same shape as input with values between 0 and 1
         weight (Tensor, optional): a manual rescaling weight
             if provided it's repeated to match input tensor shape
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
@@ -3618,22 +3660,6 @@ def smooth_l1_loss(
     element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
-
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-        beta (float, optional): Specifies the threshold at which to change from the squared
-            term to the L1 term in the loss calculation. This value must be positive.
-            Default: 1.0.
-
-    Returns:
-        Tensor: L1 loss (optionally weighted).
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3675,15 +3701,15 @@ def huber_loss(
     delta: float = 1.0,
     weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Compute the Huber loss, with optional weighting.
+    r"""huber_loss(input, target, reduction='mean', delta=1.0, weight=None) -> Tensor
+
+    Computes the Huber loss, with optional weighting.
 
     Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
 
     When delta equals 1, this loss is equivalent to SmoothL1Loss.
     In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
-
-    See :class:`~torch.nn.HuberLoss` for details.
 
     Args:
         input (Tensor): Predicted values.
@@ -3756,25 +3782,11 @@ def l1_loss(
     reduction: str = "mean",
     weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the L1 loss, with optional weighting.
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
 
     See :class:`~torch.nn.L1Loss` for details.
-
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-        weight (Tensor, optional): Weights for each sample. Default: None.
-
-    Returns:
-        Tensor: L1 loss (optionally weighted).
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3829,15 +3841,15 @@ def mse_loss(
     reduction: str = "mean",
     weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Compute the element-wise mean squared error, with optional weighting.
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
 
-    See :class:`~torch.nn.MSELoss` for details.
+    Measures the element-wise mean squared error, with optional weighting.
 
     Args:
         input (Tensor): Predicted values.
         target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        size_average (bool, optional): Deprecated (use reduction).
+        reduce (bool, optional): Deprecated (use reduction).
         reduction (str, optional): Specifies the reduction to apply to the output:
                                    'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
                                    'sum': the output will be summed. 'none': no reduction will be applied.
@@ -3905,23 +3917,9 @@ def margin_ranking_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the margin ranking loss.
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
-
-    Args:
-        input1 (Tensor): Predicted values.
-        input2 (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-
-    Returns:
-        Tensor: Margin ranking loss.
     """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
@@ -3955,23 +3953,9 @@ def hinge_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the hinge embedding loss.
+    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
-
-    Args:
-       input (Tensor): Predicted values.
-       target (Tensor): Ground truth values.
-       margin (float, optional): Margin for hinge loss. Has a default value of 1.
-       size_average (bool, optional): Deprecated (see :attr:`reduction`).
-       reduce (bool, optional): Deprecated (see :attr:`reduction`).
-       reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-       Tensor: Hinge embedding loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3998,22 +3982,9 @@ def multilabel_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the multilabel margin loss.
+    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
-
-    Args:
-       input (Tensor): Predicted values.
-       target (Tensor): Ground truth values.
-       size_average (bool, optional): Deprecated (see :attr:`reduction`).
-       reduce (bool, optional): Deprecated (see :attr:`reduction`).
-       reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-       Tensor: Mutilabel margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4039,22 +4010,10 @@ def soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the soft margin loss.
+    r"""
+    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
-
-    Args:
-       input (Tensor): Predicted values.
-       target (Tensor): Ground truth values.
-       size_average (bool, optional): Deprecated (see :attr:`reduction`).
-       reduce (bool, optional): Deprecated (see :attr:`reduction`).
-       reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-       Tensor: Soft margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4081,22 +4040,9 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the multilabel soft margin loss.
+    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
-
-    Args:
-       input (Tensor): Predicted values.
-       target (Tensor): Ground truth values.
-       size_average (bool, optional): Deprecated (see :attr:`reduction`).
-       reduce (bool, optional): Deprecated (see :attr:`reduction`).
-       reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-       Tensor: Mutilabel soft margin loss.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -4142,24 +4088,9 @@ def cosine_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the cosine embedding loss.
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
-
-    Args:
-       input1 (Tensor): Predicted values.
-       input2 (Tensor): Predicted values.
-       target (Tensor): Ground truth values.
-       margin (float, optional): Margin for cosine embedding. Has a default value of 0.
-       size_average (bool, optional): Deprecated (see :attr:`reduction`).
-       reduce (bool, optional): Deprecated (see :attr:`reduction`).
-       reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-       Tensor: Cosine embedding loss.
     """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
@@ -4190,25 +4121,9 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""Compute the multi margin loss, with optional weighting.
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
-
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        p (int, optional): Has a default value of 1. 1 and 2 are the only supported values.
-        margin (float, optional): Margin for multi margin loss. Has a default value of 1.
-        weight (Tensor, optional): Weights for each sample. Default: None.
-        size_average (bool, optional): Deprecated (see :attr:`reduction`).
-        reduce (bool, optional): Deprecated (see :attr:`reduction`).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                  'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                  'sum': the output will be summed. 'none': no reduction will be applied.
-                                  Default: 'mean'.
-
-    Returns:
-        Tensor: Multi margin loss (optionally weighted).
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(

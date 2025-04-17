@@ -4385,7 +4385,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.7")
+        self.assertEqual(ver, "2.6")
         nccl_version = t["nccl_version"]
         torch_nccl_version = torch.cuda.nccl.version()
         self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
@@ -4890,48 +4890,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue("duration_ms" not in t["entries"][seq])
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @parametrize("timing_enabled", [True, False])
-    def test_allgather_uneven(self, timing_enabled):
-        if self.rank == self.MAIN_PROCESS_RANK:
-            return
-        pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
-
-        output_split_sizes = [i + 1 for i in range(self.world_size)]
-        sum_len = sum(output_split_sizes)
-        output_tensor = torch.zeros(sum_len, 2).to(self.rank)
-        expected_tensor = torch.ones(sum_len, 2).to(self.rank)
-        input_tensor = torch.ones(output_split_sizes[self.rank], 2).to(self.rank)
-
-        dist.all_gather(
-            list(torch.split(output_tensor, output_split_sizes)), input_tensor
-        )
-        torch.cuda.synchronize(device=self.rank)
-        self.assertEqual(output_tensor, expected_tensor)
-        if timing_enabled:
-            # wait for watchdog thread to process the queue of works
-            time.sleep(1)
-
-        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t["entries"]), self.world_size + 1)
-        for i in range(self.world_size):
-            self.assertEqual(t["entries"][i]["profiling_name"], "nccl:_broadcast_oop")
-            # collective_seq_id should be incremented once.
-            self.assertEqual(t["entries"][i]["collective_seq_id"], 1)
-            self.assertEqual(t["entries"][i]["input_sizes"], [[i + 1, 2]])
-            self.assertEqual(
-                t["entries"][i]["output_sizes"],
-                [[i + 1, 2]],
-            )
-            self.assertEqual(t["entries"][i]["state"], "scheduled")
-            # No event is recorded for individual ops
-            self.assertTrue("time_discovered_completed_ns" in t["entries"][i])
-        self.assertEqual(
-            t["entries"][self.world_size]["profiling_name"], "nccl:ALLGATHER_coalesced"
-        )
+    # TODO(whc) support and test coalesced collectives that use the c++ start/end group thingy instead of python
+    # coalescing manager
 
     # TODO(whc) test out other ops (And combinations of ops, if that's valid?)
     @requires_nccl()

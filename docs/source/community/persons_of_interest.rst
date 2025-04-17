@@ -1,5 +1,3 @@
-:orphan:
-
 PyTorch Governance | Maintainers
 =========================================
 

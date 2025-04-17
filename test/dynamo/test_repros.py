@@ -3218,13 +3218,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(
+            torch._dynamo.utils.counters["graph_break"][
+                "assert with non-string message"
+            ],
+            1,
+        )
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -5037,31 +5036,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             @staticmethod
             def greet(x):
                 return x * super(Child, Child).greet()
-
-        child = Child()
-
-        def fn(x):
-            return child.greet(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(4)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-    def test_super_classmethod(self):
-        class Parent:
-            @classmethod
-            def greet(cls):
-                if cls == Parent:
-                    return 4
-                if cls == Child:
-                    return 3
-                return 2
-
-        class Child(Parent):
-            def greet(self, x):
-                return x * super().greet()
 
         child = Child()
 

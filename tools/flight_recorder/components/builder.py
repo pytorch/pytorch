@@ -6,7 +6,6 @@
 
 import argparse
 import ast
-import copy
 import os
 import sys
 from typing import Any  # type: ignore[attr-defined]
@@ -29,12 +28,10 @@ from tools.flight_recorder.components.utils import (
     check_no_missing_dump_files,
     check_version,
     error_analysis,
-    find_coalesced_group as find_coalesced_group_p2p_only,
-    find_coalesced_group_with_non_p2p,
+    find_coalesced_group,
     get_version_detail,
     just_print_entries,
-    match_coalesced_groups as match_coalesced_groups_p2p_only,
-    match_coalesced_groups_with_non_p2p,
+    match_coalesced_groups,
 )
 
 
@@ -212,23 +209,12 @@ def build_collectives(
             errors=set(),
         )
 
-        major_v, minor_v = get_version_detail(version)
-        find_coalesced_group = (
-            find_coalesced_group_p2p_only
-            if major_v <= 2 and minor_v < 7
-            else find_coalesced_group_with_non_p2p
-        )
-        maybe_coalesced_group = find_coalesced_group(
-            pg_name, entries, _pg_guids, first_rank
-        )
-        if len(maybe_coalesced_group) > 1:
-            num_coalesced_entries = len(maybe_coalesced_group)
-            # We need a copy of the original expected ranks to avoid modifying it.
-            candidate_ranks = copy.deepcopy(expected_ranks)
+        if find_coalesced_group(pg_name, entries, _pg_guids, first_rank):
+            expected_ranks.add(first_rank)
             done_ranks = set()
             all_coalesced_entries = {}
-            while candidate_ranks:
-                curr = candidate_ranks.pop()
+            while expected_ranks:
+                curr = expected_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
                     find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
@@ -240,54 +226,31 @@ def build_collectives(
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
-                        assert op._src_g == curr, (
-                            f"Send src error: {curr} expected but {op._src_g} is set"
-                        )
+                        assert op._src_g == curr, (op._src_g, curr)
                         peer = op._dst_g
                     elif op.type == "recv":
-                        assert op._dst_g == curr, (
-                            f"Recv dst error: {curr} expected but {op._dst_g} is set"
-                        )
+                        assert op._dst_g == curr, (op._dst_g, curr)
                         peer = op._src_g
                     if peer and peer not in done_ranks:
-                        candidate_ranks.add(peer)
+                        expected_ranks.add(peer)
 
-            if major_v <= 2 and minor_v < 7:
-                match = match_coalesced_groups_p2p_only(
-                    all_coalesced_entries,
-                    group_size=_groups[pg_name].size,
-                    groups=_groups,
-                    memberships=_memberships,
-                    _pg_guids=_pg_guids,
-                )
-            else:
-                match = match_coalesced_groups_with_non_p2p(
-                    copy.deepcopy(
-                        all_coalesced_entries
-                    ),  # We want to keep a copy for cleanup.
-                    pg_info=(pg_name, desc),
-                    memberships=_memberships,
-                    _pg_guids=_pg_guids,
-                    mismatch=mismatch,
-                    dumps_ranks=dumps_ranks,
-                    version=version,
-                    collectives=collectives,
-                    match_record=match_record,
-                )
+            match = match_coalesced_groups(
+                all_coalesced_entries,
+                group_size=_groups[pg_name].size,
+                groups=_groups,
+                memberships=_memberships,
+                _pg_guids=_pg_guids,
+            )
 
             if match and mismatch[pg_name] == 0:
-                # We treat coalesced collectives as a single collective.
-                # TODO: we need to surface a merged collective info like input/output sizes to users.
-                collectives.append(
-                    match_record.entry_state.to_collective(len(collectives))
-                )
+                collectives.append(entry_state.to_collective(len(collectives)))
             else:
                 mismatch[pg_name] += 1
             for r in all_coalesced_entries:
                 idx_map = {r: i for i, _ in reversed(all_coalesced_entries[r])}  # noqa: B035
                 nccl_calls.extend(
                     reversed(
-                        match_record.entry_state.to_nccl_call(
+                        entry_state.to_nccl_call(
                             all_entries,
                             idx_map,
                             len(nccl_calls),
@@ -295,10 +258,6 @@ def build_collectives(
                         )
                     )
                 )
-                # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
-                for i, k in idx_map.items():
-                    for _ in range(1, num_coalesced_entries):
-                        all_entries[i].pop(k)
         else:
             # Iterate through all the ranks and check if there is a mis-match for the current entry.
             check_current_entry_match(

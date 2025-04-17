@@ -2302,7 +2302,6 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
     #        No requirements for (wrapped_dim, ...)-th dimension.
     # 3. Expect positive num_chunks
     # 4. Expect non-empty input tensor list and each input tensor should have at least 1 element
-    # 5. Non-contiguous input tensors are allowed.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     same_ndim_cases = (
         (
@@ -2349,14 +2348,6 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
             tensors.append(make_arg(size))
         yield SampleInput(tensors, args=(dim, num_chunks))
 
-    # non-contiguous
-    for dim in range(max_dim):
-        tensors = []
-        for size in different_ndim_case:
-            # make the last 2 dims column-major (i.e. non-contiguous)
-            t = make_arg(size).transpose(-2, -1).contiguous().transpose(-2, -1)
-            tensors.append(t)
-        yield SampleInput(tensors, args=(dim, num_chunks))
 
 def error_inputs_chunk_cat(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
