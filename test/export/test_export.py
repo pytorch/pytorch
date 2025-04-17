@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
 from typing import Dict, List
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
@@ -7400,6 +7401,89 @@ def forward(self, b_a_buffer, x):
         ):
             ep.module()(torch.tensor(5))
 
+    def test_is_non_negative_check_function(self):
+        import sympy as sp
+
+        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
+
+        x = sp.Symbol("x")
+        variable_name = sp.Symbol("variable_name")
+        tensor_shape = sp.Symbol("tensor.shape[0]")
+
+        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
+        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
+
+        # Test cases where the condition is not checking for x >= 0
+        self.assertIsNone(_is_non_negative_check(x > 0))
+        self.assertIsNone(_is_non_negative_check(x == 0))
+        self.assertIsNotNone(_is_non_negative_check(0 <= x))
+        self.assertIsNone(_is_non_negative_check(x >= 1))
+
+    def test_suggest_torch_checks_with_non_negative_check(self):
+        from unittest.mock import patch
+
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        u = sympy.Symbol("u")
+        cond = u >= 0
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+        mock_exception.cond = cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            str(cond) if expr == cond else "u < 0"  # Simulating the condition
+        )
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+            _suggest_torch_checks(mock_exception, src_map)
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check_is_size(u)", error_msg)
+            self.assertIn("torch._check(u < 0)", error_msg)
+
+    def test_suggest_torch_checks_with_regular_check(self):
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+
+        mock_cond = MagicMock()
+        mock_cond.free_symbols = {sympy.Symbol("u")}
+        mock_exception.cond = mock_cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            "u > 5" if expr == mock_cond else "u <= 5"
+        )
+
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+
+            _suggest_torch_checks(mock_exception, src_map)
+
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check(u > 5)", error_msg)
+            self.assertIn("torch._check(u <= 5)", error_msg)
+            self.assertNotIn("torch._check_is_size", error_msg)
+
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -13529,6 +13613,30 @@ class GraphModule(torch.nn.Module):
                 decomp_table=decomp_table,
             )
             FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+    def test_wrapper_module(self):
+        def f(x):
+            return torch.abs(x)
+
+        from torch.export import _wrapper_utils
+
+        model = _wrapper_utils._WrapperModule(f)
+        ep = export(
+            model,
+            (
+                torch.randn(
+                    8,
+                ),
+            ),
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, args_0):
+    abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
+    return (abs_1,)""",
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
