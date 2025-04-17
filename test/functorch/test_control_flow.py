@@ -884,9 +884,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = add = None
     zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
-    clone = torch.ops.aten.clone.default(arg6_1)
-    clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
-    return (clone, clone_1, None, None, zeros_like, None)""",
+    return [arg6_1, arg6_1, None, None, zeros_like, None]""",
         )
 
     def test_cond_autograd_pytree_input(self):

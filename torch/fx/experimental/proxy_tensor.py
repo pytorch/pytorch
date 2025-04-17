@@ -1089,8 +1089,6 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             assert a.node.constant is not None
             return a.node.constant
-        if isinstance(a, torch.FunctionSchema):
-            breakpoint()
         return super().create_arg(a)  # type: ignore[return-value]
 
     @overload

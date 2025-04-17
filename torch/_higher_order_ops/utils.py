@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import functools
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -8,11 +7,9 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -760,9 +757,21 @@ def check_input_alias_and_mutation_return_ouputs(
                 new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()  # type: ignore[union-attr]
             )
             cloned = [
-                torch.as_strided(
-                    new_fake_mode.from_tensor(arg), arg.size(), arg.stride()
+                # TODO: ideally we should use new_fake_mode.from_tensor to create
+                # fake tensors in a new shape_env, but it cannot handle the case where input tensor
+                # has unbacked symint inputs. So we just use the symints from original fake mode.
+                # This is fine because we won't be introducing new constraints for the symbols since
+                # to get the graph module, we've already recorded the constraints as we're tracing.
+                torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=arg.requires_grad,
+                    layout=arg.layout,
                 )
+                if isinstance(arg, torch.Tensor)
+                else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
@@ -870,78 +879,3 @@ class FunctionalizeCtxWrapper:
                     *args, **kwargs
                 )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
-
-
-def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
-    """
-    For a fn that accepts flat inputs and returns flat outputs:
-        fw_out = fn(*args),
-    this function returns:
-        grad_args = bw_fn(*args_and_grad_output)
-    with the following invariants:
-      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
-      2. grad_args has an 1-1 corresponsence to args
-      3. for tensor arg whose requires_grad is False, its corresponding grad in
-         grad_args will be a zero tensor with the same shape.
-    """
-
-    from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
-
-    dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
-        decompositions={},
-        num_params_buffers=0,
-        aot_id=0,
-        keep_inference_input_mutations=False,
-    )
-    n_primals = len(args)
-
-    bw_fn = create_joint(
-        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
-    )
-
-    def flat_fn(*args_and_grad_outs):
-        primals = args_and_grad_outs[:n_primals]
-        tangents = args_and_grad_outs[n_primals:]
-        grad_args = bw_fn(primals, tangents)[1]
-        assert len(args) == len(grad_args)
-        out = tuple(
-            (
-                torch.zeros_like(arg)
-                if isinstance(arg, torch.Tensor) and grad is None
-                else grad
-            )
-            for grad, arg in zip(grad_args, primals)
-        )
-        _maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
-        return pytree.tree_map(_maybe_clone, out)
-
-    return flat_fn
-
-
-def materialize_as_graph(
-    fn: Callable,
-    args: tuple[Any],
-    include_key_set: torch._C.DispatchKeySet,
-    exclude_key_set: torch._C.DispatchKeySet,
-    force_enable_grad=True,
-) -> torch.fx.GraphModule:
-    @torch._dynamo.disable(recursive=True, reason=None)
-    def _materialize_as_graph_inner():
-        with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
-            )
-            if force_enable_grad:
-                stack.enter_context(torch.enable_grad())
-            return _maybe_reenter_make_fx(fn)(*unfunc_t)
-
-    gm = _materialize_as_graph_inner()
-    assert gm is not None
-    return gm

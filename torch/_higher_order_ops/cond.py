@@ -15,14 +15,14 @@ from torch._C._functorch import (
     is_batchedtensor,
     maybe_get_bdim,
 )
+from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_reenter_make_fx,
     _maybe_run_with_interpreter,
     _set_compilation_env,
-    create_bw_fn,
-    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -32,13 +32,17 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+from .utils import _from_fun
 
 
 log = logging.getLogger(__name__)
@@ -191,6 +195,79 @@ def cond(
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
                 pred, true_fn, false_fn, operands
             )
+
+
+def materialize_as_graph(
+    fn: Callable,
+    args: tuple[Any],
+    include_key_set: torch._C.DispatchKeySet,
+    exclude_key_set: torch._C.DispatchKeySet,
+    force_enable_grad=False,
+) -> torch.fx.GraphModule:
+    @torch._dynamo.disable(recursive=True, reason=None)
+    def _materialize_as_graph_inner():
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                unfunc_t = [_from_fun(arg) for arg in args]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+            )
+            if force_enable_grad:
+                stack.enter_context(torch.enable_grad())
+            return _maybe_reenter_make_fx(fn)(*unfunc_t)
+
+    gm = _materialize_as_graph_inner()
+    assert gm is not None
+    return gm
+
+
+def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        grad_args = bw_fn(primals, tangents)[1]
+        assert len(args) == len(grad_args)
+        return [
+            (
+                torch.zeros_like(arg)
+                if isinstance(arg, torch.Tensor) and grad is None
+                else grad
+            )
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+    return flat_fn
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):

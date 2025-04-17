@@ -891,10 +891,10 @@ def auto_functionalized_v2_proxy(
             None,
         )
 
-        def fn():
+        def fn(*args):
             return _invoke_op_with_kwargs_and_schema(_mutable_op, new_kwargs, schema)  # type: ignore[arg-type]
 
-        gm = reenter_make_fx(fn)()
+        gm = reenter_make_fx(fn)(pytree.tree_leaves(new_kwargs))
         hop_node = gm.graph.find_nodes(op="call_function", target=_mutable_op)[0]
         proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
         assert isinstance(schema, torch._C.FunctionSchema)
