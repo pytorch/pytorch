@@ -18,7 +18,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
 
   // Clear the stats and ensure they are zero.
   size_t round_size = c10::llvm::PowerOf2Ceil(N);
-  auto stats = at::cuda::CachingHostAllocator_getStats();
+  auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
   ASSERT_EQ(stats.allocation.current, 0);
   ASSERT_EQ(stats.allocation.peak, 0);
   ASSERT_EQ(stats.allocation.allocated, 0);
@@ -31,7 +31,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
         {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     ptr = pinned_tensor.data_ptr();
     ctx = pinned_tensor.storage().data_ptr().get_context();
-    auto stats = at::cuda::CachingHostAllocator_getStats();
+    auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_EQ(stats.allocation.current, 1);
     ASSERT_EQ(stats.allocation.peak, 1);
     ASSERT_EQ(stats.allocation.allocated, 1);
@@ -47,7 +47,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   {
     auto pinned_tensor = at::empty(
         {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
-    auto stats = at::cuda::CachingHostAllocator_getStats();
+    auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_EQ(ptr, pinned_tensor.data_ptr());
     ASSERT_EQ(ctx, pinned_tensor.storage().data_ptr().get_context());
     ASSERT_EQ(stats.allocation.current, 1);
@@ -65,7 +65,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
     size_t new_round_size = c10::llvm::PowerOf2Ceil(new_size);
     auto pinned_tensor = at::empty(
         {new_size}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
-    auto stats = at::cuda::CachingHostAllocator_getStats();
+    auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_NE(ptr, pinned_tensor.data_ptr());
     ASSERT_NE(ctx, pinned_tensor.storage().data_ptr().get_context());
     ASSERT_EQ(stats.allocation.current, 1);
@@ -81,8 +81,8 @@ TEST(CachingHostAllocatorTest, check_stats) {
 
   // Test the empty cache.
   {
-    at::cuda::CachingHostAllocator_emptyCache();
-    auto stats = at::cuda::CachingHostAllocator_getStats();
+    at::getHostAllocator(at::kCUDA)->empty_cache();
+    auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_EQ(stats.allocation.current, 0);
     ASSERT_EQ(stats.allocated_bytes.current, 0);
     ASSERT_EQ(stats.allocation.peak, 2);
@@ -97,9 +97,9 @@ TEST(CachingHostAllocatorTest, check_stats) {
 
   // Test the reset stats.
   {
-    at::cuda::CachingHostAllocator_resetAccumulatedStats();
-    at::cuda::CachingHostAllocator_resetPeakStats();
-    auto stats = at::cuda::CachingHostAllocator_getStats();
+    at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
+    at::getHostAllocator(at::kCUDA)->reset_peak_stats();
+    auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_EQ(stats.allocation.peak, 0);
     ASSERT_EQ(stats.allocation.allocated, 0);
     ASSERT_EQ(stats.allocation.freed, 0);
@@ -242,7 +242,7 @@ TEST(CachingHostAllocatorTest, check_empty_cache) {
         ptr, ctx, at::cuda::getCurrentCUDAStream().unwrap()));
   }
 
-  at::cuda::CachingHostAllocator_emptyCache();
+  at::getHostAllocator(at::kCUDA)->empty_cache();
   ASSERT_FALSE(at::getHostAllocator(at::kCUDA)->record_event(
       ptr, ctx, at::cuda::getCurrentCUDAStream().unwrap()));
 }

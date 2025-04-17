@@ -147,7 +147,7 @@ TEST(CachingHostAllocatorTest, testEmptyCache) {
     at::xpu::syncStreamsOnDevice();
   }
 
-  at::xpu::CachingHostAllocator_emptyCache();
+  at::getHostAllocator(at::kXPU)->empty_cache();
   ASSERT_FALSE(at::getHostAllocator(at::kXPU)->record_event(
       ptr, ctx, at::xpu::getCurrentXPUStream().unwrap()));
 }
