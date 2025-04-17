@@ -6481,7 +6481,6 @@ register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)
 register_pointwise_numeric_ldf64(aten.log)
-
 logical_and = register_pointwise(
     aten.logical_and,
     type_promotion_kind=None,
