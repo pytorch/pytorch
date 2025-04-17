@@ -402,9 +402,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                         f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                     )
                 else:
-                    assert self.last_seen_device_guard_index == self.device_idx, (
-                        "AOTInductor only supports running on one CUDA device"
-                    )
+                    assert (
+                        self.last_seen_device_guard_index == self.device_idx
+                    ), "AOTInductor only supports running on one CUDA device"
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
@@ -2241,9 +2241,9 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = arg
                 buf = self.args_to_buffers[arg]
             else:
-                assert raw_arg is not None, (
-                    "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
-                )
+                assert (
+                    raw_arg is not None
+                ), "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                 buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
                 buf = raw_arg
                 self.kernel_autotune_tmp_arg_idx += 1
@@ -2409,9 +2409,9 @@ class PythonWrapperCodegen(CodeGen):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Create example args for autotune in a separate epilogue
-            assert arg_types is not None and len(call_args) == len(arg_types), (
-                "call_args and arg_types do not match"
-            )
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
 
             def get_autotune_deletion_call() -> str:
                 """After all the autotune kernel calls have been written (i.e.
@@ -2434,9 +2434,9 @@ class PythonWrapperCodegen(CodeGen):
                 raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
-                assert len(raw_args) == len(call_args), (
-                    "call_args and raw_args do not match"
-                )
+                assert len(raw_args) == len(
+                    call_args
+                ), "call_args and raw_args do not match"
 
             autotune_args = None
             if original_fxnode_name and V.graph.autotuning_mapping:
@@ -2644,9 +2644,9 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(layout, ir.NoneLayout):
             return
         if isinstance(layout, ir.NonOwningLayout):
-            assert isinstance(layout.view, ir.ReinterpretView), (
-                f"unexpected {type(layout.view)}: {layout.view}"
-            )
+            assert isinstance(
+                layout.view, ir.ReinterpretView
+            ), f"unexpected {type(layout.view)}: {layout.view}"
             box = layout.view.data
             assert isinstance(box, ir.StorageBox), type(box)
             input_buffer = box.data
@@ -2850,9 +2850,9 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
         # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
-        assert len(outer_inputs) == len(subgraph.graph.graph_input_names), (
-            f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
-        )
+        assert (
+            len(outer_inputs) == len(subgraph.graph.graph_input_names)
+        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
         for inner_input, outer_input in zip(
             subgraph.graph.graph_input_names, outer_inputs
         ):

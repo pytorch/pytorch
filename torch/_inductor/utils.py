@@ -381,9 +381,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
-    )
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return runtime_ceildiv(numer, denom)
 
 
@@ -1528,9 +1528,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> tuple[
-    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
-]:
+def try_import_ck_lib() -> (
+    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
+):
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1802,9 +1802,9 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1813,9 +1813,9 @@ def run_and_get_triton_code(
 ) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1941,9 +1941,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(val, sympy.Expr), (
-        "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    )
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -2833,6 +2833,7 @@ def get_donated_idxs() -> Optional[list[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
+
 
 def set_kernel_post_grad_provenance_tracing(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
