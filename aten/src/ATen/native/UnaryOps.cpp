@@ -409,17 +409,17 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 }
 
 template <typename Stub, typename ...Args>
-static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args&&... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter, args...);
+  stub(iter.device_type(), iter, std::forward<Args>(args)...);
   return result;
 }
 
 template <typename Stub, typename ...Args>
-static inline Tensor unary_op_impl_float(const Tensor& self, Stub& stub, Args... args) {
+static inline Tensor unary_op_impl_float(const Tensor& self, Stub& stub, Args&&... args) {
   Tensor result;
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter, args...);
+  stub(iter.device_type(), iter, std::forward<Args>(args)...);
   return iter.output();
 }
 
