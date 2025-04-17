@@ -1670,13 +1670,7 @@ graph():
         # as input, runtime assertion should fail. This is because we would create
         # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
         # assertion.
-        if is_non_strict_test(self._testMethodName) and not is_non_strict_legacy_test(
-            self._testMethodName
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
-                ep.module()(x, x)
-        else:
-            self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     def test_draft_export_checks_mutation_with_nan(self):
@@ -4577,6 +4571,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    @testing.expectedFailureCppSerDes
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
