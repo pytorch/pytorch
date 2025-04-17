@@ -1452,10 +1452,33 @@ class TestStandaloneCompile(TestCase):
 
             with fresh_inductor_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
-                compiled_out = loaded(*args)
+                compiled_out = loaded(*args)[0]
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic", (False, True))
+    def test_call_in_backend(self, dynamic: bool) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        def backend(gm, args, **kwargs):
+            return torch._inductor.standalone_compile(gm, args)
+
+        with fresh_inductor_cache():
+            compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+            self.assertEqual(eager_out, compiled_out)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1467,7 +1490,7 @@ class TestStandaloneCompile(TestCase):
 
         def f(x):
             with torch.no_grad():
-                return mod(x)
+                return mod(x), x.sin()
 
         eager_out = f(x)
 
@@ -1518,7 +1541,7 @@ from torch._inductor.utils import fresh_inductor_cache
 arg = torch.ones(4, 1)
 with fresh_inductor_cache():
     loaded = torch._inductor.CompiledArtifact.load(path="{path}")
-    compiled_result = loaded(arg)
+    compiled_result = loaded(arg)[0]
 
 eager_result = arg.sin() * 2
 
