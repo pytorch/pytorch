@@ -4000,10 +4000,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "When `dynamic_shapes` is specified as a dict, its top-level keys "
-                "must be the arg names ['x'] of `inputs`, but here they are ['k']. "
-                "Since here `inputs` is a list/tuple enclosing a single dict, "
-                "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
+                "`dynamic_shapes` was specified as a dict, but found top-level keys ['k'] "
+                "that weren't present in the arg names of `inputs`: ['x']. "
+                "Since here `inputs` is a list/tuple enclosing a single dict, maybe you "
+                "just forgot to enclose `dynamic_shapes` in a list/tuple?"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4056,8 +4056,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "When `dynamic_shapes` is specified as a dict, its top-level keys "
-                "must be the arg names ['x'] of `inputs`, but here they are ['x', 'k']. "
+                "`dynamic_shapes` was specified as a dict, but found top-level keys ['k'] "
+                "that weren't present in the arg names of `inputs`: ['x']. "
                 "Alternatively, you could also ignore arg names entirely "
                 "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
             ),
@@ -4110,6 +4110,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             r"as the actual tensor shape torch\.Size\(\[4, 8, 6\]\) \(expected 3, but got 2 instead\)",
         ):
             export(O(), inputs, dynamic_shapes=dynamic_shapes)
+
+        class P(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + 2, y + z
+
+        inputs = (torch.randn(4), torch.randn(6), torch.randn(6))
+        dynamic_shapes = {"x": (Dim.AUTO,)}
+        export(P(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_unbacked_bindings_for_divisible_u_symint(self):
         from torch._export.utils import _get_shape_env_from_gm
