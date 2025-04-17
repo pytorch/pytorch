@@ -921,16 +921,17 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
 
 template <
+    typename T,
     typename ALayout,
     typename BLayout,
     typename CLayout,
     int Warps,
     int KTilesPerWarp>
 void launch_tinygemm_kernel(
-    const at::Tensor& A,
-    const at::Tensor& B,
-    const at::Tensor* qScaleAndZeros, /* optional */
-    at::Tensor& C_final,
+    const T& A,
+    const T& B,
+    const T* qScaleAndZeros, /* optional */
+    T& C_final,
     int32_t mTiles,
     int32_t nTiles,
     int32_t kTiles,
@@ -1084,12 +1085,29 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
 #endif
 
+template<typename T>
+T create_empty_tensor(
+    IntArrayRef sizes,
+    at::ScalarType dtype,
+    const at::Device& device) {
+  TORCH_CHECK(false, "Invalid create_empty_tensor");
+}
 
-at::Tensor _weight_int4pack_mm_cuda(
-    const at::Tensor& A,
-    const at::Tensor& B,
+template<>
+at::Tensor create_empty_tensor(
+    IntArrayRef sizes,
+    at::ScalarType dtype,
+    const at::Device& device) {
+  return at::empty(
+      sizes, at::TensorOptions().dtype(dtype).device(device));
+}
+
+template<typename T>
+T _weight_int4pack_mm_cuda_base(
+    const T& A,
+    const T& B,
     int64_t qGroupSize,
-    const at::Tensor& qScaleAndZeros) {
+    const T& qScaleAndZeros) {
   c10::cuda::CUDAGuard g(A.device());
 
   TORCH_CHECK(
@@ -1158,8 +1176,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(qScaleAndZeros.size(2) == 2);
 
   // Output is a standard row-major matrix
-  auto C_final = at::empty(
-      {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
+  auto C_final = create_empty_tensor<at::Tensor>({m, n}, at::kBFloat16, A.device());
 
 #if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -1176,6 +1193,7 @@ at::Tensor _weight_int4pack_mm_cuda(
         if constexpr (K_TILES_PER_WARP >= 2) {                       \
           using BLayout = BLayout_TC_int4<2, Q_GROUP_SIZE>;          \
           launch_tinygemm_kernel<                                    \
+              T,                                                     \
               ACLayout,                                              \
               BLayout,                                               \
               ACLayout,                                              \
@@ -1198,6 +1216,7 @@ at::Tensor _weight_int4pack_mm_cuda(
         if constexpr (K_TILES_PER_WARP >= 4) {                       \
           using BLayout = BLayout_TC_int4<4, Q_GROUP_SIZE>;          \
           launch_tinygemm_kernel<                                    \
+              T,                                                     \
               ACLayout,                                              \
               BLayout,                                               \
               ACLayout,                                              \
@@ -1220,6 +1239,7 @@ at::Tensor _weight_int4pack_mm_cuda(
         if constexpr (K_TILES_PER_WARP >= 8) {                       \
           using BLayout = BLayout_TC_int4<8, Q_GROUP_SIZE>;          \
           launch_tinygemm_kernel<                                    \
+              T,                                                     \
               ACLayout,                                              \
               BLayout,                                               \
               ACLayout,                                              \
@@ -1271,6 +1291,15 @@ at::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
   return C_final;
 }
+
+at::Tensor _weight_int4pack_mm_cuda(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    int64_t qGroupSize,
+    const at::Tensor& qScaleAndZeros) {
+  return _weight_int4pack_mm_cuda_base<at::Tensor>(
+      A, B, qGroupSize, qScaleAndZeros);
+    }
 
 // input is [n][k / 2] (uint8 dtype)
 // output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2] (int32 dtype)
