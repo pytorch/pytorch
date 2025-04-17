@@ -520,6 +520,8 @@ def _load_cached_autotuning(
     # Remove time taken for comparison
     best_config.pop("time_taken_ms", None)
 
+    best_config.pop("triton_cache_hash", None)
+
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False
     ):
