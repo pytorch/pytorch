@@ -120,6 +120,8 @@
 - torch/_higher_order_ops/aoti_call_delegate.py
 - torch/_inductor/codegen/aoti_runtime/**
 - torch/_inductor/codegen/aoti_hipify_utils.py
+- torch/_inductor/codegen/cpp_wrapper_cpu.py
+- torch/_inductor/codegen/cpp_wrapper_gpu.py
 - torch/_inductor/aoti_eager.py
 - torch/csrc/inductor/aoti_runtime/**
 - torch/csrc/inductor/aoti_torch/**
