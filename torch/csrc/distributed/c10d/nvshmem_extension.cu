@@ -422,7 +422,6 @@ at::Tensor nvshmem_reduce_scatter_out(
 
 __global__ void sendrecv(float *send_data, float *recv_data, int num_elems, int mype,
                                      int npes) {
-    int thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     int peer = (mype + 1) % npes;
     int block_offset = blockIdx.x * blockDim.x;
     // All threads in a block call the API with the same arguments
@@ -439,7 +438,6 @@ at::Tensor nvshmem_sendrecv(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
 
   float* input_ptr = (float*)(input_hdl->get_buffer_ptrs()[rank]);
   float* output_ptr = (float*)(out_hdl->get_buffer_ptrs()[rank]);
@@ -449,6 +447,26 @@ at::Tensor nvshmem_sendrecv(
   int num_blocks = numel / THREADS_PER_BLOCK;
 
   sendrecv<<<num_blocks, THREADS_PER_BLOCK>>>(input_ptr, output_ptr, numel, rank, world_size);
+  return out;
+}
+
+at::Tensor nvshmem_all_to_all(
+    at::Tensor& input,
+    at::Tensor& out,
+    std::string group_name) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+
+  void* input_ptr = (float*)(input_hdl->get_buffer_ptrs()[rank]);
+  void* output_ptr = (float*)(out_hdl->get_buffer_ptrs()[rank]);
+  assert input_hdl->get_buffer_size() % world_size == 0;
+  size_t bytes_per_rank = input_hdl->get_buffer_size() / world_size;
+
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+  nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
   return out;
 }
 
