@@ -2,7 +2,6 @@
 // but unlike shim.h, this file can contain header-only C++
 // code for better UX.
 
-#include <c10/util/bit_cast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <optional>
@@ -30,9 +29,11 @@ StableIValue from(T val) {
   // Initialization should be cheap enough; let's give people well-specified
   // reproducible behavior.
   StableIValue result = 0;
-  // reinterpret_cast to suppress overzealous -Wclass-memaccess. We
-  // have a static_assert above that T is trivially copyable, which
-  // should be enough.
+  // NOTE [-Wclass-memaccess ]: reinterpret_cast to suppress
+  // overzealous -Wclass-memaccess. (see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
+  // static_assert above that T is trivially copyable, which should be
+  // enough.
   std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
   return result;
 }
@@ -95,9 +96,7 @@ T to(StableIValue val) {
     T t;
   };
   Result result;
-  // reinterpret_cast to suppress overzealous -Wclass-memaccess. We
-  // have a static_assert above that T is trivially copyable, which
-  // should be enough.
+  // See NOTE[ -Wclass-memaccess ] above.
   std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
   return result.t;
 }
