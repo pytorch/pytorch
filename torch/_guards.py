@@ -999,6 +999,9 @@ class Source:
     def is_dict_key(self):
         return False
 
+    def is_flattened_input(self):
+        return False
+
     def is_ephemeral(self):
         return False
 

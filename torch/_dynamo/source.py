@@ -24,6 +24,7 @@ import enum
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._guards import ChainedSource, GuardSource, Source
+from torch.utils import _pytree as pytree
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
@@ -122,6 +123,10 @@ class LocalSource(Source):
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
     # or `co_freevars`.
     is_derefed_cell_contents: bool = False
+
+    def is_flattened_input(self):
+        # Explicit input is trivially a flattened input
+        return self.is_input
 
     def reconstruct(self, codegen: "PyCodegen"):
         if self.is_derefed_cell_contents:
@@ -524,10 +529,19 @@ class DefaultsSource(ChainedSource):
         return self._name
 
 
+def is_from_flattened_input(item: Any, base: Source) -> bool:
+    is_input = (
+        isinstance(base, LocalSource) and base.is_input
+    ) or base.is_flattened_input()
+    is_pytreeable = type(item) in pytree.SUPPORTED_NODES.keys()
+    return is_input and is_pytreeable
+
+
 @dataclasses.dataclass(frozen=True)
 class GetItemSource(ChainedSource):
     index: Any
     index_is_slice: bool = False
+    is_flattened_input_src: bool = False
 
     def __post_init__(self):
         assert self.base is not None
@@ -535,6 +549,9 @@ class GetItemSource(ChainedSource):
             # store the hashable version of the slice so the whole GetItemSource is hashable
             super().__setattr__("index", self.index.__reduce__())
             super().__setattr__("index_is_slice", True)
+
+    def is_flattened_input(self):  # type: ignore[override]
+        return self.is_flattened_input_src
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.base)
@@ -593,6 +610,7 @@ class DictGetItemSource(ChainedSource):
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
+    is_flattened_input_src: bool = False
 
     def __post_init__(self):
         from .variables import ConstantVariable
@@ -600,6 +618,9 @@ class DictGetItemSource(ChainedSource):
         assert isinstance(
             self.index, ConstDictKeySource
         ) or ConstantVariable.is_literal(self.index)
+
+    def is_flattened_input(self):  # type: ignore[override]
+        return self.is_flattened_input_src
 
     def guard_source(self):
         return self.base.guard_source()

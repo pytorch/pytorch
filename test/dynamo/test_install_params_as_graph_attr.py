@@ -332,6 +332,15 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         )
 
 
+class WrapperModule(torch.nn.Module):
+    def __init__(self, fn: Callable) -> None:
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, *args) -> torch.Tensor:
+        return self.fn(args)
+
+
 class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_params_as_graph_attr=True)
@@ -350,6 +359,24 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         actual_num_inputs = get_num_input_nodes(out_graph)
         self.assertEqual(actual_num_inputs, expected_num_exported_inputs)
         self.assertEqual(out_graph(*example_inputs), fn_to_export(*example_inputs))
+
+        # # TODO: Add this back once we have identical install and inline semantics
+        # # to dynamo
+        # # Now check against nonstrict dynamo mode if possible
+        # if isinstance(fn_to_export, torch.nn.Module):
+        #     mod = fn_to_export
+        # else:
+        #     mod = WrapperModule(fn_to_export)
+        # nonstrict_ep = torch.export.export(mod, tuple(example_inputs), strict=False)
+        # nonstrict_ep_graph = nonstrict_ep.graph_module
+        # nonstrict_inputs = get_num_input_nodes(nonstrict_ep_graph)
+        # import logging
+
+        # logging.warning(f"nonstrict_ep is {nonstrict_ep_graph} ep is {out_graph}")
+        # self.assertEqual(actual_num_inputs, nonstrict_inputs)
+        # self.assertEqual(
+        #     out_graph(*example_inputs), nonstrict_ep_graph(*example_inputs)
+        # )
 
     def test_simple_linear(self) -> None:
         net = SimpleLinearModule()
@@ -476,24 +503,6 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         inp = torch.randn((5, 5))
         self.check_export_matches_expectation(fn, 1, (inp,))
 
-    # TODO[lucaskabela]: register the flatten/unflatten function so we can evaluate this test
-    @unittest.expectedFailure
-    def test_user_defined_object(self) -> None:
-        class UserDefinedTestClass:
-            def __init__(self, x, y) -> None:
-                self.x = x
-                self.y = y
-
-        x = torch.randn((3, 3))
-        y = torch.randn((3, 3))
-
-        def fn(obj: UserDefinedTestClass, inp: torch.Tensor) -> torch.Tensor:
-            return obj.x + obj.y + inp
-
-        z = torch.randn((3, 1))
-
-        self.check_export_matches_expectation(fn, 2, (UserDefinedTestClass(x, y), z))
-
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_params_as_graph_attr=True)
     def test_modify_net_state(self) -> None:
@@ -517,6 +526,48 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         ep = torch._dynamo.export(mod)
         graph, _ = ep(inp)
         self.assertEqual(graph(inp), res)
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    @torch._dynamo.config.patch(install_params_as_graph_attr=True)
+    def test_list_of_tensor(self) -> None:
+        def fn(x: list[torch.Tensor]):
+            return x[0] + x[1]
+
+        inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
+        self.check_export_matches_expectation(fn, 2, (inp,))
+
+    def test_nested_list_of_tensor(self) -> None:
+        def fn(x: list[Union[list[torch.Tensor], torch.Tensor]]):
+            return x[0][0] + x[1]  # type: ignore[index]
+
+        inp = [[torch.tensor([1.3, 3.77, 0.1])], torch.tensor([8.7, 6.23, 9.9])]
+        self.check_export_matches_expectation(fn, 2, (inp,))
+
+    def test_dict_of_tensor(self) -> None:
+        inp_dict = {"temp": torch.tensor(12)}
+
+        def fn(inp: dict[str, torch.Tensor]) -> torch.Tensor:
+            return inp_dict["temp"] + 5
+
+        self.check_export_matches_expectation(fn, 1, (inp_dict,))
+
+    # TODO[lucaskabela]: register the flatten/unflatten function so we can evaluate this test
+    @unittest.expectedFailure
+    def test_user_defined_object(self) -> None:
+        class UserDefinedTestClass:
+            def __init__(self, x, y) -> None:
+                self.x = x
+                self.y = y
+
+        x = torch.randn((3, 3))
+        y = torch.randn((3, 3))
+
+        def fn(obj: UserDefinedTestClass, inp: torch.Tensor) -> torch.Tensor:
+            return obj.x + obj.y + inp
+
+        z = torch.randn((3, 1))
+
+        self.check_export_matches_expectation(fn, 2, (UserDefinedTestClass(x, y), z))
 
 
 if __name__ == "__main__":
