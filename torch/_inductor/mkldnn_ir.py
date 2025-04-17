@@ -14,6 +14,7 @@ from .ir import (
     FlexibleLayout,
     get_device_type,
     ir_node_to_tensor,
+    IRNode,
     is_contiguous_storage_and_layout,
     Layout,
     may_convert_to_optional,
@@ -690,8 +691,10 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self):
-        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+    def get_mutation_names(self) -> list[str]:
+        input = self.inputs[self.idx_for_inplace_sum]
+        assert isinstance(input, IRNode)
+        return [input.get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -813,10 +816,10 @@ class MKLPackedLinear(ExternKernelAlloc):
         else:
             constant_args.insert(0, None)
 
+        device = x.get_device()
+        assert device is not None
         return MKLPackedLinear(
-            layout=FixedLayout(
-                x.get_device(), x.get_dtype(), output_size, output_stride
-            ),
+            layout=FixedLayout(device, x.get_dtype(), output_size, output_stride),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -858,9 +861,12 @@ class LinearUnary(ExternKernelAlloc):
         else:
             constant_args.insert(0, None)
 
+        device = x.get_device()
+        assert device is not None
+
         packed = LinearUnary(
             layout=FixedLayout(
-                device=x.get_device(),
+                device=device,
                 dtype=x.get_dtype(),
                 size=output_size,
             ),
@@ -912,9 +918,11 @@ class LinearBinary(ExternKernelAlloc):
         else:
             constant_args.insert(0, B)
 
+        device = x.get_device()
+        assert device is not None
         packed = LinearBinary(
             layout=FixedLayout(
-                device=x.get_device(),
+                device=device,
                 dtype=x.get_dtype(),
                 size=output_size,
             ),
@@ -1048,7 +1056,9 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
-            return [self.inputs[self.idx_for_inplace_sum].get_name()]
+            input = self.inputs[self.idx_for_inplace_sum]
+            assert isinstance(input, IRNode)
+            return [input.get_name()]
         else:
             return []
 
@@ -1199,8 +1209,10 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             train,
         ]
 
+        device = x.get_device()
+        assert device is not None
         packed = MkldnnRnnLayer(
-            MultiOutputLayout(device=x.get_device()),
+            MultiOutputLayout(device=device),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1221,7 +1233,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         output_ir = [
             MultiOutput(
                 FixedLayout(
-                    x.get_device(),
+                    x.get_device(),  # type: ignore[arg-type]
                     x.get_dtype(),
                     output_size,
                     output_stride,

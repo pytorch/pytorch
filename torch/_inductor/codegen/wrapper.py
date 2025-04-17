@@ -1654,7 +1654,7 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, node: ir.MultiOutput):

@@ -48,8 +48,8 @@ if TYPE_CHECKING:
     _IntLikeT = TypeVar("_IntLikeT", bound=_WorksWithInt)
 
 
-ShapeType: TypeAlias = Union[torch.Size, list[int], tuple[int, ...]]
-StrideType: TypeAlias = Union[list[int], tuple[int, ...]]
+ShapeType: TypeAlias = Sequence[int]
+StrideType: TypeAlias = Sequence[int]
 DimsType: TypeAlias = Union[int, list[int], tuple[int, ...]]
 DimsSequenceType: TypeAlias = Union[list[int], tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
