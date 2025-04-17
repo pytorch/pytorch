@@ -1341,14 +1341,13 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
-            method_name = (
-                f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
-            )
             unimplemented_v2(
-                gb_type=f"Unsupported {method_name} method",
+                gb_type="Unsupported torch.cuda.Event method",
                 context=str(name),
-                explanation=f"Dynamo doesn't support tracing the {method_name} method. "
-                f"We currently support wait, record, synchronize, and query.",
+                explanation=(
+                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
+                    f"We currently support wait, record, synchronize, and query.",
+                ),
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],

@@ -808,17 +808,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
-        from .torch_function import get_torch_function_fn
+        from .torch_function import build_torch_function_fn
 
-        return get_torch_function_fn(tx, self)
+        return build_torch_function_fn(tx, self.value, self.source)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
 
-        from .torch_function import call_torch_function
+        from .torch_function import _get_subclass_type_var, call_torch_function
 
         return call_torch_function(
             tx,
+            _get_subclass_type_var(tx, self),
             self.get_torch_fn(tx),
             fn,
             types,

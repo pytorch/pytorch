@@ -216,7 +216,7 @@
 
 namespace at::meta {
 
-static inline c10::MemoryFormat cat_compute_output_memory_format(
+inline c10::MemoryFormat cat_compute_output_memory_format(
     const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
@@ -1119,7 +1119,7 @@ std::vector<Tensor> tensor_split_sections_symint(
 }
 
 template <typename T>
-static std::vector<Tensor> _tensor_split_indices(
+std::vector<Tensor> _tensor_split_indices(
     const Tensor& self,
     ArrayRef<T> indices,
     int64_t dim) {
@@ -1417,7 +1417,7 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-static inline void setStridedUnchecked(
+inline void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
@@ -1922,7 +1922,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
 template <typename Vec>
-static Tensor alias_with_sizes_and_strides(
+Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
@@ -1958,7 +1958,7 @@ static Tensor alias_with_sizes_and_strides(
 // SymIntArrayRef/ArrayRef<c10::SymInt> and
 // SmallVector<c10::SymInt>/SymDimVector
 template <template <typename...> typename Container>
-static Tensor alias_with_sizes_and_strides(
+Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Container<c10::SymInt>& sizes,
     const Container<c10::SymInt>& strides) {
@@ -3290,7 +3290,7 @@ static inline std::vector<Tensor> get_stack_inputs(
   return inputs;
 }
 
-static bool inline maybe_native_stack(
+bool inline maybe_native_stack(
     Tensor& result,
     TensorList tensors,
     int64_t dim) {
@@ -3366,7 +3366,7 @@ static std::vector<Tensor> _pad_chunk(
     std::vector<int64_t> view_sizes(
         tensor_size.begin(), tensor_size.begin() + dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    padded_tensors.push_back(padded_tensor.reshape(view_sizes));
+    padded_tensors.push_back(padded_tensor.view(view_sizes));
   }
   return padded_tensors;
 }
@@ -4021,7 +4021,7 @@ Tensor& squeeze_(Tensor& self, IntArrayRef dims) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), inferred_size);

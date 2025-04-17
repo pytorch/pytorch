@@ -125,12 +125,12 @@ class TestLinalg(TestCase):
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
 
     def setUp(self):
-        super().setUp()
+        super(self.__class__, self).setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
-        super().tearDown()
+        super(self.__class__, self).tearDown()
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
@@ -5746,26 +5746,6 @@ class TestLinalg(TestCase):
 
         with torch.no_grad():
             torch.matmul(a, b, out=c)
-
-    @dtypes(torch.float, torch.complex64)
-    def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
-        a = torch.empty((4, 2), device=device, dtype=dtype, requires_grad=True)
-        b = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
-        c = torch.empty((2, 2), device=device, dtype=dtype, requires_grad=True)
-        d = torch.empty((4, 4), device=device, dtype=dtype, requires_grad=False)
-        err_msg = "the 'out' tensor was specified and requires gradients"
-
-        with torch.set_grad_enabled(True), self.assertRaisesRegex(RuntimeError, err_msg):
-            torch.tensordot(a, b, dims=([1], [0]), out=c)
-
-        with torch.set_grad_enabled(True):
-            torch.tensordot(a, b, dims=([1], [0]), out=d)
-
-        with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
-            # Hack to avoid resize error for CUDA tensors as resize_cuda_ is different to resize_.
-            c.requires_grad = False
-            torch.tensordot(a, b, dims=([1], [0]), out=c)
-            self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
