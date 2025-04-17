@@ -466,24 +466,25 @@ class TestMatmulCuda(TestCase):
             output_dtypes.append(input_dtype)
 
         for output_dtype in output_dtypes:
-            if batch_size:
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    with self.assertRaises(Exception):
+            # Catch edge case of incompat with bfloat16 and major version < 8
+            if input_dtype == torch.bfloat16 and output_dtype == torch.float32 and not PLATFORM_SUPPORTS_BF16:
+                if batch_size:
+                    with self.assertRaises(RuntimeError):
                         torch.bmm(a, b, out_dtype=output_dtype)
-                        continue
-                out = torch.bmm(a, b, out_dtype=output_dtype)
-                baseline = torch.bmm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.bmm(a, b)
-            else:
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    with self.assertRaises(Exception):
+                else:
+                    with self.assertRaises(RuntimeError):
                         torch.mm(a, b, out_dtype=output_dtype)
-                        continue
-                out = torch.mm(a, b, out_dtype=output_dtype)
-                baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
+            else:
+                if batch_size:
+                    out = torch.bmm(a, b, out_dtype=output_dtype)
+                    baseline = torch.bmm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.bmm(a, b)
+                else:
+                    out = torch.mm(a, b, out_dtype=output_dtype)
+                    baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
+    
+                self.assertEqual(out.dtype, output_dtype)
 
-            self.assertEqual(out.dtype, output_dtype)
-
-            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+                torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
     @onlyCUDA
@@ -521,26 +522,24 @@ class TestMatmulCuda(TestCase):
             output_dtypes.append(input_dtype)
 
         for output_dtype in output_dtypes:
-            if batch_size:
-                # Catch edge case on compute capability < 8
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    with self.assertRaises(Exception):
+            # Catch edge case of incompat with bfloat16 and major version < 8
+            if input_dtype == torch.bfloat16 and output_dtype == torch.float32 and not PLATFORM_SUPPORTS_BF16:
+                if batch_size:
+                    with self.assertRaises(RuntimeError):
                         torch.baddbmm(c, a, b, out_dtype=output_dtype)
-                        continue
-
-                out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
-                baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.baddbmm(c, a, b)
-            else:
-                # Catch edge case on compute capability < 8
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    with self.assertRaises(Exception):
+                else:
+                    with self.assertRaises(RuntimeError):
                         torch.addmm(c, a, b, out_dtype=output_dtype)
-                        continue
-                out = torch.addmm(c, a, b, out_dtype=output_dtype)
-                baseline = torch.addmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.addmm(c, a, b)
+            else:
+                if batch_size:
+                    out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                    baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.baddbmm(c, a, b)
+                else:
+                    out = torch.addmm(c, a, b, out_dtype=output_dtype)
+                    baseline = torch.addmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.addmm(c, a, b)
 
-            self.assertEqual(out.dtype, output_dtype)
-            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+                self.assertEqual(out.dtype, output_dtype)
+                torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
     @onlyCUDA
