@@ -866,7 +866,7 @@ def prepare_hook_gm(aot_config, fn, args):
 # All tensors to save for backward will be grouped together at front.
 # Sym scalars grouped on another end. Constants are inlined in the graph.
 def maybe_inline_graph_saved_tensors_hooks(
-    fw_module, bw_module, num_inner_fwd_outputs, aot_config
+    fw_module, bw_module, num_inner_fwd_outputs, static_input_indices, aot_config
 ):
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
@@ -901,13 +901,31 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_out_n = fw_g.output_node()
     fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-    fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
 
+    fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
 
     structured_logs: list[str] = []
+
+    static_inputs = set()
+    if static_input_indices:
+        fw_g_inputs = list(fw_g.find_nodes(op="placeholder"))
+        for idx in static_input_indices:
+            static_inputs.add(fw_g_inputs[idx])
+
     for saved in fw_outs_saved_for_bw:
+        if saved in static_inputs:
+            # Do not run hooks on static_input_indices,
+            # as they correspond to model parameters,
+            # which have more users than autograd save context.
+            # The main use case for saved_tensors_hooks is activation quantization.
+            # Where desired behavior is to quantize saved activations
+            # to free the original saved tensor.
+            # That can not be done for parameters (static_input_indices).
+            fw_outs_saved_tensors_unchanged.append(saved)
+            continue
+
         val = saved.meta["val"]
         if not isinstance(val, torch.Tensor):
             continue
@@ -963,7 +981,6 @@ def maybe_inline_graph_saved_tensors_hooks(
         for n in pytree.tree_leaves(fw_pack_out_n.args[0]):
             if not isinstance(n, torch.fx.Node):
                 continue
-
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)
             elif is_sym_node(n):
@@ -1171,8 +1188,13 @@ def aot_dispatch_autograd(
                 )
 
             maybe_inline_graph_saved_tensors_hooks(
-                fw_module, bw_module, num_inner_fwd_outputs, aot_config
+                fw_module,
+                bw_module,
+                num_inner_fwd_outputs,
+                fw_metadata.static_input_indices,
+                aot_config,
             )
+            static_lifetime_input_indices = fw_metadata.static_input_indices
 
             fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints

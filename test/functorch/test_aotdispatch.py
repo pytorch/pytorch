@@ -6872,6 +6872,32 @@ metadata incorrectly.
             #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
             # )
 
+        def m_inp_fn():
+            x = torch.ones(2, 2, 2, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return (x,)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+                self.relu = nn.ReLU()
+                self.fc2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.fc1(x)
+                out = self.relu(out)
+                out = self.fc2(out)
+                return out
+
+        m = M().to(device=device)
+        _test_pack_hooks(
+            m,
+            m_inp_fn,
+            [((pack_fp8_with_scale, unpack_fp8_with_scale), True)],
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_recompile(self):
