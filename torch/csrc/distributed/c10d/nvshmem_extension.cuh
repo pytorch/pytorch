@@ -28,4 +28,9 @@ at::Tensor nvshmem_sendrecv(
     std::string group_name);
 
 
+at::Tensor nvshmem_all_to_all(
+    at::Tensor& input,
+    at::Tensor& out,
+    std::string group_name);
+
 } // namespace c10d::nvshmem_extension
