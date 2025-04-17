@@ -791,13 +791,9 @@ class AOTDedupeWrapper(CompilerWrapper):
     needs_post_compile: bool = True
 
     # NB: Hot path, avoid set lookups here
+    # TODO: Can avoid the zip here too, probably
     def remove_dupe_args(self, args):
-        result = []
-        keep_arg_mask = self.keep_arg_mask
-        for i, t in enumerate(args):
-            if keep_arg_mask[i]:
-                result.append(t)
-        return result
+        return [t for t, keep in zip(args, self.keep_arg_mask) if keep]
 
     def add_dupe_args(self, args):
         return [args[i] for i in self.add_dupe_map]
