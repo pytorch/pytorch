@@ -50,7 +50,6 @@ struct CPUGeneratorImplState {
 #if AT_MKL_ENABLED()
   uint64_t mkl_seed;
   uint64_t mkl_offset;
-  bool mkl_lock_seed;
 #endif
 };
 
@@ -91,7 +90,15 @@ CPUGeneratorImpl::CPUGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     engine_{seed_in},
     next_float_normal_sample_{std::optional<float>()},
-    next_double_normal_sample_{std::optional<double>()} { }
+    next_double_normal_sample_{std::optional<double>()} {
+#if AT_MKL_ENABLED()
+      {
+        auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+        std::scoped_lock lock(mkl_gen->mutex_);
+        mkl_gen->set_current_seed(seed_in);
+      }
+#endif
+    }
 
 /**
  * Manually seeds the engine with the seed input
@@ -101,6 +108,13 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
   next_float_normal_sample_.reset();
   next_double_normal_sample_.reset();
   engine_ = mt19937(seed);
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(seed);
+  }
+#endif
 }
 
 /**
@@ -135,6 +149,13 @@ uint64_t CPUGeneratorImpl::current_seed() const {
 uint64_t CPUGeneratorImpl::seed() {
   auto random = c10::detail::getNonDeterministicRandom();
   this->set_current_seed(random);
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(random);
+  }
+#endif
   return random;
 }
 
@@ -184,7 +205,6 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     std::scoped_lock lock(mkl_gen->mutex_);
     mkl_gen->set_current_seed(rng_state->mkl_seed);
     mkl_gen->skip_ahead(rng_state->mkl_offset);
-    mkl_gen->set_lock_seed(rng_state->mkl_lock_seed);
   }
 #endif
 }
@@ -231,7 +251,6 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
     std::scoped_lock lock(mkl_gen->mutex_);
     accum_state->mkl_seed = mkl_gen->current_seed();
     accum_state->mkl_offset = mkl_gen->get_offset();
-    accum_state->mkl_lock_seed = mkl_gen->get_lock_seed();
   }
 #endif
 
