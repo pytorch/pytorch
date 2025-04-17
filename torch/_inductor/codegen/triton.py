@@ -713,16 +713,6 @@ def triton_compute_type(dtype: torch.dtype) -> str:
     return triton_type(upcast_compute_type(dtype))
 
 
-def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
-    """Number of bits of triton_compute_type()"""
-    dtype = upcast_compute_type(dtype)
-    itemsize = getattr(dtype, "itemsize", None)
-    if itemsize:
-        return itemsize * 8
-    else:
-        return -1
-
-
 def triton_store_type(dtype: torch.dtype) -> str:
     """Convert torch.dtype to triton type, with fix for storing tl.bool"""
     if dtype == torch.bool:
@@ -918,6 +908,23 @@ class TritonOverrides(OpOverrides):
             target_dtype_bitwidth = _get_primitive_bitwidth(dtype)
             bitcast = "True" if src_dtype_bitwidth == target_dtype_bitwidth else "False"
             return f"{x}.to({triton_dtype}, bitcast={bitcast})"
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
+        assert src_dtype.itemsize == dtype.itemsize
+        # We may promote float16 or bfloat16 to float32 and cause the
+        # bitwidth of dtype to be different from the input tensor (i.e. float32).
+        # In such as case, we will have to convert the input tensor to
+        # its src_type, perform bitcast, and then convert the bit-casted
+        # tensor back to float to ensure we use values with the right precision.
+        if x.dtype != src_dtype:
+            x = f"{x}.to({triton_type(src_dtype)})"
+
+        out = f"{x}.to({triton_type(dtype)}, bitcast=True)"
+        if upcast_compute_type(dtype) != dtype:
+            out = f"{out}.to({triton_type(upcast_compute_type(dtype))})"
+
+        return out
 
     @staticmethod
     def _shaped_constant(value, dtype, shape):
