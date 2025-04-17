@@ -109,11 +109,18 @@ class BlockPointerTestBase(InductorTestCase):
         view = torch.as_strided(full, view_size, full.stride())
         return view
 
+    def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
+        pointwise_blocks = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
+
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
         reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for expected_block in reduction_blocks[:num_dims]:
+        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
+
+    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
+        for expected_block in blocks[:num_dims]:
             self.assertIn(expected_block, code)
-        for unexpected_block in reduction_blocks[num_dims:]:
+        for unexpected_block in blocks[num_dims:]:
             self.assertNotIn(unexpected_block, code)
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
@@ -929,7 +936,7 @@ class CommonTemplate:
         )
 
         # Check for 3D tiling
-        self.assertIn("ZBLOCK", code)
+        self._assert_pointwise_ndims(code, 3)
 
     @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     @parametrize("num_tile_candidates", (1, 2))
@@ -1092,7 +1099,7 @@ class CommonTemplate:
 
         # Check that the tiling is 2D, even though we allow up to 3D.
         # Singleton splits should be discarded.
-        self.assertNotIn(triton_code, "ZBLOCK")
+        self._assert_pointwise_ndims(triton_code, 2)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
