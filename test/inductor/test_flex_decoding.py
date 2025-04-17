@@ -277,7 +277,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 class TestFlexDecoding(InductorTestCase):
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         self.test_inference_only = False
         if test_device[0] == "cpu":
             if LONG_COMPILATION_ON_CPU:

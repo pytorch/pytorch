@@ -2,6 +2,8 @@ import copy
 import dataclasses
 import logging
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from enum import Enum
 from typing import Optional, Union
 
@@ -122,6 +124,26 @@ class CacheArtifactManager:
         cls._cache_info.clear()
 
     @classmethod
+    @contextmanager
+    def with_fresh_cache(cls) -> Generator[None, None, None]:
+        original_new_cache_artifacts = cls._new_cache_artifacts
+        original_seen_artifacts = cls._seen_artifacts
+        original_serializer = cls._serializer
+        original_cache_info = cls._cache_info
+
+        cls._new_cache_artifacts = []
+        cls._seen_artifacts = OrderedSet()
+        cls._serializer = AppendingByteSerializer(serialize_fn=CacheArtifact.serialize)
+        cls._cache_info = CacheInfo()
+        try:
+            yield
+        finally:
+            cls._new_cache_artifacts = original_new_cache_artifacts
+            cls._seen_artifacts = original_seen_artifacts
+            cls._serializer = original_serializer
+            cls._cache_info = original_cache_info
+
+    @classmethod
     def record_artifact(
         cls,
         artifact_type: CacheArtifactType,
@@ -184,7 +206,7 @@ class CacheArtifactManager:
             log.warning("Failed to un-pickle cache artifacts", exc_info=True)
             return None
 
-        from torch._dynamo.pgo import write_local_impl
+        from torch._dynamo.pgo import rewrite_cache_key_for_mega_cache, write_local_impl
         from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
         from torch._inductor.codecache import FxGraphCache
         from torch._inductor.runtime.autotune_cache import _LocalAutotuneCacheBackend
@@ -204,7 +226,9 @@ class CacheArtifactManager:
             elif artifact.type == CacheArtifactType.AOT_AUTOGRAD:
                 AOTAutogradCache._write_to_local_cache(artifact.key, artifact.content)
             elif artifact.type == CacheArtifactType.PGO:
-                meta = write_local_impl(artifact.key, artifact.content)
+                meta = write_local_impl(
+                    rewrite_cache_key_for_mega_cache(artifact.key), artifact.content
+                )
                 assert meta is not None
             else:
                 log.warning(f"Unsupported artifact type {artifact.type}")  # noqa: G004
