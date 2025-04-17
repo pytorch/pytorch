@@ -187,7 +187,7 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
 
             if isinstance(arg2, (int, float)):
                 kwarg = {"min" if tensor_callable is torch.maximum else "max": arg2}
-                return torch.clamp(arg1, **kwarg)
+                return torch.clamp(arg1, **kwarg)  # type: ignore[call-overload]
             else:
                 return real_callable(arg1, arg2)
 
@@ -243,7 +243,7 @@ def _override_builtin_ops():
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
 
-    math.pow = lambda x, y: x**y
+    math.pow = lambda x, y: x**y  # type: ignore[operator]
 
     try:
         yield
