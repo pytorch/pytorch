@@ -1343,7 +1343,7 @@ class TritonKernelOverrides(TritonOverrides):
             if fn_name == "sigmoid":
                 assert hasattr(OpDecompositions, "sigmoid")
                 fn = functools.partial(decomposition_router, _original_impl=original_impl, _fn_name=fn_name)
-                fn.__name__ = fn_name
+                fn.__name__ = fn_name  # type: ignore[attr-defined]
                 setattr(cls, fn_name, staticmethod(fn))
                 continue
 
@@ -1354,7 +1354,7 @@ class TritonKernelOverrides(TritonOverrides):
                     return _original_impl(x)
 
             fn = functools.partial(dtype_router, _original_impl=original_impl, _fn_name=fn_name)
-            fn.__name__ = fn_name
+            fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
 
     @classmethod
