@@ -45,6 +45,7 @@ from .ir import (
     GraphPartitionSignature,
     MultiOutput,
     MultiOutputLayout,
+    NoneLayout,
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -4572,7 +4573,9 @@ class Scheduler:
                     if (
                         buffer
                         and get_device_type(buffer) == "cpu"
-                        and not isinstance(buffer.layout, MultiOutputLayout)
+                        and not isinstance(
+                            buffer.layout, (NoneLayout, MultiOutputLayout)
+                        )
                         and buffer.get_size() == []
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
