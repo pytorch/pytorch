@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pickle
 import shutil
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
@@ -69,7 +70,7 @@ class CompiledArtifact:
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.aot_autograd_artifacts) == 1
+            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
@@ -91,9 +92,24 @@ class CompiledArtifact:
                 assert os.path.isdir(path)
                 shutil.rmtree(path, ignore_errors=True)
 
+                from .codecache import FxGraphCache
+
                 with temporary_cache_dir(path):
                     # This function unpacks the cache artifacts to disk
-                    torch.compiler.load_cache_artifacts(artifact_bytes)
+                    loaded_cache_info = torch.compiler.load_cache_artifacts(
+                        artifact_bytes
+                    )
+                    assert loaded_cache_info is not None
+                    # Now write all the output_code artifacts to disk so that
+                    # they can be inspected and modified
+                    for key in loaded_cache_info.inductor_artifacts:
+                        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                        if os.path.exists(subdir):
+                            for path in sorted(os.listdir(subdir)):
+                                with open(os.path.join(subdir, path), "rb") as f:
+                                    graph = pickle.load(f)
+                                output_file = graph.write_to_disk()
+                                log.info("Output code written to: %s", output_file)
 
     @staticmethod
     def load(
