@@ -187,6 +187,9 @@ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html.
 """
 COLLECTIVES = {
     "broadcast",
+    "_broadcast_oop",
+    "reduce",
+    "_reduce_oop",
     "all_gather",
     "all_reduce",
     "_all_gather_base",
@@ -197,6 +200,9 @@ COLLECTIVES = {
     "scatter",
     "all_to_all",
     "all_reduce_barrier",
+    "allreduce_coalesced",
+    "ALLGATHER_coalesced",
+    "REDUCESCATTER_coalesced",
 }
 
 P2P = {
@@ -498,9 +504,21 @@ class Op:
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'",
                 )
             if (
-                set(self.input_dtypes) != set(self.output_dtypes)
-                or set(self.input_dtypes) != set(other.input_dtypes)
-                or set(self.input_dtypes) != set(other.output_dtypes)
+                (
+                    set(self.input_dtypes) != set(self.output_dtypes)
+                    and self.input_sizes[0]
+                    and self.output_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.input_dtypes)
+                    and self.input_sizes[0]
+                    and other.input_sizes[0]
+                )
+                or (
+                    set(self.input_dtypes) != set(other.output_dtypes)
+                    and self.input_sizes[0]
+                    and other.output_sizes[0]
+                )
             ):
                 return MatchInfo(
                     MatchState.COLLECTIVE_DTYPE_MISMATCH,
@@ -522,16 +540,19 @@ class Op:
                     f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
                     f"'{other.output_sizes}'",
                 )
-            if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
+            if (
+                self.type in ["all_reduce", "allreduce_coalesced"]
+                and self.input_sizes != other.output_sizes
+            ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            # TODO: need to consider uneven sharding for all-gather.
-            # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
             if self.type in [
                 "all_gather",
                 "all_gather_base",
+                "all_gather_into_tensor_coalesced",
+                "ALLGATHER_coalesced",
             ] and not (
                 math.prod(other.output_sizes[0])
                 == math.prod(self.input_sizes[0]) * self.pg_size
@@ -544,6 +565,8 @@ class Op:
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
+                "reduce_scatter_tensor_coalesced",
+                "REDUCESCATTER_coalesced",
             ] and not (
                 math.prod(other.input_sizes[0])
                 == math.prod(self.output_sizes[0]) * self.pg_size
@@ -560,3 +583,36 @@ class Op:
                 else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             )
         return MatchInfo(MatchState.FULLY_MATCHED)
+
+
+class MatchStateRecord:
+    def __init__(
+        self,
+        expected_ranks: set[int],
+        other_ranks: list[int],
+        entry_state: EntryState,
+        candidate_ranks: set[int],
+        candidate_idx: dict[int, int],
+        found_ranks: set[int],
+        found_idx: dict[int, int],
+        errors: set[tuple[int, MatchInfo]],
+    ) -> None:
+        self.expected_ranks = expected_ranks
+        self.other_ranks = other_ranks
+        self.entry_state = entry_state
+        self.candidate_ranks = candidate_ranks
+        self.candidate_idx = candidate_idx
+        self.found_ranks = found_ranks
+        self.found_idx = found_idx
+        self.errors = errors
+        self.has_undecided_case = False
+
+    def reset_for_coalesced(
+        self, entry_state: EntryState, candidate_ranks: set[int]
+    ) -> None:
+        self.entry_state = entry_state
+        self.candidate_ranks = candidate_ranks
+        self.candidate_idx = {}
+        self.found_ranks = set()
+        self.found_idx = {}
+        self.errors = set()

@@ -38,7 +38,13 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
-from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
+from ..source import (
+    AttrSource,
+    GenericAttrSource,
+    GetItemSource,
+    TypeSource,
+    WeakRefCallSource,
+)
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -57,6 +63,7 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -81,7 +88,7 @@ class SuperVariable(VariableTracker):
         # cls for a classmethod)
         self.objvar = objvar
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
@@ -211,7 +218,7 @@ class SuperVariable(VariableTracker):
             inner_fn.__func__, types.FunctionType
         ):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                inner_fn.__func__, self.typevar, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
@@ -268,12 +275,16 @@ class SuperVariable(VariableTracker):
                 return result
 
             try:
-                attr_value = self.objvar.value.__getattribute__(attr_name)
+                # NB - use object.__getattribute__ to prevent running any user code
+                attr_value = object.__getattribute__(self.objvar.value, attr_name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
-            source = self.source and AttrSource(self.source, attr_name)
-            return VariableTracker.build(tx, attr_value, source)
+            attr_source = None
+            if self.objvar.source is not None:
+                # setup a object.__getattribute__(self.objvar, name) source
+                attr_source = GenericAttrSource(self.objvar.source, attr_name)
+            return VariableTracker.build(tx, attr_value, attr_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
             # See `THPModule_disable_torch_function` for the C impl.
             # The signature of _disabled_torch_function_impl is similar to
@@ -331,7 +342,7 @@ class ExceptionVariable(VariableTracker):
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
@@ -460,7 +471,7 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError("comptime is special form")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
@@ -944,7 +955,7 @@ class GetAttrVariable(VariableTracker):
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
@@ -1161,7 +1172,7 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # We're just trying to load the type here. Reconstructing the type from
         # scratch is tricky - for a type like `typing.List[int]` we'd need to
         # deconstruct the origin and args.  The origin for `List[int]` is `list`
@@ -1336,7 +1347,7 @@ class NullVariable(VariableTracker):
     def __repr__(self) -> str:
         return "NullVariable"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         codegen.append_output(create_instruction("PUSH_NULL"))
@@ -1377,7 +1388,7 @@ class StringFormatVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1426,7 +1437,7 @@ class DebuggingVariable(VariableTracker):
 
         tx.debug_locals.append((self, list(args)))
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         return self.source.reconstruct(codegen)
 
     @staticmethod
@@ -1721,7 +1732,7 @@ class RandomVariable(VariableTracker):
             return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1762,7 +1773,7 @@ class WeakRefVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.referent_vt
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
         codegen(self.referent_vt)
         codegen.extend_output(create_call_function(1, False))
