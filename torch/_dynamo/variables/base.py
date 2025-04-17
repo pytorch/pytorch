@@ -16,7 +16,7 @@ computations.
 """
 
 import collections
-from collections.abc import ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -488,23 +488,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            other = args[0]
-            if not isinstance(self, type(other)) and not (
-                isinstance(self, variables.GetAttrVariable)
-                or isinstance(other, variables.GetAttrVariable)
-            ):
-                # NB: GetAttrVariable is a special case because sometimes an
-                # object can map to GetAttrVariable but other time as
-                # SkipFunctionVariable if it is an input to the compiled
-                # function, e.g. tensor.data_ptr
-                return variables.ConstantVariable.create(NotImplemented)
+        elif (
+            name in cmp_name_to_op_mapping
+            and len(args) == 1
+            and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
+            and not kwargs
+        ):
             # NB : Checking for mutation is necessary because we compare
             # constant values
+            other = args[0]
+            if not isinstance(self, type(other)):
+                return variables.ConstantVariable.create(NotImplemented)
             if (
-                not self.is_python_constant()
-                or not other.is_python_constant()
-                or tx.output.side_effects.has_pending_mutation(self)
+                not other.is_python_constant()
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
                 unimplemented_v2(
@@ -529,11 +526,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "__iter__",
             "__next__",
         ):
-            if isinstance(self.value, (KeysView, ItemsView, ValuesView)):
-                hints.append(
-                    "Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) "
-                    "to the compiled region, instead of passing it as an input to the compiled region."
-                )
             hints.append(
                 "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
                 "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "

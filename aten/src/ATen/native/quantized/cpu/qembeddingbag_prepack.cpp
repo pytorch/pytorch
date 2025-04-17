@@ -7,7 +7,6 @@
 #include <ATen/core/custom_class.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/library.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 
@@ -23,6 +22,8 @@
 #include <c10/util/irange.h>
 
 #include <utility>
+
+int register_embedding_params();
 
 /*
  * Prepack function for embedding_bag weights.

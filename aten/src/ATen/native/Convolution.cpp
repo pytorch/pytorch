@@ -97,7 +97,7 @@ static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
-static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
+bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
   auto ch = at::symint::size<T>(input, 1);
   auto bs = at::symint::size<T>(input, 0);
@@ -220,7 +220,7 @@ static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
 
 // simplified version for cudnn 8.2 and above
 template <typename T>
-static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
+bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
   // 1D conv
   if(at::symint::size<T>(input, 2) == 1 && stride == 1){
     return true;
@@ -640,7 +640,7 @@ REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
 REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
-static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
+std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
   out << "ConvParams {"
       << "  stride = " << IntArrayRef{params.stride}
       << "  padding = " << ArrayRef<T>{params.padding}
@@ -1203,7 +1203,7 @@ at::Tensor convolution_overrideable(
 // a bool indicating whether the bias is defined. This is done to save memory by
 // avoiding saving the full bias tensor for backward.
 template <typename T>
-static ConvBackend _select_conv_backend(
+ConvBackend _select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias,

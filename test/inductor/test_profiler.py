@@ -13,7 +13,6 @@ from torch._inductor import config
 from torch.profiler import ProfilerActivity
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
 
@@ -280,23 +279,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         for e in triton_events:
             check_triton_event(e)
-
-    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    def test_cupti_lazy_reinit(self):
-        x, y = (torch.randn(4, 4, device="cuda") for _ in range(2))
-
-        def fn(x, y):
-            return (x + y).sin()
-
-        fn_c = torch.compile(fn, mode="reduce-overhead")
-
-        with torch.profiler.profile():
-            fn_c(x, y)
-
-        if TorchVersion(torch.version.cuda) >= "12.6":
-            self.assertEqual("0", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
-        else:
-            self.assertEqual("1", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
 
 
 if __name__ == "__main__":

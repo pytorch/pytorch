@@ -115,24 +115,16 @@ class TorchTensor(ir.Tensor):
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
-
-        # Handle dtypes that are not natively supported by NumPy:
-        # We pick an uint dtype that has the same size as the original dtype,
-        # view the tensor as that dtype so that it is convertible to NumPy,
-        # and then view it back to the proper dtype (using ml_dtypes obtained by
-        # calling dtype.numpy()).
         if self.dtype == ir.DataType.BFLOAT16:
-            return (
-                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
-            )
+            return self.raw.view(torch.uint16).numpy(force=True)
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
-
+            # TODO: Use ml_dtypes
+            return self.raw.view(torch.uint8).numpy(force=True)
         return self.raw.numpy(force=True)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:

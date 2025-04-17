@@ -17,14 +17,10 @@ function do_install() {
         tmp_dir=$(mktemp -d)
         pushd ${tmp_dir}
         curl -OLs https://ossci-linux.s3.us-east-1.amazonaws.com/${magma_archive}
-        if tar -xvf "${magma_archive}"
-        then
-            mkdir -p "${rocm_dir}/magma"
-            mv include "${rocm_dir}/magma/include"
-            mv lib "${rocm_dir}/magma/lib"
-        else
-            echo "${magma_archive} not found, skipping magma install"
-        fi
+        tar -xvf "${magma_archive}"
+        mkdir -p "${rocm_dir}/magma"
+        mv include "${rocm_dir}/magma/include"
+        mv lib "${rocm_dir}/magma/lib"
         popd
     )
 }

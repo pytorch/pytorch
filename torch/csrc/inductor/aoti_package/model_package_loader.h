@@ -30,15 +30,13 @@ class TORCH_API AOTIModelPackageLoader {
   void load_constants(
       std::unordered_map<std::string, at::Tensor>& constants_map,
       bool use_inactive,
-      bool check_full_update,
-      bool user_managed = false);
+      bool check_full_update);
   std::vector<std::string> get_constant_fqns();
 
   void update_constant_buffer(
       std::unordered_map<std::string, at::Tensor>& tensor_map,
       bool use_inactive,
-      bool validate_full_updates,
-      bool user_managed = false);
+      bool validate_full_updates);
 
  private:
   std::string temp_dir_;

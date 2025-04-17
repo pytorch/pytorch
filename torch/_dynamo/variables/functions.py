@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import graph_break_hints, polyfills, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -64,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -226,18 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        # TODO putting this here to avoid duplication, because we could hit this
-        # from several paths (e.g., SuperVariable or `var_getattr`s).
-        if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
-            unimplemented_v2(
-                gb_type="can't handle functions not implemented in python ",
-                context=f"{fn}",
-                explanation="Dynamo can only handle functions defined in python",
-                hints=[
-                    "Move usage of this function out of `torch.compile` region",
-                    *graph_break_hints.INFERENCE_MODE,
-                ],
-            )
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -1644,8 +1635,6 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):

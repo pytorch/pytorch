@@ -62,8 +62,6 @@ def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
 
 
 class MetalExprPrinter(ExprPrinter_):
-    """Converts sympy expression to Metal code snippet"""
-
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
         x = self.doprint(x)
@@ -119,26 +117,6 @@ class MetalExprPrinter(ExprPrinter_):
         # TODO: This is only accurate up to 2**23
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
-    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 2
-        x, y = map(self.doprint, expr.args)
-        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
-
-    def _print_ToFloat(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"static_cast<float>({x})"
-
-    def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"static_cast<int>(metal::floor({x}))"
-
-    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"metal::log2({x})"
-
 
 class MetalOverrides(OpOverrides):
     """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
@@ -156,7 +134,7 @@ class MetalOverrides(OpOverrides):
     def to_dtype_bitcast(
         x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
     ) -> str:
-        return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
 
     @staticmethod
     def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
@@ -509,15 +487,8 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
-        if dtype in [torch.float16, torch.bfloat16]:
-            # TODO(NS): Figure out the right balance betwene optype casts
-            # op_math_t for half-precision floats should be float32
-            # Otherwise it can lead to a corretness issues with eager
-            line = f"static_cast<float>({line})"
-            dtype = torch.float32
-        return self.cse.generate(self.loads, line, dtype=dtype)
+        return self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None

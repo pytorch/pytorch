@@ -21,8 +21,6 @@
 #else
 #include <ATen/ops/_saturate_weight_to_fp16.h>
 #include <ATen/ops/_saturate_weight_to_fp16_native.h>
-#include <ATen/ops/_wrapped_linear_prepack_native.h>
-#include <ATen/ops/_wrapped_quantized_linear_prepacked_native.h>
 #include <ATen/ops/dequantize.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -294,7 +292,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   return ret_ptr;
 }
 
-static inline at::Tensor pack_weight_to_onednn_tensor(
+inline at::Tensor pack_weight_to_onednn_tensor(
     const at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
   std::vector<int64_t> w_dims = weight.sizes().vec();
@@ -314,7 +312,7 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
   return packed_weight;
 }
 
-static inline at::Tensor pack_weight_to_fp16_onednn_tensor(
+inline at::Tensor pack_weight_to_fp16_onednn_tensor(
     at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
   TORCH_CHECK(weight.scalar_type() == at::kHalf || weight.scalar_type() == at::kFloat, "Weight should be of type float or float16");
@@ -344,12 +342,12 @@ at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
 }
 
 template <class... Inputs>
-static inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
 template <class... Args>
-static inline std::vector<c10::IValue> callOpByHandle(
+inline std::vector<c10::IValue> callOpByHandle(
     const c10::OperatorHandle& op,
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
@@ -358,7 +356,7 @@ static inline std::vector<c10::IValue> callOpByHandle(
 }
 
 template <class... Args>
-static inline std::vector<c10::IValue> callOpByName(
+inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
@@ -368,7 +366,7 @@ static inline std::vector<c10::IValue> callOpByName(
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
 }
 
-static at::Tensor wrapped_quantized_linear(
+at::Tensor wrapped_quantized_linear(
     at::Tensor input,
     const at::Tensor& input_scale,
     const at::Tensor& input_zero_point,
@@ -424,7 +422,7 @@ at::Tensor wrapped_quantized_linear(
 #endif // USE_FBGEMM
 }
 
-static at::Tensor wrapped_quantized_linear_meta(
+at::Tensor wrapped_quantized_linear_meta(
     at::Tensor input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
@@ -458,6 +456,11 @@ at::Tensor wrapped_quantized_linear_meta(
       false, "This PyTorch installation was not built with FBGEMM operators");
 #endif // USE_FBGEMM
 }
+
+at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
+    const at::Tensor& weight_scale,
+    const at::Tensor& weight_zero_point,
+    const at::Tensor& bias);
 
 at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
     const at::Tensor& weight_scale,
@@ -497,6 +500,13 @@ at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at
     const at::Tensor& packed_weight,
     const at::Tensor& output_scale,
     const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel);
+
+at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
+    const at::Tensor& input_zero_point,
+    const at::Tensor& packed_weight,
+    const at::Tensor& output_scale,
+    const at::Tensor& output_zero_point,
     [[maybe_unused]] const int64_t out_channel) {
   // This op is similar to wrapped_quantized_linear, but it takes the prepacked weight
 #ifdef USE_FBGEMM
@@ -518,7 +528,12 @@ at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at
 #endif // USE_FBGEMM
 }
 
-static at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
+    [[maybe_unused]] const at::Tensor& weight_scale,
+    [[maybe_unused]] const at::Tensor& weight_zero_point,
+    [[maybe_unused]] const at::Tensor& bias);
+
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
     [[maybe_unused]] const at::Tensor& weight_scale,
     [[maybe_unused]] const at::Tensor& weight_zero_point,
     [[maybe_unused]] const at::Tensor& bias) {
@@ -536,7 +551,15 @@ static at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
 #endif // USE_FBGEMM
 }
 
-static at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+    [[maybe_unused]] const at::Tensor& input_scale,
+    [[maybe_unused]] const at::Tensor& input_zero_point,
+    [[maybe_unused]] const at::Tensor& packed_weight,
+    [[maybe_unused]] const at::Tensor& output_scale,
+    [[maybe_unused]] const at::Tensor& output_zero_point,
+    const int64_t out_channel);
+
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
     [[maybe_unused]] const at::Tensor& packed_weight,
