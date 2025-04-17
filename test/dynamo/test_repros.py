@@ -1669,7 +1669,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # With unspec int, maximum computation is preserved
         self.assertExpectedInline(cnt.frame_count, """1""")
         if torch._dynamo.config.automatic_dynamic_shapes:
-            self.assertExpectedInline(cnt.op_count, """4""")
+            if not torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(cnt.op_count, """4""")
+            else:
+                self.assertExpectedInline(cnt.op_count, """3""")
         else:
             self.assertExpectedInline(cnt.op_count, """3""")
 
