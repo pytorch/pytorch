@@ -660,7 +660,13 @@ register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
 
 @register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
 def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
-    """ """
+    """
+    Note: this `as_strided` strategy is a simplified version only for unblocking
+    DTensor `flex_attention` implementation. It only supports the case where
+    the `input` has the same shape as `size` and `storage_offset` is `None`, and
+    in `FakeTensorMode` only, i.e. it only guarantees the correctness of shape and
+    stride propagation.
+    """
     assert len(op_schema.args_schema) > 2, (
         f"as_strided should have at least 3 args but got {len(op_schema.args_schema)}"
     )
@@ -673,6 +679,12 @@ def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
     target_stride = op_schema.args_schema[2]
     assert isinstance(target_stride, (tuple, list))
     target_size, target_stride = tuple(target_size), tuple(target_stride)
+
+    if len(op_schema.args_schema) == 4:
+        storage_offset = op_schema.args_schema[3]
+        assert storage_offset is None, (
+            f"DTensor as_strided only supports storage_offset == None but got {storage_offset}"
+        )
 
     inp_size = inp_strategy.shape
     assert inp_size == target_size, (
