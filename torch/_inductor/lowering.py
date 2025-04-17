@@ -593,7 +593,6 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(

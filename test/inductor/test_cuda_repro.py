@@ -921,7 +921,6 @@ class CudaReproTests(TestCase):
         )
 
     def test_libdevice_routing(self):
-
         def foo(x):
             return x.exp()
 

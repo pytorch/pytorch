@@ -1333,7 +1333,6 @@ class TritonKernelOverrides(TritonOverrides):
             assert hasattr(cls, fn_name)
             original_impl = getattr(cls, fn_name)
 
-            @staticmethod
             def dtype_router(x, _original_impl=original_impl, _fn_name=fn_name):
                 if x.dtype == torch.float64:
                     return f"libdevice.{_fn_name}({x})"
@@ -1341,7 +1340,7 @@ class TritonKernelOverrides(TritonOverrides):
                     return _original_impl(x)
 
             dtype_router.__name__ = fn_name
-            setattr(cls, fn_name, dtype_router)
+            setattr(cls, fn_name, staticmethod(dtype_router))
 
     @classmethod
     def constant(cls, value, dtype):
