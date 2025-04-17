@@ -5,15 +5,19 @@ import abc
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_ouputs,
-    create_bw_fn,
-    materialize_as_graph,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch._subclasses.functional_tensor import disable_functional_mode
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
 
 
 class BaseHOP(HigherOrderOperator, abc.ABC):
@@ -185,8 +189,6 @@ class BaseHOPFunction(torch.autograd.Function):
         ctx.subgraph = subgraph
         ctx.kwargs = kwargs
 
-        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
-        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         with torch._C._AutoDispatchBelowAutograd():
             return hop(subgraph, *operands, **kwargs)
 
@@ -196,18 +198,35 @@ class BaseHOPFunction(torch.autograd.Function):
         operands = ctx.operands
         kwargs = ctx.kwargs
 
-        bwd_gm = materialize_as_graph(
-            create_bw_fn(subgraph, operands),
-            (*operands, *grad_outputs),
-            include_key_set=ctx._fw_include_key_set,
-            exclude_key_set=ctx._fw_exclude_key_set,
-        )
+        # TODO: Something special needs to happen with min cut partitioner
+        with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
+            with disable_proxy_modes_tracing():
+                from .invoke_subgraph import create_fw_bw_graph
+                from .utils import _from_fun
+
+                fw_inputs = pytree.tree_map(_from_fun, operands)
+                (
+                    _,
+                    joint_graph,
+                    _,
+                ) = create_fw_bw_graph(subgraph, fw_inputs, grad_outputs)
+
+        # The joint graph returns (*grad_inputs, *fwd_outputs).
+        # We only need the grad_inputs.
+        def bwd_fn(*args):
+            operands = args[: -len(grad_outputs)]
+            grad_outs = args[-len(grad_outputs) :]
+            result = joint_graph(*operands, *grad_outs)
+            grad_inputs = result[: -len(grad_outputs)]
+            return grad_inputs
 
         return (
             None,
             None,
             None,
-            *ctx.hop(bwd_gm, *operands, *grad_outputs, **kwargs),
+            *ctx.hop(
+                FunctionWithNoFreeVars(bwd_fn), *operands, *grad_outputs, **kwargs
+            ),
         )
 
 
