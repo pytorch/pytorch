@@ -3212,12 +3212,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
-        self.assertEqual(
-            torch._dynamo.utils.counters["graph_break"][
-                "assert with non-string message"
-            ],
-            1,
-        )
+        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
+            if "assert with non-string message" in gb:
+                self.assertEqual(cnt, 1)
+                break
+        else:
+            # graph break not found
+            self.assertTrue(False)
 
     def test_rewrite_assert_noop(self):
         def f(x):

@@ -220,12 +220,8 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
-    "complex": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "multinomial": {f16, f32, f64},
@@ -239,10 +235,15 @@ inductor_expected_failures_single_sample["cpu"] = {
         f32,
         f64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
-    "view_as_complex": {f16},
 }
 if not torch._inductor.config.cpp_wrapper:
-    inductor_expected_failures_single_sample["cpu"]["histc"] = {f16}
+    inductor_expected_failures_single_sample["cpu"].update(
+        # half_to_float is only valid for the CUDA implementation
+        _softmax_backward_data={f16},
+        complex={f16},
+        histc={f16},
+        view_as_complex={f16},
+    )
 
 
 inductor_expected_failures_single_sample["cuda"] = {
