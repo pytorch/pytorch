@@ -1500,7 +1500,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_user_code_statically_known(self):
-        from torch.fx.experimental.symbolic_shapes import has_static_value, statically_known_true
+        from torch.fx.experimental.symbolic_shapes import (
+            has_static_value,
+            statically_known_true,
+        )
 
         @torch.compile(fullgraph=True)
         def f(x):
