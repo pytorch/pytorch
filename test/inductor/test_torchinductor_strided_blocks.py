@@ -1064,6 +1064,36 @@ class CommonTemplate:
         num_broadcasts = triton_code.count("tl.broadcast_to")
         self.assertEqual(num_broadcasts, 1)
 
+    def test_mul_broadcast_multi_output(self):
+        def foo(x, y, z):
+            a = x * y
+            b = 128.0
+            c = a * b
+            d = a * z
+            e = x * z
+            return a, c, d, e
+
+        inps = [
+            torch.randn((8, 11, 128), device=self.device),
+            torch.randn((128,), device=self.device),
+            torch.randn((8, 11, 128), device=self.device),
+        ]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=7,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check that the tiling is 2D, even though we allow up to 3D.
+        # Singleton splits should be discarded.
+        self.assertNotIn(triton_code, "ZBLOCK")
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
