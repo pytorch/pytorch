@@ -144,7 +144,7 @@ def fn(accum, buf1, buf2):
     return D, tmp_2
 """,
         )
-/data/users/mlazos/pytorch/torch/_inductor/codegen/cuda/cutlass_python_evt.py
+
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
