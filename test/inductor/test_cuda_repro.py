@@ -21,7 +21,6 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import (
-    IS_BIG_GPU,
     run_and_get_code,
     run_and_get_graph_lowering,
     run_fw_bw_and_get_code,
@@ -42,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
