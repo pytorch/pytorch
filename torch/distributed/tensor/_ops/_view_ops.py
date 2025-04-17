@@ -654,3 +654,33 @@ register_op_strategy_map(
 )
 register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
+
+
+@register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
+    """ """
+    assert len(op_schema.args_schema) > 2, (
+        f"as_strided should have at least 3 args but got {len(op_schema.args_schema)}"
+    )
+
+    inp_strategy = op_schema.args_schema[0]
+    assert isinstance(inp_strategy, OpStrategy)
+
+    target_size = op_schema.args_schema[1]
+    assert isinstance(target_size, (tuple, list))
+    target_stride = op_schema.args_schema[2]
+    assert isinstance(target_stride, (tuple, list))
+    target_size, target_stride = tuple(target_size), tuple(target_stride)
+
+    inp_size = inp_strategy.shape
+    assert inp_size == target_size, (
+        f"as_strided only supports the same size: input has size {inp_size} but target size is {target_size}"
+    )
+
+    assert len(target_size) == len(target_stride), (
+        f"size and stride should have the same length, but got {len(target_size)} and {len(target_stride)}"
+    )
+
+    from torch.distributed.tensor._ops._tensor_ops import default_strategy
+
+    return default_strategy(op_schema)
