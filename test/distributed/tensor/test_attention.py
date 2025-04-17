@@ -2,11 +2,14 @@
 # Owner(s): ["oncall: distributed"]
 import unittest
 
+from typing import Any, Callable
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor import DeviceMesh
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._ops import TorchDispatchMode
 from torch.distributed._tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
@@ -16,6 +19,14 @@ from torch.distributed._tensor.experimental._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
@@ -423,6 +434,116 @@ class RingAttentionTest(DTensorTestBase):
                     c10d_functional.all_to_all_single: self.world_size * args.n_layers,
                 },
             )
+
+
+class RingFlexAttentionTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @with_comms
+    def test_ring_flex_attention(self) -> None:
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        # Compile the flex_attention function
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        torch.manual_seed(10)
+        dtype = torch.float32
+        bs = 8
+        query_tokens = 64
+        context_tokens = 64
+        dim = 32
+        nheads = 8
+
+        q = torch.rand(
+            (bs, nheads, query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=bs,
+            H=nheads,
+            Q_LEN=query_tokens,
+            KV_LEN=context_tokens,
+            device=self.device_type,
+        )
+
+        out = flex_attention(q, k, v, block_mask=block_mask)
+
+        expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+
+        # test flex attention on DTensor
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+
+        # q_dist = distribute_tensor(q, device_mesh, [Replicate()])
+        # k_dist = distribute_tensor(k, device_mesh, [Replicate()])
+        # v_dist = distribute_tensor(v, device_mesh, [Replicate()])
+        # assert isinstance(q_dist, DTensor)
+        with CPMode():
+            out = flex_attention(q, k, v, block_mask=block_mask)
+
+        torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+
+
+class CPMode(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        return func(*args, **kwargs)
+
+
+@flex_attention_hop.py_impl(CPMode)
+def cp_flex_attention(
+    mode: CPMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    print("Congrats! Flex attention is successfully dispatched!")
+
+    return flex_attention_hop(
+        query,
+        key,
+        value,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        scale=scale,
+        kernel_options=kernel_options,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
 
 
 if __name__ == "__main__":
