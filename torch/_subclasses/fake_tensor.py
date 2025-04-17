@@ -1543,7 +1543,9 @@ class FakeTensorMode(TorchDispatchMode):
                     func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
                 )
                 for index in new_kwargs["indices"]:
-                    # index call nonzero for bool or int8 tensors
+                    # index calls nonzero for bool or int8 tensors, and
+                    # therefore has a dynamic shape output. For other dtypes,
+                    # the output shape depends on the input shape (and not data)
                     if isinstance(index, torch.Tensor) and index.dtype in (
                         torch.bool,
                         torch.int8,
