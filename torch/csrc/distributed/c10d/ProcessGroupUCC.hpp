@@ -25,16 +25,16 @@ namespace c10d {
 #define TORCH_UCC_DEVICE_NOT_SET -2
 
 #ifdef USE_CUDA
-#define SAVE_TENSORS(_TENSORS, _DATA)                       \
-  do {                                                      \
-    if ((_TENSORS)[0].device().is_cuda()) {                 \
-      for (const auto i : c10::irange((_TENSORS).size())) { \
-        c10::cuda::CUDACachingAllocator::recordStream(      \
-            (_TENSORS)[i].storage().data_ptr(), (*stream)); \
-      }                                                     \
-    } else {                                                \
-      (_DATA) = (_TENSORS);                                 \
-    }                                                       \
+#define SAVE_TENSORS(_TENSORS, _DATA)                                  \
+  do {                                                                 \
+    if ((_TENSORS)[0].defined() && (_TENSORS)[0].device().is_cuda()) { \
+      for (const auto i : c10::irange((_TENSORS).size())) {            \
+        c10::cuda::CUDACachingAllocator::recordStream(                 \
+            (_TENSORS)[i].storage().data_ptr(), (*stream));            \
+      }                                                                \
+    } else {                                                           \
+      (_DATA) = (_TENSORS);                                            \
+    }                                                                  \
   } while (0)
 
 #else
@@ -187,6 +187,19 @@ class TORCH_API ProcessGroupUCC : public Backend {
       std::vector<at::Tensor>& outputTensors,
       const char* prof_title);
 
+  // Coalescing is not natively supported by UCC, so we implement it at the
+  // ProcessGroup level. The implementation relies on calling UCC's alltoallv.
+  // Because of that, We impose several restrictions on coalesced groups:
+  // 1) we can only coalesce send and recv ops
+  // 2) we can only coalesce one send and one recv maximum per pair of ranks
+  // 3) all ranks must participate in the coalesced group, even if it is empty.
+  // 4) we do not support tags for coalesced groups.
+  // Despite these restrictions, we support a number of useful data patterns,
+  // such as ring p2p, allgather, broadcast, alltoall, etc.
+  void startCoalescing() override;
+
+  c10::intrusive_ptr<Work> endCoalescing() override;
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
@@ -285,6 +298,10 @@ class TORCH_API ProcessGroupUCC : public Backend {
   ucc_team_h team{nullptr};
   ucc_ee_h cuda_ee{nullptr};
   ucc_ee_h cuda_ee_p2p[2]{nullptr, nullptr};
+
+  bool capturing_coalesced_coll_ = false;
+  std::vector<at::Tensor> coalesced_coll_outputTensors_;
+  std::vector<at::Tensor> coalesced_coll_inputTensors_;
 
 #ifdef USE_CUDA
   std::unique_ptr<at::cuda::CUDAStream> stream = nullptr;
