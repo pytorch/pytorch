@@ -14,8 +14,8 @@ can be used to explore the snapshot.
    allocted and managed through the PyTorch allocator.  Any memory allocated directly from CUDA APIs will not be
    visible in the PyTorch memory profiler.
 
-   NCCL (used for distributed communication on CUDA devices) is a common example of a library that allocates significant
-   amounts of GPU memory that is invisible to the PyTorch memory profiler.  See :ref:`non_pytorch_alloc` for more info.
+   NCCL (used for distributed communication on CUDA devices) is a common example of a library that allocates some
+   GPU memory that is invisible to the PyTorch memory profiler.  See :ref:`non_pytorch_alloc` for more info.
 
 Generating a Snapshot
 =====================
