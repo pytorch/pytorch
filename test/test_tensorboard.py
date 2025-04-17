@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import importlib.util
 import io
 import os
 import shutil
@@ -12,18 +13,12 @@ import expecttest
 import numpy as np
 
 
-TEST_TENSORBOARD = True
-try:
-    import tensorboard.summary.writer.event_file_writer  # noqa: F401
+TEST_TENSORBOARD: bool = importlib.util.find_spec("tensorboard") is not None
+if TEST_TENSORBOARD:
     from tensorboard.compat.proto.summary_pb2 import Summary
-except ImportError:
-    TEST_TENSORBOARD = False
-
-HAS_TORCHVISION = True
-try:
+HAS_TORCHVISION: bool = importlib.util.find_spec("torchvision") is not None
+if HAS_TORCHVISION:
     import torchvision
-except ImportError:
-    HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_MATPLOTLIB = True
