@@ -998,7 +998,10 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
-    * :attr:`stride` controls the stride for the cross-correlation.
+    * :attr:`stride` controls the stride for the cross-correlation. When stride > 1, ConvTranspose2d inserts zeros between input
+      elements along the spatial dimensions before applying the convolution kernel. This zero-insertion operation is the standard
+      behavior of transposed convolutions, which can increase the spatial resolution and is equivalent to a learnable
+      upsampling operation.
 
     * :attr:`padding` controls the amount of implicit zero padding on both
       sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
@@ -1140,6 +1143,14 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+        """
+        Performs the forward pass.
+
+        Attributes:
+            input (Tensor): The input tensor.
+            output_size (list[int], optional): A list of integers representing
+                the size of the output tensor. Default is None.
+        """
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose2d"

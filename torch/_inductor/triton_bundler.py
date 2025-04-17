@@ -382,7 +382,10 @@ class TritonBundler:
                         os.replace(tmp_dir, directory)
                 else:
                     # Atomic on POSIX systems
-                    os.replace(tmp_dir, directory)
+                    try:
+                        os.replace(tmp_dir, directory)
+                    except OSError:
+                        log.warning("Directory %s is not empty - skipping!", tmp_dir)
 
             if config.use_static_cuda_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
