@@ -57,7 +57,7 @@ static bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-RegisterOperators reg_ops(
+static RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
          [](Stack& stack) {
