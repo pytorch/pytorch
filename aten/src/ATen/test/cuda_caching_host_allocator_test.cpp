@@ -121,10 +121,10 @@ TEST(CachingHostAllocatorTest, pinned_alias_slice) {
   auto pinned_tensor =
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
   ASSERT_TRUE(pinned_tensor.is_pinned());
-  ASSERT_TRUE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_TRUE(at::getHostAllocator(at::kCUDA)->record_event(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
 
   // Check an tensor constructed with from_blob can be correctly recorded (via
   // the shared data_ptr)
@@ -136,10 +136,10 @@ TEST(CachingHostAllocatorTest, pinned_alias_slice) {
       alias_tensor.storage().data_ptr().get_context() ==
       pinned_tensor.storage().data_ptr().get_context());
   ASSERT_EQ(alias_tensor.data_ptr(), pinned_tensor.data_ptr());
-  ASSERT_TRUE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_TRUE(at::getHostAllocator(at::kCUDA)->record_event(
       alias_tensor.data_ptr(),
       alias_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
 
   // Check an tensor constructed with slicing can be correctly recorded (via
   // the shared context)
@@ -149,20 +149,20 @@ TEST(CachingHostAllocatorTest, pinned_alias_slice) {
       slice_tensor.storage().data_ptr().get_context(),
       pinned_tensor.storage().data_ptr().get_context());
   ASSERT_NE(slice_tensor.data_ptr(), pinned_tensor.data_ptr());
-  ASSERT_TRUE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_TRUE(at::getHostAllocator(at::kCUDA)->record_event(
       slice_tensor.data_ptr(),
       slice_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
 
   // Check a tensor that has neither a matching context nor data_ptr cannot be
   // recorded.
   auto alias_slice_tensor = at::from_blob(
       slice_tensor.data_ptr(), slice_tensor.sizes(), slice_tensor.options());
   ASSERT_TRUE(alias_slice_tensor.is_pinned());
-  ASSERT_FALSE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_FALSE(at::getHostAllocator(at::kCUDA)->record_event(
       alias_slice_tensor.data_ptr(),
       alias_slice_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
   ASSERT_NE(
       alias_slice_tensor.storage().data_ptr().get(),
       slice_tensor.storage().data_ptr().get());
@@ -206,10 +206,10 @@ TEST(CachingHostAllocatorTest, check_raw_allocation) {
           .make_tensor();
 
   ASSERT_TRUE(pinned_tensor.is_pinned());
-  ASSERT_TRUE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_TRUE(at::getHostAllocator(at::kCUDA)->record_event(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
 }
 
 TEST(CachingHostAllocatorTest, check_unknown_tensor) {
@@ -220,10 +220,10 @@ TEST(CachingHostAllocatorTest, check_unknown_tensor) {
   auto unpinned_tensor =
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(false));
 
-  ASSERT_FALSE(at::cuda::CachingHostAllocator_recordEvent(
+  ASSERT_FALSE(at::getHostAllocator(at::kCUDA)->record_event(
       unpinned_tensor.data_ptr(),
       unpinned_tensor.storage().data_ptr().get_context(),
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream().unwrap()));
 }
 
 TEST(CachingHostAllocatorTest, check_empty_cache) {
@@ -238,13 +238,13 @@ TEST(CachingHostAllocatorTest, check_empty_cache) {
         {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     ptr = pinned_tensor.data_ptr();
     ctx = pinned_tensor.storage().data_ptr().get_context();
-    ASSERT_TRUE(at::cuda::CachingHostAllocator_recordEvent(
-        ptr, ctx, at::cuda::getCurrentCUDAStream()));
+    ASSERT_TRUE(at::getHostAllocator(at::kCUDA)->record_event(
+        ptr, ctx, at::cuda::getCurrentCUDAStream().unwrap()));
   }
 
   at::cuda::CachingHostAllocator_emptyCache();
-  ASSERT_FALSE(at::cuda::CachingHostAllocator_recordEvent(
-      ptr, ctx, at::cuda::getCurrentCUDAStream()));
+  ASSERT_FALSE(at::getHostAllocator(at::kCUDA)->record_event(
+      ptr, ctx, at::cuda::getCurrentCUDAStream().unwrap()));
 }
 
 TEST(CachingHostAllocatorTest, check_reuse) {
