@@ -32,38 +32,38 @@ inline TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
     c10::cuda::CUDAStream stream) {
-  return getCachingHostAllocator()->record_event(ptr, ctx, stream.unwrap());
+  return getHostAllocator(at::kCUDA)->record_event(ptr, ctx, stream.unwrap());
 }
 
 // Releases cached pinned memory allocations via cudaHostFree
 C10_DEPRECATED_MESSAGE(
   "at::cuda::CachingHostAllocator_emptyCache() is deprecated. Please use at::getHostAllocator(at::kCUDA)->empty_cache() instead.")
 inline TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache() {
-  getCachingHostAllocator()->empty_cache();
+  getHostAllocator(at::kCUDA)->empty_cache();
 }
 
 C10_DEPRECATED_MESSAGE(
   "at::cuda::HostAlloc(...) is deprecated. Please use at::getHostAllocator(at::kCUDA)->allocate(...) instead.")
 inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
-  return getCachingHostAllocator()->allocate(size);
+  return getHostAllocator(at::kCUDA)->allocate(size);
 }
 
 C10_DEPRECATED_MESSAGE(
   "at::cuda::CachingHostAllocator_getStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->get_stats() instead.")
 inline TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats() {
-  return getCachingHostAllocator()->get_stats();
+  return getHostAllocator(at::kCUDA)->get_stats();
 }
 
 C10_DEPRECATED_MESSAGE(
   "at::cuda::CachingHostAllocator_resetAccumulatedStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->reset_accumulated_stats() instead.")
 inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats() {
-  getCachingHostAllocator()->reset_accumulated_stats();
+  getHostAllocator(at::kCUDA)->reset_accumulated_stats();
 }
 
 C10_DEPRECATED_MESSAGE(
   "at::cuda::CachingHostAllocator_resetPeakStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->reset_peak_stats() instead.")
 inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats() {
-  getCachingHostAllocator()->reset_peak_stats();
+  getHostAllocator(at::kCUDA)->reset_peak_stats();
 }
 
 } // namespace at::cuda
