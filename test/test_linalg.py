@@ -5696,8 +5696,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         # Test offline tuning with submatrices
-        # Covers both GEMM and ScaledGEMM case, the later
-        # implicitly due to shared code path
+        # Covers GEMM, ScaledGEMM, and GEMM+bias.
         ordinal = torch.cuda.current_device()
 
         with self._tunableop_ctx():
@@ -5718,6 +5717,8 @@ class TestLinalg(TestCase):
             m = 4
             k = 2
 
+            # Covers GEMM and Scaled GEMM cases
+            # Scaled GEMM is a subset of GEMM cases
             # There might be less confusing ways create submatrices, but this works
             # just fine and covers the four transA, transB combinations.
             # 'TN'
@@ -5748,56 +5749,9 @@ class TestLinalg(TestCase):
             subB = matB[:n, :k]
             torch.mm(subA, subB)
 
-            self.assertTrue(torch.cuda.tunable.is_enabled())
-            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
-
-            untuned_filename = get_tunableop_untuned_filename()
-
-            # tuning the untuned GEMMs in file
-            torch.cuda.tunable.tuning_enable(True)
-            torch.cuda.tunable.record_untuned_enable(False)
-
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_duration(1)
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            ref_results = len(torch.cuda.tunable.get_results())
-            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
-            new_results = len(torch.cuda.tunable.get_results())
-
-            # This stores total number of cummulative results
-            total_num_results = new_results - ref_results
-
-            # There must be a new tuning results
-            self.assertEqual(total_num_results, 4)
-
-            self.assertTrue(torch.cuda.tunable.write_file())
-
-            # Compare Param Signature of untuned and tuned results
-            ok = self._compare_untuned_tuned_entries()
-            self.assertTrue(ok)
-
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    @dtypes(torch.bfloat16)
-    def test_gemm_bias_submatrix_offline_tunableop(self, device, dtype):
-        # Test offline tuning with submatrices for GEMM and bias.
-        ordinal = torch.cuda.current_device()
-
-        with self._tunableop_ctx():
-            torch.cuda.tunable.set_rotating_buffer_size(0)
-
-            # record GEMM
-            torch.cuda.tunable.tuning_enable(False)
-            torch.cuda.tunable.record_untuned_enable(True)
-            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
-
-            lda = 12
-            ldb = 10
-            ldc = 14
-            m = 5
-            n = 7
-            k = 9
+            # Cover GEMM+bias case. Also mostly a subset of the regular
+            # GEMM case but with a implicit transpose which makes code
+            #  path slightly different.
             # 'TN' case
             X = torch.rand(ldc, lda, dtype=dtype, device=device)
             matA = torch.rand(ldc, ldb, dtype=dtype, device=device)
@@ -5839,7 +5793,7 @@ class TestLinalg(TestCase):
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
-            self.assertEqual(total_num_results, 2)
+            self.assertEqual(total_num_results, 6)
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
