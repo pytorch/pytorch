@@ -113,8 +113,13 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
-  // AOTriton 0.9+ supports head_dim up to 512
-  const auto max_size = c10::SymInt(512);
+  if (at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    // User explicitly set CK as the flash attention backend.
+    const auto max_size = c10::SymInt(256);
+  } else {
+    // AOTriton 0.9+ supports head_dim up to 512
+    const auto max_size = c10::SymInt(512);
+  }
 #else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -136,6 +141,16 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
           ", Value.size(-1): ",
           value_size_last,
           " instead.");
+    }
+    return false;
+  }
+  if (input_requires_grad(params) &&
+        at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck &&
+        query_size_last > 128) {
+    if (debug) {
+      TORCH_WARN(
+          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
+          "CK flash attention on ROCM does not support backward head_dim > 128.");
     }
     return false;
   }
