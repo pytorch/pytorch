@@ -4,7 +4,6 @@ import tempfile
 import unittest
 
 import torch
-from torch._library.fake_profile import MissingOpProfile
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
