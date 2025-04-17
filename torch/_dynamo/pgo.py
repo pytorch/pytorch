@@ -494,6 +494,11 @@ def get_cache_key() -> Optional[str]:
 
 
 def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    """
+    The PGO cache artifact key for a MAST job contains the job name and the version.
+    When we want to use the cache artifact on a different MAST job, we need to
+    update the key to use the new MAST job's name and version.
+    """
     if not original_key.startswith("mast:"):
         # if original_key is overriden, then dont change it
         return original_key
