@@ -58,6 +58,20 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
+  void start_memory_profile() override {
+    LOG(INFO) << "Starting on-demand memory profile";
+    startMemoryProfile();
+  }
+
+  void stop_memory_profile() override {
+    LOG(INFO) << "Stopping on-demand memory profile";
+    stopMemoryProfile();
+  }
+
+  void export_memory_profile(const std::string& path) override {
+    exportMemoryProfile(path);
+  }
+
  private:
   // Temporarily disable shape collection until
   // we re-roll out the feature for on-demand cases

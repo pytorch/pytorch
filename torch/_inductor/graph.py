@@ -204,6 +204,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -430,7 +431,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs: OrderedSet[str] = OrderedSet()
+        # Track the buffers that we know is unaligned
+        # This can either be a graph input or the output of fallback
+        # kernels.
+        self.unaligned_buffers: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names = OrderedSet[str]()
 
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
@@ -1116,8 +1120,8 @@ class GraphLowering(torch.fx.Interpreter):
         # expensive and cause recompiles; Instead, we're generating code
         # based on the alignment of the example input without guarding.
         with maybe_get_suppress_shape_guards_ctx():
-            if should_assume_input_aligned(example):
-                self.aligned_inputs.add(target)
+            if not should_assume_input_aligned(example):
+                self.unaligned_buffers.add(target)
         return tensor
 
     def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
@@ -1691,7 +1695,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._convolution_pointwise.binary,
                                 torch.ops.mkldnn._convolution_pointwise_.binary,
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
-                                torch.ops.onednn.qconv2d_pointwise.default,
+                                torch.ops.onednn.qconv_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                             ]
                             if torch._C.has_mkl:
@@ -1807,35 +1811,9 @@ class GraphLowering(torch.fx.Interpreter):
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
 
-            for i0 in new_unbacked_defs:
-                ras = self.ras_by_symbol.pop(i0, [])
-                # NB: size-like not needed, we won't retrace
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
-
-                    def is_convertible(s: Expr) -> bool:
-                        if s in (int_oo, -int_oo):
-                            return False
-                        try:
-                            int(s)
-                            return True
-                        except TypeError:
-                            return False
-
-                    if is_convertible(vr.lower):
-                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                    if is_convertible(vr.upper):
-                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
-
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
-
+            # bound_unbacked_symbols tracks the symbols that are created so far,
+            # we use it to make sure that runtime assertions are added after all
+            # symbols used in them are defined.
             self.bound_unbacked_symbols |= new_unbacked_defs
 
             unbacked_bindings = resolve_unbacked_bindings(
@@ -1865,6 +1843,36 @@ class GraphLowering(torch.fx.Interpreter):
                 f"fx node is: {n.format_node()}\n"
                 f"new operations are:\n\n{format_new_defs()}"
             )
+
+            # Emit code for runtime asserts that can be inserted at this point.
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def is_convertible(s: Expr) -> bool:
+                        if s in (int_oo, -int_oo):
+                            return False
+                        try:
+                            int(s)
+                            return True
+                        except TypeError:
+                            return False
+
+                    if is_convertible(vr.lower):
+                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                    if is_convertible(vr.upper):
+                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = min(missing, key=str)
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        make_assert(ra.expr, f"{ra.expr}")
 
         return result
 

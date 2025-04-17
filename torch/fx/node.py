@@ -6,6 +6,7 @@ import operator
 import types
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -58,6 +59,8 @@ Argument = Optional[
     ]
 ]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _legal_ops = dict.fromkeys(
     [
@@ -102,7 +105,7 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> Callable:
+def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     _side_effectful_functions.add(fn)
     return fn
 
@@ -714,10 +717,13 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self) -> bool:
+    def is_impure(self, impure_random: bool = True) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
+
+        Args:
+            impure_random (bool): Whether to treat rand op as impure.
 
         Returns:
 
@@ -732,9 +738,10 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
-                return True
+            if impure_random:
+                if getattr(self.target, "_nondeterministic_seeded", False):
+                    # impure since it mutates RNG state
+                    return True
 
             return self.target in _side_effectful_functions
 

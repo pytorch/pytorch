@@ -95,7 +95,14 @@ from torch.utils.hooks import RemovableHandle
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Iterator, KeysView, ValuesView
+    from collections.abc import (
+        Generator,
+        ItemsView,
+        Iterable,
+        Iterator,
+        KeysView,
+        ValuesView,
+    )
 
 
 try:
@@ -580,11 +587,26 @@ class CompileEventLogger:
     @staticmethod
     def try_add_pt2_compile(event_name: str, **metadata: object):
         """
-        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
+        or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
+        if CHROMIUM_EVENT_LOG is None:
+            return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def try_(method_fn, *args, **kwargs):
+        """
+        Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
+        """
+        if CHROMIUM_EVENT_LOG is None:
+            return
+        metrics_context = get_metrics_context()
+        if not metrics_context.in_progress():
+            return
+        method_fn(*args, **kwargs)
 
 
 @contextmanager
@@ -968,12 +990,17 @@ if sys.version_info >= (3, 12):
 
 def get_inputs_devices(
     inputs: collections.abc.Sequence[object],
+    model: torch.fx.GraphModule,
 ) -> list[Optional[torch.device]]:
-    return list(
-        OrderedSet(
-            [i.device for i in pytree.tree_flatten(inputs)[0] if hasattr(i, "device")]
-        )
-    ) + [None]
+    all_inputs = pytree.tree_flatten(inputs)[0] + [
+        node.meta["val"] for node in list(model.graph.nodes) if "val" in node.meta
+    ]
+    devices: list[Optional[torch.device]] = list(
+        OrderedSet([i.device for i in all_inputs if hasattr(i, "device")])
+    )
+    return [
+        i for i in devices if (isinstance(i, torch.device) and i.type != "meta")
+    ] + [None]
 
 
 def is_typing(value):
@@ -1256,6 +1283,17 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
+    # The number of elements within parameters. This is classically what people
+    # think of when they think of parameters in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
+    # per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters counted by fields. This is mostly a proxy for
+    # the number of distinct type of params.
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -2412,6 +2450,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
+dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
@@ -4109,6 +4148,8 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+    # This emulates
+    # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -4123,12 +4164,14 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
     if vt.is_realized() or (
         hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
     ):
+        func = None
         if isinstance(vt, TensorWithTFOverrideVariable):
-            return True
+            func = getattr(vt.class_type, "__torch_function__", None)
 
-        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-            vt.value, "__torch_function__"
-        )
+        elif isinstance(vt, UserDefinedObjectVariable):
+            func = getattr(vt.value, "__torch_function__", None)
+
+        return func not in (None, torch._C._disabled_torch_function_impl)
 
     return False
 
