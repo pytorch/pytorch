@@ -467,7 +467,7 @@ class TestMatmulCuda(TestCase):
 
         for output_dtype in output_dtypes:
             # Catch edge case of incompat with bfloat16 and major version < 8
-            if input_dtype == torch.bfloat16 and output_dtype == torch.float32 and not PLATFORM_SUPPORTS_BF16:
+            if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
                 if batch_size:
                     with self.assertRaises(RuntimeError):
                         torch.bmm(a, b, out_dtype=output_dtype)
@@ -523,7 +523,7 @@ class TestMatmulCuda(TestCase):
 
         for output_dtype in output_dtypes:
             # Catch edge case of incompat with bfloat16 and major version < 8
-            if input_dtype == torch.bfloat16 and output_dtype == torch.float32 and not PLATFORM_SUPPORTS_BF16:
+            if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
                 if batch_size:
                     with self.assertRaises(RuntimeError):
                         torch.baddbmm(c, a, b, out_dtype=output_dtype)
