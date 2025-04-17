@@ -10850,7 +10850,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_arange_with_int64(self):
         self.assertEqual(torch.arange(0, 0.5, 1, dtype=torch.int64).numel(), 1)
         self.assertEqual(torch.arange(0, 1.5, 1, dtype=torch.int64).numel(), 2)
-        self.assertEqual(torch.arange(1.1, 5, 1, dtype=torch.int64).numel(), 4)
+        self.assertEqual(torch.arange(1 << 53, (1 << 53) + 0.5, 1, dtype=torch.int64).numel(), 0)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
