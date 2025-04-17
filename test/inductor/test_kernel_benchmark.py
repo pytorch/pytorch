@@ -4,6 +4,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -15,7 +16,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -150,6 +151,11 @@ class TestKernelBenchmark(TestCase):
     )
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
+
         M = 12544
         N = 256
         K = 64

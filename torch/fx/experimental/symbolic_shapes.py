@@ -5129,9 +5129,8 @@ class ShapeEnv:
                         source, constraint
                     )
                     msg = (
-                        f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg

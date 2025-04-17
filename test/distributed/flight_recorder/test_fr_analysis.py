@@ -150,9 +150,9 @@ class FlightRecorderEventTest(TestCase):
             output_sizes = [[4, 4]]
             expectedState = MatchState.FULLY_MATCHED
             if collective in [
+                "reduce_scatter",
                 "_reduce_scatter_base",
                 "reduce_scatter_tensor_coalesced",
-                "REDUCESCATTER_coalesced",
             ]:
                 input_sizes = [[4, 4]]
                 output_sizes = [[input_sizes[0][0] * 2]]
@@ -160,7 +160,6 @@ class FlightRecorderEventTest(TestCase):
                 "all_gather",
                 "_all_gather_base",
                 "all_gather_into_tensor_coalesced",
-                "ALLGATHER_coalesced",
             ]:
                 output_sizes = [[math.prod(input_sizes[0]) * 2]]
             if collective == "all_to_all":
@@ -295,7 +294,7 @@ class FlightRecorderE2ETest(TestCase):
             create_one_entry(1, "_broadcast_oop", [[5, 5]], [[5, 5]])
         )
         details4["dump_file_rank_0"]["entries"].append(
-            create_one_entry(2, "coalesced", [[]], [[]])
+            create_one_entry(2, "ALLGATHER_coalesced", [[]], [[]])
         )
         details4["dump_file_rank_1"]["entries"].append(
             create_one_entry(0, "_broadcast_oop", [[4, 4]], [[4, 4]])
@@ -304,13 +303,41 @@ class FlightRecorderE2ETest(TestCase):
             create_one_entry(1, "_broadcast_oop", [[4, 4]], [[4, 4]])
         )
         details4["dump_file_rank_1"]["entries"].append(
-            create_one_entry(2, "coalesced", [[]], [[]])
+            create_one_entry(2, "ALLGATHER_coalesced", [[]], [[]])
         )
         db = build_db(details4, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 1)
         self.assertEqual(db.collectives[0].collective_name, "nccl:_broadcast_oop")
         self.assertEqual(db.collectives[0].pass_check, False)
+        # Test case 5: matched uneven reduce scatter case.
+        details5 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
+        # sequence ID should not increase for coalesced collectives
+        details5["dump_file_rank_0"]["entries"].append(
+            create_one_entry(0, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details5["dump_file_rank_0"]["entries"].append(
+            create_one_entry(1, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details5["dump_file_rank_0"]["entries"].append(
+            create_one_entry(2, "REDUCE_SCATTER_coalesced", [[]], [[]])
+        )
+        details5["dump_file_rank_1"]["entries"].append(
+            create_one_entry(0, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details5["dump_file_rank_1"]["entries"].append(
+            create_one_entry(1, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details5["dump_file_rank_1"]["entries"].append(
+            create_one_entry(2, "REDUCE_SCATTER_coalesced", [[]], [[]])
+        )
+        db = build_db(details5, args, version)
+        self.assertEqual(len(db.collectives), 1)
+        self.assertEqual(db.collectives[0].record_id, 2)
+        self.assertEqual(
+            db.collectives[0].collective_name, "nccl:REDUCE_SCATTER_coalesced"
+        )
+        self.assertEqual(db.collectives[0].pass_check, True)
 
 
 if __name__ == "__main__":

@@ -25,11 +25,23 @@ struct HostAllocator final : at::Allocator {
           get_method("hostMalloc")(nbytes).cast<openreg_ptr_t>());
       TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
     }
-    return {data, data, &ReportAndDelete<kHostFreeMethod>, at::Device(at::kCPU)};
+    return {data, data, &ReportAndDelete, at::Device(at::kCPU)};
+  }
+
+  static void ReportAndDelete(void* ptr) {
+    if (!ptr) {
+      return;
+    }
+    py::gil_scoped_acquire acquire;
+    TORCH_CHECK(
+        get_method("hostFree")(reinterpret_cast<openreg_ptr_t>(ptr))
+            .cast<bool>(),
+        "Failed to free memory pointer at ",
+        ptr);
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    return &ReportAndDelete<kHostFreeMethod>;
+    return &ReportAndDelete;
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
