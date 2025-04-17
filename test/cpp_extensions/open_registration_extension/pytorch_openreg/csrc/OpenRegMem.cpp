@@ -1,21 +1,16 @@
 #include "OpenReg.h"
 
 #include <ATen/EmptyTensor.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/set_cpu_dispatch.h>
+
 #include <c10/core/Allocator.h>
-#include <c10/core/TensorOptions.h>
-#include <c10/util/ArrayRef.h>
+
 #include <torch/library.h>
 
 namespace openreg {
-
 namespace {
 
-using openreg_ptr_t = uint64_t;
-
-// A dummy allocator for our custom device, that secretly uses the CPU
 struct OpenRegAllocator final : at::Allocator {
   OpenRegAllocator() = default;
 
@@ -31,36 +26,11 @@ struct OpenRegAllocator final : at::Allocator {
       TORCH_CHECK(
           data, "Failed to allocator ", nbytes, " bytes on openreg device.");
     }
-    return {data, data, &ReportAndDelete, curr_device};
-  }
-
-  static void ReportAndDelete(void* ptr) {
-    if (!ptr || !Py_IsInitialized()) {
-      return;
-    }
-
-    py::gil_scoped_acquire acquire;
-
-    PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
-    // Always stash, this will be a no-op if there is no error
-    PyErr_Fetch(&type, &value, &traceback);
-
-    TORCH_CHECK(
-        get_method("free")(reinterpret_cast<openreg_ptr_t>(ptr)).cast<bool>(),
-        "Failed to free memory pointer at ",
-        ptr);
-
-    // If that user code raised an error, just print it without raising it
-    if (PyErr_Occurred()) {
-      PyErr_Print();
-    }
-
-    // Restore the original error
-    PyErr_Restore(type, value, traceback);
+    return {data, data, &ReportAndDelete<kFreeMethod>, curr_device};
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    return &ReportAndDelete;
+    return &ReportAndDelete<kFreeMethod>;
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
@@ -72,7 +42,6 @@ struct OpenRegAllocator final : at::Allocator {
   }
 };
 
-// Register our dummy allocator
 static OpenRegAllocator global_openreg_alloc;
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_openreg_alloc);
 
@@ -147,5 +116,4 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 }
 
 } // namespace
-
 } // namespace openreg
