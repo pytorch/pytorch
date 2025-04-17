@@ -52,16 +52,29 @@ elif TEST_XPU:
     DEVICE_TYPE = "xpu"
 else:
     DEVICE_TYPE = "cpu"
+<<<<<<< HEAD
+=======
+
+>>>>>>> 339dd83856 ( Fix merge conflicts)
 
 DEVICE_MODULE = torch.get_device_module(DEVICE_TYPE)
 DEVICE_COUNT = DEVICE_MODULE.device_count()
 BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 NUM_DEVICES = 4
+<<<<<<< HEAD
 
 
 # We use this as a proxy for "multiple GPUs/XPUs/HPUs exist"
 if any((TEST_CUDA, TEST_XPU, TEST_HPU)) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs/XPUs/HPUs, relax the requirement to smaller counts.
+=======
+device_module = torch.get_device_module(DEVICE)
+device_count = device_module.device_count()
+BACKEND = dist.get_default_backend_for_device(DEVICE)
+# We use this as a proxy for "multiple GPUs exist"
+if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
+    # when we actually have multiple GPUs, relax the requirement to smaller counts.
+>>>>>>> 339dd83856 ( Fix merge conflicts)
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
 T = TypeVar("T")

@@ -28,6 +28,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 339dd83856 ( Fix merge conflicts)
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
@@ -216,9 +220,13 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
+<<<<<<< HEAD
         device = torch.device(
             self.device_type, torch.get_device_module(self.device_type).current_device()
         )
+=======
+        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
+>>>>>>> 339dd83856 ( Fix merge conflicts)
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -257,12 +265,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         seed_from_rank_0 = int(object_list[0])
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        # seed synchronization now does NOT happen after the first `distribute_tensor`
-        # call
-        dt = distribute_tensor(
-            torch.empty([self.world_size], device=self.device_type),
-            device_mesh,
-            [Shard(0)],
+        # seed synchronization happens after the first `distribute_tensor` call
+        distribute_tensor(
+            torch.empty([self.world_size], device=self.device_type), device_mesh, [Shard(0)]
         )
         self.assertTrue(random._rng_tracker is None)
         # seed synchronization only happens after `manual_seed` or the first DTensor
@@ -567,9 +572,13 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
+<<<<<<< HEAD
         device = torch.device(
             self.device_type, torch.get_device_module(self.device_type).current_device()
         )
+=======
+        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
+>>>>>>> 339dd83856 ( Fix merge conflicts)
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
