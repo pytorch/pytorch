@@ -7,6 +7,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -108,14 +109,17 @@ class TORCH_API Context {
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "at::globalContext()::getPinnedMemoryAllocator(type) is deprecated. Please use at::getHostAllocator(type) instead.")
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
     auto opt_device_type =
         device_type.has_value() ? device_type : at::getAccelerator();
-    if (opt_device_type) {
-      lazyInitDevice(opt_device_type.value());
-    }
-    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
+    TORCH_CHECK(
+        opt_device_type.has_value(),
+        "Expected a valid device type, but got none.");
+    lazyInitDevice(opt_device_type.value());
+    return at::getHostAllocator(opt_device_type.value());
   }
 
   void lazyInitDevice(c10::DeviceType device_type) {
