@@ -418,8 +418,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     auto* ptr = (dst_device == kCPU ? dst : src);
     auto* ctx = host_tensor.storage().data_ptr().get_context();
     // TODO: warn on the return value.
-    CachingHostAllocator_recordEvent(ptr, ctx, stream);
-
+    at::getHostAllocator(at::kCUDA)->record_event(ptr, ctx, stream.unwrap());
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }
