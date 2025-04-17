@@ -2,6 +2,7 @@
 // but unlike shim.h, this file can contain header-only C++
 // code for better UX.
 
+#include <c10/util/bit_cast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <optional>
@@ -25,7 +26,12 @@ StableIValue from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
       "StableLibrary stack does not support parameter types larger than 64 bits.");
-  return *reinterpret_cast<StableIValue*>(&val);
+  static_assert(std::is_trivially_copyable_v<T>);
+  // Initialization should be cheap enough; let's give people well-specified
+  // reproducible behavior.
+  StableIValue result = 0;
+  std::memcpy(&result, &val, sizeof(val));
+  return result;
 }
 
 // Specialization for std::nullopt_t
@@ -76,7 +82,18 @@ template <
     typename T,
     std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
-  return *reinterpret_cast<T*>(&val);
+  static_assert(std::is_trivially_copyable_v<T>);
+  // T may not have a default constructor. (For example, it might be
+  // c10::Device.) However, std::memcpy implicitly creates a T at the
+  // destination. So, we can use a union to work around this lack of
+  // default constructor.
+  union Result {
+    Result() {}
+    T t;
+  };
+  Result result;
+  std::memcpy(&result.t, &val, sizeof(result));
+  return result.t;
 }
 
 template <
