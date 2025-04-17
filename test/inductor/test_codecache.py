@@ -1507,6 +1507,40 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_save_in_new_path(self) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "new_dir")
+            with fresh_inductor_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact.save(path=path, format="unpacked")
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_inductor_cache():
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=path, format="unpacked"
+                )
+                compiled_out = loaded(*args)
+                self.assertEqual(eager_out, compiled_out)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @unittest.skipIf(IS_FBCODE, "torch import error")
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

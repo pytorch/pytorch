@@ -88,8 +88,9 @@ class CompiledArtifact:
                     file.write(writer.to_bytes())
             else:
                 assert format == "unpacked"
-                assert os.path.isdir(path)
-                shutil.rmtree(path, ignore_errors=True)
+                if os.path.exists(path):
+                    assert os.path.isdir(path)
+                    shutil.rmtree(path, ignore_errors=True)
 
                 with temporary_cache_dir(path):
                     # This function unpacks the cache artifacts to disk
