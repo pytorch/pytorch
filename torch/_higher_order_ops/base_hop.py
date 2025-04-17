@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 
 import abc
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.cond import materialize_as_graph
 from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_ouputs,
     reenter_make_fx,
@@ -112,42 +114,42 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             return subgraph(*operands)
 
     def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
-        unwrapped_operands = ctx.unwrap_tensors(operands)
-        with ctx.redispatch_to_next():
-            # We assume the subgraph doesn't mutate inputs and there is no aliasing.
-            # In the PT2 stack, this is Dynamo's responsibility to figure out.
-            functionalized_subgraph = FunctionWithNoFreeVars(
-                ctx.functionalize(subgraph)
-            )
-            out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
-        return ctx.wrap_tensors(out)
+        from torch._higher_order_ops.auto_functionalize import do_auto_functionalize_v2
 
-    def gen_schema(self, *args, **kwargs):
+        return do_auto_functionalize_v2(ctx.mode, self, (subgraph, *operands), kwargs)
+
+    def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
 
-        subgraph, *operands = args
+        if not isinstance(subgraph, torch.fx.GraphModule):
+            subgraph = materialize_as_graph(
+                subgraph,
+                operands,
+                include_key_set=torch._C._dispatch_tls_local_include_set(),
+                exclude_key_set=torch._C._dispatch_tls_local_exclude_set(),
+            )
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
         ), f"NYI non GraphModule subgraph got {subgraph}"
 
+        def _try_get_fake(node: torch.fx.Node) -> Any:
+            if "example_value" in node.meta:
+                return node.meta["example_value"]
+            else:
+                return node.meta["val"]
+
         fake_args = [
-            ph.meta["example_value"]
-            for ph in subgraph.graph.find_nodes(op="placeholder")
+            _try_get_fake(ph) for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
             mutated_inp_idx,
-            inp_inp_alias,
-            inp_out_alias,
-            out_out_alias,
+            _,
+            _,
+            _,
             output,
         ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
 
-        assert (
-            len(inp_inp_alias) == 0
-            and len(inp_out_alias) == 0
-            and len(out_out_alias) == 0
-        ), "Aliasing is not suppported for HOP subgraph."
         args = [
             HopArgumentInfoGen.from_example(
                 subgraph, name="subgraph", default_value=None, is_mutated=False
@@ -157,17 +159,21 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             if isinstance(arg, tuple):
                 # kwargs value are treated as default argument
                 arg_name, example_value = arg
-                default = example_value
+                # TODO: cannot pass in InvokeQuant as IValue
+                default = None
+                kw_only = True
             else:
                 arg_name = f"arg{idx}"
                 example_value = arg
                 default = None
+                kw_only = False
             args.append(
                 HopArgumentInfoGen.from_example(
                     example_value=example_value,
                     name=arg_name,
                     default_value=default,
                     is_mutated=idx in mutated_inp_idx,
+                    kw_only=kw_only,
                 )
             )
 

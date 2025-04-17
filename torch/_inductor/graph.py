@@ -1275,7 +1275,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
 
-        assert isinstance(value, torch.Tensor)
+        assert isinstance(value, torch.Tensor), value
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants

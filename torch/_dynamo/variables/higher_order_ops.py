@@ -3105,7 +3105,7 @@ def maybe_positional_arg_names(func):
 class BaseHOPVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
+        self.supports_input_mutation = True
         self.supports_aliasing = False
 
     def python_type(self):

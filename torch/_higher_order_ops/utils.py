@@ -722,13 +722,18 @@ def check_input_alias_and_mutation_return_ouputs(
     dict[int, int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    with disable_proxy_modes_tracing():
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    # When we call this function under some TracingContext,
+    # we don't want to modify the original tracing states but instead
+    # we should create a new fake mode, a new shape_env and new inputs.
+    # and disable active functional, proxy and fake modes if any.
+    with torch.utils._python_dispatch._disable_current_modes():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
         changed after run gm once to detect mutation and checks tensor storage
         to detect alias.
         """
-        from torch._prims_common import clone_preserve_strides
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
@@ -744,12 +749,33 @@ def check_input_alias_and_mutation_return_ouputs(
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
+            new_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=ShapeEnv(), allow_non_fake_inputs=False
+            )
+            ctx_stack.enter_context(new_fake_mode)
+            ctx_stack.enter_context(
+                new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()  # type: ignore[union-attr]
+            )
             cloned = [
-                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                # TODO: ideally we should use new_fake_mode.from_tensor to create
+                # fake tensors in a new shape_env, but it cannot handle the case where input tensor
+                # has unbacked symint inputs. So we just use the symints from original fake mode.
+                # This is fine because we won't be introducing new constraints for the symbols since
+                # to get the graph module, we've already recorded the constraints as we're tracing.
+                torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=arg.requires_grad,
+                    layout=arg.layout,
+                )
+                if isinstance(arg, torch.Tensor)
+                else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
+            outputs = gm(*cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [

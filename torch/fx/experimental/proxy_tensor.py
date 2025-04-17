@@ -381,6 +381,8 @@ _ExtractValType = Optional[
         PySymType,
         _AnyScriptObjectType,
         BackwardState,
+        torch._C.FunctionSchema,
+        "torch._higher_order_ops._invoke_quant.InvokeQuant",
         list["_ExtractValType"],
         tuple["_ExtractValType", ...],
         dict[str, "_ExtractValType"],
@@ -400,6 +402,10 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     elif isinstance(val, _AnyScriptObject):
         return val
     elif isinstance(val, BackwardState):
+        return val
+    elif isinstance(val, torch._C.FunctionSchema):
+        return val
+    elif isinstance(val, torch._higher_order_ops._invoke_quant.InvokeQuant):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -677,6 +683,12 @@ def track_tensor_tree(
             assert isinstance(proxy, Proxy)
             set_meta(proxy, e)
             e.proxy = proxy
+        elif isinstance(e, torch._C.FunctionSchema):
+            assert isinstance(proxy, Proxy)
+            set_meta(proxy, e)
+        elif isinstance(e, torch._higher_order_ops._invoke_quant.InvokeQuant):
+            assert isinstance(proxy, Proxy)
+            set_meta(proxy, e)
         else:
             # intentionally pass on primitives
             pass
@@ -1155,7 +1167,9 @@ def _should_save_eager_input_vals(
         or target is torch.ops.higher_order.auto_functionalized_v2
     ):
         args = args_kwargs[0]
-        assert isinstance(args[0], torch._ops.OpOverload)
+        assert isinstance(
+            args[0], (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
         return _should_save_eager_input_vals(args[0], None)
     if target is torch.ops.higher_order.with_effects:
         # TODO: inductor lowering for with_effects needs to be updated to propagate
