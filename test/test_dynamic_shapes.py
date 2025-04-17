@@ -3025,6 +3025,17 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_eq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(b.item() == 5)
+            return a * 10
+
+        func(torch.tensor([5]), torch.tensor([5]))
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([100]), torch.tensor([1]))
+
 
 if __name__ == "__main__":
     run_tests()
