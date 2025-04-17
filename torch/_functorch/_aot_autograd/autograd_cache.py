@@ -245,10 +245,14 @@ def check_cacheable(gm: torch.fx.GraphModule):
     for node in nodes:
         check_node_safe(node)
 
-    for n, m in gm.named_modules():
-        # Check all submodules?
-        if "saved_tensors_hooks" in n:
-            check_cacheable(m)
+    # Saved tensors hooks are globally set subgraphs,
+    # that are not used explicitly in the main graph.
+    # They are inlined in aot_autograd graphs.
+    # Subgraphs are only used for caching logic.
+    if hasattr(gm, "saved_tensors_hooks_pack_0"):
+        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
+        # We have guarantee of unpack sugraph existance if pack subgraph exists
+        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
 def check_metadata_cacheable(metadata: ViewAndMutationMeta):

@@ -1818,8 +1818,12 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
 @contextlib.contextmanager
 def _disable_saved_tensors_hooks():
     error_message = (
-        "Saved tensors hooks in aot_autograd were inlined in forward and backward graph."
-        "Changing hooks must recompile."
+        "Saved tensors hooks were specialized as GraphModules."
+        "In this case aot_autograd inlines them in forward and backward graph "
+        "and disables them during runtime of aot_autograd compiled region."
+        "If you see this error, that means that there is some unexpected push or pop manipulation "
+        "during aot_autograd compiled region runtime."
+        "Compilation with different hooks must result in recompilation."
     )
     fail_if_non_empty = False
     maybe_prev_message = None

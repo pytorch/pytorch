@@ -477,6 +477,10 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: set[str] = set()
+        # These are the ambient, currently-global saved_tensor_hooks stashed in autograd,
+        # that are set for the entire duration of the compiled region.
+        # This is an invariant today because we graph break on the saved_tensor_hook
+        # context manager inside a compiled region
         self.saved_tensors_hooks_subgraph_names: Optional[list[str]] = (
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
@@ -581,6 +585,8 @@ class OutputGraph:
             "saved_tensors_hooks_unpack",
             torch.fx.GraphModule(self.nn_modules, unpack_gm.graph),
         )
+        assert pack_subgraph_name == "saved_tensors_hooks_pack_0"
+        assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
         return [pack_subgraph_name, unpack_subgraph_name]
 
     def synthetic_graph_input(self, fn, args):

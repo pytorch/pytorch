@@ -791,10 +791,16 @@ def run_joint_graph_passes_on_hops(
     return joint_gm
 
 
-def maybe_log_graph(gm, graph_name, structured_log_tag, aot_config):
+def maybe_log_graph(
+    gm,
+    graph_name,
+    aot_config,
+    structured_log_prefix_fn,
+    out_structured_logs: Optional[list[str]] = None,
+):
     if not aot_config.enable_log:
         return
-    aot_graphs_log.info(
+    aot_graphs_log.debug(
         "%s",
         lazy_format_graph_code(
             f"{graph_name}",
@@ -808,10 +814,13 @@ def maybe_log_graph(gm, graph_name, structured_log_tag, aot_config):
     gm_str = gm.print_readable(
         print_output=False, include_stride=True, include_device=True
     )
-    trace_structured(
-        f"{structured_log_tag}",
-        payload_fn=lambda: gm_str,
-    )
+    if out_structured_logs:
+        out_structured_logs.append(f"{structured_log_prefix_fn()}:{gm_str}")
+    else:
+        trace_structured(
+            f"{structured_log_prefix_fn()}",
+            payload_fn=lambda: gm_str,
+        )
 
 
 def create_wrap_fn(fn, args):
@@ -876,14 +885,14 @@ def maybe_inline_graph_saved_tensors_hooks(
     maybe_log_graph(
         fw_module,
         "Forward graph pre saved_tensors_hooks inlining",
-        "aot_forward_graph_pre_saved_tensors_hooks",
         aot_config,
+        lambda: "aot_forward_graph_pre_saved_tensors_hooks",
     )
     maybe_log_graph(
         fw_module,
         "Backward graph pre saved_tensors_hooks inlining",
-        "aot_backward_graph_pre_saved_tensors_hooks",
         aot_config,
+        lambda: "aot_backward_graph_pre_saved_tensors_hooks",
     )
     fw_g = fw_module.graph
     bw_g = bw_module.graph
@@ -892,10 +901,12 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_out_n = fw_g.output_node()
     fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-    fw_outs_saved_tensors_unchanged = []
+    fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
+
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
 
+    structured_logs: list[str] = []
     for saved in fw_outs_saved_for_bw:
         val = saved.meta["val"]
         if not isinstance(val, torch.Tensor):
@@ -909,16 +920,18 @@ def maybe_inline_graph_saved_tensors_hooks(
         if requires_sc_handling:
             raise NotImplementedError(
                 "Tensor subclasses in GraphModule saved tensors hooks are not supported"
+                "You can workaround it by manually returning subclass's inner tensors"
+                " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
 
-        pack_out_val_flat, p_out_spec = pytree.tree_flatten(pack_out_val)
         pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
         pack_g = pack_gm.graph
         maybe_log_graph(
             pack_gm,
             f"saved_tensors_pack_hook {saved.name}",
-            "aot_saved_tensors_hooks_pack",
             aot_config,
+            lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
+            structured_logs,
         )
         pack_out_val = pack_gm(val)
 
@@ -965,8 +978,9 @@ def maybe_inline_graph_saved_tensors_hooks(
         maybe_log_graph(
             unpack_gm,
             f"saved_tensors_unpack_hook {saved.name}",
-            "aot_saved_tensors_hooks_unpack",
             aot_config,
+            lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
+            structured_logs,
         )
 
         def find_saved_in_bw_inputs(bw_inputs):
@@ -1041,6 +1055,11 @@ def maybe_inline_graph_saved_tensors_hooks(
     )
     fw_g.lint()
     bw_g.lint()
+    if aot_config.enable_log:
+        trace_structured(
+            "aot_saved_tensors_hooks_graphs",
+            payload_fn=lambda: "\n".join(structured_logs),
+        )
 
 
 def aot_dispatch_autograd(
