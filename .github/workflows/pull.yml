@@ -368,6 +368,9 @@ jobs:
     name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu

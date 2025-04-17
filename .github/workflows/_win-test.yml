@@ -37,6 +37,10 @@ on:
         type: boolean
         default: true
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -115,6 +119,13 @@ jobs:
           # Windows conda doesn't have python3 binary, only python, but it's python3
           ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          role-session-name: gha-windows-test
+          aws-region: us-east-1
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@v4
@@ -229,6 +240,13 @@ jobs:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
           kill "$MONITOR_SCRIPT_PID"
+
+      - name: Configure AWS Credentials - Upload Test Artifacts
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
+          role-session-name: gha-windows-test-upload-test-artifacts
+          aws-region: us-east-1
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts

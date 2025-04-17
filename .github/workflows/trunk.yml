@@ -130,6 +130,9 @@ jobs:
     name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
@@ -149,6 +152,9 @@ jobs:
     needs:
       - win-vs2022-cpu-py3-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
@@ -159,6 +165,9 @@ jobs:
     name: win-vs2022-cuda12.6-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: win-vs2022-cuda12.6-py3
       cuda-version: "12.6"
