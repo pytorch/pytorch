@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import shutil
@@ -172,6 +173,8 @@ def standalone_compile(
     context = torch._guards.TracingContext(fake_mode)
     with torch._guards.tracing(context):
         with CacheArtifactManager.with_fresh_cache():
+            # compile_fx can mutate gm
+            gm = copy.deepcopy(gm)
             compiled_fn = compile_fx(gm, example_inputs, **kwargs)
             assert callable(compiled_fn)
 
