@@ -49,7 +49,6 @@ from torch._inductor.aoti_eager import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
-from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -6624,7 +6623,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
     @xfail_if_mps_unimplemented
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6673,7 +6671,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @xfail_if_mps
@@ -6695,7 +6692,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @xfail_if_mps
