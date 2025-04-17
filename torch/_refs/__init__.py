@@ -3809,11 +3809,13 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         deferred = []
         def maybe_throw_dde():
-            # NOTE: if a data-dependent error has been thrown here, it's done so because the
-            # guard_or_true(), in the process of accumulating original dimensions, has bypassed
-            # earlier data-dependent errors in an attempt to later produce a successful reshape/view.
-            # This may have proved unsuccessful, and the original error has been thrown, to instruct
-            # the user how to torch._check their way past this error.
+            # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
+            # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
+            # divisibility (accum % length != 0), and have deferred raising them, in the hope that we'd
+            # figure out a valid reshape later in the loop.
+            # But we failed, either by running out of dimensions, or we couldn't figure out the strides,
+            # and we've decided to re-raise to either graph break out, or provide the exact guard so the user
+            # can torch._check() to avoid this.
             for f in deferred:
                 f()
 
