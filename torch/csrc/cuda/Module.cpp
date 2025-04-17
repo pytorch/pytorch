@@ -264,7 +264,7 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 
 PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
+  c10::Allocator* allocator = at::getHostAllocator(at::kCUDA);
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -553,7 +553,7 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
 PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    at::cuda::CachingHostAllocator_emptyCache();
+    at::getHostAllocator(at::kCUDA)->empty_cache();
   }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
@@ -677,7 +677,7 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
     return dict;
   };
 
-  const HostStats stats = at::cuda::CachingHostAllocator_getStats();
+  const HostStats stats = at::getHostAllocator(at::kCUDA)->get_stats();
 
   py::dict result;
   result["num_host_alloc"] = stats.num_host_alloc;
@@ -697,7 +697,7 @@ PyObject* THCPModule_resetAccumulatedHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetAccumulatedStats();
+  at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -706,7 +706,7 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetPeakStats();
+  at::getHostAllocator(at::kCUDA)->reset_peak_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }

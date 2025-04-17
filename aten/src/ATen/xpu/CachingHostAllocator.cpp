@@ -30,47 +30,24 @@ struct XPUCachingHostAllocatorImpl
   bool query_event(XPUEvent& event) override {
     return event.query();
   }
-};
 
-void raw_local_deleter(void* ptr);
+  bool is_pinned(void* ptr) override {
+    if (!at::xpu::is_available()) {
+      return false;
+    }
 
-struct XPUCachingHostAllocator final
-    : public CachingHostAllocatorInterface<XPUCachingHostAllocatorImpl> {
-  at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        &raw_local_deleter,
-        at::DeviceType::CPU};
+    return sycl::usm::alloc::host ==
+        sycl::get_pointer_type(ptr, c10::xpu::get_device_context());
   }
 };
 
-static XPUCachingHostAllocator caching_host_allocator;
+DECLARE_HOST_ALLOCATOR(
+    XPUCachingHostAllocator,
+    XPUCachingHostAllocatorImpl,
+    raw_local_deleter,
+    caching_host_allocator)
 
-static inline XPUCachingHostAllocator& getXPUCachingHostAllocator() {
-  return caching_host_allocator;
-}
-
-void raw_local_deleter(void* ptr) {
-  getXPUCachingHostAllocator().free(ptr);
-}
+REGISTER_HOST_ALLOCATOR(at::kXPU, &caching_host_allocator);
 
 } // anonymous namespace
-
-bool CachingHostAllocator_recordEvent(
-    void* ptr,
-    void* ctx,
-    c10::xpu::XPUStream stream) {
-  return getXPUCachingHostAllocator().record_event(ptr, ctx, stream);
-}
-
-void CachingHostAllocator_emptyCache() {
-  getXPUCachingHostAllocator().empty_cache();
-}
-
-at::Allocator* getCachingHostAllocator() {
-  return &getXPUCachingHostAllocator();
-}
-
 } // namespace at::xpu

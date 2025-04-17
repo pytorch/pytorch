@@ -156,6 +156,38 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
+  bool is_pinned(void* ptr) override {
+    // First check if driver is broken/missing, in which case PyTorch CPU
+    // functionalities should still work, we should report `false` here.
+    if (!at::cuda::is_available()) {
+      return false;
+    }
+    // cudaPointerGetAttributes grabs context on the current device, so we set
+    // device to one that already has context, if exists.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index = getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
+    cudaPointerAttributes attr{};
+    // We do not believe that CUDA needs mutable access to the data here.
+    cudaError_t err = cudaPointerGetAttributes(&attr, data);
+#if !defined(USE_ROCM)
+    if (err == cudaErrorInvalidValue) {
+      (void)cudaGetLastError(); // clear CUDA error
+      return false;
+    }
+    AT_CUDA_CHECK(err);
+#else
+    // HIP throws hipErrorUnknown here
+    if (err != cudaSuccess) {
+      (void)cudaGetLastError(); // clear HIP error
+      return false;
+    }
+#endif
+    return attr.type == cudaMemoryTypeHost;
+  }
+
   bool pinned_use_background_threads() override {
     return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
         pinned_use_background_threads();
@@ -249,58 +281,13 @@ struct CUDACachingHostAllocatorImpl
   }
 };
 
-void raw_local_deleter(void* ptr);
+DECLARE_HOST_ALLOCATOR(
+    CUDACachingHostAllocator,
+    CUDACachingHostAllocatorImpl,
+    raw_local_deleter,
+    caching_host_allocator);
 
-struct CUDACachingHostAllocator final
-    : public CachingHostAllocatorInterface<CUDACachingHostAllocatorImpl> {
-  at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        &raw_local_deleter,
-        at::DeviceType::CPU};
-  }
-};
-
-CUDACachingHostAllocator caching_host_allocator;
-
-static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
-  return caching_host_allocator;
-}
-
-void raw_local_deleter(void* ptr) {
-  getCUDACachingHostAllocator().free(ptr);
-}
+REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 
 } // anonymous namespace
-
-bool CachingHostAllocator_recordEvent(
-    void* ptr,
-    void* ctx,
-    at::cuda::CUDAStream stream) {
-  return getCUDACachingHostAllocator().record_event(ptr, ctx, stream);
-}
-
-// Releases cached pinned memory allocations via cudaHostFree
-void CachingHostAllocator_emptyCache() {
-  getCUDACachingHostAllocator().empty_cache();
-}
-
-at::Allocator* getCachingHostAllocator() {
-  return &getCUDACachingHostAllocator();
-}
-
-at::HostStats CachingHostAllocator_getStats() {
-  return getCUDACachingHostAllocator().getStats();
-}
-
-void CachingHostAllocator_resetAccumulatedStats() {
-  return getCUDACachingHostAllocator().resetAccumulatedStats();
-}
-
-void CachingHostAllocator_resetPeakStats() {
-  return getCUDACachingHostAllocator().resetPeakStats();
-}
-
 } // namespace at::cuda
