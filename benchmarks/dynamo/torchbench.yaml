@@ -54,10 +54,6 @@ tolerance:
     - drq
     - hf_Whisper
 
-  higher_fp16_bf16_xpu:
-    - phlippe_resnet
-    - timm_regnet
-
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
     # the conv-batchnorm fusion used under freezing may cause relatively
