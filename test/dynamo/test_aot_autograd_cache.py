@@ -310,6 +310,59 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_unsafe_mark_cacheable(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def gn(x, y, z=None):
+            a = torch.matmul(x, y)
+            if z is not None:
+                return torch.matmul(a, z)
+            return a
+
+        @torch.compile
+        def fn(x, y, z):
+            return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        z = torch.randn(4, 4)
+        args = (x, y, z)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            r".*BypassAOTAutogradCache: Unsupported call_function target tag_activation_checkpoint.*",
+        ):
+            fn(*args)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions",
+            ["torch.ops.higher_order.tag_activation_checkpoint"],
+        ):
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_fx_graph_cache_off(self):
