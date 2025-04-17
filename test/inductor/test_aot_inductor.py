@@ -27,11 +27,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQu
 from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import (
-    IS_SM89,
-    PLATFORM_SUPPORTS_FP8,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -53,7 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
 from torch.utils import _pytree as pytree
@@ -441,8 +437,10 @@ class AOTInductorTestsTemplate:
                 self.check_model(model, example_inputs)
 
     def test_linear_dynamic_maxautotune(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -560,8 +558,10 @@ class AOTInductorTestsTemplate:
 
     @skip("Test was marked as expected failure, but does not fail always anymore.")
     def test_dynamic_smem_above_default_limit(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -882,13 +882,11 @@ class AOTInductorTestsTemplate:
             Model(), list_example_inputs, dynamic_shapes=dynamic_shapes
         )
 
-    @unittest.skipIf(
-        IS_SM89,
-        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
-    )
     def test_addmm_multiple_dynamic(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -926,13 +924,11 @@ class AOTInductorTestsTemplate:
             },
         )
 
-    @unittest.skipIf(
-        IS_SM89,
-        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
-    )
     def test_bmm_multiple_dynamic(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1199,6 +1195,48 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.ones(4, 4, device=self.device),)
         self.check_model(Foo(self.device), example_inputs)
+
+    def test_aoti_constant_tensor_name_collision(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self, user_float_feature_idx, device):
+                super().__init__()
+                self.user_float_feature_idx = user_float_feature_idx
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+                self.sub_mod = SubModule(device)
+
+            def forward(self, x):
+                return (
+                    torch.index_select(
+                        x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
+                    ),
+                    self._tensor_constant0,
+                    self.sub_mod._tensor_constant1,
+                )
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        user_float_feature_idx = [1]
+        # we have to have run_decomposition first to trigger the name collision
+        ep = torch.export.export(
+            Foo(user_float_feature_idx, self.device), example_inputs, strict=False
+        ).run_decompositions()
+        gm = ep.module()
+        self.check_model(gm, example_inputs)
 
     def test_large_grid(self):
         if self.device != GPU_TYPE:
@@ -3014,8 +3052,10 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), inputs)
 
     def test_convolution(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+        if not IS_BIG_GPU:
+            raise unittest.SkipTest(
+                "skipping triton backend only since not big GPU (not enough SM)"
+            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
