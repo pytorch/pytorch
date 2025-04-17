@@ -152,6 +152,14 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+    def test_rms_norm_nograd(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150629
+        def fn(x, w):
+            with torch.no_grad():
+                return torch.nn.functional.rms_norm(x, x.shape, w)
+
+        self.common(fn, (torch.rand(10), torch.ones(10)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
