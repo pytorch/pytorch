@@ -30,7 +30,10 @@ StableIValue from(T val) {
   // Initialization should be cheap enough; let's give people well-specified
   // reproducible behavior.
   StableIValue result = 0;
-  std::memcpy(&result, &val, sizeof(val));
+  // reinterpret_cast to suppress overzealous -Wclass-memaccess. We
+  // have a static_assert above that T is trivially copyable, which
+  // should be enough.
+  std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
   return result;
 }
 
@@ -92,7 +95,10 @@ T to(StableIValue val) {
     T t;
   };
   Result result;
-  std::memcpy(&result.t, &val, sizeof(result));
+  // reinterpret_cast to suppress overzealous -Wclass-memaccess. We
+  // have a static_assert above that T is trivially copyable, which
+  // should be enough.
+  std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
   return result.t;
 }
 
