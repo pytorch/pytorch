@@ -8,15 +8,15 @@ This note will eventually contain more details on how to use the APIs in torch/c
 
 |  type in custom extension    |   StableIValue representation   |   type in libtorch  |   Schema Type  |
 | -------- | ------- | ------- | ------- |
-| std::optional\<S> | \*reinterpret_cast\<(StableIValue\*)\*>, pointer to a StableIValue recursively defined | std::optional\<T> | Type? |
-| std::nullopt | \*reinterpret_cast\<nullptr_t\*> | IValue() | None |
-| RAIIATH | \*reinterpret_cast\<uint64_t\*> of AtenTensorHandle | at::Tensor |  Tensor |
-| int32_t | \*reinterpret_cast\<uint64_t\*> | at::ScalarType | ScalarType |
-| int32_t | \*reinterpret_cast\<uint64_t\*> | at::Layout | Layout |
-| int32_t | \*reinterpret_cast\<uint64_t\*> | at::MemoryFormat | MemoryFormat |
-| bool | \*reinterpret_cast\<uint64_t\*> | bool | bool |
-| int64_t | \*reinterpret_cast\<uint64_t\*> | int64_t | int |
-| double | \*reinterpret_cast\<uint64_t\*> | double | float |
+| std::optional\<S> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue representing S | std::optional\<T> | Type? |
+| std::nullopt | nullptr | IValue() | None |
+| RAIIATH | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
+| int32_t | raw bitwise copy into leading bytes of uint64_t | at::ScalarType | ScalarType |
+| int32_t | raw bitwise copy into leading bytes of uint64_t | at::Layout | Layout |
+| int32_t | raw bitwise copy into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
+| bool | raw bitwise copy into leading bytes of uint64_t | bool | bool |
+| int64_t | raw bitwise copy into leading bytes of uint64_t | int64_t | int |
+| double | raw bitwise copy into leading bytes of uint64_t | double | float |
 | ? | ? | c10::Device | Device |
 | ? | ? | c10::Stream | Stream |
 | ? | ? | c10::complex<double> | complex |
