@@ -932,6 +932,8 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
 
     @staticmethod
     def check_guard_hit(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
+        if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
+            return True
         shape_env = AOTAutogradCache._get_shape_env()
         assert shape_env is not None
         result = shape_env.evaluate_guards_expression(guard_expr, hints)

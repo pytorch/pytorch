@@ -1008,10 +1008,7 @@ class GuardedCache(Generic[T]):
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            if config.unsafe_skip_cache_dynamic_shape_guards:
-                hit = True
-            else:
-                hit = bool(check_guard_hit(candidate.guards_expr, hints))  # type: ignore[attr-defined]
+            hit = bool(check_guard_hit(candidate.guards_expr, hints))  # type: ignore[attr-defined]
             if hit:
                 graph = candidate
                 pickled_content = content
@@ -1114,6 +1111,12 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
+        # If this config is turned on, everything is a guard hit and we check nothing
+        if config.unsafe_skip_cache_dynamic_shape_guards:
+            # This also makes it so we don't add anything to the dynamic
+            # shape environment
+            check_guard_hit = lambda x, y: True
+
         if check_guard_hit is None:
             check_guard_hit = shape_env.evaluate_guards_expression
 
@@ -1167,7 +1170,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
-        if not config.unsafe_skip_cache_dynamic_shape_guards and graph.guards_expr:
+        if graph.guards_expr:
             check = bool(check_guard_hit(graph.guards_expr, symints))
             assert check is True
             log.debug(
