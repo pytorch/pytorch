@@ -539,7 +539,7 @@ def triplet_margin_with_distance_loss(
 def normalize(
     input: Tensor,
     p: float = ...,
-    dim: int = ...,
+    dim: Union[int, Sequence[int]] = ...,
     eps: float = ...,
     out: Optional[Tensor] = ...,
 ) -> Tensor: ...
