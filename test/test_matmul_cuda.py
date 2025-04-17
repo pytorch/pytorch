@@ -481,7 +481,7 @@ class TestMatmulCuda(TestCase):
                 else:
                     out = torch.mm(a, b, out_dtype=output_dtype)
                     baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
-    
+
                 self.assertEqual(out.dtype, output_dtype)
 
                 torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
