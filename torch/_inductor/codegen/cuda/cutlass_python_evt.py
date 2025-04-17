@@ -6,7 +6,7 @@ import sympy
 import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, FlexibleLayout, IRNode, Pointwise
 from torch._inductor.ops_handler import DefaultHandler
-from torch._inductor.utils import IndentedBuffer, sympy_str
+from torch._inductor.utils import IndentedBuffer, OrderedSet, sympy_str
 from torch._inductor.virtualized import OpsValue
 
 
@@ -78,8 +78,8 @@ class CutlassEVTCodegen:
         self.result_aliases: dict[str, OpsValue] = (
             dict()
         )  # Aliases for subexpression functors
-        self.reads: list[str] = []
-        self.writes: list[str] = []
+        self.reads: OrderedSet[str] = OrderedSet()
+        self.writes: OrderedSet[str] = OrderedSet()
 
     @staticmethod
     def ir_to_evt_python_code(
@@ -167,18 +167,18 @@ class CutlassEVTCodegen:
 
     def load(self, name: str, index: Any) -> str:
         if name == self.accumulator_node_name:
-            self.reads.append(name)
+            self.reads.add(name)
             return _ACCUMULATOR_ALIAS
         elif name in self.result_aliases:
             return self.result_aliases[name].value
         else:
-            self.reads.append(name)
+            self.reads.add(name)
             return name
 
     def store(
         self, name: Any, index: Any = None, value: Any = None, mode: Any = None
     ) -> None:
-        self.writes.append(name)
+        self.writes.add(name)
         return None
 
     def constant(self, value: Any, dtype: Any) -> str:
