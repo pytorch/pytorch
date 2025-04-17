@@ -954,7 +954,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            "cuda",
+            self.device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -1004,7 +1004,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
+            self.device_type,
+            mesh_shape=(dp_degree, tp_degree),
+            mesh_dim_names=("dp", "tp"),
         )
 
         inp = torch.rand(20, 10, device=self.device_type)
@@ -1048,7 +1050,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_compile_dtensor_redistribute_backward(self):
-        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
+        mesh = DeviceMesh(
+            device_type=self.device_type, mesh=torch.arange(self.world_size)
+        )
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
