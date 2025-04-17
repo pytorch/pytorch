@@ -976,11 +976,15 @@ def maybe_inline_graph_saved_tensors_hooks(
                 # Removed in the end.
                 if node.op == "output":
                     fw_pack_out_n = new_n
+
         env.clear()
         assert fw_pack_out_n
-        for n in pytree.tree_leaves(fw_pack_out_n.args[0]):
+        for out_idx, n in enumerate(pytree.tree_leaves(fw_pack_out_n.args[0])):
             if not isinstance(n, torch.fx.Node):
                 continue
+            if not n.meta:
+                n.meta = {}
+            n.meta["__debug_hooks_origin"] = f"{saved.name}_{out_idx}"
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)
             elif is_sym_node(n):
@@ -1013,7 +1017,9 @@ def maybe_inline_graph_saved_tensors_hooks(
         unpack_g_inputs = unpack_g.find_nodes(op="placeholder")
         env = {}
         num_saved_for_bw = len(fw_outs_saved_for_bw)
-        for unp_in_n, val in zip(unpack_g_inputs, pytree.tree_leaves(pack_out_val)):
+        for out_idx, (unp_in_n, val) in enumerate(
+            zip(unpack_g_inputs, pytree.tree_leaves(pack_out_val))
+        ):
             is_sym = isinstance(val, py_sym_types)
             if isinstance(val, torch.Tensor) or is_sym:
                 new_node_name = bw_g_input.name + "_" + unp_in_n.name
@@ -1025,6 +1031,9 @@ def maybe_inline_graph_saved_tensors_hooks(
                     bw_g_inputs[0]
                 ) if is_sym else bw_g.inserting_before(bw_g_inputs[num_saved_for_bw]):
                     new_n = bw_g.placeholder(new_node_name)
+                    if not n.meta:
+                        n.meta = {}
+                    new_n.meta["__debug_hooks_origin"] = f"{saved.name}_{out_idx}"
                 new_n.meta["val"] = val
                 env[unp_in_n] = new_n
             else:
@@ -1057,21 +1066,42 @@ def maybe_inline_graph_saved_tensors_hooks(
     # Inserting packed_tensors and packed_syms on the place of saved tensors.
     # Packed sym_scalars are together with saved symints
     symint_outs_saved_for_bw = [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
-    fw_out_n.args = (
-        tuple(
-            pytree.tree_leaves(
-                (
-                    fw_outs[:num_inner_fwd_outputs],
-                    fw_outs_saved_tensors_unchanged,
-                    fw_outs_packed_tensors,
-                    fw_outs_packed_syms,
-                    symint_outs_saved_for_bw,
-                )
-            )
-        ),
+    fw_new_outs = pytree.tree_leaves(
+        (
+            fw_outs[:num_inner_fwd_outputs],
+            fw_outs_saved_tensors_unchanged,
+            fw_outs_packed_tensors,
+            fw_outs_packed_syms,
+            symint_outs_saved_for_bw,
+        )
     )
+    fw_out_n.args = (tuple(fw_new_outs),)
+
+    # Assert that saved tensors and symints in forward outputs are aligned with backward inputs
+    _fw_n = num_inner_fwd_outputs
+    _fw_num_t = len(fw_outs_saved_tensors_unchanged) + len(fw_outs_packed_tensors)
+    _fw_num_s = len(fw_outs_packed_syms) + len(symint_outs_saved_for_bw)
+    fw_outs_saved_tensors = fw_new_outs[_fw_n : _fw_n + _fw_num_t]
+    fw_outs_saved_syms = fw_new_outs[_fw_n + _fw_num_t :]
+    bw_new_ins = list(bw_g.find_nodes(op="placeholder"))
+    bw_ins_saved_syms = bw_new_ins[:_fw_num_s]
+    bw_ins_saved_tensors = bw_new_ins[_fw_num_s : _fw_num_s + _fw_num_t]
+
+    def _get_origin(n):
+        if n.meta and (_n := n.meta.pop("__debug_hooks_origin", None)):
+            return _n
+        return n.name
+
+    fw_t_origins = [_get_origin(n) for n in fw_outs_saved_tensors]
+    bw_t_origins = [_get_origin(n) for n in bw_ins_saved_tensors]
+    fw_s_origins = [_get_origin(n) for n in fw_outs_saved_syms]
+    bw_s_origins = [_get_origin(n) for n in bw_ins_saved_syms]
+    assert fw_t_origins == bw_t_origins
+    assert fw_s_origins == bw_s_origins
+
     fw_g.lint()
     bw_g.lint()
+
     if aot_config.enable_log:
         trace_structured(
             "aot_saved_tensors_hooks_graphs",
