@@ -50,8 +50,6 @@ typedef at::BFloat16 bfloat16;
 
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
-typedef at::Float8_e4m3fnuz float8_e4m3fnuz;
-typedef at::Float8_e5m2fnuz float8_e5m2fnuz;
 
 template <typename T>
 struct Welford {
@@ -90,7 +88,7 @@ struct WelfordHelper {
   std::vector<Welford<T>> welford_stk;
   uint64_t depth; // depth of welford_stk.
   uint64_t num_chunks; // number of chunks stored in welford_stk.
-  WelfordHelper() {}
+  WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
