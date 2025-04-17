@@ -27,8 +27,7 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -42,10 +41,7 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
-TEST_ON_XPU = (
-    torch.xpu.is_available()
-    and torch.utils._triton.has_triton()
-)
+TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 if HAS_GPU:
     if TEST_ON_CUDA:
@@ -1998,7 +1994,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
 
 
-instantiate_device_type_tests(TestFlexDecoding, globals(), only_for=test_device, allow_xpu=True)
+instantiate_device_type_tests(
+    TestFlexDecoding, globals(), only_for=test_device, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

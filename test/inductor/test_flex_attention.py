@@ -2539,9 +2539,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k.grad = None
         v.grad = None
 
-        block_mask2 = create_block_mask(
-            mask, None, None, 2048, 2048, device=device
-        )
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048, device=device)
         # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
         out2 = torch.compile(flex_attention, dynamic=True)(
             q, k, v, block_mask=block_mask2
@@ -2732,7 +2730,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ],
     )
     @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
-    def test_flex_attention_backward_stride_ordering(self, device, mode, permute_order, shape):
+    def test_flex_attention_backward_stride_ordering(
+        self, device, mode, permute_order, shape
+    ):
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -2865,15 +2865,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod_sparse_flex = functools.partial(
             flex_attention,
             score_mod=causal,
-            block_mask=create_block_mask(
-                causal_mask, 1, 1, 2048, 2048, device=device
-            ),
+            block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device),
         )
         mask_mod_sparse_flex = functools.partial(
             flex_attention,
-            block_mask=create_block_mask(
-                causal_mask, 1, 1, 2048, 2048, device=device
-            ),
+            block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device),
         )
         for attention_call in [
             no_sparse_flex,
@@ -2892,9 +2888,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 for _ in range(3)
             ]
-            gradOut = torch.randn(
-                2, 2, 2048, 64, device=device, dtype=torch.float16
-            )
+            gradOut = torch.randn(2, 2, 2048, 64, device=device, dtype=torch.float16)
             out_ref = torch.nn.functional.scaled_dot_product_attention(
                 *inputs, is_causal=True
             )
@@ -2949,9 +2943,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
-        bias = torch.randn(
-            H, device=device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -3017,9 +3009,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(
-            S, S, device=device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(S, S, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -3048,9 +3038,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias + index multiple
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(
-            S, S, device=device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(S, S, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -3079,9 +3067,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # 2-dimensional bias + transposed:
         B, H, S, D = 1, 1, 256, 64
-        bias = torch.randn(
-            S, S, device=device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(S, S, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -3868,7 +3854,7 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             expected_joint_graph,
         )
-    
+
     @supported_platform
     @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
     def test_cpu_error_message_return_lse(self, device):
@@ -3992,9 +3978,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(
-            causal_mask, 4, 2, 2048, 2048, device=device
-        )
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
@@ -4005,9 +3989,7 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
         offset = torch.arange(8, device=device)
-        block_mask = create_block_mask(
-            causal_mask, 8, 1, 2048, 2048, device=device
-        )
+        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048, device=device)
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
@@ -4163,9 +4145,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(
-            causal_mask, 1, 1, 2048, 2048, device=device
-        )
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
 
         def replace_non_printable(s):
             def replace(c):
@@ -4368,9 +4348,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(
-            causal_mask, 1, 1, 2048, 2048, device=device
-        )
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
         # manually set q_num_blocks and q_indices to None
         block_mask.q_num_blocks = None
         block_mask.q_indices = None
@@ -4494,9 +4472,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         seq_len = 256
         batch_size = 1
 
-        make_tensor = functools.partial(
-            torch.randn, device=device, dtype=torch.float16
-        )
+        make_tensor = functools.partial(torch.randn, device=device, dtype=torch.float16)
         q = make_tensor(*(batch_size, q_heads, seq_len, qk_dims))
         k = make_tensor(*(batch_size, kv_heads, seq_len, qk_dims))
         v = make_tensor(*(batch_size, kv_heads, seq_len, v_dims))
@@ -4556,16 +4532,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
             return q, k, v
 
-        block_mask = create_block_mask(
-            mask_mod, None, None, 1024, 1024, device=device
-        )
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=device)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
-        block_mask = create_block_mask(
-            mask_mod, None, None, 1023, 1023, device=device
-        )
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
@@ -5634,10 +5606,19 @@ class TestLearnableBiases(InductorTestCase):
         opt_fn(sliding_window2, None, None, 1024, 1024)
 
 
-instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device, allow_xpu=True)
-instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device, allow_xpu=True)
-instantiate_device_type_tests(TestBlockMask, globals(), only_for=test_device, allow_xpu=True)
-instantiate_device_type_tests(TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True)
+instantiate_device_type_tests(
+    TestFlexAttention, globals(), only_for=test_device, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPagedAttention, globals(), only_for=test_device, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestBlockMask, globals(), only_for=test_device, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
+)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
