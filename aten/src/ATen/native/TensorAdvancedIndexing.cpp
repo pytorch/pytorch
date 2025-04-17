@@ -147,7 +147,6 @@
 
 namespace at::native {
 
-std::string shapes_as_str(TensorList tensors);
 AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
 } // namespace at::native
@@ -186,7 +185,7 @@ TORCH_META_FUNC(gather)
 }
 
 template <bool use_new_options = false, typename Meta>
-void scatter_meta_impl(
+static void scatter_meta_impl(
     Meta& meta,
     const Tensor& self,
     int64_t dim,
@@ -358,7 +357,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 }
 
 template <typename Meta>
-void index_func_meta_impl(
+static void index_func_meta_impl(
     Meta& meta,
     const Tensor& self,
     int64_t dim,
@@ -591,21 +590,6 @@ static bool all_strides_match(TensorList tensors) {
     }
   }
   return true;
-}
-
-inline std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
 }
 
 // Replace indexed dimensions in src with stride 0 and the size of the result
@@ -2249,7 +2233,7 @@ template <
     typename T,
     typename ReduceStub,
     typename FillStub>
-void scatter_impl(
+static void scatter_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
@@ -2822,7 +2806,7 @@ Tensor _gather_sparse_backward(
 }
 
 template <typename scalar_t>
-int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
+static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   int64_t num_nonzero = 0;
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
