@@ -125,19 +125,26 @@ class TestCutlassEVT(TestCase):
 
         buf3_node = MockIRNode("buf3", inner_fn_buf3)
         buf4_node = MockIRNode("buf4", inner_fn_buf4)
-        reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code("acc", [buf3_node, buf4_node])
+        reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            "acc", [buf3_node, buf4_node]
+        )
         self.assertExpectedInline(reads, """['acc', 'buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
-        self.assertExpectedInline(renames, """{'buf3': 'D', 'buf4': 'tmp_2', 'acc': 'accum'}""")
-        self.assertExpectedInline(code, """\
+        self.assertExpectedInline(
+            renames, """{'buf3': 'D', 'buf4': 'tmp_2', 'acc': 'accum'}"""
+        )
+        self.assertExpectedInline(
+            code,
+            """\
 def fn(accum, buf1, buf2):
     tmp_0 = accum * buf1
     tmp_1 = tmp_0 + buf2
     D = tmp_1
     tmp_2 = accum + D
     return D, tmp_2
-""")
-
+""",
+        )
+/data/users/mlazos/pytorch/torch/_inductor/codegen/cuda/cutlass_python_evt.py
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
