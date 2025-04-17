@@ -25,6 +25,7 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from torch._environment import is_fbcode
 from torch.utils import _config_module
 
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
@@ -3297,6 +3298,7 @@ MOD_INLINELIST = [
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
     "torch.fx.experimental.proxy_tensor",
@@ -3357,6 +3359,7 @@ MOD_SKIPLIST = [
     "torch._functorch",
     "torch._guards",
     "torch._higher_order_ops.effects",
+    "torch._higher_order_ops.map",
     "torch._higher_order_ops.torchbind",
     "torch._higher_order_ops.wrap",
     "torch._inductor",
@@ -3473,7 +3476,6 @@ SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPL
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
-is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
 FBCODE_SKIP_DIRS: set[str] = set()
@@ -3561,7 +3563,7 @@ def check_file(filename, is_inlined_call=False):
             "MOD_INLINELIST",
         )
     if (
-        is_fbcode
+        is_fbcode()
         and FBCODE_SKIP_DIRS
         and bool(FBCODE_SKIP_DIRS_RE.match(filename))
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
@@ -3572,7 +3574,7 @@ def check_file(filename, is_inlined_call=False):
         )
 
     if (
-        is_fbcode
+        is_fbcode()
         and torch._dynamo.config.skip_torchrec
         and FBCODE_SKIP_TORCHREC_DIRS
         and bool(FBCODE_SKIP_TORCHREC_DIRS_RE.match(filename))
