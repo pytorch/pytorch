@@ -595,20 +595,14 @@ union alignas(16) Vec<16> {
 template <int Alignment, typename T>
 __device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
   Vec<Alignment> vec;
-#if defined(USE_ROCM)
-  Vec<Alignment> vec;
   if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
     vec.u128 = *reinterpret_cast<const uint4*>(addr);
   } else if constexpr (Alignment == 8) {
     vec.u64 = *reinterpret_cast<const uint64_t*>(addr);
   } else if constexpr (Alignment == 4) {
     vec.u32 = *reinterpret_cast<const uint32_t*>(addr);
-  } else {
-    static_assert(dependent_false<T>);
-  }
-  return vec;
 #else
-  if constexpr (Alignment == 16) {
     asm("ld.global.v4.u32 {%0,%1,%2,%3}, [%4];"
         : "=r"(vec.u32[0]), "=r"(vec.u32[1]), "=r"(vec.u32[2]), "=r"(vec.u32[3])
         : "l"(addr)
@@ -620,28 +614,24 @@ __device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
         : "memory");
   } else if constexpr (Alignment == 4) {
     asm("ld.global.u32 %0, [%1];" : "=r"(vec.u32) : "l"(addr) : "memory");
+#endif
   } else {
     static_assert(dependent_false<T>);
   }
   return vec;
-#endif
 }
 
 template <int Alignment, typename T>
 __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
-#if defined(USE_ROCM)
   if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
     reinterpret_cast<uint64_t*>(addr)[0] = vec.u64[0];
     reinterpret_cast<uint64_t*>(addr)[1] = vec.u64[1];
   } else if constexpr (Alignment == 8) {
     *reinterpret_cast<uint64_t*>(addr) = vec.u64;
   } else if constexpr (Alignment == 4) {
     *reinterpret_cast<uint32_t*>(addr) = vec.u32;
-  } else {
-    static_assert(dependent_false<T>);
-  }
 #else
-  if constexpr (Alignment == 16) {
     asm("st.global.v4.u32 [%0], {%1,%2,%3,%4};"
         :
         : "l"(addr),
@@ -657,10 +647,10 @@ __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
         : "memory");
   } else if constexpr (Alignment == 4) {
     asm("st.global.u32 [%0], %1;" : : "l"(addr), "r"(vec.u32) : "memory");
+#endif
   } else {
     static_assert(dependent_false<T>);
   }
-#endif
 }
 
 

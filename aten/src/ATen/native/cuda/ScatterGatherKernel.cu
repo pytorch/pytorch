@@ -160,7 +160,6 @@ struct _cuda_scatter_gather_internal_kernel {
       return;
     }
 
-
     char* self_ptr = (char*)iter.data_ptr(0);
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
@@ -178,7 +177,7 @@ struct _cuda_scatter_gather_internal_kernel {
       if (iter.ndim() == 2 && iter.strides(2)[0]==0 && (size_t)iter.strides(0)[0]==element_size &&
           (size_t)iter.strides(1)[0]==element_size && get_alignment(self_ptr) == 16 && get_alignment(src_ptr) == 16 &&
           get_alignment((size_t)(iter.shape()[0] * element_size)) == 16 && get_alignment((size_t)(index_stride * element_size)) == 16 &&
-          iter.strides(0)[1] == 16) {
+          get_alignment((size_t)iter.strides(0)[1]) == 16) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto ind_dim_size = index_size;
