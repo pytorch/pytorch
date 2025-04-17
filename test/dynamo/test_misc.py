@@ -1498,6 +1498,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
 
+    def test_user_code_statically_known_true(self):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            if statically_known_true(x.shape[0] > 50):
+                x += 1
+            else:
+                x -= 1
+            return x
+
+        x = torch.ones(51)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.assertEqual(f(x).sum(), 0)
+
     def test_dictcomp(self):
         def fn1(inputs):
             return {k: v + 1 for k, v in inputs.items()}
