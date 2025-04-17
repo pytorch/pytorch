@@ -603,22 +603,16 @@ class TestViewOps(DTensorTestBase):
     def test_view_redistribution(self):
         """
         This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
-        #TODO: we need to define the view ops behavior when view on the sharded dimension.
         """
 
         x = torch.randn(4, 4)
-        y = x.view(-1, 8)
-
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
-        dtensor_y = dtensor_x.view(-1, 8)
 
-        self.assertEqual(y, dtensor_y.full_tensor())
-        # TODO: to match up with single device semantics, the data pointer of dtensor_x and dtensor_y
-        # should be the same.
-        self.assertNotEqual(
-            dtensor_x.to_local().data_ptr(), dtensor_y.to_local().data_ptr()
-        )
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension"
+        ):
+            dtensor_x.view(-1, 8)
 
 
 if __name__ == "__main__":
