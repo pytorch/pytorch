@@ -505,8 +505,7 @@ class CommonTemplate:
 
     def test_dynamic_shapes_generic(self):
         """
-        Test a generic strided block with dynamic shapes. Block pointers are not
-        expected. This only checks that the analysis doesn't break this case.
+        Test a generic strided block with dynamic shapes.
         """
 
         device = torch.device(self.device)
@@ -515,7 +514,32 @@ class CommonTemplate:
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        run_and_compare(self, torch.div, view, view, compile_kwargs={"dynamic": True})
+        run_and_compare(
+            self,
+            torch.div,
+            view,
+            view,
+            expected_num_block_pointers=2,
+            compile_kwargs={"dynamic": True},
+        )
+
+        # Check the load and store for dynamic shapes.
+        load_lines, store_lines = tuple(
+            self._get_lines_containing_substr(triton_code, substr)
+            for substr in ("tl.load", "tl.store")
+        )
+        self.assertExpectedInline(
+            load_lines,
+            """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+            """ #TODO replace with actual code
+        )
+        self.assertExpectedInline(
+            store_lines,
+            """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+            """ #TODO replace with actual code
+        )
 
     @unittest.skip(reason="Dynamo tracing error")
     def test_dynamic_shapes_multiple_max_block(self):
