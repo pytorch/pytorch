@@ -63,9 +63,6 @@ void binary_op_kernel(const std::string func_name, const Tensor& input, const Te
   auto common_dtype = output.scalar_type();
   auto input_cast = input.to(kMPS, common_dtype);
   auto other_cast = other.to(kMPS, common_dtype);
-  if (input.scalar_type() != common_dtype || other.scalar_type() != common_dtype) {
-    input_cast = input.to(kMPS, common_dtype);
-  }
   auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
 
   lib.exec_binary_kernel(iter, func_name);
