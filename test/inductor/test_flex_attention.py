@@ -3342,10 +3342,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_mixed_device_error_message(self, device):
         # Create tensors on different devices
         cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
-        cuda_tensor = torch.randn(2, 2, 128, 16, device=device)
+        gpu_tensor = torch.randn(2, 2, 128, 16, device=device)
 
         # Use different devices for query, key, and value
-        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+        query, key, value = cpu_tensor, gpu_tensor, cpu_tensor
 
         expected_error_message = (
             "Expected query, key, and value to have the same device type, "
@@ -3924,9 +3924,9 @@ class GraphModule(torch.nn.Module):
         not has_triton() or not HAS_WARP_SPEC,
         reason="FBCODE Triton is required for this test",
     )
-    def test_triton_template_warp_specialization(self):
+    def test_triton_template_warp_specialization(self, device):
         def make_tensor():
-            return torch.rand(4, 16, 4096, 64, device="cuda", dtype=torch.bfloat16)
+            return torch.rand(4, 16, 4096, 64, device=device, dtype=torch.bfloat16)
 
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         flex_compiled = torch.compile(flex_attention, fullgraph=True)
@@ -4071,16 +4071,17 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_block_mask_device_change(self, device):
+        device = torch.device(device)
         offset = torch.zeros(8, device=device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=device)
-        assert block_mask.kv_indices.is_cuda
-        assert block_mask.kv_num_blocks.is_cuda
-        assert block_mask.q_indices.is_cuda
-        assert block_mask.q_num_blocks.is_cuda
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
         block_mask = block_mask.to("cpu")
         assert block_mask.kv_indices.is_cpu
@@ -4089,10 +4090,10 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_num_blocks.is_cpu
 
         block_mask = block_mask.to(device)
-        assert block_mask.kv_indices.is_cuda
-        assert block_mask.kv_num_blocks.is_cuda
-        assert block_mask.q_indices.is_cuda
-        assert block_mask.q_num_blocks.is_cuda
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
     @supported_platform
     def test_compiling_create_block_mask(self, device):
@@ -4984,9 +4985,12 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 
 supports_learnable_bias = unittest.skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    (torch.xpu.is_available() and has_triton())
+    or (
+        (torch.cuda.is_available() and has_triton())
+        and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
+    ),
+    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
 )
 
 
@@ -5554,10 +5558,10 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
 
-    def test_flex_attention_with_dynamic_max_autotune(self):
-        query = torch.randn(2, 16, 512, 64, device="cuda")
-        key = torch.randn(2, 16, 512, 64, device="cuda")
-        value = torch.randn(2, 16, 512, 64, device="cuda")
+    def test_flex_attention_with_dynamic_max_autotune(self, device):
+        query = torch.randn(2, 16, 512, 64, device=device)
+        key = torch.randn(2, 16, 512, 64, device=device)
+        value = torch.randn(2, 16, 512, 64, device=device)
         query.requires_grad = True
         key.requires_grad = True
         value.requires_grad = True
@@ -5571,7 +5575,9 @@ class TestLearnableBiases(InductorTestCase):
             return m >= n
 
         mask_shape = (1, 1, M, N)
-        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
+        block_mask = torch.compile(create_block_mask)(
+            causal, *mask_shape, device=device
+        )
 
         compiled_sdpa = torch.compile(
             flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
@@ -5598,7 +5604,7 @@ class TestLearnableBiases(InductorTestCase):
             return (q_idx - kv_idx).abs() < val
 
         sliding_window2 = functools.partial(
-            sliding_window, val=torch.randn((), device="cuda")
+            sliding_window, val=torch.randn((), device=device)
         )
         opt_fn = torch.compile(create_block_mask, fullgraph=True)
         create_block_mask(sliding_window2, None, None, 1024, 1024)
