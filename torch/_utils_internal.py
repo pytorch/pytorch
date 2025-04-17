@@ -274,3 +274,7 @@ def record_chromium_event_internal(
     event: dict[str, Any],
 ):
     return None
+
+
+def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
+    return True
