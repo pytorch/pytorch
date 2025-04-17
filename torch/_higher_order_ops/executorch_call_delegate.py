@@ -87,7 +87,7 @@ def call_delegate_cpu(lowered_module, *args):
     return lowered_module.original_module.module()(*new_args)
 
 
-@executorch_call_delegate.py_impl(torch._C.DispatchKey.Autograd)
+@executorch_call_delegate.py_autograd_impl
 # pyre-ignore
 def call_delegate_autograd(lowered_module, *args):
     # TODO: support autograd
