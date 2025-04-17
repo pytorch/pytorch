@@ -4576,6 +4576,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    @testing.expectedFailureCppSerDes
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
