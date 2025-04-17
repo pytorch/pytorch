@@ -935,6 +935,14 @@ class CudaReproTests(TestCase):
         FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
+        def foo(x):
+            return x.sigmoid()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(

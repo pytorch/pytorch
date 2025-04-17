@@ -1329,18 +1329,33 @@ class TritonKernelOverrides(TritonOverrides):
     def _setup_libdevice_routing(cls):
         """Set up routing to libdevice implementations for fp64 inputs."""
 
+        from torch._inductor.codegen.common import OpDecompositions
         for fn_name in torch._inductor.utils.op_requires_libdevice_fp64:
             assert hasattr(cls, fn_name)
             original_impl = getattr(cls, fn_name)
 
-            def dtype_router(x, _original_impl=original_impl, _fn_name=fn_name):
+            def decomposition_router(x, _original_impl, _fn_name):
+                if x.dtype != torch.float64:
+                    return _original_impl(x)
+                else:
+                    return getattr(OpDecompositions, _fn_name)(x).value
+
+            if fn_name == "sigmoid":
+                assert hasattr(OpDecompositions, "sigmoid")
+                fn = functools.partial(decomposition_router, _original_impl=original_impl, _fn_name=fn_name)
+                fn.__name__ = fn_name
+                setattr(cls, fn_name, staticmethod(fn))
+                continue
+
+            def dtype_router(x, _original_impl, _fn_name):
                 if x.dtype == torch.float64:
                     return f"libdevice.{_fn_name}({x})"
                 else:
                     return _original_impl(x)
 
-            dtype_router.__name__ = fn_name
-            setattr(cls, fn_name, staticmethod(dtype_router))
+            fn = functools.partial(dtype_router, _original_impl=original_impl, _fn_name=fn_name)
+            fn.__name__ = fn_name
+            setattr(cls, fn_name, staticmethod(fn))
 
     @classmethod
     def constant(cls, value, dtype):
