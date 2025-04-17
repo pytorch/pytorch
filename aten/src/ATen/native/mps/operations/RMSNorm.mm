@@ -4,7 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_rms_norm_fused_native.h>
+#include <ATen/ops/_fused_rms_norm_native.h>
 #include <ATen/ops/empty_like.h>
 #endif
 #include <ATen/native/mps/OperationUtils.h>
@@ -19,7 +19,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/RMSNorm_metallib.h>
 #endif
 
-Tensor _rms_norm_fused_mps(const Tensor& input, const int64_t normalized_ndim, const Tensor& weight, const double eps) {
+Tensor _fused_rms_norm_mps(const Tensor& input, const int64_t normalized_ndim, const Tensor& weight, const double eps) {
   TORCH_CHECK(input.is_contiguous() && weight.is_contiguous(), "Expected contiguous input and weight tensors");
   auto output = at::empty_like(input);
   const auto input_shape = input.sizes();
