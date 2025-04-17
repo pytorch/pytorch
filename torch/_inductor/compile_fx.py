@@ -41,6 +41,7 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_inputs_devices,
     get_metrics_context,
     lazy_format_graph_code,
     set_feature_use,
@@ -384,7 +385,9 @@ def _recursive_pre_grad_passes(
         return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
-def _recursive_joint_graph_passes(gm: GraphModule) -> None:
+def _recursive_joint_graph_passes(
+    gm: GraphModule, input_device: Optional[torch.device] = None
+) -> None:
     with dynamo_timed(
         "_recursive_joint_graph_passes",
         log_pt2_compile_event=True,
@@ -398,8 +401,8 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
         # skip_invoke_subgraph.
         for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph=True):
             subgraph = getattr(gm, subgraph_name)
-            _recursive_joint_graph_passes(subgraph)
-        joint_graph_passes(gm)
+            _recursive_joint_graph_passes(subgraph, input_device)
+        joint_graph_passes(gm, input_device)
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -1070,6 +1073,7 @@ class _InProcessFxCompile(FxCompile):
                 cuda_context = get_cuda_device_context(gm)
                 with cuda_context:
                     _recursive_post_grad_passes(gm, is_inference=is_inference)
+
                 V.debug.fx_graph_transformed(gm, example_inputs)
                 post_grad_graphs_log.debug(
                     "%s",
@@ -1653,7 +1657,10 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    _recursive_joint_graph_passes(aot_autograd_model)
+    inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
+    _recursive_joint_graph_passes(
+        aot_autograd_model, input_device=next(iter(inputs_devices))
+    )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1977,7 +1984,10 @@ def compile_fx(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
-                    _recursive_joint_graph_passes(gm)
+                    inputs_devices = get_inputs_devices(example_inputs, gm)
+                    _recursive_joint_graph_passes(
+                        gm, input_device=next(iter(inputs_devices))
+                    )
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)
@@ -2077,7 +2087,10 @@ def compile_fx(
         ) -> tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
-                _recursive_joint_graph_passes(gm)
+                inputs_devices = get_inputs_devices(joint_inputs, gm)
+                _recursive_joint_graph_passes(
+                    gm, input_device=next(iter(inputs_devices))
+                )
 
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
