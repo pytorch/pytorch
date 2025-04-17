@@ -70,6 +70,9 @@ jobs:
     needs:
       - linux-focal-cuda12_6-py3_10-gcc11-sm86-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm86
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm86-build.outputs.docker-image }}
@@ -97,6 +100,9 @@ jobs:
     needs:
       - linux-focal-py3_9-clang10-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-py3.9-clang10
       docker-image: ${{ needs.linux-focal-py3_9-clang10-build.outputs.docker-image }}
@@ -156,6 +162,9 @@ jobs:
     needs:
       - linux-jammy-py3_10-clang15-asan-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}

@@ -228,6 +228,9 @@ jobs:
   verify-cachebench-cpu-test:
     name: verify-cachebench-cpu-test
     uses: ./.github/workflows/_linux-test.yml
+    permissions:
+      id-token: write
+      contents: read
     needs:
       - verify-cachebench-cpu-build
       - target-determination

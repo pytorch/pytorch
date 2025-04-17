@@ -51,6 +51,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-nightly-dynamo-benchmarks
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build.outputs.docker-image }}

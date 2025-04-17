@@ -113,6 +113,9 @@ jobs:
     name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event.schedule == '0 7 * * 1-6'
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
@@ -128,6 +131,9 @@ jobs:
     name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event.schedule == '0 7 * * 0'
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
@@ -143,6 +149,9 @@ jobs:
     name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90

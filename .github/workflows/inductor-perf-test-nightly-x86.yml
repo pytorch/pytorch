@@ -94,6 +94,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
@@ -110,6 +113,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
