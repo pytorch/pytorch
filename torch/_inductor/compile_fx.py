@@ -1173,7 +1173,7 @@ class _InProcessFxCompile(FxCompile):
                                 "pt2_configs": str(get_patched_config_dict())
                             }
                         )
-                    except ValueError:
+                    except:
                         # TODO(T216453900): need to work around for now to support vllm
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
