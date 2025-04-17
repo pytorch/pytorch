@@ -182,6 +182,9 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_mutation_names()
 
+    def get_device(self) -> Optional[torch.device]:
+        return self.node.get_output_spec().get_device()
+
 
 @dataclasses.dataclass
 class SchedulerDonatedBuffer(SchedulerBuffer):
@@ -2093,6 +2096,10 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
+
+        if torch._inductor.config.graph_partition:
+            self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
+
         self.compute_last_usage()
         log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -4269,6 +4276,38 @@ class Scheduler:
 
         return signatures[::-1]
 
+    def reorder_for_partition_with_simple_dependency(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder a node if it should be partitioned and has simple dependency:
+        1. move a partitioned node to the front if it has no dependency
+        2. move a partitioned node to the back if it is only used by OutputNode
+        3. otherwise do not reorder
+        """
+
+        front: list[BaseSchedulerNode] = []
+        middle: list[BaseSchedulerNode] = []
+        back: list[BaseSchedulerNode] = []
+
+        def only_output_user(node: BaseSchedulerNode) -> bool:
+            for buf in node.get_outputs():
+                for use in buf.users:
+                    if not isinstance(use.node, OutputNode):
+                        return False
+            return True
+
+        for node in nodes:
+            should_partition = self.should_partition(node)
+            if should_partition and len(node.unmet_dependencies) == 0:
+                front.append(node)
+            elif should_partition and only_output_user(node):
+                back.append(node)
+            else:
+                middle.append(node)
+
+        return front + middle + back
+
     def graph_partition(
         self,
     ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
@@ -4277,7 +4316,6 @@ class Scheduler:
         graph partitions and compute partition input/output signatures.
         """
         partitions: list[PartitionType] = []
-
         skip_cudagraph = True
         cur_partition: PartitionType = []
         skip_cudagraphs = []
