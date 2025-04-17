@@ -1510,6 +1510,29 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic", (False, True))
+    def test_call_in_backend(self, dynamic: bool) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        def backend(gm, args, **kwargs):
+            return torch._inductor.standalone_compile(gm, args)
+
+        with fresh_inductor_cache():
+            compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+            self.assertEqual(eager_out, compiled_out)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_save_in_new_path(self) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import shutil
@@ -7,7 +8,7 @@ from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
@@ -15,7 +16,6 @@ from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config
-from .utils import shape_env_from_inputs
 
 
 if TYPE_CHECKING:
@@ -166,12 +166,15 @@ def standalone_compile(
 
     from .compile_fx import compile_fx
 
-    shape_env = shape_env_from_inputs(example_inputs, default=True)
-    assert shape_env is not None
+    fake_mode = detect_fake_mode(example_inputs)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    context = torch._guards.TracingContext(FakeTensorMode(shape_env=shape_env))
+    context = torch._guards.TracingContext(fake_mode)
     with torch._guards.tracing(context):
         with CacheArtifactManager.with_fresh_cache():
+            # compile_fx can mutate gm
+            gm = copy.deepcopy(gm)
             compiled_fn = compile_fx(gm, example_inputs, **kwargs)
             assert callable(compiled_fn)
 
