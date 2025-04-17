@@ -605,12 +605,18 @@ class TORCH_API Library final {
   /// }
   /// ```
 
-  template <typename Schema>
   Library& def(
-      Schema&& raw_schema,
+      c10::FunctionSchema s,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
+    return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  Library& def(
+      const char* raw_schema,
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    c10::FunctionSchema s = schema(raw_schema);
     return _def(std::move(s), nullptr, tags, rv);
   }
 
