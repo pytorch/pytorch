@@ -1104,13 +1104,14 @@ class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. It supports two types of outputs
     1) tensor
-    2) tuple of tensors
+    2) tuple/list of tensors
 
-    is_output_tuple flag helps in differentiating the return type
+    output_seq_type flag helps in setting the return type. If None, its just a
+    tensor. Otherwise, the value is list/tuple.
     """
 
     output_infos: tuple[_DispatchCacheEntryOutputInfo]
-    is_output_tuple: bool = False
+    output_seq_type: Optional[type] = None
 
 
 class _BypassDispatchCache(Exception):
@@ -1448,6 +1449,7 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
+            print(func, e.reason)
             if self._raise_on_failure_to_cache:
                 raise
 
@@ -1689,7 +1691,7 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         if not isinstance(output, FakeTensor):
-            raise _BypassDispatchCache("non-FakeTensor output")
+            raise _BypassDispatchCache(f"non-FakeTensor output - {type(output)}")
 
         # Avoid caching FakeTensors with constants attached since those
         # can be invalidated.
@@ -1759,7 +1761,7 @@ class FakeTensorMode(TorchDispatchMode):
         # This approach keeps the (more frequent) cache-hit path as lightweight
         # as possible.
         entry_for_synth_output = _DispatchCacheEntry(
-            output_infos=(entry,), is_output_tuple=False
+            output_infos=(entry,), output_seq_type=None
         )
         synth_output = self._output_from_cache_entry(
             state, entry_for_synth_output, key, func, args
@@ -1793,10 +1795,10 @@ class FakeTensorMode(TorchDispatchMode):
                 inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )
             return _DispatchCacheEntry(
-                output_infos=(output_info,), is_output_tuple=False
+                output_infos=(output_info,), output_seq_type=None
             )
 
-        if isinstance(output, tuple):
+        if isinstance(output, (list, tuple)):
             for out_element in output:
                 self._validate_output_for_cache_entry(
                     state, key, func, args, kwargs, out_element
@@ -1806,7 +1808,7 @@ class FakeTensorMode(TorchDispatchMode):
                 state, key, func, args, kwargs, output
             )
 
-        if isinstance(output, tuple):
+        if isinstance(output, (list, tuple)):
             output_infos = [
                 self._get_output_info_for_cache_entry(
                     state, key, func, args, kwargs, out_elem
@@ -1814,7 +1816,7 @@ class FakeTensorMode(TorchDispatchMode):
                 for out_elem in output
             ]
             return _DispatchCacheEntry(
-                output_infos=tuple(output_infos), is_output_tuple=True
+                output_infos=tuple(output_infos), output_seq_type=list if isinstance(output, list) else tuple
             )
 
         else:
@@ -1822,7 +1824,7 @@ class FakeTensorMode(TorchDispatchMode):
                 state, key, func, args, kwargs, output
             )
             return _DispatchCacheEntry(
-                output_infos=(output_info,), is_output_tuple=False
+                output_infos=(output_info,), output_seq_type=None
             )
 
     def _get_output_tensor_from_cache_entry(
@@ -1910,7 +1912,7 @@ class FakeTensorMode(TorchDispatchMode):
         Create a new FakeTensor from the cache entry.
         """
 
-        if entry.is_output_tuple:
+        if entry.output_seq_type is not None:
             outputs = [
                 self._get_output_tensor_from_cache_entry(
                     state,
@@ -1921,7 +1923,7 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 for output_info in entry.output_infos
             ]
-            return tuple(outputs)
+            return entry.output_seq_type(outputs)
         else:
             return self._get_output_tensor_from_cache_entry(
                 state, entry.output_infos[0], key, func, args
@@ -1941,8 +1943,8 @@ class FakeTensorMode(TorchDispatchMode):
         """
 
         def assert_helper(a: Any, b: Any) -> None:
-            if isinstance(a, tuple):
-                assert isinstance(b, tuple)
+            if isinstance(a, (tuple, list)):
+                assert type(a) is type(b)
                 assert len(a) == len(b)
                 for l, r in zip(a, b):
                     assert_helper(l, r)
