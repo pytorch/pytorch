@@ -14,7 +14,7 @@ inline TORCH_XPU_API at::HostAllocator* getCachingHostAllocator() {
 }
 
 C10_DEPRECATED_MESSAGE(
-  "at::xpu::CachingHostAllocator_recordEvent(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->record_event(...) instead.")
+    "at::xpu::CachingHostAllocator_recordEvent(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->record_event(...) instead.")
 inline TORCH_XPU_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
@@ -23,13 +23,13 @@ inline TORCH_XPU_API bool CachingHostAllocator_recordEvent(
 }
 
 C10_DEPRECATED_MESSAGE(
-  "at::xpu::CachingHostAllocator_emptyCache() is deprecated. Please use at::getHostAllocator(at::kXPU)->empty_cache() instead.")
+    "at::xpu::CachingHostAllocator_emptyCache() is deprecated. Please use at::getHostAllocator(at::kXPU)->empty_cache() instead.")
 inline TORCH_XPU_API void CachingHostAllocator_emptyCache() {
   getCachingHostAllocator()->empty_cache();
 }
 
 C10_DEPRECATED_MESSAGE(
-  "at::xpu::HostAlloc(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->allocate(...) instead.")
+    "at::xpu::HostAlloc(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->allocate(...) instead.")
 inline TORCH_XPU_API at::DataPtr HostAlloc(size_t size) {
   return getCachingHostAllocator()->allocate(size);
 }
