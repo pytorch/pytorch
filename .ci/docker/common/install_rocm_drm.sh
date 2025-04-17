@@ -25,9 +25,7 @@ python3 -m pip install meson ninja
 ###########################
 ### clone repo
 ###########################
-# TEMPORARY FIX: https://gitlab.freedesktop.org/mesa/drm.git is down until 2025/03/22
-# GIT_SSL_NO_VERIFY=true git clone https://gitlab.freedesktop.org/mesa/drm.git
-GIT_SSL_NO_VERIFY=true git clone git://anongit.freedesktop.org/mesa/drm
+GIT_SSL_NO_VERIFY=true git clone https://gitlab.freedesktop.org/mesa/drm.git
 pushd drm
 
 ###########################
