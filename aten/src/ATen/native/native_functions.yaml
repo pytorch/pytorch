@@ -1211,8 +1211,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_not_out
-    MPS: bitwise_not_out_mps
+    CPU, CUDA, MPS: bitwise_not_out
   tags: pointwise
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)

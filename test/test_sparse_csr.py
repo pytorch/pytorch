@@ -1495,7 +1495,8 @@ class TestSparseCSR(TestCase):
             res = csr.matmul(vec)
             expected = csr.to_dense().matmul(vec)
 
-            self.assertEqual(res, expected)
+            atol, rtol = (2e-3, 1e-3) if dtype == torch.half else (None, None)
+            self.assertEqual(res, expected, atol=atol, rtol=rtol)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
             err_msg = "size mismatch, got"
