@@ -1200,6 +1200,48 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.ones(4, 4, device=self.device),)
         self.check_model(Foo(self.device), example_inputs)
 
+    def test_aoti_constant_tensor_name_collision(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self, user_float_feature_idx, device):
+                super().__init__()
+                self.user_float_feature_idx = user_float_feature_idx
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+                self.sub_mod = SubModule(device)
+
+            def forward(self, x):
+                return (
+                    torch.index_select(
+                        x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
+                    ),
+                    self._tensor_constant0,
+                    self.sub_mod._tensor_constant1,
+                )
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        user_float_feature_idx = [1]
+        # we have to have run_decomposition first to trigger the name collision
+        ep = torch.export.export(
+            Foo(user_float_feature_idx, self.device), example_inputs, strict=False
+        ).run_decompositions()
+        gm = ep.module()
+        self.check_model(gm, example_inputs)
+
     def test_large_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
