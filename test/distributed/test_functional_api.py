@@ -3,6 +3,7 @@
 import sys
 import unittest
 from functools import partial, wraps
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -10,6 +11,7 @@ import torch.distributed._functional_collectives as ft_c
 import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
 from functorch import make_fx
+from torch._dynamo.metrics_context import MetricsContext
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -665,6 +667,13 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
     def world_size(self):
         return 2
 
+    # `compilation_metric` attempts to update the `is_forward` field of `metrics_context`. Since
+    # `metrics_context` is a singleton, a runtime error will occur if multiple threads try to update it
+    # because `MetricsContext` does not allow updating existing fields when `overwrite` is False.
+    # So, we need to patch the `update` function of MetricsContext
+    def _metrics_context_update(self, *args, **kwargs) -> None:
+        pass
+
     @parametrize("compile", [True, False])
     def test_all_to_all_single(self, compile: bool = True) -> None:
         group = dist.group.WORLD.group_name
@@ -690,7 +699,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         self.assertIsNotNone(out.grad_fn)
         self.assertTrue(out.requires_grad)
         loss = out.sum()
-        loss.backward()
+        with patch.object(MetricsContext, "update", self._metrics_context_update):
+            loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
     def test_all_to_all_single_inductor(self) -> None:
@@ -710,7 +720,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
 
         def run_with_backward():
             out = compiled(t, self.world_size)
-            out.backward()
+            with patch.object(MetricsContext, "update", self._metrics_context_update):
+                out.backward()
 
         _, codes = run_and_get_code(run_with_backward)
         for code in codes:
@@ -750,7 +761,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             gathered_tensor = compiled(local_tensor, dim)
             self.assertEqual(gathered_tensor, torch.ones(output_size))
 
-            gathered_tensor.sum().backward()
+            with patch.object(MetricsContext, "update", self._metrics_context_update):
+                gathered_tensor.sum().backward()
             self.assertEqual(
                 local_tensor.grad,
                 torch.full((3, 3, 3), fill_value=float(self.world_size)),
@@ -785,7 +797,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             rs_tensor = compiled(input_tensor, dim)
             res_num = 1 * group_size
             self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
-            rs_tensor.sum().backward()
+            with patch.object(MetricsContext, "update", self._metrics_context_update):
+                rs_tensor.sum().backward()
             self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
 
 
