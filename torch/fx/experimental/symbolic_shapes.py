@@ -1205,7 +1205,7 @@ def guard_or_false(a: BoolLikeType) -> bool:
             return statically_known_true(a)
         else:
             try:
-                return bool(guard_bool(a))
+                return guard_bool(a)
             except GuardOnDataDependentSymNode:
                 return False
 
@@ -1226,7 +1226,7 @@ def guard_or_true(a: BoolLikeType) -> bool:
             return True
         else:
             try:
-                return bool(guard_bool(a))
+                return guard_bool(a)
             except GuardOnDataDependentSymNode:
                 return True
 
