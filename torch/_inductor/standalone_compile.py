@@ -58,7 +58,7 @@ class CompiledArtifact:
         self._artifacts = artifacts
 
     def __call__(self, *args: Any) -> Any:
-        return self._compiled_fn(*args)[0]
+        return self._compiled_fn(*args)
 
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
