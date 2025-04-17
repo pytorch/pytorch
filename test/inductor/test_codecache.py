@@ -1431,7 +1431,7 @@ class TestStandaloneCompile(TestCase):
 
         def f(x):
             with torch.no_grad():
-                return mod(x)
+                return mod(x), x.sin()
 
         eager_out = f(x)
 
@@ -1452,7 +1452,7 @@ class TestStandaloneCompile(TestCase):
 
             with fresh_inductor_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
-                compiled_out = loaded(*args)[0]
+                compiled_out = loaded(*args)
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -1490,7 +1490,7 @@ class TestStandaloneCompile(TestCase):
 
         def f(x):
             with torch.no_grad():
-                return mod(x), x.sin()
+                return mod(x)
 
         eager_out = f(x)
 
@@ -1509,7 +1509,7 @@ class TestStandaloneCompile(TestCase):
                 loaded = torch._inductor.CompiledArtifact.load(
                     path=path, format="unpacked"
                 )
-                compiled_out = loaded(*args)
+                compiled_out = loaded(*args)[0]
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
