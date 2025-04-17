@@ -5936,7 +5936,7 @@ class ShapeEnv:
 
         if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
             min_max_replacements = {}
-            for atom in (*expr.atoms(Max), *expr.atoms(Min)):
+            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
                 a, b = atom.args
                 if b == 1 or b == 0:
                     a, b = b, a
@@ -5944,7 +5944,7 @@ class ShapeEnv:
                     vr = self.bound_sympy(b, size_oblivious=True)
                     if vr.lower >= a:
                         min_max_replacements[atom] = b if atom.func is Max else a
-                    elif vr.upper <= b:
+                    elif vr.upper <= a:
                         min_max_replacements[atom] = a if atom.func is Max else b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
