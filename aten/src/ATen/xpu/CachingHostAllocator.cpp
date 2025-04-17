@@ -34,10 +34,17 @@ struct XPUCachingHostAllocatorImpl
 
 void raw_local_deleter(void* ptr);
 
-DECLARE_HOST_ALLOCATOR(
-    XPUCachingHostAllocator,
-    XPUCachingHostAllocatorImpl,
-    raw_local_deleter)
+struct XPUCachingHostAllocator final
+    : public CachingHostAllocatorInterface<XPUCachingHostAllocatorImpl> {
+  at::DataPtr allocate(size_t size) override {
+    auto ptr_and_ctx = impl_->allocate(size);
+    return {
+        ptr_and_ctx.first,
+        ptr_and_ctx.second,
+        &raw_local_deleter,
+        at::DeviceType::CPU};
+  }
+};
 
 static XPUCachingHostAllocator caching_host_allocator;
 

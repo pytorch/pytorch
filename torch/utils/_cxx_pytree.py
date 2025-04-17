@@ -24,7 +24,6 @@ import optree
 from torch._vendor.packaging.version import Version
 
 
-# Keep the version in sync with torch.utils._cxx_pytree!
 if Version(optree.__version__) < Version("0.13.0"):  # type: ignore[attr-defined]
     raise ImportError(
         "torch.utils._cxx_pytree depends on optree, which is an optional dependency "

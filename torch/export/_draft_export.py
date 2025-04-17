@@ -360,7 +360,7 @@ def draft_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
-    pre_dispatch: bool = True,
+    pre_dispatch: bool = False,
 ) -> ExportedProgram:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}

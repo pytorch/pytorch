@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 
 import transformers
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -150,7 +149,12 @@ class DynamoExporterTest(common_utils.TestCase):
                 x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
                 return x, z
 
-        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
+        onnx_program = torch.onnx.export(
+            CondModel(),
+            (torch.tensor([1, 2]),),
+            dynamo=True,
+            fallback=False,
+        )
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
@@ -189,56 +193,33 @@ class DynamoExporterTest(common_utils.TestCase):
             _ = self.export(exported_program)
 
     @common_utils.parametrize(
-        "float8_type, onnx_type",
+        "float8_type",
         [
             common_utils.subtest(
-                (torch.float8_e5m2, ir.DataType.FLOAT8E5M2),
+                torch.float8_e5m2,
                 name="torch_float8_e5m2",
             ),
             common_utils.subtest(
-                (torch.float8_e5m2fnuz, ir.DataType.FLOAT8E5M2FNUZ),
+                torch.float8_e5m2fnuz,
                 name="torch_float8_e5m2fnuz",
             ),
             common_utils.subtest(
-                (torch.float8_e4m3fn, ir.DataType.FLOAT8E4M3FN),
+                torch.float8_e4m3fn,
                 name="torch_float8_e4m3fn",
             ),
             common_utils.subtest(
-                (torch.float8_e4m3fnuz, ir.DataType.FLOAT8E4M3FNUZ),
+                torch.float8_e4m3fnuz,
                 name="torch_float8_e4m3fnuz",
             ),
         ],
     )
-    def test_float8_support(self, float8_type: torch.dtype, onnx_type: ir.DataType):
+    def test_float8_support(self, float8_type):
         class Float8Module(torch.nn.Module):
             def forward(self, input: torch.Tensor):
                 input = input.to(float8_type)
                 return input
 
         _ = self.export(Float8Module(), (torch.randn(1, 2),))
-
-    def test_bfloat16_support(self):
-        class BfloatModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # Test parameters
-                self.param = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.bfloat16))
-
-            def forward(self, x):
-                # Test constant tensors are stored as bfloat16
-                const = torch.tensor(1.0, dtype=torch.bfloat16)
-                return x * const * self.param
-
-        input = torch.tensor([1.0, 2.0], dtype=torch.bfloat16)
-        onnx_program = self.export(BfloatModel(), (input,), optimize=False)
-        initializers = onnx_program.model.graph.initializers.values()
-        self.assertEqual(len(initializers), 2)
-        for initializer in initializers:
-            self.assertEqual(initializer.dtype, ir.DataType.BFLOAT16)
-        self.assertEqual(onnx_program.model.graph.inputs[0].dtype, ir.DataType.BFLOAT16)
-        self.assertEqual(
-            onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
-        )
 
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)

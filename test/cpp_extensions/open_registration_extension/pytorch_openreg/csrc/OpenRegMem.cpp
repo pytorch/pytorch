@@ -1,16 +1,21 @@
 #include "OpenReg.h"
 
 #include <ATen/EmptyTensor.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/set_cpu_dispatch.h>
-
 #include <c10/core/Allocator.h>
-
+#include <c10/core/TensorOptions.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
 namespace openreg {
+
 namespace {
 
+using openreg_ptr_t = uint64_t;
+
+// A dummy allocator for our custom device, that secretly uses the CPU
 struct OpenRegAllocator final : at::Allocator {
   OpenRegAllocator() = default;
 
@@ -67,6 +72,7 @@ struct OpenRegAllocator final : at::Allocator {
   }
 };
 
+// Register our dummy allocator
 static OpenRegAllocator global_openreg_alloc;
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_openreg_alloc);
 
@@ -141,4 +147,5 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 }
 
 } // namespace
+
 } // namespace openreg

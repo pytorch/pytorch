@@ -620,17 +620,12 @@ protected:
   alignas(64) HostStatsStaged stats_;
 };
 
-template <typename T, c10::DeleterFnPtr deleteFunc>
+template <typename T>
 struct CachingHostAllocatorInterface : public at::Allocator {
   CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        deleteFunc, // Use the template parameter deleter function
-        at::DeviceType::CPU};
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
   }
 
   void free(void* ctx) {
@@ -665,10 +660,6 @@ struct CachingHostAllocatorInterface : public at::Allocator {
 
   std::unique_ptr<T> impl_;
 };
-
-#define DECLARE_HOST_ALLOCATOR(name, impl, deleter) \
-  struct name final                                 \
-      : public at::CachingHostAllocatorInterface<impl, deleter> {};
 
 } // namespace at
 C10_DIAGNOSTIC_POP()

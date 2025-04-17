@@ -91,7 +91,6 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
-from ._wrapper_utils import _WrapperModule
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -1299,6 +1298,15 @@ def _temp_disable_texpr_fuser():
         yield
     finally:
         torch._C._jit_set_texpr_fuser_enabled(original_state)
+
+
+class _WrapperModule(torch.nn.Module):
+    def __init__(self, f):
+        super().__init__()
+        self.f = f
+
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
 
 
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):

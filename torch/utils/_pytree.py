@@ -173,20 +173,12 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    # No optree package found
+    # optree was not imported
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
 else:
-    from torch._vendor.packaging.version import Version
-
-    # Keep this in sync with torch.utils._cxx_pytree!
-    if Version(_optree_version) < Version("0.13.0"):
-        # optree package less than our required minimum version.
-        # Pretend the optree package doesn't exist.
-        # NB: We will raise ImportError if the user directly tries to
-        # `import torch.utils._cxx_pytree` (look in that file for the check).
-        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
-    else:
-        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
+    # optree was imported
+    _cxx_pytree_exists = True
+    _cxx_pytree_dynamo_traceable = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
