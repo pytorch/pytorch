@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import unittest
-from typing import Any
 
 import torch
 import torch._dynamo.test_case
@@ -11,6 +10,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -74,29 +74,6 @@ class GraphModule(torch.nn.Module):
 """,  # NOQA: B950
         )
 
-    def _find_hop_schema(
-        self, gm: torch.fx.GraphModule, target: Any
-    ) -> list[torch._C.FunctionSchema]:
-        import torch.utils._pytree as pytree
-
-        schemas = []
-        for node in gm.graph.find_nodes(op="call_function", target=target):
-
-            def _get_example_value(node: torch.fx.Node) -> Any:
-                if node.op == "get_attr":
-                    return getattr(gm, node.target)
-                else:
-                    return node.meta["example_value"]
-
-            fake_args, fake_kwargs = pytree.tree_map_only(
-                torch.fx.Node,
-                _get_example_value,
-                (node.args, node.kwargs),
-            )
-            schema = node.target.gen_schema(*fake_args, **fake_kwargs)
-            schemas.append(schema)
-        return schemas
-
     def test_schema_gen_single_return(self):
         def inner(x, y):
             return (x @ y).sin().cos()
@@ -112,7 +89,7 @@ class GraphModule(torch.nn.Module):
 
         out = f(x.clone(), y)
         self.assertEqual(out, inner(x.clone(), y))
-        schemas = self._find_hop_schema(backend.graphs[0], invoke_quant_test)
+        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
@@ -140,7 +117,7 @@ class GraphModule(torch.nn.Module):
 
         out = f(x.clone(), y)
         self.assertEqual(out, inner([x.clone(), y]))
-        schemas = self._find_hop_schema(backend.graphs[0], invoke_quant_test)
+        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
