@@ -87,22 +87,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
-    def generate_extern_kernel_alloc(self, *args, **kwargs):
-        # Disable stack allocation for extern kernels.
-        self.allow_stack_allocation = False
-        super().generate_extern_kernel_alloc(*args, **kwargs)
-
-    def generate_extern_kernel_out(self, *args, **kwargs):
-        # Disable stack allocation for extern kernels.
-        self.allow_stack_allocation = False
-        super().generate_extern_kernel_out(*args, **kwargs)
-
-    def generate_fallback_kernel(self, *args, **kwargs):
-        # Disable stack allocation for extern kernels.
-        self.allow_stack_allocation = False
-        super().generate_fallback_kernel(*args, **kwargs)
-
-    def _generate_kernel_call_helper(
+    def generate_kernel_call(
         self,
         kernel_name: str,
         call_args,
@@ -113,7 +98,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
-        graph_name="",
         original_fxnode_name=None,
     ):
         """

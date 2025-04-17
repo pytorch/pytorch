@@ -87,7 +87,6 @@ class MultiKernelState:
 
     def __init__(self):
         self.subkernel_to_kernel_name = {}
-        self.kernel_defs = IndentedBuffer()
 
     def define_kernel(self, kernels):
         """
@@ -117,7 +116,7 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
-        buf = self.kernel_defs
+        buf = IndentedBuffer()
         buf.writeline("")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
@@ -127,10 +126,12 @@ class MultiKernelState:
                 buf.writeline(f"{name},")
         buf.writeline("])")
 
+        wrapper = V.graph.wrapper_code
         if config.triton.autotune_at_compile_time:
-            V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
-                multi_kernel_name
-            )
+            wrapper.kernel_autotune_defs.splice(buf)
+            wrapper.src_to_kernel["\n".join(kernel_names)] = multi_kernel_name
+        else:
+            wrapper.header.splice(buf)
 
         return multi_kernel_name
 

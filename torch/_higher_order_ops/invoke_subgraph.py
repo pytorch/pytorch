@@ -447,8 +447,22 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         return None, None, None, *grads
 
 
-@invoke_subgraph.py_autograd_impl
+@invoke_subgraph.py_impl(DispatchKey.Autograd)
 def _(subgraph, identifier, operands):
+    if not torch.is_grad_enabled():
+        with torch._C._AutoDispatchBelowAutograd():
+            return invoke_subgraph(subgraph, identifier, operands)
+
+    # A shortcut for the case where all inputs don't require gradient,
+    # we skip tracing the forward and backward graph.
+    if pytree.tree_all_only(
+        torch.Tensor,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        operands,
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return invoke_subgraph(subgraph, identifier, operands)
+
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:

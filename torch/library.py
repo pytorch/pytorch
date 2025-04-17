@@ -127,7 +127,6 @@ class Library:
             _defs,
             self._op_defs,
             self._registration_handles,
-            self.m,
         )
 
     def __repr__(self):
@@ -452,7 +451,6 @@ def _del_library(
     captured_defs,
     op_defs,
     registration_handles,
-    m,
 ):
     import torch.fx
 
@@ -473,9 +471,6 @@ def _del_library(
     captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
-
-    if m is not None:
-        m.reset()
 
 
 @contextlib.contextmanager

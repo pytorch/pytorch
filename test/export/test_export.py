@@ -12,7 +12,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
 from typing import Dict, List
-from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
@@ -4312,7 +4311,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('You can add either: torch._check_is_size(u2) or torch._check(u2>=0) Note: torch._check_is_size(u2) could prevent data dependent errors that happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning. See documentation on guard_size_oblivious for more details: https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html')}.*\n"
+            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
             f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
         ):
@@ -4635,8 +4634,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -6993,29 +6990,6 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
-    def test_sym_or_sym_and(self):
-        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
-
-        class Foo(torch.nn.Module):
-            def forward(self, xs):
-                u0, u1, u2 = xs.tolist()
-                torch._check(sym_or(u0 == 2, u0 == 4, u0 == 6))
-                torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
-                return u0 + u1 + u2
-
-        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
-        ep.module()(torch.tensor([2, 6, 5]))
-        ep.module()(torch.tensor([4, 7, 5]))
-        ep.module()(torch.tensor([6, 5, 5]))
-        with self.assertRaisesRegex(
-            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
-        ):
-            ep.module()(torch.tensor([3, 6, 5]))
-        with self.assertRaisesRegex(
-            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
-        ):
-            ep.module()(torch.tensor([6, 6, 6]))
-
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -7328,7 +7302,6 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
-    # map_fn references module outside the module hierarchy
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -7378,89 +7351,6 @@ def forward(self, b_a_buffer, x):
         error_msg = r"Could not guard on data-dependent expression"
         with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
-
-    def test_is_non_negative_check_function(self):
-        import sympy as sp
-
-        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
-
-        x = sp.Symbol("x")
-        variable_name = sp.Symbol("variable_name")
-        tensor_shape = sp.Symbol("tensor.shape[0]")
-
-        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
-        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
-
-        # Test cases where the condition is not checking for x >= 0
-        self.assertIsNone(_is_non_negative_check(x > 0))
-        self.assertIsNone(_is_non_negative_check(x == 0))
-        self.assertIsNotNone(_is_non_negative_check(0 <= x))
-        self.assertIsNone(_is_non_negative_check(x >= 1))
-
-    def test_suggest_torch_checks_with_non_negative_check(self):
-        from unittest.mock import patch
-
-        import sympy
-
-        from torch.export.dynamic_shapes import defaultdict
-        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
-
-        u = sympy.Symbol("u")
-        cond = u >= 0
-        mock_exception = MagicMock(
-            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        )
-        mock_exception.args = ["Test error message"]
-        mock_exception.cond = cond
-
-        mock_printer = MagicMock()
-        mock_printer.doprint.side_effect = lambda expr: (
-            str(cond) if expr == cond else "u < 0"  # Simulating the condition
-        )
-        with patch(
-            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
-            return_value=mock_printer,
-        ):
-            src_map = defaultdict(list)
-            src_map["u"] = ["u"]
-            _suggest_torch_checks(mock_exception, src_map)
-            error_msg = mock_exception.args[0]
-            self.assertIn("torch._check_is_size(u)", error_msg)
-            self.assertIn("torch._check(u < 0)", error_msg)
-
-    def test_suggest_torch_checks_with_regular_check(self):
-        import sympy
-
-        from torch.export.dynamic_shapes import defaultdict
-        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
-
-        mock_exception = MagicMock(
-            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        )
-        mock_exception.args = ["Test error message"]
-
-        mock_cond = MagicMock()
-        mock_cond.free_symbols = {sympy.Symbol("u")}
-        mock_exception.cond = mock_cond
-
-        mock_printer = MagicMock()
-        mock_printer.doprint.side_effect = lambda expr: (
-            "u > 5" if expr == mock_cond else "u <= 5"
-        )
-
-        with patch(
-            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
-            return_value=mock_printer,
-        ):
-            src_map = defaultdict(list)
-            src_map["u"] = ["u"]
-
-            _suggest_torch_checks(mock_exception, src_map)
-
-            error_msg = mock_exception.args[0]
-            self.assertIn("torch._check(u > 5)", error_msg)
-            self.assertIn("torch._check(u <= 5)", error_msg)
-            self.assertNotIn("torch._check_is_size", error_msg)
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
@@ -13591,30 +13481,6 @@ class GraphModule(torch.nn.Module):
                 decomp_table=decomp_table,
             )
             FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
-
-    def test_wrapper_module(self):
-        def f(x):
-            return torch.abs(x)
-
-        from torch.export import _wrapper_utils
-
-        model = _wrapper_utils._WrapperModule(f)
-        ep = export(
-            model,
-            (
-                torch.randn(
-                    8,
-                ),
-            ),
-        )
-
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, args_0):
-    abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
-    return (abs_1,)""",
-        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
