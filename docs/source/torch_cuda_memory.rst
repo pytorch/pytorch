@@ -11,7 +11,7 @@ can be used to explore the snapshot.
 .. note::
 
    The memory profiler and visualizer described in this document only have visibility into the CUDA memory that is
-   allocted and managed through the PyTorch allocator.  Any memory allocated directly from CUDA APIs will not be
+   allocated and managed through the PyTorch allocator.  Any memory allocated directly from CUDA APIs will not be
    visible in the PyTorch memory profiler.
 
    NCCL (used for distributed communication on CUDA devices) is a common example of a library that allocates some
@@ -72,19 +72,13 @@ If you suspect CUDA memory is being allocated outside of PyTorch, you can collec
 the pynvml package, and compare that to the allocation reported by pytorch.
 
 
-To collect raw memory usage outside pytorch:
-
-`pip install pynvml`
+To collect raw memory usage outside pytorch, use :func:`device_memory_used`:
 
 .. code::
 
-    import pynvml
-    pynvml.nvmlInit()
+    import torch
     device_idx = ...
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device_idx)
-    memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    pynvml.nvmlShutdown()
-    print(memory_info.used)
+    print(torch.cuda.device_memory_used(device_idx))
 
 
 Snapshot API Reference
