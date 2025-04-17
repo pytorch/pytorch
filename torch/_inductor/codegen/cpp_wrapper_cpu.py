@@ -6,7 +6,7 @@ import sys
 import textwrap
 from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol, Union
 
 import sympy
 
@@ -100,6 +100,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
+        )
+
+    @staticmethod
+    def _is_inplace_aten_operator(op: Any) -> bool:
+        # To be complete, this function would also have to handle dunder methods like
+        # __iadd__, but by this point all of those have been converted into applications
+        # of aten functions.  For the rest, make the same assumption that
+        # BaseOperatorName.parse does: that a function name ending with "_" is inplace.
+        return (
+            isinstance(op, torch._ops.OpOverload)
+            and op.namespace == "aten"
+            and op._opname.endswith("_")
         )
 
     def _generate_kernel_call_helper(
@@ -1155,10 +1167,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # registered output buffer name
         name = extern_kernel.name
         output_handle_name = f"{name}_handle"
-        is_inplace = (
-            isinstance(extern_kernel.op_overload, torch._ops.OpOverload)
-            and torch.Tag.inplace_view in extern_kernel.op_overload.tags
-        )
+        is_inplace = self._is_inplace_aten_operator(extern_kernel.op_overload)
 
         if not is_inplace:
             self.writeline(f"AtenTensorHandle {output_handle_name};")
@@ -1185,32 +1194,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args = []
         output_raii_handles = []
         output_name_base = fallback_kernel.get_name()
-        for idx, output in enumerate(fallback_kernel.outputs):
-            if isinstance(output, ir.MultiOutput):
-                # TODO: handle integer output (e.g., as in attention)
-                name = f"{output.get_name()}"
-                output_handle_name = f"{name}_handle"
-                if output.indices:
-                    assert output.indices[0][1] == idx, (
-                        f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
+        if not self._is_inplace_aten_operator(fallback_kernel.op_overload):
+            for idx, output in enumerate(fallback_kernel.outputs):
+                if isinstance(output, ir.MultiOutput):
+                    # TODO: handle integer output (e.g., as in attention)
+                    name = f"{output.get_name()}"
+                    output_handle_name = f"{name}_handle"
+                    if output.indices:
+                        assert output.indices[0][1] == idx, (
+                            f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
+                        )
+                    self.writeline(f"AtenTensorHandle {output_handle_name};")
+                    output_args.append(f"&{output_handle_name}")
+                    output_raii_handles.append(
+                        f"RAIIAtenTensorHandle {name}({output_handle_name});"
                     )
-                self.writeline(f"AtenTensorHandle {output_handle_name};")
-                output_args.append(f"&{output_handle_name}")
-                output_raii_handles.append(
-                    f"RAIIAtenTensorHandle {name}({output_handle_name});"
-                )
-            elif isinstance(output, int):
-                output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"int64_t {output_name} = {output};")
-                output_args.append(f"&{output_name}")
-            elif isinstance(output, sympy.Expr):
-                output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {cexpr(output)};")
-                output_args.append(f"&{output_name}")
-            elif output is None:
-                output_args.append("nullptr")
-            else:
-                raise NotImplementedError(f"unsupported type of {output=}")
+                elif isinstance(output, int):
+                    output_name = f"{output_name_base}_{idx}"
+                    self.writeline(f"int64_t {output_name} = {output};")
+                    output_args.append(f"&{output_name}")
+                elif isinstance(output, sympy.Expr):
+                    output_name = f"{output_name_base}_{idx}"
+                    self.writeline(f"auto {output_name} = {cexpr(output)};")
+                    output_args.append(f"&{output_name}")
+                elif output is None:
+                    output_args.append("nullptr")
+                else:
+                    raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
@@ -2323,7 +2333,7 @@ if (!custom_op_wrapper) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("ScalarType", "Layout"):
+        ) or repr(type_) in ("Layout", "MemoryFormat", "ScalarType"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
