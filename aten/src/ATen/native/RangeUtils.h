@@ -31,14 +31,14 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
     // Workaround for corner case where casting start/end/step to int64_t
     // may introduce precision loss. If all values are within the range
-    // that double can represent exactly (i.e., [-2^53, 2^53]), we prefer 
-    // using double arithmetic for consistency across devices. Otherwise, 
+    // that double can represent exactly (i.e., [-2^53, 2^53]), we prefer
+    // using double arithmetic for consistency across devices. Otherwise,
     // fallback to int64_t computation.
     auto xmax = static_cast<accscalar_t>(1L << std::numeric_limits<double>::digits);
     auto xmin = -xmax;
-    bool in_double_precision = xmin < xstart && xstart < xmax &&
-        xmin < xend && xend < xmax &&
-        xmin < xstep && xstep < xmax;
+    bool in_double_precision = xmin <= xstart && xstart <= xmax &&
+        xmin <= xend && xend <= xmax &&
+        xmin <= xstep && xstep <= xmax;
     if (C10_LIKELY(in_double_precision)) {
       size_d = std::ceil(
           static_cast<double>(end.to<double>() - start.to<double>()) /
