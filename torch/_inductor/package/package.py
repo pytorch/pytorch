@@ -259,6 +259,7 @@ class AOTICompiledModel:
         constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
+        user_managed: bool = False,
     ) -> None:
         """
         Given a mapping of constant fqns to tensors, load the constants into the model.
@@ -270,7 +271,9 @@ class AOTICompiledModel:
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
         """
-        self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
+        self.loader.load_constants(  # type: ignore[attr-defined]
+            constants_map, False, check_full_update, user_managed
+        )
 
     def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
